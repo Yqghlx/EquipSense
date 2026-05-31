@@ -20,4 +20,9 @@ public interface ITenantContext
     /// 当前用户是否为系统管理员（跨租户权限）
     /// </summary>
     bool IsSystemAdmin { get; }
+
+    /// <summary>
+    /// 当前用户 ID
+    /// </summary>
+    Guid UserId { get; }
 }

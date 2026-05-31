@@ -42,6 +42,7 @@ public class TenantResolutionMiddleware
     {
         var tenantId = Guid.Empty;
         var isSystemAdmin = false;
+        var userId = Guid.Empty;
 
         // 优先级 1：从 JWT Claims 中提取 tenant_id 和 role
         var tenantIdClaim = context.User.FindFirst("tenant_id");
@@ -52,6 +53,13 @@ public class TenantResolutionMiddleware
 
         // 检查是否为系统管理员角色
         var roleClaim = context.User.FindFirst("role");
+
+        // 从 JWT Claims 中提取用户 ID
+        var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var parsedUserId))
+        {
+            userId = parsedUserId;
+        }
         if (roleClaim != null)
         {
             isSystemAdmin = roleClaim.Value == UserRole.SystemAdmin.ToString();
@@ -74,7 +82,8 @@ public class TenantResolutionMiddleware
             var tenantContext = new TenantContext(
                 tenantId,
                 TenantIsolationMode.Shared.ToString(),
-                isSystemAdmin
+                isSystemAdmin,
+                userId
             );
 
             context.Items[TenantContextKey] = tenantContext;

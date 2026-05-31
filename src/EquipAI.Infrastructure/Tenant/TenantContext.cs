@@ -18,11 +18,13 @@ public class TenantContext : ITenantContext
     /// <param name="tenantId">当前请求关联的租户 ID</param>
     /// <param name="isolationMode">数据隔离模式</param>
     /// <param name="isSystemAdmin">是否为系统管理员（拥有跨租户权限）</param>
-    public TenantContext(Guid tenantId, string isolationMode, bool isSystemAdmin)
+    /// <param name="userId">当前用户 ID</param>
+    public TenantContext(Guid tenantId, string isolationMode, bool isSystemAdmin, Guid userId = default)
     {
         _tenantId = tenantId;
         _isSystemAdmin = isSystemAdmin;
         IsolationMode = isolationMode;
+        UserId = userId;
     }
 
     /// <summary>
@@ -38,4 +40,7 @@ public class TenantContext : ITenantContext
 
     /// <inheritdoc />
     public bool IsSystemAdmin => _isSystemAdmin;
+
+    /// <inheritdoc />
+    public Guid UserId { get; }
 }
