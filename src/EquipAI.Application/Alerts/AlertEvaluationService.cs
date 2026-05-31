@@ -41,11 +41,23 @@ public class AlertEvaluationService : IAlertEvaluationService
 
     /// <inheritdoc />
     public async Task EvaluateForDeviceAsync(Guid tenantId, Guid deviceId, string deviceType,
-        string metric, double value, DeviceContext context)
+        string metric, double value, DeviceContext context, CancellationToken cancellationToken = default)
     {
         // 使用独立作用域获取 DbContext，避免长生命周期导致的连接泄漏
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // 查询当前设备当前指标的基线数据，供 BaselineEvaluator 使用
+        var baseline = await dbContext.Set<Core.Entities.MetricBaseline>()
+            .FirstOrDefaultAsync(b =>
+                b.TenantId == tenantId &&
+                b.DeviceId == deviceId &&
+                b.Metric == metric, cancellationToken);
+
+        if (baseline != null)
+        {
+            context.Baseline = baseline;
+        }
 
         // 查询匹配的告警规则：
         // - 同租户、已启用、指标匹配

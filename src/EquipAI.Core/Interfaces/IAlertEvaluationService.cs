@@ -16,5 +16,5 @@ public interface IAlertEvaluationService
     /// <param name="value">指标值</param>
     /// <param name="context">设备全量指标上下文</param>
     Task EvaluateForDeviceAsync(Guid tenantId, Guid deviceId, string deviceType,
-        string metric, double value, DeviceContext context);
+        string metric, double value, DeviceContext context, CancellationToken cancellationToken = default);
 }
