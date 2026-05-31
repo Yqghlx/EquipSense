@@ -55,6 +55,11 @@ public class AlertRule : BaseEntity
     public string? Conditions { get; set; }
 
     /// <summary>
+    /// 基线标准差倍数，仅 Baseline 类型使用（默认 3.0，即 3σ 规则）
+    /// </summary>
+    public decimal? BaselineStddevMultiplier { get; set; }
+
+    /// <summary>
     /// 告警严重级别
     /// </summary>
     public AlertSeverity Severity { get; set; } = AlertSeverity.Normal;
