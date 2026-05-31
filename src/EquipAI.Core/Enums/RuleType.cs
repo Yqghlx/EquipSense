@@ -13,5 +13,11 @@ public enum RuleType
     /// <summary>
     /// 组合条件 — 多个指标同时满足条件时触发
     /// </summary>
-    Combined
+    Combined,
+
+    /// <summary>
+    /// 动态基线 — 基于历史统计数据的均值±N倍标准差触发
+    /// 需要 100+ 样本才启用
+    /// </summary>
+    Baseline
 }
