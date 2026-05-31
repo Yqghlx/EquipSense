@@ -67,6 +67,21 @@ public class AppDbContext : DbContext
     public DbSet<Core.Entities.MetricBaseline> MetricBaselines => Set<Core.Entities.MetricBaseline>();
 
     /// <summary>
+    /// AI 分析结果表
+    /// </summary>
+    public DbSet<Core.Entities.Analysis> Analyses => Set<Core.Entities.Analysis>();
+
+    /// <summary>
+    /// 工单表
+    /// </summary>
+    public DbSet<Core.Entities.WorkOrder> WorkOrders => Set<Core.Entities.WorkOrder>();
+
+    /// <summary>
+    /// 工单日志表
+    /// </summary>
+    public DbSet<Core.Entities.WorkOrderLog> WorkOrderLogs => Set<Core.Entities.WorkOrderLog>();
+
+    /// <summary>
     /// 模型创建时配置实体映射和全局查询过滤器
     /// 全局查询过滤器确保所有拥有 TenantId 属性的实体自动按租户隔离，
     /// 避免开发人员遗漏租户条件导致数据泄露
