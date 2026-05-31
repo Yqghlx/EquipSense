@@ -98,6 +98,48 @@ public class TimescaleDbSetup
                 "SELECT add_retention_policy('device_telemetry', INTERVAL '90 days')",
                 cancellationToken);
 
+            // 创建 telemetry_hourly 连续聚合视图（幂等）
+            await _dbContext.Database.ExecuteSqlRawAsync("""
+                CREATE MATERIALIZED VIEW IF NOT EXISTS telemetry_hourly
+                WITH (timescaledb.continuous) AS
+                SELECT
+                    time_bucket('1 hour', time) AS bucket,
+                    tenant_id,
+                    device_id,
+                    metric,
+                    AVG(value) AS avg_value,
+                    STDDEV(value) AS std_dev,
+                    MIN(value) AS min_value,
+                    MAX(value) AS max_value,
+                    COUNT(*) AS sample_count,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value) AS p95_value
+                FROM device_telemetry
+                WHERE value IS NOT NULL
+                GROUP BY 1, 2, 3, 4
+                WITH NO DATA;
+                """, cancellationToken);
+
+            _logger.LogInformation("telemetry_hourly 连续聚合视图已创建");
+
+            // 添加连续聚合刷新策略（每小时刷新一次，刷新 3 小时前到 1 小时前的数据）
+            await _dbContext.Database.ExecuteSqlRawAsync("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM timescaledb_information.jobs
+                        WHERE proc_name = 'policy_refresh_continuous_aggregate'
+                        AND hypertable_name = 'telemetry_hourly'
+                    ) THEN
+                        PERFORM add_continuous_aggregate_policy('telemetry_hourly',
+                            start_offset => INTERVAL '3 hours',
+                            end_offset => INTERVAL '1 hour',
+                            schedule_interval => INTERVAL '1 hour');
+                    END IF;
+                END $$;
+                """, cancellationToken);
+
+            _logger.LogInformation("telemetry_hourly 刷新策略已配置");
+
             _logger.LogInformation("TimescaleDB 压缩和保留策略已配置");
         }
         catch (Exception ex)
