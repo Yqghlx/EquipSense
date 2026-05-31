@@ -1,4 +1,5 @@
 using AutoMapper;
+using EquipAI.Application.Alerts.DTOs;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.DTOs.Tenants;
 using EquipAI.Application.DTOs.Users;
@@ -111,6 +112,41 @@ public class MappingProfile : Profile
                     ? p
                     : dest.Plan))
             .ForAllMembers(opt => opt.Condition((_, _, srcMember) => srcMember != null));
+
+        // ========== 告警规则映射 ==========
+
+        CreateMap<Core.Entities.AlertRule, AlertRuleDto>()
+            .ForMember(dest => dest.RuleType, opt => opt.MapFrom(src => src.RuleType.ToString()))
+            .ForMember(dest => dest.Severity, opt => opt.MapFrom(src => src.Severity.ToString()));
+
+        CreateMap<CreateAlertRuleRequest, Core.Entities.AlertRule>()
+            .ForMember(dest => dest.RuleType, opt => opt.MapFrom((src, _) =>
+                Enum.TryParse<Core.Enums.RuleType>(src.RuleType, ignoreCase: true, out var rt)
+                    ? rt : Core.Enums.RuleType.Threshold))
+            .ForMember(dest => dest.Severity, opt => opt.MapFrom((src, _) =>
+                Enum.TryParse<Core.Enums.AlertSeverity>(src.Severity, ignoreCase: true, out var s)
+                    ? s : Core.Enums.AlertSeverity.Normal))
+            .ForMember(dest => dest.Id, opt => opt.Ignore())
+            .ForMember(dest => dest.TenantId, opt => opt.Ignore())
+            .ForMember(dest => dest.CreatedBy, opt => opt.Ignore())
+            .ForMember(dest => dest.CreatedAt, opt => opt.Ignore());
+
+        CreateMap<UpdateAlertRuleRequest, Core.Entities.AlertRule>()
+            .ForMember(dest => dest.RuleType, opt => opt.MapFrom((src, dest) =>
+                src.RuleType != null && Enum.TryParse<Core.Enums.RuleType>(src.RuleType, ignoreCase: true, out var rt)
+                    ? rt : dest.RuleType))
+            .ForMember(dest => dest.Severity, opt => opt.MapFrom((src, dest) =>
+                src.Severity != null && Enum.TryParse<Core.Enums.AlertSeverity>(src.Severity, ignoreCase: true, out var s)
+                    ? s : dest.Severity))
+            .ForAllMembers(opt => opt.Condition((_, _, srcMember) => srcMember != null));
+
+        // ========== 告警实例映射 ==========
+
+        CreateMap<Core.Entities.Alert, AlertDto>()
+            .ForMember(dest => dest.Severity, opt => opt.MapFrom(src => src.Severity.ToString()))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+            .ForMember(dest => dest.Acknowledged, opt => opt.MapFrom(src => src.Status != Core.Enums.AlertStatus.Active))
+            .ForMember(dest => dest.Resolved, opt => opt.MapFrom(src => src.Status == Core.Enums.AlertStatus.Resolved));
     }
 
     /// <summary>
