@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-EquipSense 是一个工业设备智能监控与预测维护平台。核心目标：**在故障发生前预警，在告警触发后秒级给出根因和建议，在确认问题后自动创建工单闭环。**
+EquipSense（内部代号 EquipAI）是一个工业设备智能监控与预测维护平台。核心目标：**在故障发生前预警，在告警触发后秒级给出根因和建议，在确认问题后自动创建工单闭环。**
 
-当前状态：**设计阶段**，完整技术方案见 `docs/FINAL_TECHNICAL_DESIGN.md`。
+**当前状态：设计阶段**，仅包含技术设计文档，尚未开始编码。完整技术方案（2,457 行）见 `docs/FINAL_TECHNICAL_DESIGN.md`，涵盖系统架构、数据库 Schema、API 规范、安全设计、开发路线图等所有细节。实现时应以该文档为权威参考。
 
 ## 技术栈
 
@@ -32,6 +32,39 @@ EquipSense 是一个工业设备智能监控与预测维护平台。核心目标
 边缘网关(.NET 8) → MQTT/HTTPS → 后端(ASP.NET Core 8 模块化单体) → PG+TimescaleDB / Redis
 后端 SignalR Hub → React 19 PWA 前端
 ```
+
+### 后端项目结构（规划）
+
+```
+EquipAI.sln
+├── src/
+│   ├── EquipAI.WebAPI/                    -- ASP.NET Core 入口 + 中间件 + Controllers
+│   ├── EquipAI.Core/                      -- 领域层（实体 + 接口 + 事件 + 枚举）
+│   ├── EquipAI.Application/               -- 应用层（业务逻辑，按模块分文件夹）
+│   │   ├── Devices/ Alerts/ WorkOrders/ Analysis/ Knowledge/ Telemetry/
+│   │   └── Common/                        -- EventBus, ITenantContext 等
+│   ├── EquipAI.Infrastructure/            -- 基础设施层（EF Core + Redis + MQTT + AI + JWT）
+│   └── EquipAI.EdgeGateway/               -- 边缘网关（独立部署）
+├── tests/
+│   ├── EquipAI.Tests.Unit/                -- xUnit 单元测试
+│   ├── EquipAI.Tests.Integration/         -- Testcontainers 集成测试
+│   └── EquipAI.Tests.E2E/                -- API 端到端测试
+└── docker/
+    ├── Dockerfile.backend / Dockerfile.frontend
+    ├── docker-compose.yml                 -- 生产
+    └── docker-compose.dev.yml             -- 开发
+```
+
+**命名规范：**
+- 命名空间：`EquipAI.{Layer}.{Module}`（如 `EquipAI.Application.Alerts`）
+- 接口：`I` 前缀（如 `IAlertEvaluationService`）
+- DTO：`{Entity}Dto` / `Create{Entity}Request` / `Update{Entity}Request`
+- 仓储：`I{Entity}Repository` → `{Entity}Repository`
+- 事件：`{Verb}{Entity}Event`（如 `AlertTriggeredEvent`）
+
+**模块化单体原则：**
+- 模块间通过 `IEventBus` 解耦，禁止直接调用其他模块的 Service
+- 跨模块查询通过 `I{Module}QueryService` 接口，实现在 Application 层
 
 ### 后端模块划分
 
@@ -60,7 +93,7 @@ EquipSense 是一个工业设备智能监控与预测维护平台。核心目标
 - 协议适配器接口：`IProtocolAdapter`（ConnectAsync / ReadAsync / IsConnected / ProtocolType）
 - 数据管线：采集 → 标准化 → 内存环形队列(10000) → SQLite(7天断网缓存) → MQTT/HTTPS 上传
 
-### 前端结构
+### 前端结构（规划）
 
 ```
 frontend/src/
@@ -83,8 +116,10 @@ frontend/src/
 
 ## 数据库关键表
 
+完整 Schema（含索引、约束、种子数据）见 `docs/FINAL_TECHNICAL_DESIGN.md` 第三章。核心表：
+
 - `tenants` / `users` — 多租户与用户（RBAC 五角色）
-- `devices` / `device_type_templates` — 设备管理（模板化设计）
+- `devices` / `device_type_templates` — 设备管理（模板化设计，行业预置模板归属系统租户）
 - `alert_rules` / `alerts` — 告警规则与告警实例
 - `work_orders` / `work_order_logs` — 工单与流转日志
 - `knowledge_rules` / `pending_rules` / `fault_cases` — 知识库（规则+案例双表）
@@ -93,10 +128,24 @@ frontend/src/
 - `metric_baselines` — 告警引擎基线数据
 - `notifications` / `audit_logs` / `system_configs` — 通知、审计、配置
 
+**设备类型模板的租户策略：** 行业预置模板归属系统租户（`tenant_id = '00000000-0000-0000-0000-000000000000'`），查询时 `WHERE tenant_id = @current_tenant OR tenant_id = @system_tenant`。
+
 ## 部署
 
 Phase 1 使用 Docker Compose：frontend + backend + postgres(timescaledb) + redis + mosquitto。
 敏感配置通过环境变量注入（`PG_PASSWORD`、`JWT_SECRET`、`LLM_API_KEY`、`GATEWAY_AUTH_KEY`）。
+
+**Phase 1 不引入：** RabbitMQ（进程内事件）、MinIO（文件存本地）、K8s（Compose 够用）、YARP（单体不需要）。
+
+## 实现阶段核心设计原则
+
+1. **单体优先** — Phase 1 模块化单体 + Docker Compose，不拆微服务
+2. **Day 1 多租户** — 所有业务表从第一条建表语句就有 `tenant_id`，EF Core 全局查询过滤器，所有查询方法必须传入 tenant_id
+3. **时序窄表** — `device_telemetry` 一行一个指标，新增指标不改 schema
+4. **AI 自动降级** — 数据质量评分影响分析级别和置信度乘数（预测→统计→规则→LLM）
+5. **知识沉淀安全边界** — AI 生成的规则写入 `pending_rules`，专家批准后才移入 `knowledge_rules`
+6. **告警聚合防风暴** — 30 分钟窗口内，同设备同指标：第 1 次立即告警、2-3 次更新已有、超过 3 次静默
+7. **工单可插拔** — `IWorkOrderIntegration` 接口适配钉钉/飞书/Maximo/Webhook
 
 ## 开发路线图
 
