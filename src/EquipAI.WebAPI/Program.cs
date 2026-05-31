@@ -31,6 +31,11 @@ try
     builder.Services.AddJwtAuthentication(builder.Configuration);
     builder.Services.AddSwagger();
     builder.Services.AddControllers();
+    builder.Services.AddSignalR(options =>
+    {
+        options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+        options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+    });
 
     // 健康检查：PostgreSQL 和 Redis 连通性
     builder.Services.AddHealthChecks()
@@ -79,6 +84,7 @@ try
     }
 
     app.MapControllers();
+    app.MapHub<EquipAI.WebAPI.Hubs.IndustrialHub>("/hubs/industrial");
     app.MapHealthChecks("/health");
 
     // 种子数据初始化：开发环境或传入 --seed 参数时执行
