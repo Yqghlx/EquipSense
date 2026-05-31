@@ -81,6 +81,9 @@ public static class ServiceCollectionExtensions
         // MQTT 后台订阅服务（随应用启动/停止）
         services.AddHostedService<MqttBackgroundService>();
 
+        // SignalR 实时推送服务（Scoped — 可注入 Scoped 的 ITenantContext）
+        services.AddScoped<Core.Interfaces.ISignalRNotificationService, Services.SignalRNotificationService>();
+
         // TimescaleDB 初始化服务
         services.AddScoped<TimescaleDbSetup>();
     }
@@ -112,12 +115,16 @@ public static class ServiceCollectionExtensions
         // 告警评估器（多个实现，通过 RuleType 区分）
         services.AddSingleton<IAlertRuleEvaluator, ThresholdEvaluator>();
         services.AddSingleton<IAlertRuleEvaluator, CombinedEvaluator>();
+        services.AddSingleton<IAlertRuleEvaluator, BaselineEvaluator>();
 
         // 告警聚合器（Singleton — 内存状态）
         services.AddSingleton<IAlertAggregator, AlertAggregator>();
 
         // 告警评估服务（Scoped — 需要 DbContext）
         services.AddScoped<IAlertEvaluationService, AlertEvaluationService>();
+
+        // 基线计算后台服务
+        services.AddHostedService<BaselineCalculationService>();
 
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
