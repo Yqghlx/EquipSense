@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EquipAI.Application/EquipAI.Application.csproj" />
+    <Project Path="src/EquipAI.Core/EquipAI.Core.csproj" />
+    <Project Path="src/EquipAI.Infrastructure/EquipAI.Infrastructure.csproj" />
+    <Project Path="src/EquipAI.WebAPI/EquipAI.WebAPI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj" />
+    <Project Path="tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj" />
+  </Folder>
+</Solution>
