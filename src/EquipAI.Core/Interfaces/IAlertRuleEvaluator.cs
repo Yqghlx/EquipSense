@@ -6,6 +6,7 @@ namespace EquipAI.Core.Interfaces;
 /// <summary>
 /// 设备上下文，提供评估时需要的设备全量指标数据
 /// CombinedEvaluator 需要同时查看多个指标的值
+/// BaselineEvaluator 需要 Baseline 历史统计数据
 /// </summary>
 public class DeviceContext
 {
@@ -13,6 +14,11 @@ public class DeviceContext
     /// 指标名称到数值的映射
     /// </summary>
     public Dictionary<string, double> Metrics { get; } = new();
+
+    /// <summary>
+    /// 当前指标的基线数据（BaselineEvaluator 使用）
+    /// </summary>
+    public MetricBaseline? Baseline { get; set; }
 
     /// <summary>
     /// 获取指定指标的值，不存在时返回 null
