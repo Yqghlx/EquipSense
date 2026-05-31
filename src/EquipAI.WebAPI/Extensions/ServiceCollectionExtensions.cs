@@ -1,13 +1,18 @@
 using System.Text;
+using EquipAI.Application.Alerts;
+using EquipAI.Application.Alerts.Evaluators;
+using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Eventing;
 using EquipAI.Application.Interfaces;
 using EquipAI.Application.Mapping;
 using EquipAI.Application.Services;
+using EquipAI.Application.Telemetry;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Data.Repositories;
 using EquipAI.Infrastructure.Identity;
+using EquipAI.Infrastructure.Messaging;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Tenant;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -63,6 +68,21 @@ public static class ServiceCollectionExtensions
 
         // 通用仓储注册，Scoped 生命周期，随请求创建和释放
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+
+        // MQTT 配置选项
+        services.Configure<MqttOptions>(configuration.GetSection("Mqtt"));
+
+        // MQTT 客户端服务（Singleton — 共享连接）
+        services.AddSingleton<MqttClientService>();
+
+        // MQTT 消息处理器（Singleton — 无状态）
+        services.AddSingleton<MqttMessageHandler>();
+
+        // MQTT 后台订阅服务（随应用启动/停止）
+        services.AddHostedService<MqttBackgroundService>();
+
+        // TimescaleDB 初始化服务
+        services.AddScoped<TimescaleDbSetup>();
     }
 
     /// <summary>
@@ -85,6 +105,23 @@ public static class ServiceCollectionExtensions
 
         // AutoMapper 映射配置，扫描 MappingProfile 所在程序集
         services.AddAutoMapper(typeof(MappingProfile).Assembly);
+
+        // 遥测数据服务（Singleton — 内部维护定时器和队列）
+        services.AddSingleton<ITelemetryService, TelemetryService>();
+
+        // 告警评估器（多个实现，通过 RuleType 区分）
+        services.AddSingleton<IAlertRuleEvaluator, ThresholdEvaluator>();
+        services.AddSingleton<IAlertRuleEvaluator, CombinedEvaluator>();
+
+        // 告警聚合器（Singleton — 内存状态）
+        services.AddSingleton<IAlertAggregator, AlertAggregator>();
+
+        // 告警评估服务（Scoped — 需要 DbContext）
+        services.AddScoped<IAlertEvaluationService, AlertEvaluationService>();
+
+        // 事件处理器
+        services.AddScoped<TelemetryEventHandler>();
+        services.AddScoped<AlertEventHandler>();
     }
 
     /// <summary>

@@ -1,3 +1,6 @@
+using EquipAI.Application.Alerts.Handlers;
+using EquipAI.Core.Events;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
@@ -47,6 +50,11 @@ try
 
     var app = builder.Build();
 
+    // 注册事件订阅：遥测数据 → 告警评估
+    var eventBus = app.Services.GetRequiredService<IEventBus>();
+    eventBus.Subscribe<TelemetryReceivedEvent, TelemetryEventHandler>();
+    eventBus.Subscribe<AlertTriggeredEvent, AlertEventHandler>();
+
     // 中间件管线（顺序很重要，决定请求的处理流程）
     // 1. 全局异常处理 — 最外层捕获所有未处理异常
     app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -80,6 +88,16 @@ try
         {
             var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
             await seeder.SeedAsync();
+        }
+    }
+
+    // TimescaleDB 初始化：创建超级表、配置压缩和保留策略
+    if (args.Contains("--seed") || app.Environment.IsDevelopment())
+    {
+        using (var scope = app.Services.CreateScope())
+        {
+            var timescaleSetup = scope.ServiceProvider.GetRequiredService<TimescaleDbSetup>();
+            await timescaleSetup.InitializeAsync();
         }
     }
 
