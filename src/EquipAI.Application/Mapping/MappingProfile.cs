@@ -147,6 +147,19 @@ public class MappingProfile : Profile
             .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
             .ForMember(dest => dest.Acknowledged, opt => opt.MapFrom(src => src.Status != Core.Enums.AlertStatus.Active))
             .ForMember(dest => dest.Resolved, opt => opt.MapFrom(src => src.Status == Core.Enums.AlertStatus.Resolved));
+
+        // ========== 分析映射 ==========
+
+        CreateMap<Core.Entities.Analysis, Analysis.DTOs.AnalysisDto>()
+            .ForMember(dest => dest.Level, opt => opt.MapFrom(src => src.Level.ToString()))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
+
+        // ========== 工单映射 ==========
+
+        CreateMap<Core.Entities.WorkOrder, WorkOrders.DTOs.WorkOrderDto>()
+            .ForMember(dest => dest.Type, opt => opt.MapFrom(src => src.Type.ToString()))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+            .ForMember(dest => dest.Priority, opt => opt.MapFrom(src => src.Priority.ToString()));
     }
 
     /// <summary>

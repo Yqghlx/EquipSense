@@ -1,4 +1,6 @@
 using EquipAI.Application.Alerts.Handlers;
+using EquipAI.Application.Analysis.Handlers;
+using EquipAI.Application.WorkOrders.Handlers;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -59,6 +61,9 @@ try
     var eventBus = app.Services.GetRequiredService<IEventBus>();
     eventBus.Subscribe<TelemetryReceivedEvent, TelemetryEventHandler>();
     eventBus.Subscribe<AlertTriggeredEvent, AlertEventHandler>();
+    eventBus.Subscribe<AlertTriggeredEvent, RootCauseAnalysisHandler>();
+    eventBus.Subscribe<AlertTriggeredEvent, WorkOrderAutoCreateHandler>();
+    eventBus.Subscribe<AnalysisCompletedEvent, WorkOrderAnalysisHandler>();
 
     // 中间件管线（顺序很重要，决定请求的处理流程）
     // 1. 全局异常处理 — 最外层捕获所有未处理异常

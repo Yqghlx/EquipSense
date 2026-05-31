@@ -2,12 +2,17 @@ using System.Text;
 using EquipAI.Application.Alerts;
 using EquipAI.Application.Alerts.Evaluators;
 using EquipAI.Application.Alerts.Handlers;
+using EquipAI.Application.Analysis;
+using EquipAI.Application.Analysis.Handlers;
 using EquipAI.Application.Eventing;
 using EquipAI.Application.Interfaces;
 using EquipAI.Application.Mapping;
 using EquipAI.Application.Services;
 using EquipAI.Application.Telemetry;
+using EquipAI.Application.WorkOrders;
+using EquipAI.Application.WorkOrders.Handlers;
 using EquipAI.Core.Interfaces;
+using EquipAI.Infrastructure.AI;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Data.Repositories;
@@ -57,7 +62,7 @@ public static class ServiceCollectionExtensions
 
             // 未认证用户（如登录接口）返回默认的空租户上下文
             // 此场景下 EF Core 全局过滤器会匹配不到任何数据，符合安全预期
-            return new TenantContext(Guid.Empty, "Shared", false);
+            return new TenantContext(Guid.Empty, "Shared", false, Guid.Empty);
         });
 
         // Redis 缓存服务，Singleton 生命周期，整个应用共享一个连接
@@ -80,6 +85,9 @@ public static class ServiceCollectionExtensions
 
         // MQTT 后台订阅服务（随应用启动/停止）
         services.AddHostedService<MqttBackgroundService>();
+
+        // LLM 服务（Singleton — Semantic Kernel 内部有状态管理）
+        services.AddSingleton<Core.Interfaces.ILLMService, SemanticKernelLLMService>();
 
         // SignalR 实时推送服务（Scoped — 可注入 Scoped 的 ITenantContext）
         services.AddScoped<Core.Interfaces.ISignalRNotificationService, Services.SignalRNotificationService>();
@@ -122,6 +130,20 @@ public static class ServiceCollectionExtensions
 
         // 告警评估服务（Scoped — 需要 DbContext）
         services.AddScoped<IAlertEvaluationService, AlertEvaluationService>();
+
+        // 数据质量服务
+        services.AddSingleton<Core.Interfaces.IDataQualityService, DataQualityService>();
+
+        // 根因分析引擎
+        services.AddScoped<Core.Interfaces.IAnalysisService, RootCauseAnalysisEngine>();
+
+        // 工单服务
+        services.AddScoped<IWorkOrderService, WorkOrderService>();
+
+        // 事件处理器
+        services.AddScoped<RootCauseAnalysisHandler>();
+        services.AddScoped<WorkOrderAutoCreateHandler>();
+        services.AddScoped<WorkOrderAnalysisHandler>();
 
         // 基线计算后台服务
         services.AddHostedService<BaselineCalculationService>();
