@@ -1,34 +1,96 @@
-var builder = WebApplication.CreateBuilder(args);
+using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Middleware;
+using EquipAI.Infrastructure.Seeding;
+using EquipAI.WebAPI.Extensions;
+using EquipAI.WebAPI.Middleware;
+using Serilog;
 
-// Add services to the container.
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-var app = builder.Build();
-
-// Configure the HTTP request pipeline.
-
-app.UseHttpsRedirection();
-
-var summaries = new[]
+try
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var builder = WebApplication.CreateBuilder(args);
 
-app.MapGet("/weatherforecast", () =>
+    // 配置 Serilog 日志，从 appsettings.json 中读取日志级别和输出目标
+    builder.Host.UseSerilog((context, config) =>
+    {
+        config.ReadFrom.Configuration(context.Configuration);
+    });
+
+    // 注册 HTTP 上下文访问器，供中间件和服务获取当前请求上下文
+    builder.Services.AddHttpContextAccessor();
+
+    // 分层注册：基础设施层 → 应用层 → 认证 → Swagger
+    builder.Services.AddInfrastructure(builder.Configuration);
+    builder.Services.AddApplication();
+    builder.Services.AddJwtAuthentication(builder.Configuration);
+    builder.Services.AddSwagger();
+    builder.Services.AddControllers();
+
+    // 健康检查：PostgreSQL 和 Redis 连通性
+    builder.Services.AddHealthChecks()
+        .AddNpgSql(builder.Configuration.GetConnectionString("Default")!)
+        .AddRedis(builder.Configuration["Redis:ConnectionString"]!);
+
+    // CORS：开发阶段允许所有来源，生产环境应限制为前端域名
+    builder.Services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
+        {
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        });
+    });
+
+    var app = builder.Build();
+
+    // 中间件管线（顺序很重要，决定请求的处理流程）
+    // 1. 全局异常处理 — 最外层捕获所有未处理异常
+    app.UseMiddleware<ExceptionHandlingMiddleware>();
+    // 2. 请求日志记录 — 记录每个请求的方法、路径、耗时和状态码
+    app.UseSerilogRequestLogging();
+    // 3. CORS — 跨域处理，在认证之前执行
+    app.UseCors();
+    // 4. 租户解析 — 从 JWT 或请求头中提取租户信息，存入 HttpContext.Items
+    app.UseMiddleware<TenantResolutionMiddleware>();
+    // 5. JWT 认证 — 解析并验证 Bearer Token
+    app.UseAuthentication();
+    // 6. 权限校验 — 基于角色和权限标识的细粒度访问控制
+    app.UseMiddleware<PermissionMiddleware>();
+    // 7. 授权 — ASP.NET Core 内置的 [Authorize] 特性支持
+    app.UseAuthorization();
+
+    // 开发环境启用 Swagger UI
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
+
+    app.MapControllers();
+    app.MapHealthChecks("/health");
+
+    // 种子数据初始化：开发环境或传入 --seed 参数时执行
+    if (args.Contains("--seed") || app.Environment.IsDevelopment())
+    {
+        using (var scope = app.Services.CreateScope())
+        {
+            var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
+            await seeder.SeedAsync();
+        }
+    }
+
+    Log.Information("EquipAI 后端服务启动成功");
+    app.Run();
+}
+catch (Exception ex)
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-});
-
-app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
+    Log.Fatal(ex, "服务启动失败");
+}
+finally
 {
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+    Log.CloseAndFlush();
 }
