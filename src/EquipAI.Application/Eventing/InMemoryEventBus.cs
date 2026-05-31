@@ -152,7 +152,15 @@ public class InMemoryEventBus : IEventBus, IDisposable
         _channel.Writer.TryComplete();
 
         // 等待消费任务完成，设置超时防止无限等待
-        _consumeTask.Wait(TimeSpan.FromSeconds(5));
+        // 取消令牌后 ReadAllAsync 会抛出 OperationCanceledException，属于正常行为，忽略即可
+        try
+        {
+            _consumeTask.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException)
+        {
+            // 后台消费者因取消而退出，属于预期行为
+        }
 
         _cts.Dispose();
         GC.SuppressFinalize(this);
