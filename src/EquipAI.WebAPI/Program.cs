@@ -94,3 +94,8 @@ finally
 {
     Log.CloseAndFlush();
 }
+
+/// <summary>
+/// 将 Program 类声明为 public，允许集成测试项目通过 WebApplicationFactory 访问
+/// </summary>
+public partial class Program { }

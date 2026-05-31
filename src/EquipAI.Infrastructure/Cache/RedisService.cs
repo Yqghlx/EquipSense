@@ -31,7 +31,7 @@ public class RedisService
     /// <param name="userId">用户 ID</param>
     /// <param name="refreshToken">刷新令牌字符串</param>
     /// <param name="expiry">令牌过期时间跨度</param>
-    public async Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
+    public virtual async Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
     {
         var key = $"refresh:{userId}";
         await _database.StringSetAsync(key, refreshToken, expiry);
@@ -42,7 +42,7 @@ public class RedisService
     /// </summary>
     /// <param name="userId">用户 ID</param>
     /// <returns>刷新令牌字符串，若不存在或已过期则返回 null</returns>
-    public async Task<string?> GetRefreshTokenAsync(Guid userId)
+    public virtual async Task<string?> GetRefreshTokenAsync(Guid userId)
     {
         var key = $"refresh:{userId}";
         var value = await _database.StringGetAsync(key);
@@ -53,7 +53,7 @@ public class RedisService
     /// 删除指定用户的刷新令牌，用于令牌吊销或刷新后作废旧令牌
     /// </summary>
     /// <param name="userId">用户 ID</param>
-    public async Task RemoveRefreshTokenAsync(Guid userId)
+    public virtual async Task RemoveRefreshTokenAsync(Guid userId)
     {
         var key = $"refresh:{userId}";
         await _database.KeyDeleteAsync(key);
