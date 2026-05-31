@@ -14,6 +14,7 @@ public class AlertRuleDto
     public string? Operator { get; set; }
     public decimal? Threshold { get; set; }
     public string? Conditions { get; set; }
+    public decimal? BaselineStddevMultiplier { get; set; }
     public string Severity { get; set; } = string.Empty;
     public int CooldownSeconds { get; set; }
     public bool AutoCreateWorkorder { get; set; }

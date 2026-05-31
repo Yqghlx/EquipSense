@@ -13,6 +13,7 @@ public class CreateAlertRuleRequest
     public string? Operator { get; set; }
     public decimal? Threshold { get; set; }
     public string? Conditions { get; set; }
+    public decimal? BaselineStddevMultiplier { get; set; }
     public string Severity { get; set; } = "normal";
     public int CooldownSeconds { get; set; } = 300;
     public bool AutoCreateWorkorder { get; set; }
