@@ -1,0 +1,43 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace EquipAI.Application.DTOs.Users;
+
+/// <summary>
+/// 创建用户请求 DTO
+/// </summary>
+public class CreateUserRequest
+{
+    /// <summary>
+    /// 登录用户名（租户内唯一）
+    /// </summary>
+    [Required(ErrorMessage = "用户名不能为空")]
+    [StringLength(100, ErrorMessage = "用户名长度不能超过 100 个字符")]
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 登录密码（至少 8 位）
+    /// </summary>
+    [Required(ErrorMessage = "密码不能为空")]
+    [MinLength(8, ErrorMessage = "密码长度不能少于 8 位")]
+    public string Password { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 显示名称
+    /// </summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>
+    /// 用户角色（默认 viewer）
+    /// </summary>
+    public string Role { get; set; } = "viewer";
+
+    /// <summary>
+    /// 邮箱地址
+    /// </summary>
+    public string? Email { get; set; }
+
+    /// <summary>
+    /// 手机号
+    /// </summary>
+    public string? Phone { get; set; }
+}
