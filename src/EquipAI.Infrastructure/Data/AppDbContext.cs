@@ -1,5 +1,6 @@
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
+using EquipAI.Infrastructure.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.Infrastructure.Data;
@@ -44,6 +45,21 @@ public class AppDbContext : DbContext
     /// 设备类型模板表
     /// </summary>
     public DbSet<DeviceTypeTemplate> DeviceTypeTemplates => Set<DeviceTypeTemplate>();
+
+    /// <summary>
+    /// 告警规则表
+    /// </summary>
+    public DbSet<Core.Entities.AlertRule> AlertRules => Set<Core.Entities.AlertRule>();
+
+    /// <summary>
+    /// 告警实例表
+    /// </summary>
+    public DbSet<Core.Entities.Alert> Alerts => Set<Core.Entities.Alert>();
+
+    /// <summary>
+    /// 设备遥测时序数据表（TimescaleDB 超级表，无主键）
+    /// </summary>
+    public DbSet<Entities.DeviceTelemetry> DeviceTelemetry => Set<Entities.DeviceTelemetry>();
 
     /// <summary>
     /// 模型创建时配置实体映射和全局查询过滤器
