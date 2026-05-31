@@ -62,6 +62,11 @@ public class AppDbContext : DbContext
     public DbSet<Entities.DeviceTelemetry> DeviceTelemetry => Set<Entities.DeviceTelemetry>();
 
     /// <summary>
+    /// 指标基线数据表
+    /// </summary>
+    public DbSet<Core.Entities.MetricBaseline> MetricBaselines => Set<Core.Entities.MetricBaseline>();
+
+    /// <summary>
     /// 模型创建时配置实体映射和全局查询过滤器
     /// 全局查询过滤器确保所有拥有 TenantId 属性的实体自动按租户隔离，
     /// 避免开发人员遗漏租户条件导致数据泄露

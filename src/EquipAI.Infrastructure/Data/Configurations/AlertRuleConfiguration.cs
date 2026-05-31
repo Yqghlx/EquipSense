@@ -22,6 +22,7 @@ public class AlertRuleConfiguration : IEntityTypeConfiguration<AlertRule>
         builder.Property(e => e.Operator).HasColumnName("operator").HasMaxLength(5);
         builder.Property(e => e.Threshold).HasColumnName("threshold").HasPrecision(18, 4);
         builder.Property(e => e.Conditions).HasColumnName("conditions").HasColumnType("jsonb");
+        builder.Property(e => e.BaselineStddevMultiplier).HasColumnName("baseline_stddev_multiplier");
         builder.Property(e => e.Severity).HasColumnName("severity").HasConversion<string>().HasMaxLength(20).IsRequired();
         builder.Property(e => e.CooldownSeconds).HasColumnName("cooldown_seconds").IsRequired();
         builder.Property(e => e.AutoCreateWorkorder).HasColumnName("auto_create_workorder").IsRequired();
