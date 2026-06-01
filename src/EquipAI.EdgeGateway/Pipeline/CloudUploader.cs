@@ -1,4 +1,5 @@
 using System.Text.Json;
+using EquipAI.EdgeGateway.Persistence;
 using EquipAI.EdgeGateway.Protocols;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
@@ -8,21 +9,42 @@ using MQTTnet.Protocol;
 namespace EquipAI.EdgeGateway.Pipeline;
 
 /// <summary>
-/// 云端上传器，通过 MQTT 将标准化遥测数据发布到后端
+/// 云端上传器，通过 MQTT 将标准化遥测数据发布到后端。
+/// 支持断网检测和离线回放——在线时直接上传并回放积压数据，断网时缓冲到本地存储。
 /// MQTT 主题格式：factory/{tenantId}/telemetry/{deviceId}
 /// </summary>
 public class CloudUploader : IAsyncDisposable
 {
     private readonly ILogger<CloudUploader> _logger;
     private readonly GatewayOptions _options;
+    private readonly SqliteBufferStore? _offlineStore;
+    private readonly LocalBuffer? _localBuffer;
     private readonly MqttFactory _mqttFactory = new();
     private IMqttClient? _mqttClient;
     private bool _disposed;
 
-    public CloudUploader(ILogger<CloudUploader> logger, GatewayOptions options)
+    /// <summary>
+    /// 当前是否在线（MQTT 连接正常）
+    /// </summary>
+    public bool IsOnline => _mqttClient?.IsConnected == true;
+
+    /// <summary>
+    /// 初始化云端上传器
+    /// </summary>
+    /// <param name="logger">日志记录器</param>
+    /// <param name="options">网关配置选项</param>
+    /// <param name="offlineStore">可选的 SQLite 离线缓冲存储</param>
+    /// <param name="localBuffer">可选的内存本地缓冲区</param>
+    public CloudUploader(
+        ILogger<CloudUploader> logger,
+        GatewayOptions options,
+        SqliteBufferStore? offlineStore = null,
+        LocalBuffer? localBuffer = null)
     {
         _logger = logger;
         _options = options;
+        _offlineStore = offlineStore;
+        _localBuffer = localBuffer;
     }
 
     /// <summary>
@@ -71,6 +93,85 @@ public class CloudUploader : IAsyncDisposable
         await _mqttClient.PublishAsync(mqttMessage, ct);
         _logger.LogDebug("已上传: {DeviceId} → {Topic}, 指标数={Count}",
             message.DeviceId, topic, message.Metrics.Count);
+    }
+
+    /// <summary>
+    /// 带断网保护的上传方法
+    /// 在线时直接上传并回放离线积压数据；离线或上传失败时缓冲到本地
+    /// </summary>
+    /// <param name="topic">MQTT 主题</param>
+    /// <param name="payload">消息负载</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task UploadWithFallbackAsync(string topic, byte[] payload, CancellationToken ct)
+    {
+        if (IsOnline)
+        {
+            try
+            {
+                var mqttMessage = new MqttApplicationMessageBuilder()
+                    .WithTopic(topic)
+                    .WithPayload(payload)
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                    .Build();
+                await _mqttClient!.PublishAsync(mqttMessage, ct);
+                _logger.LogDebug("已上传: {Topic}", topic);
+                await ReplayOfflineDataAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "上传失败，转入离线缓冲: {Topic}", topic);
+                await BufferOfflineAsync(topic, payload);
+            }
+        }
+        else
+        {
+            await BufferOfflineAsync(topic, payload);
+        }
+    }
+
+    /// <summary>
+    /// 将消息缓冲到离线存储
+    /// 优先写入内存 LocalBuffer，无内存缓冲时直接写 SQLite
+    /// </summary>
+    private async Task BufferOfflineAsync(string topic, byte[] payload)
+    {
+        if (_localBuffer is not null)
+            await _localBuffer.EnqueueAsync(topic, payload);
+        else if (_offlineStore is not null)
+            await _offlineStore.StoreAsync(topic, payload);
+    }
+
+    /// <summary>
+    /// 回放离线缓冲数据
+    /// 在线时从 SQLite 取出积压消息逐条发送，发送成功后标记已发送
+    /// 遇到发送失败或断网则停止回放，等待下次恢复后继续
+    /// </summary>
+    /// <param name="ct">取消令牌</param>
+    public async Task ReplayOfflineDataAsync(CancellationToken ct)
+    {
+        if (_offlineStore is null || !IsOnline) return;
+
+        var pending = await _offlineStore.GetPendingAsync(100);
+        foreach (var record in pending)
+        {
+            if (!IsOnline || ct.IsCancellationRequested) break;
+            try
+            {
+                var mqttMessage = new MqttApplicationMessageBuilder()
+                    .WithTopic(record.Topic)
+                    .WithPayload(record.Payload)
+                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                    .Build();
+                await _mqttClient!.PublishAsync(mqttMessage, ct);
+                await _offlineStore.MarkAsSentAsync(record.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "回放离线数据失败，停止回放");
+                break;
+            }
+        }
+        await _offlineStore.CleanupOldAsync();
     }
 
     /// <summary>
