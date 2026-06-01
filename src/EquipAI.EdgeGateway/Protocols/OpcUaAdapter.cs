@@ -22,7 +22,9 @@ public class OpcUaAdapter : IProtocolAdapter
     public OpcUaAdapter(ILogger<OpcUaAdapter>? logger = null)
     {
         _logger = logger;
+#pragma warning disable CS0618 // DefaultSessionFactory 无参构造函数已过时，SDK 1.5.x 推荐传 ITelemetryContext
         _sessionFactory = new DefaultSessionFactory();
+#pragma warning restore CS0618
     }
 
     /// <inheritdoc />
@@ -51,11 +53,11 @@ public class OpcUaAdapter : IProtocolAdapter
             var appConfig = await CreateApplicationConfigurationAsync();
 
             // 2. 发现服务器端点（使用不安全连接以简化开发阶段，生产环境应启用安全）
+            //    使用推荐签名: SelectEndpointAsync(ApplicationConfiguration, string, bool, ITelemetryContext?, CancellationToken)
             var endpointDescription = await CoreClientUtils.SelectEndpointAsync(
-                appConfig, config.ConnectionString, useSecurity: false,
-                telemetryContext: null, ct);
+                appConfig, config.ConnectionString, false, null!, ct);
             var endpointConfig = EndpointConfiguration.Create();
-            var configuredEndpoint = new ConfiguredEndpoint(null, endpointDescription, endpointConfig);
+            var configuredEndpoint = new ConfiguredEndpoint(null!, endpointDescription, endpointConfig);
 
             // 3. 使用 ISessionFactory 创建并打开会话（推荐方式，替代已过时的 Session.Create）
             _session = await _sessionFactory.CreateAsync(
