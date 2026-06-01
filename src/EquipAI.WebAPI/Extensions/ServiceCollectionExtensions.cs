@@ -6,6 +6,7 @@ using EquipAI.Application.Analysis;
 using EquipAI.Application.Analysis.Handlers;
 using EquipAI.Application.Eventing;
 using EquipAI.Application.Interfaces;
+using EquipAI.Application.Knowledge;
 using EquipAI.Application.Mapping;
 using EquipAI.Application.Services;
 using EquipAI.Infrastructure.Seeding;
@@ -154,10 +155,14 @@ public static class ServiceCollectionExtensions
         // 工单服务
         services.AddScoped<IWorkOrderService, WorkOrderService>();
 
+        // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
+        services.AddScoped<KnowledgeCaptureService>();
+
         // 事件处理器
         services.AddScoped<RootCauseAnalysisHandler>();
         services.AddScoped<WorkOrderAutoCreateHandler>();
         services.AddScoped<WorkOrderAnalysisHandler>();
+        services.AddScoped<KnowledgeCaptureHandler>();
 
         // 基线计算后台服务
         services.AddHostedService<BaselineCalculationService>();
