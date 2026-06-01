@@ -53,9 +53,12 @@ public class OpcUaAdapter : IProtocolAdapter
             var appConfig = await CreateApplicationConfigurationAsync();
 
             // 2. 发现服务器端点（使用不安全连接以简化开发阶段，生产环境应启用安全）
-            //    使用推荐签名: SelectEndpointAsync(ApplicationConfiguration, string, bool, ITelemetryContext?, CancellationToken)
             var endpointDescription = await CoreClientUtils.SelectEndpointAsync(
-                appConfig, config.ConnectionString, false, null!, ct);
+                application: appConfig,
+                discoveryUrl: config.ConnectionString,
+                useSecurity: false,
+                telemetry: null!,
+                ct);
             var endpointConfig = EndpointConfiguration.Create();
             var configuredEndpoint = new ConfiguredEndpoint(null!, endpointDescription, endpointConfig);
 
