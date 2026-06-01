@@ -164,6 +164,9 @@ public static class ServiceCollectionExtensions
         // 工单服务
         services.AddScoped<IWorkOrderService, WorkOrderService>();
 
+        // 智能派工服务 — 基于技能匹配 + 负载均衡推荐最佳技术人员
+        services.AddScoped<ISmartDispatchService, SmartDispatchService>();
+
         // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
         services.AddScoped<KnowledgeCaptureService>();
 
