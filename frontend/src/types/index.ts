@@ -388,3 +388,140 @@ export interface Notification {
   /** 关联链接（点击后跳转的页面路径） */
   link?: string;
 }
+
+// ============================================================================
+// 知识库
+// ============================================================================
+
+/** 知识规则（已审核通过的正式规则） */
+export interface KnowledgeRule {
+  /** 规则唯一标识（UUID） */
+  id: string;
+  /** 所属租户 ID */
+  tenantId: string;
+  /** 适用设备类型 */
+  deviceType: string;
+  /** 规则名称 */
+  name: string;
+  /** 触发条件（自然语言描述） */
+  conditions: string;
+  /** 结论/诊断结果 */
+  conclusion: string;
+  /** 推荐措施 */
+  recommendedActions?: string;
+  /** 检查步骤 */
+  checkSteps?: string;
+  /** 置信度权重（0-1） */
+  confidenceWeight: number;
+  /** 来源（manual / ai_generated / imported） */
+  source: string;
+  /** 准确率（百分比） */
+  accuracyRate?: number;
+  /** 成功应用次数 */
+  successCount: number;
+  /** 是否启用 */
+  enabled: boolean;
+  /** 创建人 ID */
+  createdBy?: string;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
+}
+
+/** 候选规则（AI 生成，待专家审核） */
+export interface PendingRule {
+  /** 规则唯一标识（UUID） */
+  id: string;
+  /** 所属租户 ID */
+  tenantId: string;
+  /** 适用设备类型 */
+  deviceType: string;
+  /** 规则名称 */
+  name: string;
+  /** 触发条件（自然语言描述） */
+  conditions: string;
+  /** 结论/诊断结果 */
+  conclusion: string;
+  /** 推荐措施 */
+  recommendedActions?: string;
+  /** 检查步骤 */
+  checkSteps?: string;
+  /** 关联工单 ID */
+  sourceWorkorderId?: string;
+  /** AI 置信度（0-1） */
+  confidence?: number;
+  /** 审核状态 */
+  reviewStatus: 'Pending' | 'Approved' | 'Rejected';
+  /** 审核人 ID */
+  reviewedBy?: string;
+  /** 审核意见 */
+  reviewComment?: string;
+  /** 审核时间（ISO 8601） */
+  reviewedAt?: string;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
+}
+
+/** 故障案例 */
+export interface FaultCase {
+  /** 案例唯一标识（UUID） */
+  id: string;
+  /** 所属租户 ID */
+  tenantId: string;
+  /** 关联设备 ID */
+  deviceId?: string;
+  /** 设备类型 */
+  deviceType: string;
+  /** 故障发生时间（ISO 8601） */
+  faultOccurredAt?: string;
+  /** 故障描述 */
+  faultDescription: string;
+  /** 根因分析 */
+  rootCause: string;
+  /** 解决方案 */
+  solution: string;
+  /** 维修时长（分钟） */
+  repairDurationMinutes?: number;
+  /** 是否已验证 */
+  isVerified: boolean;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
+}
+
+// ============================================================================
+// 设备配置向导
+// ============================================================================
+
+/** 设备类型模板（用于向导选择设备类型） */
+export interface DeviceTypeTemplate {
+  /** 模板唯一标识（UUID） */
+  id: string;
+  /** 模板名称 */
+  name: string;
+  /** 所属行业 */
+  industry?: string;
+  /** 默认告警规则（模板预置） */
+  defaultAlarmRules?: Record<string, unknown>;
+  /** 设备参数模板（JSONB） */
+  parameters?: Record<string, unknown>;
+}
+
+/** 快速注册设备请求参数 */
+export interface QuickRegisterRequest {
+  /** 所属租户 ID */
+  tenantId: string;
+  /** 设备编码（业务唯一） */
+  deviceCode: string;
+  /** 设备名称 */
+  name?: string;
+  /** 设备类型 */
+  deviceType?: string;
+  /** 默认告警规则列表 */
+  defaultAlertRules?: {
+    /** 监控指标名称 */
+    metric: string;
+    /** 告警阈值 */
+    threshold: number;
+    /** 告警严重级别（Critical / High / Normal / Low） */
+    severity?: string;
+  }[];
+}

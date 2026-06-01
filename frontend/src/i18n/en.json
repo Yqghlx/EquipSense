@@ -47,6 +47,7 @@
     "alertRules": "Alert Rules",
     "workOrders": "Work Orders",
     "analyses": "AI Analysis",
+    "knowledge": "Knowledge Base",
     "settings": "Settings"
   },
   "sidebar": {
@@ -290,5 +291,38 @@
     "timeliness": "Timeliness",
     "consistency": "Consistency",
     "validity": "Validity"
+  },
+  "knowledge": {
+    "title": "Knowledge Base",
+    "rules": "Diagnostic Rules",
+    "cases": "Fault Cases",
+    "conditions": "Conditions",
+    "conclusion": "Conclusion",
+    "successCount": "Applied",
+    "accuracyRate": "Accuracy",
+    "faultDescription": "Fault Description",
+    "rootCause": "Root Cause",
+    "solution": "Solution",
+    "repairDuration": "Repair Duration",
+    "minutes": "min",
+    "verified": "Verified",
+    "sourceManual": "Manual",
+    "sourceAI": "AI Generated",
+    "sourceImported": "Imported"
+  },
+  "pendingRules": {
+    "title": "Pending Rule Review",
+    "filterStatus": "Review Status",
+    "statusPending": "Pending",
+    "statusApproved": "Approved",
+    "statusRejected": "Rejected",
+    "confidence": "Confidence",
+    "recommendedActions": "Recommended Actions",
+    "reviewComment": "Review Comment",
+    "approve": "Approve",
+    "reject": "Reject",
+    "rejectReason": "Rejection Reason",
+    "rejectReasonPlaceholder": "Enter rejection reason...",
+    "confirmReject": "Confirm Reject"
   }
 }

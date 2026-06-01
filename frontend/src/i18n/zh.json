@@ -47,6 +47,7 @@
     "alertRules": "告警规则",
     "workOrders": "工单管理",
     "analyses": "AI 分析",
+    "knowledge": "知识库",
     "settings": "系统设置"
   },
   "sidebar": {
@@ -290,5 +291,38 @@
     "timeliness": "时效性",
     "consistency": "一致性",
     "validity": "有效性"
+  },
+  "knowledge": {
+    "title": "知识库",
+    "rules": "诊断规则",
+    "cases": "故障案例",
+    "conditions": "触发条件",
+    "conclusion": "结论",
+    "successCount": "应用次数",
+    "accuracyRate": "准确率",
+    "faultDescription": "故障描述",
+    "rootCause": "根因",
+    "solution": "解决方案",
+    "repairDuration": "维修时长",
+    "minutes": "分钟",
+    "verified": "已验证",
+    "sourceManual": "手动创建",
+    "sourceAI": "AI 生成",
+    "sourceImported": "批量导入"
+  },
+  "pendingRules": {
+    "title": "候选规则审核",
+    "filterStatus": "审核状态",
+    "statusPending": "待审核",
+    "statusApproved": "已批准",
+    "statusRejected": "已驳回",
+    "confidence": "置信度",
+    "recommendedActions": "推荐措施",
+    "reviewComment": "审核意见",
+    "approve": "批准",
+    "reject": "驳回",
+    "rejectReason": "驳回原因",
+    "rejectReasonPlaceholder": "请输入驳回原因...",
+    "confirmReject": "确认驳回"
   }
 }

@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ClipboardList,
   Brain,
+  BookOpen,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +21,7 @@ const navItems = [
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },
   { path: '/work-orders', icon: ClipboardList, labelKey: 'nav.workOrders' },
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
+  { path: '/knowledge', icon: BookOpen, labelKey: 'nav.knowledge' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 
