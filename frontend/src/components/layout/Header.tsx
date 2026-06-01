@@ -51,7 +51,7 @@ export function Header() {
       <div className="flex items-center gap-2">
         {/* 通知铃铛 */}
         <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
-          <DropdownMenuTrigger asChild>
+          <DropdownMenuTrigger className="relative">
             <Button variant="ghost" size="icon" className="relative">
               <Bell className="h-4 w-4" />
               {unreadCount > 0 && (
@@ -87,7 +87,7 @@ export function Header() {
 
         {/* 用户菜单 */}
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+          <DropdownMenuTrigger>
             <Button variant="ghost" size="icon">
               <User className="h-4 w-4" />
             </Button>
