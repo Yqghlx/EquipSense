@@ -73,6 +73,21 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.WorkOrderLog> WorkOrderLogs => Set<Core.Entities.WorkOrderLog>();
 
+    /// <summary>
+    /// 正式知识规则表
+    /// </summary>
+    public DbSet<KnowledgeRule> KnowledgeRules => Set<KnowledgeRule>();
+
+    /// <summary>
+    /// 候选规则表（AI 生成，待专家审核）
+    /// </summary>
+    public DbSet<PendingRule> PendingRules => Set<PendingRule>();
+
+    /// <summary>
+    /// 故障案例表
+    /// </summary>
+    public DbSet<FaultCase> FaultCases => Set<FaultCase>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
