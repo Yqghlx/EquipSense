@@ -5,6 +5,11 @@ import { AuthLayout } from './components/layout/AuthLayout';
 import { AppLayout } from './components/layout/AppLayout';
 import { NotificationToast } from './components/layout/NotificationToast';
 import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
+import DeviceListPage from './pages/DeviceListPage';
+import DeviceDetailPage from './pages/DeviceDetailPage';
+import AlertCenterPage from './pages/AlertCenterPage';
+import AlertRulesPage from './pages/AlertRulesPage';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 
@@ -33,11 +38,11 @@ function AppRoutes() {
 
       {/* 业务路由（需认证） */}
       <Route element={<AppLayout />}>
-        <Route path="/dashboard" element={<div className="text-muted-foreground">仪表盘（子计划 B 实现）</div>} />
-        <Route path="/devices" element={<div className="text-muted-foreground">设备管理（子计划 B 实现）</div>} />
-        <Route path="/devices/:id" element={<div className="text-muted-foreground">设备详情（子计划 B 实现）</div>} />
-        <Route path="/alerts" element={<div className="text-muted-foreground">告警中心（子计划 B 实现）</div>} />
-        <Route path="/alert-rules" element={<div className="text-muted-foreground">告警规则（子计划 B 实现）</div>} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/devices" element={<DeviceListPage />} />
+        <Route path="/devices/:id" element={<DeviceDetailPage />} />
+        <Route path="/alerts" element={<AlertCenterPage />} />
+        <Route path="/alert-rules" element={<AlertRulesPage />} />
         <Route path="/work-orders" element={<div className="text-muted-foreground">工单管理（子计划 C 实现）</div>} />
         <Route path="/work-orders/:id" element={<div className="text-muted-foreground">工单详情（子计划 C 实现）</div>} />
         <Route path="/analyses" element={<div className="text-muted-foreground">AI 分析（子计划 C 实现）</div>} />
