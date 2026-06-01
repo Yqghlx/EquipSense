@@ -22,10 +22,10 @@ const ruleSchema = z.object({
   metric: z.string().min(1, '请输入指标名称'),
   ruleType: z.enum(['threshold', 'composite', 'baseline']),
   operator: z.string().optional(),
-  threshold: z.coerce.number().optional(),
-  baselineStddevMultiplier: z.coerce.number().optional(),
+  threshold: z.number().optional(),
+  baselineStddevMultiplier: z.number().optional(),
   severity: z.enum(['critical', 'high', 'normal', 'low']),
-  cooldownSeconds: z.coerce.number().min(0),
+  cooldownSeconds: z.number().min(0),
   autoCreateWorkorder: z.boolean(),
   enabled: z.boolean(),
 });
@@ -39,12 +39,11 @@ type RuleFormData = z.infer<typeof ruleSchema>;
  */
 export default function AlertRulesPage() {
   const { t } = useTranslation();
-  const [page, setPage] = useState(1);
   const [keyword, setKeyword] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<AlertRule | undefined>();
 
-  const { data, isLoading } = useAlertRules({ page, pageSize: 20, keyword: keyword || undefined });
+  const { data, isLoading } = useAlertRules({ page: 1, pageSize: 20, keyword: keyword || undefined });
   const createRule = useCreateAlertRule();
   const updateRule = useUpdateAlertRule();
   const deleteRule = useDeleteAlertRule();
@@ -175,7 +174,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>{rule ? t('common.edit') : t('common.create')}</DialogTitle></DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+        <form onSubmit={handleSubmit((data) => onSubmit(data as CreateAlertRuleRequest))} className="space-y-4">
           {/* 规则名称 */}
           <div className="space-y-2">
             <Label>名称</Label>
@@ -207,7 +206,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>运算符</Label>
-                <Select onValueChange={(v) => { if (v) setValue('operator', v); }}>
+                <Select onValueChange={(v) => { if (v != null) setValue('operator', String(v)); }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="GreaterThan">大于</SelectItem>
@@ -219,7 +218,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
               </div>
               <div className="space-y-2">
                 <Label>阈值</Label>
-                <Input type="number" {...register('threshold')} />
+                <Input type="number" {...register('threshold', { valueAsNumber: true })} />
               </div>
             </div>
           )}
@@ -228,7 +227,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
           {ruleType === 'baseline' && (
             <div className="space-y-2">
               <Label>标准差倍数</Label>
-              <Input type="number" step="0.5" {...register('baselineStddevMultiplier')} />
+              <Input type="number" step="0.5" {...register('baselineStddevMultiplier', { valueAsNumber: true })} />
             </div>
           )}
 
@@ -248,7 +247,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
             </div>
             <div className="space-y-2">
               <Label>冷却时间（秒）</Label>
-              <Input type="number" {...register('cooldownSeconds')} />
+              <Input type="number" {...register('cooldownSeconds', { valueAsNumber: true })} />
             </div>
           </div>
 
