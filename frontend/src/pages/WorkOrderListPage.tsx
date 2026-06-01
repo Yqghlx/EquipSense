@@ -72,7 +72,7 @@ export default function WorkOrderListPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1); }}>
+        <Select value={status} onValueChange={(v) => { if (v != null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>

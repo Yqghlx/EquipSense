@@ -63,7 +63,7 @@ export default function AnalysesPage() {
 
       {/* 筛选栏 */}
       <div className="flex gap-3">
-        <Select value={level} onValueChange={(v) => { setLevel(v === 'all' ? '' : v); setPage(1); }}>
+        <Select value={level} onValueChange={(v) => { if (v != null) { setLevel(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-28"><SelectValue placeholder="分析级别" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>
@@ -72,7 +72,7 @@ export default function AnalysesPage() {
             <SelectItem value="L3">L3</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={status} onValueChange={(v) => { setStatus(v === 'all' ? '' : v); setPage(1); }}>
+        <Select value={status} onValueChange={(v) => { if (v != null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-28"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>
