@@ -12,7 +12,9 @@ export async function startConnection(): Promise<HubConnection> {
   if (connection) return connection;
 
   connection = new HubConnectionBuilder()
-    .withUrl('/hubs/industrial')
+    .withUrl('/hubs/industrial', {
+      accessTokenFactory: () => localStorage.getItem('token') ?? '',
+    })
     .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
     .configureLogging(LogLevel.Information)
     .build();

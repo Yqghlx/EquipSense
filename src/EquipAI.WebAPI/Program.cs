@@ -21,7 +21,8 @@ try
     // 配置 Serilog 日志，从 appsettings.json 中读取日志级别和输出目标
     builder.Host.UseSerilog((context, config) =>
     {
-        config.ReadFrom.Configuration(context.Configuration);
+        config.ReadFrom.Configuration(context.Configuration)
+              .WriteTo.Console();
     });
 
     // 注册 HTTP 上下文访问器，供中间件和服务获取当前请求上下文
@@ -44,14 +45,15 @@ try
         .AddNpgSql(builder.Configuration.GetConnectionString("Default")!)
         .AddRedis(builder.Configuration["Redis:ConnectionString"]!);
 
-    // CORS：开发阶段允许所有来源，生产环境应限制为前端域名
+    // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
     builder.Services.AddCors(options =>
     {
         options.AddDefaultPolicy(policy =>
         {
-            policy.AllowAnyOrigin()
+            policy.WithOrigins("http://localhost:5173")
                   .AllowAnyMethod()
-                  .AllowAnyHeader();
+                  .AllowAnyHeader()
+                  .AllowCredentials();
         });
     });
 

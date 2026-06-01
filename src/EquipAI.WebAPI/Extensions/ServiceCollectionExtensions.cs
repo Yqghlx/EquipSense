@@ -8,6 +8,7 @@ using EquipAI.Application.Eventing;
 using EquipAI.Application.Interfaces;
 using EquipAI.Application.Mapping;
 using EquipAI.Application.Services;
+using EquipAI.Infrastructure.Seeding;
 using EquipAI.Application.Telemetry;
 using EquipAI.Application.WorkOrders;
 using EquipAI.Application.WorkOrders.Handlers;
@@ -93,6 +94,7 @@ public static class ServiceCollectionExtensions
 
         // TimescaleDB 初始化服务
         services.AddScoped<TimescaleDbSetup>();
+        services.AddScoped<DataSeeder>();
     }
 
     /// <summary>
@@ -189,6 +191,22 @@ public static class ServiceCollectionExtensions
                 ValidateLifetime = true,
                 // 时钟偏移设为 0，精确校验过期时间
                 ClockSkew = TimeSpan.Zero
+            };
+
+            // SignalR WebSocket 连接无法通过 HTTP Header 传递 JWT，
+            // 改为从 query string 的 access_token 参数读取（仅限 /hubs 路径）
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    var path = context.HttpContext.Request.Path;
+                    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    {
+                        context.Token = accessToken;
+                    }
+                    return Task.CompletedTask;
+                }
             };
         });
     }

@@ -8,6 +8,9 @@ import { useNotificationStore } from '../stores/notificationStore';
  * SignalR 连接 Hook
  * 在用户认证后自动建立连接，监听告警和遥测事件，
  * 并通过 TanStack Query 自动刷新相关数据
+ *
+ * 连接在认证期间持续保持，仅在登出时断开。
+ * 使用 started ref 防止 React StrictMode 双重挂载导致的重复连接。
  */
 export function useSignalR() {
   const queryClient = useQueryClient();
@@ -16,11 +19,20 @@ export function useSignalR() {
   const started = useRef(false);
 
   useEffect(() => {
-    if (!isAuthenticated || started.current) return;
+    if (!isAuthenticated) {
+      // 用户登出时断开连接
+      if (started.current) {
+        started.current = false;
+        stopConnection();
+      }
+      return;
+    }
+
+    if (started.current) return;
     started.current = true;
 
-    startConnection().then((conn) => {
-      // 监听告警触发事件
+    /** 注册所有 SignalR 事件处理器（初始连接 + 重连后都需要调用） */
+    const registerHandlers = (conn: import('@microsoft/signalr').HubConnection) => {
       conn.on('OnAlertTriggered', (data: { alertId: string; alertCode: string; deviceId: string; metric: string; value: number; severity: string }) => {
         push({
           type: 'alert',
@@ -32,20 +44,20 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       });
 
-      // 监听告警解决事件
       conn.on('OnAlertResolved', () => {
         queryClient.invalidateQueries({ queryKey: ['alerts'] });
       });
 
-      // 监听遥测数据更新事件
       conn.on('OnTelemetryUpdate', (deviceId: string) => {
         queryClient.invalidateQueries({ queryKey: ['telemetry', deviceId] });
       });
+    };
+
+    startConnection().then((conn) => {
+      registerHandlers(conn);
+      conn.onreconnected(() => registerHandlers(conn));
     }).catch(console.error);
 
-    return () => {
-      started.current = false;
-      stopConnection();
-    };
+    // 不在组件卸载时断开连接 — SignalR 连接跨路由保持
   }, [isAuthenticated]);
 }
