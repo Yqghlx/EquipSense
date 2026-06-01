@@ -64,6 +64,21 @@ public class WorkOrder : BaseEntity
     public string? Resolution { get; set; }
 
     /// <summary>
+    /// 实际维修时长（小时）
+    /// </summary>
+    public double? ActualHours { get; set; }
+
+    /// <summary>
+    /// 维修执行报告
+    /// </summary>
+    public string? ExecutionReport { get; set; }
+
+    /// <summary>
+    /// 使用零件（JSON 数组字符串）
+    /// </summary>
+    public string? RequiredParts { get; set; }
+
+    /// <summary>
     /// 派工给谁（用户 ID）
     /// </summary>
     public Guid? AssignedTo { get; set; }
