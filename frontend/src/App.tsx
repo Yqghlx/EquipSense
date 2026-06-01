@@ -16,6 +16,7 @@ import AnalysesPage from './pages/AnalysesPage';
 import KnowledgePage from './pages/KnowledgePage';
 import PendingRulesPage from './pages/PendingRulesPage';
 import SettingsPage from './pages/SettingsPage';
+import DeviceSetupPage from './pages/DeviceSetupPage';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/devices" element={<DeviceListPage />} />
         <Route path="/devices/:id" element={<DeviceDetailPage />} />
+        <Route path="/device-setup" element={<DeviceSetupPage />} />
         <Route path="/alerts" element={<AlertCenterPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
         <Route path="/work-orders" element={<WorkOrderListPage />} />

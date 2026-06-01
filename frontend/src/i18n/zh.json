@@ -324,5 +324,30 @@
     "rejectReason": "驳回原因",
     "rejectReasonPlaceholder": "请输入驳回原因...",
     "confirmReject": "确认驳回"
+  },
+  "deviceSetup": {
+    "title": "设备配置向导",
+    "stepSelectType": "选择设备类型",
+    "stepBasicInfo": "设备基本信息",
+    "stepAlertRules": "告警规则配置",
+    "industryFilter": "行业筛选",
+    "allIndustries": "全部行业",
+    "industryManufacturing": "制造业",
+    "industryEnergy": "能源",
+    "industryChemical": "化工",
+    "industryLogistics": "物流",
+    "parametersCount": "{{count}} 个参数",
+    "selectedTemplate": "已选择模板：{{name}}",
+    "noTemplateSelected": "未选择模板（可选）",
+    "appliedTemplate": "已应用设备类型模板",
+    "deviceCode": "设备编码",
+    "deviceCodePlaceholder": "例如：PUMP-001",
+    "deviceCodeHint": "设备编码在租户内必须唯一，用于数据采集匹配",
+    "deviceName": "设备名称",
+    "deviceNamePlaceholder": "例如：1号冷却水泵",
+    "alertRulesHint": "配置此设备的默认告警规则。可留空，后续在告警规则页面单独配置。",
+    "noAlertRules": "暂未配置告警规则，点击下方按钮添加",
+    "addAlertRule": "添加告警规则",
+    "submitRegister": "完成注册"
   }
 }

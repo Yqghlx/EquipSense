@@ -324,5 +324,30 @@
     "rejectReason": "Rejection Reason",
     "rejectReasonPlaceholder": "Enter rejection reason...",
     "confirmReject": "Confirm Reject"
+  },
+  "deviceSetup": {
+    "title": "Device Setup Wizard",
+    "stepSelectType": "Select Device Type",
+    "stepBasicInfo": "Basic Information",
+    "stepAlertRules": "Alert Rule Configuration",
+    "industryFilter": "Industry Filter",
+    "allIndustries": "All Industries",
+    "industryManufacturing": "Manufacturing",
+    "industryEnergy": "Energy",
+    "industryChemical": "Chemical",
+    "industryLogistics": "Logistics",
+    "parametersCount": "{{count}} parameters",
+    "selectedTemplate": "Selected template: {{name}}",
+    "noTemplateSelected": "No template selected (optional)",
+    "appliedTemplate": "Applied device type template",
+    "deviceCode": "Device Code",
+    "deviceCodePlaceholder": "e.g., PUMP-001",
+    "deviceCodeHint": "Device code must be unique within the tenant and is used for data collection matching",
+    "deviceName": "Device Name",
+    "deviceNamePlaceholder": "e.g., Cooling Water Pump #1",
+    "alertRulesHint": "Configure default alert rules for this device. You can leave this empty and configure rules later on the Alert Rules page.",
+    "noAlertRules": "No alert rules configured yet. Click the button below to add.",
+    "addAlertRule": "Add Alert Rule",
+    "submitRegister": "Complete Registration"
   }
 }
