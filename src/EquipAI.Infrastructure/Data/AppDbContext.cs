@@ -88,6 +88,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<FaultCase> FaultCases => Set<FaultCase>();
 
+    /// <summary>
+    /// 技术人员画像表
+    /// </summary>
+    public DbSet<TechnicianProfile> TechnicianProfiles => Set<TechnicianProfile>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
