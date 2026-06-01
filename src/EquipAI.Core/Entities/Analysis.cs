@@ -29,7 +29,7 @@ public class Analysis : BaseEntity
     public Guid? RuleId { get; set; }
 
     /// <summary>
-    /// 分析级别（L1/L2/L3）
+    /// 分析级别（L1/L2/L3/L4）
     /// </summary>
     public AnalysisLevel Level { get; set; }
 

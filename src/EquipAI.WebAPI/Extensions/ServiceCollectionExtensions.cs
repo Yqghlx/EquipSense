@@ -5,8 +5,8 @@ using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Analysis;
 using EquipAI.Application.Analysis.Handlers;
 using EquipAI.Application.Eventing;
-using EquipAI.Application.Interfaces;
 using EquipAI.Application.Knowledge;
+using EquipAI.Application.Interfaces;
 using EquipAI.Application.Mapping;
 using EquipAI.Application.Services;
 using EquipAI.Infrastructure.Seeding;
@@ -151,6 +151,15 @@ public static class ServiceCollectionExtensions
 
         // 根因分析引擎
         services.AddScoped<Core.Interfaces.IAnalysisService, RootCauseAnalysisEngine>();
+
+        // L2 规则引擎诊断（Scoped — 需要 DbContext 查询知识库规则）
+        services.AddScoped<Core.Interfaces.IRuleEngineAnalysisService, RuleEngineAnalysisService>();
+
+        // L4 ML.NET 异常检测（Singleton — MLContext 内部线程安全，通过 IServiceScopeFactory 创建独立作用域）
+        services.AddSingleton<Core.Interfaces.IMlAnomalyDetectionService, MlAnomalyDetectionService>();
+
+        // 规则准确率追踪（Scoped — 需要 DbContext 更新规则统计）
+        services.AddScoped<Core.Interfaces.IRuleAccuracyTracker, RuleAccuracyTracker>();
 
         // 工单服务
         services.AddScoped<IWorkOrderService, WorkOrderService>();

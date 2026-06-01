@@ -7,17 +7,21 @@ using MetricBaselineEntity = EquipAI.Core.Entities.MetricBaseline;
 namespace EquipAI.Application.Analysis;
 
 /// <summary>
-/// 根因分析引擎，实现 L3→L1 自动降级分析链
-/// L3 统计分析：有基线数据且数据质量 ≥ 0.6 时，基于历史统计基线计算偏离度
+/// 根因分析引擎，实现 L4→L2→L3→L1 四级自动降级分析链
+/// L4 ML 异常检测：样本充足时使用 SrCnn 算法检测异常
+/// L2 规则引擎诊断：知识库规则匹配
+/// L3 统计分析：有基线数据且数据质量达标时，基于历史统计基线计算偏离度
 /// L1 LLM 诊断：兜底方案，调用大语言模型分析告警上下文
 /// </summary>
 public class RootCauseAnalysisEngine : IAnalysisService
 {
     private readonly ILLMService _llmService;
     private readonly IDataQualityService _dataQualityService;
+    private readonly IRuleEngineAnalysisService _ruleEngineService;
+    private readonly IMlAnomalyDetectionService _mlService;
 
     /// <summary>
-    /// 数据质量阈值：≥ 此值时使用统计基线分析（L3），否则降级到 LLM 诊断（L1）
+    /// 数据质量阈值：≥ 此值时使用统计基线分析（L3），否则降级到 LLM 诊断
     /// </summary>
     private const double DataQualityThreshold = 0.6;
 
@@ -26,10 +30,16 @@ public class RootCauseAnalysisEngine : IAnalysisService
     /// </summary>
     private const int MinSampleCount = 100;
 
-    public RootCauseAnalysisEngine(ILLMService llmService, IDataQualityService dataQualityService)
+    public RootCauseAnalysisEngine(
+        ILLMService llmService,
+        IDataQualityService dataQualityService,
+        IRuleEngineAnalysisService ruleEngineService,
+        IMlAnomalyDetectionService mlService)
     {
         _llmService = llmService;
         _dataQualityService = dataQualityService;
+        _ruleEngineService = ruleEngineService;
+        _mlService = mlService;
     }
 
     /// <inheritdoc />
@@ -38,7 +48,7 @@ public class RootCauseAnalysisEngine : IAnalysisService
     {
         var startTime = Stopwatch.GetTimestamp();
 
-        // 计算数据质量评分，样本不足时默认为 0（触发 L1 降级）
+        // 计算数据质量评分，样本不足时默认为 0（触发降级）
         var dataQualityNullable = await _dataQualityService.CalculateScoreAsync(tenantId, deviceId, metric, ct);
         var dataQuality = dataQualityNullable ?? 0.0;
 
@@ -48,17 +58,38 @@ public class RootCauseAnalysisEngine : IAnalysisService
         AnalysisLevel level;
         AnalysisStatus status = AnalysisStatus.Completed;
         string? rawResponse = null;
+        Guid? matchedRuleId = null;
 
-        // 降级决策：有足够基线数据且数据质量达标时使用 L3 统计分析，否则降级到 L1
-        if (baseline != null && (baseline.SampleCount ?? 0) >= MinSampleCount && dataQuality >= DataQualityThreshold)
+        // 四级降级决策链：L4 → L2 → L3 → L1
+
+        // L4: ML.NET 异常检测 — 样本充足时使用机器学习模型检测异常
+        var mlResult = await _mlService.DetectAsync(tenantId, deviceId, metric, value, ct);
+        if (mlResult != null && mlResult.IsAnomaly)
         {
-            // L3 统计分析：基于历史基线计算偏离度
+            level = AnalysisLevel.L4;
+            rootCause = mlResult.Description;
+            suggestion = $"ML 模型检测到异常（概率 {mlResult.AnomalyScore:P}），建议人工确认并排查";
+            confidence = Math.Min(1.0, mlResult.AnomalyScore * 0.9 + dataQuality * 0.1);
+        }
+        // L2: 规则引擎诊断 — 从知识库匹配规则条件
+        else if (await _ruleEngineService.MatchRuleAsync(tenantId, deviceId, metric, value, ct) is { } ruleMatch)
+        {
+            level = AnalysisLevel.L2;
+            rootCause = ruleMatch.Conclusion;
+            suggestion = ruleMatch.RecommendedActions ?? "请参考知识库推荐措施";
+            confidence = ruleMatch.ConfidenceWeight;
+            matchedRuleId = ruleMatch.RuleId;
+            rawResponse = ruleMatch.CheckSteps;
+        }
+        // L3: 统计分析 — 有基线数据且数据质量达标时，基于历史统计基线计算偏离度
+        else if (baseline != null && (baseline.SampleCount ?? 0) >= MinSampleCount && dataQuality >= DataQualityThreshold)
+        {
             level = AnalysisLevel.L3;
             (rootCause, suggestion, confidence) = StatisticalAnalysis(value, baseline, metric, dataQuality);
         }
+        // L1: LLM 诊断 — 兜底方案，调用大语言模型分析告警上下文
         else
         {
-            // L1 LLM 诊断：兜底方案
             level = AnalysisLevel.L1;
             var result = await LLMDiagnosisAsync(deviceId, metric, value, baseline, ct);
 
@@ -86,6 +117,7 @@ public class RootCauseAnalysisEngine : IAnalysisService
             TenantId = tenantId,
             AlertId = alertId,
             DeviceId = deviceId,
+            RuleId = matchedRuleId,
             Level = level,
             Status = status,
             Confidence = confidence,

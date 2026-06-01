@@ -11,12 +11,17 @@ public enum AnalysisLevel
     L1,
 
     /// <summary>
-    /// Level 2 — 规则引擎诊断（需知识库，暂不实现）
+    /// Level 2 — 规则引擎诊断（基于知识库规则匹配）
     /// </summary>
     L2,
 
     /// <summary>
     /// Level 3 — 统计分析（基于历史基线）
     /// </summary>
-    L3
+    L3,
+
+    /// <summary>
+    /// Level 4 — ML.NET SrCnn 异常检测（基于机器学习模型）
+    /// </summary>
+    L4
 }

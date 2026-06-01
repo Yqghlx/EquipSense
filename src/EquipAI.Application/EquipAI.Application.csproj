@@ -11,6 +11,8 @@
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />
+    <PackageReference Include="Microsoft.ML" Version="4.0.2" />
+    <PackageReference Include="Microsoft.ML.TimeSeries" Version="4.0.2" />
   </ItemGroup>
 
   <PropertyGroup>

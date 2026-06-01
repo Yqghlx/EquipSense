@@ -339,6 +339,18 @@ public class FullPipelineTests
             // 数据质量服务
             services.AddSingleton<IDataQualityService, DataQualityService>();
 
+            // 模拟 L2 规则引擎（返回 null — 无匹配规则，让降级链继续）
+            var ruleEngineMock = new Mock<IRuleEngineAnalysisService>();
+            ruleEngineMock.Setup(r => r.MatchRuleAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((RuleMatchResult?)null);
+            services.AddSingleton(ruleEngineMock.Object);
+
+            // 模拟 L4 ML.NET 异常检测（返回 null — 样本不足，让降级链继续到 L3/L1）
+            var mlMock = new Mock<IMlAnomalyDetectionService>();
+            mlMock.Setup(m => m.DetectAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((MlAnomalyResult?)null);
+            services.AddSingleton(mlMock.Object);
+
             // 告警评估器
             services.AddSingleton<IAlertRuleEvaluator, ThresholdEvaluator>();
             services.AddSingleton<IAlertRuleEvaluator, CombinedEvaluator>();
