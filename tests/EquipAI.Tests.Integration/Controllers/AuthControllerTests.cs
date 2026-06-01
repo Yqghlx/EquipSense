@@ -9,8 +9,10 @@ namespace EquipAI.Tests.Integration.Controllers;
 /// <summary>
 /// 认证控制器集成测试，验证登录接口在各种输入条件下的行为
 /// 使用 WebApplicationFactory 启动完整的应用管线，包括中间件、DI 和数据库
+/// 使用共享测试集合确保 WebApplicationFactory 单例
 /// </summary>
-public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>
+[Collection("SharedFactory")]
+public class AuthControllerTests
 {
     private readonly CustomWebApplicationFactory _factory;
 

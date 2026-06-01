@@ -148,7 +148,8 @@ public class InMemoryEventBus : IEventBus, IDisposable
     /// </summary>
     public void Dispose()
     {
-        _cts.Cancel();
+        try { _cts.Cancel(); } catch (ObjectDisposedException) { }
+
         _channel.Writer.TryComplete();
 
         // 等待消费任务完成，设置超时防止无限等待
