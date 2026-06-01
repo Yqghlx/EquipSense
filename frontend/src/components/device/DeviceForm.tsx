@@ -66,7 +66,7 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
       {/* 设备类型 */}
       <div className="space-y-2">
         <Label>{t('device.type')}</Label>
-        <Select defaultValue={device?.deviceType} onValueChange={(v) => setValue('deviceType', v)}>
+        <Select defaultValue={device?.deviceType} onValueChange={(v) => { if (v) setValue('deviceType', v); }}>
           <SelectTrigger><SelectValue placeholder={t('device.type')} /></SelectTrigger>
           <SelectContent>
             {deviceTypes.map((type) => (
