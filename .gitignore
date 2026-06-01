@@ -480,3 +480,10 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Frontend test artifacts
+frontend/playwright-report/
+frontend/test-results/
+
+# Claude Code worktrees
+.claude/worktrees/
