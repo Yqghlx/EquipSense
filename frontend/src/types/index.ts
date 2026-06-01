@@ -48,11 +48,11 @@ export interface LoginRequest {
 /** 认证响应（包含令牌和用户信息） */
 export interface AuthResponse {
   /** JWT 访问令牌 */
-  token: string;
+  accessToken: string;
   /** 刷新令牌 */
   refreshToken: string;
   /** 当前登录用户信息 */
-  user: UserInfo;
+  userInfo: UserInfo;
 }
 
 /** 用户基本信息 */
@@ -61,10 +61,18 @@ export interface UserInfo {
   id: string;
   /** 用户名 */
   username: string;
-  /** 角色标识（system_admin / maintenance_lead / technician / operator / viewer） */
+  /** 显示名称 */
+  displayName: string;
+  /** 角色标识（SystemAdmin / MaintenanceLead / Technician / Operator / Viewer） */
   role: string;
-  /** 所属租户 ID */
-  tenantId: string;
+  /** 邮箱 */
+  email?: string;
+  /** 手机号 */
+  phone?: string;
+  /** 是否激活 */
+  isActive: boolean;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
 }
 
 // ============================================================================
@@ -80,7 +88,7 @@ export interface Device {
   /** 设备名称 */
   name: string;
   /** 设备类型 */
-  deviceType: string;
+  type: string;
   /** 设备状态（online / offline / maintenance / alarm） */
   status: string;
   /** 安装位置 */
@@ -98,7 +106,7 @@ export interface CreateDeviceRequest {
   /** 设备名称 */
   name: string;
   /** 设备类型 */
-  deviceType: string;
+  type: string;
   /** 安装位置 */
   location?: string;
 }

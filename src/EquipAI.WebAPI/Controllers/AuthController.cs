@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using EquipAI.Application.DTOs.Auth;
+using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
+using EquipAI.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,14 +17,17 @@ namespace EquipAI.WebAPI.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IRepository<EquipAI.Core.Entities.User> _userRepo;
 
     /// <summary>
     /// 初始化认证控制器
     /// </summary>
     /// <param name="authService">认证服务</param>
-    public AuthController(IAuthService authService)
+    /// <param name="userRepo">用户仓储</param>
+    public AuthController(IAuthService authService, IRepository<EquipAI.Core.Entities.User> userRepo)
     {
         _authService = authService;
+        _userRepo = userRepo;
     }
 
     /// <summary>
@@ -94,6 +99,43 @@ public class AuthController : ControllerBase
 
         await _authService.ChangePasswordAsync(userId, request);
         return Ok(new { message = "密码修改成功" });
+    }
+
+    /// <summary>
+    /// 获取当前登录用户信息
+    /// </summary>
+    /// <returns>当前用户信息</returns>
+    [HttpGet("me")]
+    [Authorize]
+    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<UserDto>> GetCurrentUser()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            return Unauthorized(new { code = 401, message = "无法识别用户身份" });
+        }
+
+        var user = await _userRepo.GetByIdAsync(userId);
+        if (user == null)
+        {
+            return NotFound(new { code = 404, message = "用户不存在" });
+        }
+
+        return Ok(new UserDto
+        {
+            Id = user.Id,
+            Username = user.Username,
+            DisplayName = user.DisplayName,
+            Role = user.Role.ToString(),
+            Email = user.Email,
+            Phone = user.Phone,
+            IsActive = user.IsActive,
+            CreatedAt = user.CreatedAt
+        });
     }
 }
 

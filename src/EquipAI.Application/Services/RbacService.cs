@@ -25,16 +25,18 @@ public class RbacService : IRbacService
             // 租户管理（全部 CRUD）
             "tenant:create", "tenant:read", "tenant:update", "tenant:delete",
             // 告警管理（全部 CRUD）
-            "alert:create", "alert:read", "alert:update", "alert:delete", "alert:configure",
+            "alert:create", "alert:read", "alert:update", "alert:delete", "alert:config",
             // 工单管理（全部 CRUD）
             "workorder:create", "workorder:read", "workorder:update", "workorder:delete",
-            "workorder:assign", "workorder:accept", "workorder:execute",
+            "workorder:dispatch", "workorder:accept", "workorder:execute",
+            "workorder:close", "workorder:cancel",
             // 知识库管理（全部 CRUD）
             "knowledge:create", "knowledge:read", "knowledge:update", "knowledge:delete", "knowledge:verify",
             // 报表
             "report:read",
             // AI 分析（全部 CRUD）
-            "ai:read", "ai:query", "ai:configure"
+            "ai:read", "ai:query", "ai:configure",
+            "analysis:read", "analysis:trigger", "analysis:configure"
         ],
 
         // 维保主管：设备读写、告警配置、工单派工验收、知识库验证、报表和 AI 只读
@@ -45,10 +47,10 @@ public class RbacService : IRbacService
             // 用户管理（只读）
             "user:read",
             // 告警管理（读 + 更新 + 配置）
-            "alert:read", "alert:update", "alert:configure",
+            "alert:read", "alert:update", "alert:config",
             // 工单管理（创建 + 读 + 更新 + 派工 + 接受）
             "workorder:create", "workorder:read", "workorder:update",
-            "workorder:assign", "workorder:accept",
+            "workorder:dispatch", "workorder:accept",
             // 知识库管理（读 + 更新 + 验证）
             "knowledge:read", "knowledge:update", "knowledge:verify",
             // 报表（只读）
@@ -107,7 +109,7 @@ public class RbacService : IRbacService
     /// 判断指定角色是否拥有某项权限
     /// </summary>
     /// <param name="role">用户角色名称（如 SystemAdmin、MaintenanceLead 等）</param>
-    /// <param name="permission">所需权限标识（如 "device:create"、"alert:configure" 等）</param>
+    /// <param name="permission">所需权限标识（如 "device:create"、"alert:config" 等）</param>
     /// <returns>有权限返回 true，否则 false</returns>
     public bool HasPermission(string role, string permission)
     {

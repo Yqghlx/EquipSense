@@ -6,20 +6,12 @@ using Microsoft.EntityFrameworkCore;
 namespace EquipAI.Infrastructure.Data;
 
 /// <summary>
-/// 应用程序数据库上下文，负责：
-/// 1. 管理 DbSets 和实体映射
-/// 2. 通过全局查询过滤器实现 Day 1 多租户数据隔离
-/// 3. 提供忽略租户过滤器的 UnfilteredSet 方法（系统管理场景）
+/// 应用程序数据库上下文
 /// </summary>
 public class AppDbContext : DbContext
 {
     private readonly ITenantContext _tenantContext;
 
-    /// <summary>
-    /// 初始化数据库上下文
-    /// </summary>
-    /// <param name="options">DbContext 配置选项</param>
-    /// <param name="tenantContext">租户上下文，用于全局查询过滤器</param>
     public AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext tenantContext)
         : base(options)
     {
@@ -81,21 +73,15 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.WorkOrderLog> WorkOrderLogs => Set<Core.Entities.WorkOrderLog>();
 
-    /// <summary>
-    /// 模型创建时配置实体映射和全局查询过滤器
-    /// 全局查询过滤器确保所有拥有 TenantId 属性的实体自动按租户隔离，
-    /// 避免开发人员遗漏租户条件导致数据泄露
-    /// </summary>
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // 从程序集自动加载所有 IEntityTypeConfiguration 实现
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
-        // 为所有拥有 TenantId 属性的实体注册全局多租户查询过滤器
-        // 过滤逻辑：实体租户 ID == 当前请求租户 ID
+        // 全局多租户查询过滤器
+        // 关键：不能直接引用 _tenantContext，因为 OnModelCreating 只执行一次（模型缓存）
+        // 必须通过 Expression 访问 ITenantContext.TenantId，使其每次查询时动态评估
         foreach (var entityType in modelBuilder.Model.GetEntityTypes())
         {
-            // Tenant 实体本身没有 TenantId 属性，跳过
             if (entityType.ClrType == typeof(Core.Entities.Tenant))
                 continue;
 
@@ -103,12 +89,14 @@ public class AppDbContext : DbContext
             if (tenantIdProperty is null)
                 continue;
 
-            // 构建过滤器 Lambda: entity => entity.TenantId == _tenantContext.TenantId
+            // 使用 Func<Func<ITenantContext>> 延迟解析，确保每次查询使用当前请求的租户上下文
             var parameter = System.Linq.Expressions.Expression.Parameter(entityType.ClrType, "e");
             var propertyAccess = System.Linq.Expressions.Expression.Property(parameter, "TenantId");
-            var tenantIdValue = System.Linq.Expressions.Expression.Property(
-                System.Linq.Expressions.Expression.Constant(_tenantContext),
-                nameof(ITenantContext.TenantId));
+            // 通过闭包访问 _tenantContext，EF Core 每次查询时都会重新评估此表达式
+            var tenantIdValue = System.Linq.Expressions.Expression.Call(
+                System.Linq.Expressions.Expression.Constant(this),
+                nameof(GetCurrentTenantId),
+                null);
             var filter = System.Linq.Expressions.Expression.Lambda(
                 System.Linq.Expressions.Expression.Equal(propertyAccess, tenantIdValue),
                 parameter);
@@ -118,6 +106,11 @@ public class AppDbContext : DbContext
 
         base.OnModelCreating(modelBuilder);
     }
+
+    /// <summary>
+    /// 获取当前请求的租户 ID，供全局查询过滤器使用
+    /// </summary>
+    private Guid GetCurrentTenantId() => _tenantContext.TenantId;
 
     /// <summary>
     /// 获取不受租户过滤器约束的 DbSet

@@ -115,7 +115,7 @@ export default function DeviceListPage() {
                   <TableRow key={device.id} className="cursor-pointer" onClick={() => navigate(`/devices/${device.id}`)}>
                     <TableCell className="font-mono text-sm">{device.deviceCode}</TableCell>
                     <TableCell>{device.name}</TableCell>
-                    <TableCell>{device.deviceType}</TableCell>
+                    <TableCell>{device.type}</TableCell>
                     <TableCell><DeviceStatusBadge status={device.status} /></TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {device.lastCommunicatedAt ? new Date(device.lastCommunicatedAt).toLocaleString() : '-'}

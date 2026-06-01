@@ -72,10 +72,10 @@ try
     app.UseSerilogRequestLogging();
     // 3. CORS — 跨域处理，在认证之前执行
     app.UseCors();
-    // 4. 租户解析 — 从 JWT 或请求头中提取租户信息，存入 HttpContext.Items
-    app.UseMiddleware<TenantResolutionMiddleware>();
-    // 5. JWT 认证 — 解析并验证 Bearer Token
+    // 4. JWT 认证 — 解析并验证 Bearer Token，填充 context.User
     app.UseAuthentication();
+    // 5. 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（必须在认证之后）
+    app.UseMiddleware<TenantResolutionMiddleware>();
     // 6. 权限校验 — 基于角色和权限标识的细粒度访问控制
     app.UseMiddleware<PermissionMiddleware>();
     // 7. 授权 — ASP.NET Core 内置的 [Authorize] 特性支持

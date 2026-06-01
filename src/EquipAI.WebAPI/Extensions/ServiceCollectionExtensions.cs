@@ -41,7 +41,6 @@ public static class ServiceCollectionExtensions
     public static void AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         // 注册数据库上下文，使用 Npgsql 连接 PostgreSQL
-        // ITenantContext 通过工厂模式从 HttpContext.Items 中解析，确保每次请求使用正确的租户信息
         services.AddDbContext<AppDbContext>(options =>
         {
             options.UseNpgsql(configuration.GetConnectionString("Default"));
@@ -175,6 +174,9 @@ public static class ServiceCollectionExtensions
         })
         .AddJwtBearer(options =>
         {
+            // 禁止 JWT 处理器自动将短声明名映射为完整 URI（如 role → ClaimTypes.Role）
+            // 保持 JWT 中的声明名不变，以便中间件用 FindFirst("role") 直接查找
+            options.MapInboundClaims = false;
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,

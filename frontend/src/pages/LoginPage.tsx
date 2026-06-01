@@ -48,7 +48,7 @@ export default function LoginPage() {
     setError('');
     try {
       const response = await api.post<AuthResponse>('/auth/login', data);
-      setAuth(response.data.token, response.data.user);
+      setAuth(response.data.accessToken, response.data.userInfo);
       navigate('/dashboard', { replace: true });
     } catch {
       setError(t('auth.loginError'));

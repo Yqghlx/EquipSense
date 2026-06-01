@@ -74,7 +74,7 @@ export default function DeviceDetailPage() {
       {/* 设备基本信息卡片 */}
       <Card>
         <CardContent className="grid grid-cols-2 gap-4 p-4 md:grid-cols-4">
-          <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.deviceType}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.type}</p></div>
           <div><p className="text-sm text-muted-foreground">{t('device.location')}</p><p className="font-medium">{device.location ?? '-'}</p></div>
           <div><p className="text-sm text-muted-foreground">{t('common.status')}</p><DeviceStatusBadge status={device.status} /></div>
           <div><p className="text-sm text-muted-foreground">{t('device.lastCommunicatedAt')}</p><p className="font-medium">{device.lastCommunicatedAt ? new Date(device.lastCommunicatedAt).toLocaleString() : '-'}</p></div>

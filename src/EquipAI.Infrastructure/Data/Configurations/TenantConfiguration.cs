@@ -82,20 +82,21 @@ public class TenantConfiguration : IEntityTypeConfiguration<Core.Entities.Tenant
         // Slug 唯一索引 — 确保租户标识全局唯一（用于子域名路由）
         builder.HasIndex(e => e.Slug).IsUnique();
 
-        // 导航属性
+        // 导航属性 — 使用 CLR 属性引用，避免与子实体配置中的 HasForeignKey(e => e.TenantId) 冲突
+        // 冲突会导致 EF Core 创建影子属性 tenant_id1 列
         builder.HasMany(e => e.Users)
             .WithOne(e => e.Tenant)
-            .HasForeignKey("tenant_id")
+            .HasForeignKey(e => e.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(e => e.Devices)
             .WithOne(e => e.Tenant)
-            .HasForeignKey("tenant_id")
+            .HasForeignKey(e => e.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(e => e.DeviceTypeTemplates)
             .WithOne(e => e.Tenant)
-            .HasForeignKey("tenant_id")
+            .HasForeignKey(e => e.TenantId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

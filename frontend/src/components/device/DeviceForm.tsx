@@ -12,7 +12,7 @@ import type { Device, CreateDeviceRequest } from '../../types';
 const deviceSchema = z.object({
   deviceCode: z.string().min(1, '请输入设备编码'),
   name: z.string().min(1, '请输入设备名称'),
-  deviceType: z.string().min(1, '请选择设备类型'),
+  type: z.string().min(1, '请选择设备类型'),
   location: z.string().optional(),
 });
 
@@ -43,7 +43,7 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<DeviceFormData>({
     resolver: zodResolver(deviceSchema),
     defaultValues: device
-      ? { deviceCode: device.deviceCode, name: device.name, deviceType: device.deviceType, location: device.location }
+      ? { deviceCode: device.deviceCode, name: device.name, type: device.type, location: device.location }
       : undefined,
   });
 
@@ -66,7 +66,7 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
       {/* 设备类型 */}
       <div className="space-y-2">
         <Label>{t('device.type')}</Label>
-        <Select defaultValue={device?.deviceType} onValueChange={(v) => { if (v) setValue('deviceType', v); }}>
+        <Select defaultValue={device?.type} onValueChange={(v) => { if (v) setValue('type', v); }}>
           <SelectTrigger><SelectValue placeholder={t('device.type')} /></SelectTrigger>
           <SelectContent>
             {deviceTypes.map((type) => (
@@ -74,7 +74,7 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
             ))}
           </SelectContent>
         </Select>
-        {errors.deviceType && <p className="text-sm text-destructive">{errors.deviceType.message}</p>}
+        {errors.type && <p className="text-sm text-destructive">{errors.type.message}</p>}
       </div>
 
       {/* 安装位置 */}
