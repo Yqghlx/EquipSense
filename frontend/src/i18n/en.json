@@ -1,0 +1,90 @@
+{
+  "common": {
+    "appName": "EquipSense",
+    "loading": "Loading...",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "filter": "Filter",
+    "export": "Export",
+    "confirm": "Confirm",
+    "actions": "Actions",
+    "status": "Status",
+    "createdAt": "Created At",
+    "noData": "No data",
+    "success": "Success",
+    "error": "Error"
+  },
+  "auth": {
+    "login": "Login",
+    "username": "Username",
+    "password": "Password",
+    "loginError": "Invalid username or password",
+    "logout": "Logout"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "devices": "Devices",
+    "alerts": "Alerts",
+    "alertRules": "Alert Rules",
+    "workOrders": "Work Orders",
+    "analyses": "AI Analysis",
+    "settings": "Settings"
+  },
+  "device": {
+    "title": "Device Management",
+    "deviceCode": "Device Code",
+    "name": "Name",
+    "type": "Type",
+    "location": "Location",
+    "lastCommunicatedAt": "Last Communication",
+    "online": "Online",
+    "offline": "Offline",
+    "maintenance": "Maintenance"
+  },
+  "alert": {
+    "title": "Alert Center",
+    "alertCode": "Alert Code",
+    "metric": "Metric",
+    "value": "Value",
+    "severity": "Severity",
+    "critical": "Critical",
+    "high": "High",
+    "normal": "Normal",
+    "low": "Low",
+    "active": "Active",
+    "acknowledged": "Acknowledged",
+    "resolved": "Resolved",
+    "acknowledge": "Acknowledge",
+    "resolve": "Resolve"
+  },
+  "workorder": {
+    "title": "Work Orders",
+    "code": "Code",
+    "priority": "Priority",
+    "assign": "Assign",
+    "start": "Start",
+    "complete": "Complete",
+    "accept": "Accept",
+    "reject": "Reject",
+    "close": "Close",
+    "cancel": "Cancel"
+  },
+  "analysis": {
+    "title": "AI Analysis",
+    "level": "Level",
+    "confidence": "Confidence",
+    "rootCause": "Root Cause",
+    "suggestion": "Suggestion"
+  },
+  "settings": {
+    "title": "Settings",
+    "users": "Users",
+    "roles": "Roles & Permissions",
+    "llm": "LLM Configuration",
+    "system": "System Parameters"
+  }
+}
