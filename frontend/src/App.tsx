@@ -10,6 +10,10 @@ import DeviceListPage from './pages/DeviceListPage';
 import DeviceDetailPage from './pages/DeviceDetailPage';
 import AlertCenterPage from './pages/AlertCenterPage';
 import AlertRulesPage from './pages/AlertRulesPage';
+import WorkOrderListPage from './pages/WorkOrderListPage';
+import WorkOrderDetailPage from './pages/WorkOrderDetailPage';
+import AnalysesPage from './pages/AnalysesPage';
+import SettingsPage from './pages/SettingsPage';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 
@@ -43,10 +47,10 @@ function AppRoutes() {
         <Route path="/devices/:id" element={<DeviceDetailPage />} />
         <Route path="/alerts" element={<AlertCenterPage />} />
         <Route path="/alert-rules" element={<AlertRulesPage />} />
-        <Route path="/work-orders" element={<div className="text-muted-foreground">工单管理（子计划 C 实现）</div>} />
-        <Route path="/work-orders/:id" element={<div className="text-muted-foreground">工单详情（子计划 C 实现）</div>} />
-        <Route path="/analyses" element={<div className="text-muted-foreground">AI 分析（子计划 C 实现）</div>} />
-        <Route path="/settings" element={<div className="text-muted-foreground">系统设置（子计划 C 实现）</div>} />
+        <Route path="/work-orders" element={<WorkOrderListPage />} />
+        <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
+        <Route path="/analyses" element={<AnalysesPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
 
       {/* 兜底路由 */}
