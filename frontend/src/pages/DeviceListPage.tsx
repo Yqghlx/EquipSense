@@ -79,7 +79,7 @@ export default function DeviceListPage() {
         <Select value={status} onValueChange={(v) => { if (v !== null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="all">{t('common.all')}</SelectItem>
             <SelectItem value="Online">{t('device.online')}</SelectItem>
             <SelectItem value="Offline">{t('device.offline')}</SelectItem>
             <SelectItem value="Maintenance">{t('device.maintenance')}</SelectItem>
@@ -99,7 +99,7 @@ export default function DeviceListPage() {
                 <TableHead>{t('device.name')}</TableHead>
                 <TableHead>{t('device.type')}</TableHead>
                 <TableHead>{t('common.status')}</TableHead>
-                <TableHead>型号</TableHead>
+                <TableHead>{t('device.model')}</TableHead>
                 <TableHead>{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -143,10 +143,10 @@ export default function DeviceListPage() {
           {/* 分页控制 */}
           {data && data.total > 20 && (
             <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>共 {data.total} 条</span>
+              <span>{t('common.totalItems', { count: data.total })}</span>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</Button>
-                <Button variant="outline" size="sm" disabled={page * 20 >= data.total} onClick={() => setPage(page + 1)}>下一页</Button>
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>{t('common.previous')}</Button>
+                <Button variant="outline" size="sm" disabled={page * 20 >= data.total} onClick={() => setPage(page + 1)}>{t('common.next')}</Button>
               </div>
             </div>
           )}

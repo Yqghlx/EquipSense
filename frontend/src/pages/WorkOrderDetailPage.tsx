@@ -21,17 +21,7 @@ import {
 } from '../hooks/useWorkOrders';
 import type { WorkOrder } from '../types';
 
-/** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
-const statusLabels: Record<string, string> = {
-  PendingDispatch: '待派工',
-  Assigned: '已派工',
-  InProgress: '执行中',
-  Completed: '已完成',
-  Accepted: '已验收',
-  Rejected: '验收不通过',
-  Closed: '已关闭',
-  Cancelled: '已取消',
-};
+
 
 /**
  * 工单详情页
@@ -43,6 +33,18 @@ export default function WorkOrderDetailPage() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  /** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
+  const statusLabels: Record<string, string> = {
+    PendingDispatch: t('workorder.status.pendingDispatch'),
+    Assigned: t('workorder.status.assigned'),
+    InProgress: t('workorder.status.inProgress'),
+    Completed: t('workorder.status.completed'),
+    Accepted: t('workorder.status.accepted'),
+    Rejected: t('workorder.status.rejected'),
+    Closed: t('workorder.status.closed'),
+    Cancelled: t('workorder.status.cancelled'),
+  };
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [resolution, setResolution] = useState('');
@@ -78,16 +80,16 @@ export default function WorkOrderDetailPage() {
       {/* 基本信息 */}
       <Card>
         <CardContent className="grid grid-cols-2 gap-4 p-4 md:grid-cols-4">
-          <div><p className="text-sm text-muted-foreground">类型</p><p className="font-medium">{workOrder.type}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('common.type')}</p><p className="font-medium">{workOrder.type}</p></div>
           <div>
             <p className="text-sm text-muted-foreground">{t('common.status')}</p>
             <Badge variant="outline">{statusLabels[workOrder.status]}</Badge>
           </div>
-          <div><p className="text-sm text-muted-foreground">派工人</p><p className="font-medium">{workOrder.assignedTo ?? '-'}</p></div>
-          <div><p className="text-sm text-muted-foreground">截止日期</p><p className="font-medium">{workOrder.dueDate ?? '-'}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('workorder.assignedTo')}</p><p className="font-medium">{workOrder.assignedTo ?? '-'}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('workorder.dueDate')}</p><p className="font-medium">{workOrder.dueDate ?? '-'}</p></div>
           <div><p className="text-sm text-muted-foreground">{t('common.createdAt')}</p><p className="font-medium">{new Date(workOrder.createdAt).toLocaleString()}</p></div>
           {workOrder.completedAt && (
-            <div><p className="text-sm text-muted-foreground">完成时间</p><p className="font-medium">{new Date(workOrder.completedAt).toLocaleString()}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('workorder.completedAt')}</p><p className="font-medium">{new Date(workOrder.completedAt).toLocaleString()}</p></div>
           )}
         </CardContent>
       </Card>
@@ -105,31 +107,31 @@ export default function WorkOrderDetailPage() {
       <div className="grid gap-6 md:grid-cols-2">
         {/* 关联信息：根因描述 + 解决措施 */}
         <Card>
-          <CardHeader><CardTitle className="text-base">关联信息</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('workorder.relatedInfo')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {workOrder.rootCause ? (
               <div>
-                <p className="text-sm text-muted-foreground">根因描述</p>
+                <p className="text-sm text-muted-foreground">{t('workorder.rootCause')}</p>
                 <p className="mt-1 text-sm">{workOrder.rootCause}</p>
               </div>
             ) : null}
             {workOrder.resolution ? (
               <div>
-                <p className="text-sm text-muted-foreground">解决措施</p>
+                <p className="text-sm text-muted-foreground">{t('workorder.resolution')}</p>
                 <p className="mt-1 text-sm">{workOrder.resolution}</p>
               </div>
             ) : null}
             {!workOrder.rootCause && !workOrder.resolution && (
-              <p className="text-sm text-muted-foreground">暂无关联信息</p>
+              <p className="text-sm text-muted-foreground">{t('workorder.noRelatedInfo')}</p>
             )}
           </CardContent>
         </Card>
 
         {/* 审计日志时间线 */}
         <Card>
-          <CardHeader><CardTitle className="text-base">操作记录</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('workorder.operationRecords')}</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">暂无操作记录</p>
+            <p className="text-sm text-muted-foreground">{t('workorder.noOperationRecords')}</p>
           </CardContent>
         </Card>
       </div>
@@ -137,12 +139,12 @@ export default function WorkOrderDetailPage() {
       {/* 执行中状态：填写解决措施区域 */}
       {workOrder.status === 'InProgress' && (
         <Card>
-          <CardHeader><CardTitle className="text-base">填写解决措施</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('workorder.fillResolution')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <Textarea
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
-              placeholder="描述解决措施..."
+              placeholder={t('workorder.describeResolution')}
               rows={3}
             />
             <Button
@@ -158,14 +160,14 @@ export default function WorkOrderDetailPage() {
       {/* 取消工单对话框 */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>取消工单</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('workorder.cancel')}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>取消原因</Label>
+              <Label>{t('workorder.cancelReason')}</Label>
               <Textarea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
-                placeholder="请输入取消原因..."
+                placeholder={t('workorder.enterCancelReason')}
                 rows={3}
               />
             </div>
@@ -179,7 +181,7 @@ export default function WorkOrderDetailPage() {
                   setCancelDialogOpen(false);
                 }}
               >
-                确认取消
+                {t('workorder.confirmCancel')}
               </Button>
             </div>
           </div>
@@ -216,19 +218,20 @@ interface ActionButtonsProps {
  * - accepted → 关闭
  */
 function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCancel }: ActionButtonsProps) {
+  const { t } = useTranslation();
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
 
   /** 各状态对应的可用按钮配置 */
   const buttons: Record<string, Array<{ label: string; action: () => void; variant?: 'default' | 'outline' | 'destructive' }>> = {
-    PendingDispatch: [{ label: '派工', action: onStart }],
-    Assigned: [{ label: '开始执行', action: onStart }],
+    PendingDispatch: [{ label: t('workorder.dispatch'), action: onStart }],
+    Assigned: [{ label: t('workorder.startExecution'), action: onStart }],
     InProgress: [],
     Completed: [
-      { label: '验收通过', action: onAccept },
-      { label: '验收不通过', action: () => setShowReject(true), variant: 'outline' },
+      { label: t('workorder.accept'), action: onAccept },
+      { label: t('workorder.reject'), action: () => setShowReject(true), variant: 'outline' },
     ],
-    Accepted: [{ label: '关闭', action: onClose }],
+    Accepted: [{ label: t('workorder.close'), action: onClose }],
     Rejected: [],
     Closed: [],
     Cancelled: [],
@@ -238,7 +241,7 @@ function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCanc
 
   // 非 terminal 状态添加取消按钮
   if (available.length === 0 && workOrder.status !== 'cancelled' && workOrder.status !== 'closed') {
-    available.push({ label: '取消工单', action: onCancel, variant: 'destructive' });
+    available.push({ label: t('workorder.cancel'), action: onCancel, variant: 'destructive' });
   }
 
   if (available.length === 0 && !showReject) return null;
@@ -257,11 +260,11 @@ function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCanc
             <Input
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="不通过原因..."
+              placeholder={t('workorder.rejectReasonPlaceholder')}
               className="flex-1"
             />
-            <Button size="sm" disabled={!rejectReason} onClick={() => { onReject(rejectReason); setShowReject(false); }}>提交</Button>
-            <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>取消</Button>
+            <Button size="sm" disabled={!rejectReason} onClick={() => { onReject(rejectReason); setShowReject(false); }}>{t('common.submit')}</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>{t('common.cancel')}</Button>
           </div>
         )}
       </CardContent>

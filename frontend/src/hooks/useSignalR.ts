@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { startConnection, stopConnection } from '../lib/signalr';
 import { useAuthStore } from '../stores/authStore';
 import { useNotificationStore } from '../stores/notificationStore';
+import i18n from '../i18n';
 
 /**
  * SignalR 连接 Hook
@@ -36,8 +37,8 @@ export function useSignalR() {
       conn.on('OnAlertTriggered', (data: { alertId: string; alertCode: string; deviceId: string; metric: string; value: number; severity: string }) => {
         push({
           type: 'alert',
-          title: `告警：${data.metric}`,
-          message: `${data.metric} = ${data.value}（${data.severity}）`,
+          title: i18n.t('notification.alertTitle', { metric: data.metric }),
+          message: i18n.t('notification.alertMessage', { metric: data.metric, value: data.value, severity: data.severity }),
           link: `/alerts`,
         });
         queryClient.invalidateQueries({ queryKey: ['alerts'] });

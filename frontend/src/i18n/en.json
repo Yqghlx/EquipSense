@@ -16,14 +16,29 @@
     "createdAt": "Created At",
     "noData": "No data",
     "success": "Success",
-    "error": "Error"
+    "error": "Error",
+    "all": "All",
+    "name": "Name",
+    "type": "Type",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "previous": "Previous",
+    "next": "Next",
+    "totalItems": "{{count}} items",
+    "submit": "Submit",
+    "time": "Time",
+    "id": "ID"
   },
   "auth": {
     "login": "Login",
     "username": "Username",
     "password": "Password",
     "loginError": "Invalid username or password",
-    "logout": "Logout"
+    "logout": "Logout",
+    "usernameRequired": "Please enter username",
+    "passwordRequired": "Please enter password",
+    "loginSubtitle": "Login to Industrial Equipment Intelligent Monitoring Platform",
+    "platformName": "Industrial Equipment Intelligent Monitoring Platform"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -34,22 +49,61 @@
     "analyses": "AI Analysis",
     "settings": "Settings"
   },
+  "sidebar": {
+    "expand": "Expand Sidebar",
+    "collapse": "Collapse Sidebar"
+  },
+  "notification": {
+    "close": "Close Notification",
+    "alertTitle": "Alert: {{metric}}",
+    "alertMessage": "{{metric}} = {{value}} ({{severity}})"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "deviceCount": "Total Devices",
+    "activeAlerts": "Active Alerts",
+    "pendingWorkOrders": "Pending Work Orders",
+    "deviceAvailability": "Device Availability",
+    "deviceStatusDistribution": "Device Status Distribution",
+    "alertTrends": "Alert Trends (Last 7 Days)",
+    "recentAlerts": "Recent Alerts"
+  },
   "device": {
     "title": "Device Management",
     "deviceCode": "Device Code",
-    "name": "Name",
-    "type": "Type",
+    "name": "Device Name",
+    "type": "Device Type",
     "location": "Location",
     "lastCommunicatedAt": "Last Communication",
     "online": "Online",
     "offline": "Offline",
-    "maintenance": "Maintenance"
+    "maintenance": "Maintenance",
+    "model": "Model",
+    "modelPlaceholder": "Device Model",
+    "healthScore": "Health Score",
+    "telemetryTrends": "Telemetry Trends",
+    "recentAlerts": "Recent Alerts",
+    "deviceCodeRequired": "Please enter device code",
+    "nameRequired": "Please enter device name",
+    "typeRequired": "Please select device type"
+  },
+  "telemetry": {
+    "temperature": "Temperature",
+    "pressure": "Pressure",
+    "vibration": "Vibration",
+    "humidity": "Humidity"
+  },
+  "time": {
+    "1hour": "1 Hour",
+    "6hours": "6 Hours",
+    "24hours": "24 Hours",
+    "7days": "7 Days"
   },
   "alert": {
     "title": "Alert Center",
     "alertCode": "Alert Code",
     "metric": "Metric",
-    "value": "Value",
+    "value": "Current Value",
     "severity": "Severity",
     "critical": "Critical",
     "high": "High",
@@ -59,11 +113,41 @@
     "acknowledged": "Acknowledged",
     "resolved": "Resolved",
     "acknowledge": "Acknowledge",
-    "resolve": "Resolve"
+    "resolve": "Resolve",
+    "triggeredAt": "Triggered At",
+    "acknowledgedAt": "Acknowledged At",
+    "resolvedAt": "Resolved At"
+  },
+  "alertrule": {
+    "title": "Alert Rules",
+    "name": "Name",
+    "metric": "Metric",
+    "condition": "Condition",
+    "level": "Level",
+    "ruleType": "Rule Type",
+    "threshold": "Threshold",
+    "composite": "Composite",
+    "baseline": "Baseline",
+    "operator": "Operator",
+    "stddevMultiplier": "Std Dev Multiplier",
+    "alertLevel": "Alert Level",
+    "cooldownSeconds": "Cooldown (seconds)",
+    "autoCreateWorkOrder": "Auto Create Work Order",
+    "multipleConditions": "Multiple Conditions",
+    "nameRequired": "Please enter rule name",
+    "metricRequired": "Please enter metric name"
+  },
+  "operator": {
+    "greaterThan": "Greater Than",
+    "lessThan": "Less Than",
+    "greaterThanOrEqual": "Greater Than or Equal",
+    "lessThanOrEqual": "Less Than or Equal"
   },
   "workorder": {
     "title": "Work Orders",
-    "code": "Code",
+    "code": "Work Order Code",
+    "titleField": "Title",
+    "titlePlaceholder": "Work Order Title",
     "priority": "Priority",
     "assign": "Assign",
     "start": "Start",
@@ -71,20 +155,140 @@
     "accept": "Accept",
     "reject": "Reject",
     "close": "Close",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "assignedTo": "Assigned To",
+    "dueDate": "Due Date",
+    "completedAt": "Completed At",
+    "relatedInfo": "Related Information",
+    "rootCause": "Root Cause",
+    "resolution": "Resolution",
+    "noRelatedInfo": "No Related Information",
+    "operationRecords": "Operation Records",
+    "noOperationRecords": "No Operation Records",
+    "fillResolution": "Fill Resolution",
+    "describeResolution": "Describe resolution...",
+    "cancelReason": "Cancel Reason",
+    "enterCancelReason": "Please enter cancel reason...",
+    "confirmCancel": "Confirm Cancel",
+    "rejectReasonPlaceholder": "Reject reason...",
+    "dispatch": "Dispatch",
+    "startExecution": "Start Execution",
+    "create": "Create Work Order",
+    "titleRequired": "Please enter title",
+    "typeRequired": "Please select type",
+    "priorityRequired": "Please select priority",
+    "deviceRequired": "Please select device",
+    "type": "Type",
+    "selectType": "Select Type",
+    "selectPriority": "Select Priority",
+    "device": "Device",
+    "selectDevice": "Select Device",
+    "description": "Description",
+    "descriptionPlaceholder": "Problem description...",
+    "status": {
+      "pendingDispatch": "Pending Dispatch",
+      "assigned": "Assigned",
+      "inProgress": "In Progress",
+      "completed": "Completed",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "closed": "Closed",
+      "cancelled": "Cancelled"
+    },
+    "typeOptions": {
+      "corrective": "Corrective Maintenance",
+      "preventive": "Preventive Maintenance",
+      "predictive": "Predictive Maintenance",
+      "inspection": "Inspection"
+    },
+    "action": {
+      "created": "Created",
+      "assigned": "Assigned",
+      "started": "Started",
+      "completed": "Completed",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "closed": "Closed",
+      "cancelled": "Cancelled"
+    }
   },
   "analysis": {
     "title": "AI Analysis",
-    "level": "Level",
+    "level": "Analysis Level",
     "confidence": "Confidence",
     "rootCause": "Root Cause",
-    "suggestion": "Suggestion"
+    "suggestion": "Suggestion",
+    "device": "Device",
+    "dataQuality": "Data Quality",
+    "duration": "Duration",
+    "completedAt": "Completed At",
+    "manualTrigger": "Manual Trigger",
+    "manualTriggerTitle": "Manual Trigger Analysis",
+    "selectAlert": "Select Alert",
+    "trigger": "Trigger Analysis",
+    "dataQualityScore": "Data Quality Score",
+    "rootCauseAnalysis": "Root Cause Analysis",
+    "suggestedActions": "Suggested Actions",
+    "durationMs": "Duration {{ms}}ms",
+    "status": {
+      "pending": "Pending",
+      "running": "Analyzing",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "levelOptions": {
+      "l1": "L1 — Rule Matching",
+      "l2": "L2 — Statistical Analysis",
+      "l3": "L3 — LLM Deep Analysis"
+    }
   },
   "settings": {
     "title": "Settings",
-    "users": "Users",
+    "users": "User Management",
     "roles": "Roles & Permissions",
     "llm": "LLM Configuration",
-    "system": "System Parameters"
+    "system": "System Parameters",
+    "module": {
+      "deviceManagement": "Device Management",
+      "alertManagement": "Alert Management",
+      "workOrderManagement": "Work Order Management",
+      "knowledgeBase": "Knowledge Base",
+      "reports": "Reports",
+      "aiAnalysis": "AI Analysis"
+    },
+    "role": {
+      "systemAdmin": "System Administrator",
+      "maintenanceLead": "Maintenance Lead",
+      "technician": "Technician",
+      "operator": "Operator",
+      "viewer": "Viewer"
+    },
+    "manageUserAccounts": "Manage System User Accounts",
+    "username": "Username",
+    "role": "Role",
+    "userManagementNote": "User management requires backend /api/v1/users API implementation",
+    "rbacMatrix": "RBAC Permission Matrix (Read Only)",
+    "permissionRole": "Permission / Role",
+    "configureLLM": "Configure LLM Service Parameters",
+    "modelId": "Model ID",
+    "modelIdentifier": "Model Identifier",
+    "endpoint": "Endpoint",
+    "apiEndpoint": "API Endpoint",
+    "timeout": "Timeout (seconds)",
+    "maxTokens": "Max Tokens",
+    "globalSystemParameters": "Global System Parameters",
+    "alertCooldown": "Alert Cooldown (seconds)",
+    "aggregationWindow": "Aggregation Window (minutes)",
+    "maxAggregationCount": "Max Aggregation Count",
+    "dataRetentionDays": "Data Retention Days"
+  },
+  "dataquality": {
+    "title": "Data Quality",
+    "noData": "No data quality assessment available",
+    "completeness": "Completeness",
+    "accuracy": "Accuracy",
+    "timeliness": "Timeliness",
+    "consistency": "Consistency",
+    "validity": "Validity"
   }
 }

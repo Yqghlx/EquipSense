@@ -1,0 +1,13 @@
+- generic [ref=e3]:
+  - generic [ref=e4]: "[plugin:@tailwindcss/vite:generate:serve] Cannot apply unknown utility class `bg-background`"
+  - generic [ref=e5]: /Users/yqgmac/yqg/project/EquipSense/frontend/src/index.css
+  - generic [ref=e7]: at onInvalidCandidate (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:21:1511) at $e (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:16:38783) at file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:21:355 at $r (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:3:1733) at I (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:3:1377) at Ce (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:21:172) at Hi (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:38:294) at async ma (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:38:631) at async wf (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/tailwindcss/dist/lib.mjs:38:1406) at async su (file:///Users/yqgmac/yqg/project/EquipSense/frontend/node_modules/@tailwindcss/node/dist/index.mjs:10:3457)
+  - generic [ref=e8]:
+    - text: Click outside, press Esc key, or fix the code to dismiss.
+    - text: You can also disable this overlay by setting
+    - code [ref=e9]: server.hmr.overlay
+    - text: to
+    - code [ref=e10]: "false"
+    - text: in
+    - code [ref=e11]: vite.config.ts
+    - text: .

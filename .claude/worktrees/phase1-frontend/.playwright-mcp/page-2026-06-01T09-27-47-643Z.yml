@@ -1,0 +1,100 @@
+- generic [ref=e21]:
+  - complementary [ref=e22]:
+    - generic [ref=e23]:
+      - generic [ref=e24]: EquipSense
+      - button "收起侧边栏" [ref=e25]:
+        - img [ref=e26]
+    - navigation [ref=e28]:
+      - link "仪表盘" [ref=e29] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e30]
+        - generic [ref=e35]: 仪表盘
+      - link "设备管理" [active] [ref=e36] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e37]
+        - generic [ref=e39]: 设备管理
+      - link "告警中心" [ref=e40] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e41]
+        - generic [ref=e43]: 告警中心
+      - link "工单管理" [ref=e44] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e45]
+        - generic [ref=e48]: 工单管理
+      - link "AI 分析" [ref=e49] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e50]
+        - generic [ref=e58]: AI 分析
+      - link "系统设置" [ref=e59] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e60]
+        - generic [ref=e63]: 系统设置
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - generic [ref=e66]: EquipSense
+      - generic [ref=e67]:
+        - button [ref=e68]:
+          - button [ref=e69]:
+            - img
+        - button "切换主题" [ref=e70]:
+          - img
+        - button "切换语言" [ref=e71]:
+          - img
+        - button [ref=e72]:
+          - button [ref=e73]:
+            - img
+    - main [ref=e74]:
+      - generic [ref=e127]:
+        - generic [ref=e128]:
+          - heading "设备管理" [level=1] [ref=e129]
+          - button "新建" [ref=e130]:
+            - img
+            - text: 新建
+        - generic [ref=e131]:
+          - generic [ref=e132]:
+            - img [ref=e133]
+            - textbox "搜索..." [ref=e136]
+          - combobox [ref=e137]:
+            - generic [ref=e138]: 状态
+            - img: ▼
+          - textbox [ref=e139]
+        - table [ref=e141]:
+          - rowgroup [ref=e142]:
+            - row "设备编码 设备名称 设备类型 状态 型号 操作" [ref=e143]:
+              - columnheader "设备编码" [ref=e144]
+              - columnheader "设备名称" [ref=e145]
+              - columnheader "设备类型" [ref=e146]
+              - columnheader "状态" [ref=e147]
+              - columnheader "型号" [ref=e148]
+              - columnheader "操作" [ref=e149]
+          - rowgroup [ref=e150]:
+            - row "MOTOR-002 2号电机 motor device.Offline -" [ref=e151] [cursor=pointer]:
+              - cell "MOTOR-002" [ref=e152]
+              - cell "2号电机" [ref=e153]
+              - cell "motor" [ref=e154]
+              - cell "device.Offline" [ref=e155]:
+                - generic [ref=e156]: device.Offline
+              - cell "-" [ref=e157]
+              - cell [ref=e158]:
+                - generic [ref=e159]:
+                  - button [ref=e160]:
+                    - img
+                  - button [ref=e161]:
+                    - img
+                  - button [ref=e162]:
+                    - img
+            - row "PUMP-001 1号水泵 pump device.Offline -" [ref=e163] [cursor=pointer]:
+              - cell "PUMP-001" [ref=e164]
+              - cell "1号水泵" [ref=e165]
+              - cell "pump" [ref=e166]
+              - cell "device.Offline" [ref=e167]:
+                - generic [ref=e168]: device.Offline
+              - cell "-" [ref=e169]
+              - cell [ref=e170]:
+                - generic [ref=e171]:
+                  - button [ref=e172]:
+                    - img
+                  - button [ref=e173]:
+                    - img
+                  - button [ref=e174]:
+                    - img

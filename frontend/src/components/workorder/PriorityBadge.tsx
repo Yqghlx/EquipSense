@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Badge } from '../ui/badge';
 
 /** 优先级对应的样式映射 */
@@ -8,12 +9,12 @@ const priorityStyles: Record<string, string> = {
   low: 'bg-gray-500/10 text-gray-500 border-gray-500/20',
 };
 
-/** 优先级对应的中文标签 */
-const priorityLabels: Record<string, string> = {
-  critical: '紧急',
-  high: '高',
-  normal: '普通',
-  low: '低',
+/** 优先级对应的翻译键映射 */
+const priorityLabelKeys: Record<string, string> = {
+  critical: 'alert.critical',
+  high: 'alert.high',
+  normal: 'alert.normal',
+  low: 'alert.low',
 };
 
 interface PriorityBadgeProps {
@@ -31,9 +32,11 @@ interface PriorityBadgeProps {
  * - low → 灰色
  */
 export function PriorityBadge({ priority }: PriorityBadgeProps) {
+  const { t } = useTranslation();
+
   return (
     <Badge variant="outline" className={priorityStyles[priority] ?? ''}>
-      {priorityLabels[priority] ?? priority}
+      {priorityLabelKeys[priority] ? t(priorityLabelKeys[priority]) : priority}
     </Badge>
   );
 }

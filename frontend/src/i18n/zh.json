@@ -16,14 +16,29 @@
     "createdAt": "创建时间",
     "noData": "暂无数据",
     "success": "操作成功",
-    "error": "操作失败"
+    "error": "操作失败",
+    "all": "全部",
+    "name": "名称",
+    "type": "类型",
+    "enabled": "启用",
+    "disabled": "禁用",
+    "previous": "上一页",
+    "next": "下一页",
+    "totalItems": "共 {{count}} 条",
+    "submit": "提交",
+    "time": "时间",
+    "id": "ID"
   },
   "auth": {
     "login": "登录",
     "username": "用户名",
     "password": "密码",
     "loginError": "用户名或密码错误",
-    "logout": "退出登录"
+    "logout": "退出登录",
+    "usernameRequired": "请输入用户名",
+    "passwordRequired": "请输入密码",
+    "loginSubtitle": "登录到工业设备智能监控平台",
+    "platformName": "工业设备智能监控平台"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -34,6 +49,25 @@
     "analyses": "AI 分析",
     "settings": "系统设置"
   },
+  "sidebar": {
+    "expand": "展开侧边栏",
+    "collapse": "收起侧边栏"
+  },
+  "notification": {
+    "close": "关闭通知",
+    "alertTitle": "告警：{{metric}}",
+    "alertMessage": "{{metric}} = {{value}}（{{severity}}）"
+  },
+  "dashboard": {
+    "title": "仪表盘",
+    "deviceCount": "设备总数",
+    "activeAlerts": "活跃告警",
+    "pendingWorkOrders": "待处理工单",
+    "deviceAvailability": "设备可用率",
+    "deviceStatusDistribution": "设备状态分布",
+    "alertTrends": "告警趋势（最近 7 天）",
+    "recentAlerts": "最近告警"
+  },
   "device": {
     "title": "设备管理",
     "deviceCode": "设备编码",
@@ -43,7 +77,27 @@
     "lastCommunicatedAt": "最后通讯",
     "online": "在线",
     "offline": "离线",
-    "maintenance": "维护中"
+    "maintenance": "维护中",
+    "model": "型号",
+    "modelPlaceholder": "设备型号",
+    "healthScore": "健康评分",
+    "telemetryTrends": "遥测趋势",
+    "recentAlerts": "最近告警",
+    "deviceCodeRequired": "请输入设备编码",
+    "nameRequired": "请输入设备名称",
+    "typeRequired": "请选择设备类型"
+  },
+  "telemetry": {
+    "temperature": "温度",
+    "pressure": "压力",
+    "vibration": "振动",
+    "humidity": "湿度"
+  },
+  "time": {
+    "1hour": "1 小时",
+    "6hours": "6 小时",
+    "24hours": "24 小时",
+    "7days": "7 天"
   },
   "alert": {
     "title": "告警中心",
@@ -59,11 +113,41 @@
     "acknowledged": "已确认",
     "resolved": "已解决",
     "acknowledge": "确认",
-    "resolve": "解决"
+    "resolve": "解决",
+    "triggeredAt": "触发时间",
+    "acknowledgedAt": "确认时间",
+    "resolvedAt": "解决时间"
+  },
+  "alertrule": {
+    "title": "告警规则",
+    "name": "名称",
+    "metric": "指标",
+    "condition": "条件",
+    "level": "级别",
+    "ruleType": "规则类型",
+    "threshold": "阈值",
+    "composite": "组合",
+    "baseline": "基线",
+    "operator": "运算符",
+    "stddevMultiplier": "标准差倍数",
+    "alertLevel": "告警级别",
+    "cooldownSeconds": "冷却时间（秒）",
+    "autoCreateWorkOrder": "自动创建工单",
+    "multipleConditions": "多条件",
+    "nameRequired": "请输入规则名称",
+    "metricRequired": "请输入指标名称"
+  },
+  "operator": {
+    "greaterThan": "大于",
+    "lessThan": "小于",
+    "greaterThanOrEqual": "大于等于",
+    "lessThanOrEqual": "小于等于"
   },
   "workorder": {
     "title": "工单管理",
     "code": "工单编码",
+    "titleField": "标题",
+    "titlePlaceholder": "工单标题",
     "priority": "优先级",
     "assign": "派工",
     "start": "开始执行",
@@ -71,20 +155,140 @@
     "accept": "验收通过",
     "reject": "验收不通过",
     "close": "关闭",
-    "cancel": "取消"
+    "cancel": "取消",
+    "assignedTo": "派工人",
+    "dueDate": "截止日期",
+    "completedAt": "完成时间",
+    "relatedInfo": "关联信息",
+    "rootCause": "根因描述",
+    "resolution": "解决措施",
+    "noRelatedInfo": "暂无关联信息",
+    "operationRecords": "操作记录",
+    "noOperationRecords": "暂无操作记录",
+    "fillResolution": "填写解决措施",
+    "describeResolution": "描述解决措施...",
+    "cancelReason": "取消原因",
+    "enterCancelReason": "请输入取消原因...",
+    "confirmCancel": "确认取消",
+    "rejectReasonPlaceholder": "不通过原因...",
+    "dispatch": "派工",
+    "startExecution": "开始执行",
+    "create": "新建工单",
+    "titleRequired": "请输入标题",
+    "typeRequired": "请选择类型",
+    "priorityRequired": "请选择优先级",
+    "deviceRequired": "请选择设备",
+    "type": "类型",
+    "selectType": "选择类型",
+    "selectPriority": "选择优先级",
+    "device": "设备",
+    "selectDevice": "选择设备",
+    "description": "描述",
+    "descriptionPlaceholder": "问题描述...",
+    "status": {
+      "pendingDispatch": "待派工",
+      "assigned": "已派工",
+      "inProgress": "执行中",
+      "completed": "已完成",
+      "accepted": "已验收",
+      "rejected": "验收不通过",
+      "closed": "已关闭",
+      "cancelled": "已取消"
+    },
+    "typeOptions": {
+      "corrective": "纠正性维护",
+      "preventive": "预防性维护",
+      "predictive": "预测性维护",
+      "inspection": "巡检"
+    },
+    "action": {
+      "created": "创建工单",
+      "assigned": "派工",
+      "started": "开始执行",
+      "completed": "完成",
+      "accepted": "验收通过",
+      "rejected": "验收不通过",
+      "closed": "关闭",
+      "cancelled": "取消"
+    }
   },
   "analysis": {
     "title": "AI 分析",
     "level": "分析级别",
     "confidence": "置信度",
     "rootCause": "根因",
-    "suggestion": "建议"
+    "suggestion": "建议",
+    "device": "设备",
+    "dataQuality": "数据质量",
+    "duration": "耗时",
+    "completedAt": "完成时间",
+    "manualTrigger": "手动触发",
+    "manualTriggerTitle": "手动触发分析",
+    "selectAlert": "选择告警",
+    "trigger": "触发分析",
+    "dataQualityScore": "数据质量评分",
+    "rootCauseAnalysis": "根因分析",
+    "suggestedActions": "建议措施",
+    "durationMs": "耗时 {{ms}}ms",
+    "status": {
+      "pending": "等待中",
+      "running": "分析中",
+      "completed": "已完成",
+      "failed": "失败"
+    },
+    "levelOptions": {
+      "l1": "L1 — 规则匹配",
+      "l2": "L2 — 统计分析",
+      "l3": "L3 — LLM 深度分析"
+    }
   },
   "settings": {
     "title": "系统设置",
     "users": "用户管理",
     "roles": "角色权限",
     "llm": "LLM 配置",
-    "system": "系统参数"
+    "system": "系统参数",
+    "module": {
+      "deviceManagement": "设备管理",
+      "alertManagement": "告警管理",
+      "workOrderManagement": "工单管理",
+      "knowledgeBase": "知识库",
+      "reports": "报表",
+      "aiAnalysis": "AI 分析"
+    },
+    "role": {
+      "systemAdmin": "系统管理员",
+      "maintenanceLead": "维保主管",
+      "technician": "技术员",
+      "operator": "操作员",
+      "viewer": "观察者"
+    },
+    "manageUserAccounts": "管理系统用户账号",
+    "username": "用户名",
+    "role": "角色",
+    "userManagementNote": "用户管理功能需要后端 /api/v1/users API 完整实现",
+    "rbacMatrix": "RBAC 权限矩阵（只读）",
+    "permissionRole": "权限 / 角色",
+    "configureLLM": "配置 LLM 服务参数",
+    "modelId": "模型 ID",
+    "modelIdentifier": "模型标识",
+    "endpoint": "Endpoint",
+    "apiEndpoint": "API 端点",
+    "timeout": "超时时间（秒）",
+    "maxTokens": "最大 Token 数",
+    "globalSystemParameters": "全局系统参数配置",
+    "alertCooldown": "告警冷却时间（秒）",
+    "aggregationWindow": "聚合窗口（分钟）",
+    "maxAggregationCount": "最大聚合次数",
+    "dataRetentionDays": "数据保留天数"
+  },
+  "dataquality": {
+    "title": "数据质量",
+    "noData": "暂无数据质量评估结果",
+    "completeness": "完整性",
+    "accuracy": "准确性",
+    "timeliness": "时效性",
+    "consistency": "一致性",
+    "validity": "有效性"
   }
 }

@@ -1,0 +1,69 @@
+- generic [ref=e21]:
+  - complementary [ref=e22]:
+    - generic [ref=e23]:
+      - generic [ref=e24]: EquipSense
+      - button "收起侧边栏" [ref=e25]:
+        - img [ref=e26]
+    - navigation [ref=e28]:
+      - link "仪表盘" [ref=e29] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e30]
+        - generic [ref=e35]: 仪表盘
+      - link "设备管理" [ref=e36] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e37]
+        - generic [ref=e39]: 设备管理
+      - link "告警中心" [ref=e40] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e41]
+        - generic [ref=e43]: 告警中心
+      - link "工单管理" [ref=e44] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e45]
+        - generic [ref=e48]: 工单管理
+      - link "AI 分析" [ref=e49] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e50]
+        - generic [ref=e58]: AI 分析
+      - link "系统设置" [active] [ref=e59] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e60]
+        - generic [ref=e63]: 系统设置
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - generic [ref=e66]: EquipSense
+      - generic [ref=e67]:
+        - button [ref=e68]:
+          - button [ref=e69]:
+            - img
+        - button "切换主题" [ref=e70]:
+          - img
+        - button "切换语言" [ref=e71]:
+          - img
+        - button [ref=e72]:
+          - button [ref=e73]:
+            - img
+    - main [ref=e74]:
+      - generic [ref=e178]:
+        - heading "系统设置" [level=1] [ref=e179]
+        - generic [ref=e180]:
+          - tablist [ref=e181]:
+            - tab "用户管理" [selected] [ref=e182]
+            - tab "角色权限" [ref=e183]
+            - tab "LLM 配置" [ref=e184]
+            - tab "系统参数" [ref=e185]
+          - tabpanel "用户管理" [ref=e186]:
+            - generic [ref=e187]:
+              - generic [ref=e188]:
+                - generic [ref=e189]: 用户管理
+                - generic [ref=e190]: 管理系统用户账号
+              - table [ref=e193]:
+                - rowgroup [ref=e194]:
+                  - row "用户名 角色 状态 操作" [ref=e195]:
+                    - columnheader "用户名" [ref=e196]
+                    - columnheader "角色" [ref=e197]
+                    - columnheader "状态" [ref=e198]
+                    - columnheader "操作" [ref=e199]
+                - rowgroup [ref=e200]:
+                  - row "用户管理功能需要后端 /api/v1/users API 完整实现" [ref=e201]:
+                    - cell "用户管理功能需要后端 /api/v1/users API 完整实现" [ref=e202]

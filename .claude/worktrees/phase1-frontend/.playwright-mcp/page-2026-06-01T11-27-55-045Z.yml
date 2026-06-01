@@ -1,0 +1,76 @@
+- generic [ref=e21]:
+  - complementary [ref=e22]:
+    - generic [ref=e23]:
+      - generic [ref=e24]: EquipSense
+      - button "收起侧边栏" [ref=e25]:
+        - img [ref=e26]
+    - navigation [ref=e28]:
+      - link "仪表盘" [ref=e29] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e30]
+        - generic [ref=e35]: 仪表盘
+      - link "设备管理" [ref=e36] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e37]
+        - generic [ref=e39]: 设备管理
+      - link "告警中心" [ref=e40] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e41]
+        - generic [ref=e43]: 告警中心
+      - link "工单管理" [ref=e44] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e45]
+        - generic [ref=e48]: 工单管理
+      - link "AI 分析" [active] [ref=e49] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e50]
+        - generic [ref=e58]: AI 分析
+      - link "系统设置" [ref=e59] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e60]
+        - generic [ref=e63]: 系统设置
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - generic [ref=e66]: EquipSense
+      - generic [ref=e67]:
+        - button [ref=e68]:
+          - button [ref=e69]:
+            - img
+        - button "切换主题" [ref=e70]:
+          - img
+        - button "切换语言" [ref=e71]:
+          - img
+        - button [ref=e72]:
+          - button [ref=e73]:
+            - img
+    - main [ref=e74]:
+      - generic [ref=e151]:
+        - generic [ref=e152]:
+          - heading "AI 分析" [level=1] [ref=e153]
+          - button "手动触发" [ref=e154]:
+            - img
+            - text: 手动触发
+        - generic [ref=e155]:
+          - combobox [ref=e156]:
+            - generic [ref=e157]: 分析级别
+            - img: ▼
+          - textbox [ref=e158]
+          - combobox [ref=e159]:
+            - generic [ref=e160]: 状态
+            - img: ▼
+          - textbox [ref=e161]
+        - table [ref=e163]:
+          - rowgroup [ref=e164]:
+            - row "ID 设备 级别 置信度 数据质量 状态 耗时 完成时间" [ref=e165]:
+              - columnheader "ID" [ref=e166]
+              - columnheader "设备" [ref=e167]
+              - columnheader "级别" [ref=e168]
+              - columnheader "置信度" [ref=e169]
+              - columnheader "数据质量" [ref=e170]
+              - columnheader "状态" [ref=e171]
+              - columnheader "耗时" [ref=e172]
+              - columnheader "完成时间" [ref=e173]
+              - columnheader [ref=e174]
+          - rowgroup [ref=e175]:
+            - row "暂无数据" [ref=e176]:
+              - cell "暂无数据" [ref=e177]

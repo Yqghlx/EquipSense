@@ -12,7 +12,18 @@ import { Separator } from '../components/ui/separator';
 const roles = ['system_admin', 'maintenance_lead', 'technician', 'operator', 'viewer'];
 
 /** 权限模块列表 */
-const permissions = ['设备管理', '告警管理', '工单管理', '知识库', '报表', 'AI 分析'];
+/** 权限模块对应的翻译键映射 */
+const permissionKeys: Record<string, string> = {
+  'deviceManagement': 'settings.module.deviceManagement',
+  'alertManagement': 'settings.module.alertManagement',
+  'workOrderManagement': 'settings.module.workOrderManagement',
+  'knowledgeBase': 'settings.module.knowledgeBase',
+  'reports': 'settings.module.reports',
+  'aiAnalysis': 'settings.module.aiAnalysis',
+};
+
+/** 权限模块列表（使用内部键） */
+const permissions = ['deviceManagement', 'alertManagement', 'workOrderManagement', 'knowledgeBase', 'reports', 'aiAnalysis'];
 
 /**
  * RBAC 权限矩阵（只读展示）
@@ -20,20 +31,20 @@ const permissions = ['设备管理', '告警管理', '工单管理', '知识库'
  * 对应 CLAUDE.md 中定义的权限矩阵，五个角色 × 六个模块。
  */
 const rbacMatrix: Record<string, Record<string, string>> = {
-  system_admin:     { '设备管理': 'CRUD', '告警管理': 'CRUD', '工单管理': 'CRUD', '知识库': 'CRUD', '报表': 'R', 'AI 分析': 'CRUD' },
-  maintenance_lead: { '设备管理': 'RW', '告警管理': 'RW+配置', '工单管理': 'RW+派工验收', '知识库': 'RW+验证', '报表': 'R', 'AI 分析': 'R' },
-  technician:       { '设备管理': 'R', '告警管理': 'R+确认', '工单管理': 'R+执行', '知识库': 'R', '报表': '-', 'AI 分析': 'R+查询' },
-  operator:         { '设备管理': 'R', '告警管理': 'R+确认', '工单管理': 'R', '知识库': '-', '报表': 'R', 'AI 分析': 'R+查询' },
-  viewer:           { '设备管理': 'R', '告警管理': 'R', '工单管理': 'R', '知识库': 'R', '报表': 'R', 'AI 分析': '-' },
+  system_admin:     { deviceManagement: 'CRUD', alertManagement: 'CRUD', workOrderManagement: 'CRUD', knowledgeBase: 'CRUD', reports: 'R', aiAnalysis: 'CRUD' },
+  maintenance_lead: { deviceManagement: 'RW', alertManagement: 'RW+配置', workOrderManagement: 'RW+派工验收', knowledgeBase: 'RW+验证', reports: 'R', aiAnalysis: 'R' },
+  technician:       { deviceManagement: 'R', alertManagement: 'R+确认', workOrderManagement: 'R+执行', knowledgeBase: 'R', reports: '-', aiAnalysis: 'R+查询' },
+  operator:         { deviceManagement: 'R', alertManagement: 'R+确认', workOrderManagement: 'R', knowledgeBase: '-', reports: 'R', aiAnalysis: 'R+查询' },
+  viewer:           { deviceManagement: 'R', alertManagement: 'R', workOrderManagement: 'R', knowledgeBase: 'R', reports: 'R', aiAnalysis: '-' },
 };
 
-/** 角色对应的中文标签 */
-const roleLabels: Record<string, string> = {
-  system_admin: '系统管理员',
-  maintenance_lead: '维保主管',
-  technician: '技术员',
-  operator: '操作员',
-  viewer: '观察者',
+/** 角色对应的翻译键 */
+const roleLabelKeys: Record<string, string> = {
+  system_admin: 'settings.role.systemAdmin',
+  maintenance_lead: 'settings.role.maintenanceLead',
+  technician: 'settings.role.technician',
+  operator: 'settings.role.operator',
+  viewer: 'settings.role.viewer',
 };
 
 /**
@@ -65,14 +76,14 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>{t('settings.users')}</CardTitle>
-              <CardDescription>管理系统用户账号</CardDescription>
+              <CardDescription>{t('settings.manageUserAccounts')}</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>用户名</TableHead>
-                    <TableHead>角色</TableHead>
+                    <TableHead>{t('settings.username')}</TableHead>
+                    <TableHead>{t('settings.role')}</TableHead>
                     <TableHead>{t('common.status')}</TableHead>
                     <TableHead>{t('common.actions')}</TableHead>
                   </TableRow>
@@ -80,7 +91,7 @@ export default function SettingsPage() {
                 <TableBody>
                   <TableRow>
                     <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      用户管理功能需要后端 /api/v1/users API 完整实现
+                      {t('settings.userManagementNote')}
                     </TableCell>
                   </TableRow>
                 </TableBody>
@@ -94,22 +105,22 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>{t('settings.roles')}</CardTitle>
-              <CardDescription>RBAC 权限矩阵（只读）</CardDescription>
+              <CardDescription>{t('settings.rbacMatrix')}</CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>权限 / 角色</TableHead>
+                    <TableHead>{t('settings.permissionRole')}</TableHead>
                     {roles.map((role) => (
-                      <TableHead key={role}>{roleLabels[role]}</TableHead>
+                      <TableHead key={role}>{t(roleLabelKeys[role])}</TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {permissions.map((perm) => (
                     <TableRow key={perm}>
-                      <TableCell className="font-medium">{perm}</TableCell>
+                      <TableCell className="font-medium">{t(permissionKeys[perm])}</TableCell>
                       {roles.map((role) => (
                         <TableCell key={role}>
                           <Badge variant="outline" className={
@@ -135,24 +146,24 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>{t('settings.llm')}</CardTitle>
-              <CardDescription>配置 LLM 服务参数</CardDescription>
+              <CardDescription>{t('settings.configureLLM')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>模型 ID</Label>
-                  <Input defaultValue="glm-5" placeholder="模型标识" />
+                  <Label>{t('settings.modelId')}</Label>
+                  <Input defaultValue="glm-5" placeholder={t('settings.modelIdentifier')} />
                 </div>
                 <div className="space-y-2">
                   <Label>Endpoint</Label>
-                  <Input defaultValue="https://dashscope.aliyuncs.com/api/v1" placeholder="API 端点" />
+                  <Input defaultValue="https://dashscope.aliyuncs.com/api/v1" placeholder={t('settings.apiEndpoint')} />
                 </div>
                 <div className="space-y-2">
-                  <Label>超时时间（秒）</Label>
+                  <Label>{t('settings.timeout')}</Label>
                   <Input type="number" defaultValue="30" />
                 </div>
                 <div className="space-y-2">
-                  <Label>最大 Token 数</Label>
+                  <Label>{t('settings.maxTokens')}</Label>
                   <Input type="number" defaultValue="4096" />
                 </div>
               </div>
@@ -169,24 +180,24 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>{t('settings.system')}</CardTitle>
-              <CardDescription>全局系统参数配置</CardDescription>
+              <CardDescription>{t('settings.globalSystemParameters')}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>告警冷却时间（秒）</Label>
+                  <Label>{t('settings.alertCooldown')}</Label>
                   <Input type="number" defaultValue="300" />
                 </div>
                 <div className="space-y-2">
-                  <Label>聚合窗口（分钟）</Label>
+                  <Label>{t('settings.aggregationWindow')}</Label>
                   <Input type="number" defaultValue="30" />
                 </div>
                 <div className="space-y-2">
-                  <Label>最大聚合次数</Label>
+                  <Label>{t('settings.maxAggregationCount')}</Label>
                   <Input type="number" defaultValue="3" />
                 </div>
                 <div className="space-y-2">
-                  <Label>数据保留天数</Label>
+                  <Label>{t('settings.dataRetentionDays')}</Label>
                   <Input type="number" defaultValue="90" />
                 </div>
               </div>

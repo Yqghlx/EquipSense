@@ -13,13 +13,7 @@ import { useAlerts } from '../hooks/useAlerts';
 /** 分析级别标签 */
 const levelLabels: Record<string, string> = { L1: 'L1', L2: 'L2', L3: 'L3' };
 
-/** 分析状态中文标签 */
-const statusLabels: Record<string, string> = {
-  pending: '等待中',
-  running: '分析中',
-  completed: '已完成',
-  failed: '失败',
-};
+
 
 /**
  * AI 分析列表页
@@ -29,6 +23,15 @@ const statusLabels: Record<string, string> = {
  */
 export default function AnalysesPage() {
   const { t } = useTranslation();
+
+  /** 分析状态中文标签 */
+  const statusLabels: Record<string, string> = {
+    pending: t('analysis.status.pending'),
+    running: t('analysis.status.running'),
+    completed: t('analysis.status.completed'),
+    failed: t('analysis.status.failed'),
+  };
+
   const [page, setPage] = useState(1);
   const [level, setLevel] = useState<string>('');
   const [status, setStatus] = useState<string>('');
@@ -57,16 +60,16 @@ export default function AnalysesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('analysis.title')}</h1>
         <Button onClick={() => setTriggerDialogOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />手动触发
+          <Plus className="mr-2 h-4 w-4" />{t('analysis.manualTrigger')}
         </Button>
       </div>
 
       {/* 筛选栏 */}
       <div className="flex gap-3">
         <Select value={level} onValueChange={(v) => { if (v != null) { setLevel(v === 'all' ? '' : v); setPage(1); } }}>
-          <SelectTrigger className="w-28"><SelectValue placeholder="分析级别" /></SelectTrigger>
+          <SelectTrigger className="w-28"><SelectValue placeholder={t('analysis.level')} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="all">{t('common.all')}</SelectItem>
             <SelectItem value="L1">L1</SelectItem>
             <SelectItem value="L2">L2</SelectItem>
             <SelectItem value="L3">L3</SelectItem>
@@ -75,11 +78,11 @@ export default function AnalysesPage() {
         <Select value={status} onValueChange={(v) => { if (v != null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-28"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="completed">已完成</SelectItem>
-            <SelectItem value="running">分析中</SelectItem>
-            <SelectItem value="pending">等待中</SelectItem>
-            <SelectItem value="failed">失败</SelectItem>
+            <SelectItem value="all">{t('common.all')}</SelectItem>
+            <SelectItem value="completed">{t('analysis.status.completed')}</SelectItem>
+            <SelectItem value="running">{t('analysis.status.running')}</SelectItem>
+            <SelectItem value="pending">{t('analysis.status.pending')}</SelectItem>
+            <SelectItem value="failed">{t('analysis.status.failed')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -91,14 +94,14 @@ export default function AnalysesPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>设备</TableHead>
-              <TableHead>级别</TableHead>
-              <TableHead>置信度</TableHead>
-              <TableHead>数据质量</TableHead>
+              <TableHead>{t('common.id')}</TableHead>
+              <TableHead>{t('analysis.device')}</TableHead>
+              <TableHead>{t('analysis.level')}</TableHead>
+              <TableHead>{t('analysis.confidence')}</TableHead>
+              <TableHead>{t('analysis.dataQuality')}</TableHead>
               <TableHead>{t('common.status')}</TableHead>
-              <TableHead>耗时</TableHead>
-              <TableHead>完成时间</TableHead>
+              <TableHead>{t('analysis.duration')}</TableHead>
+              <TableHead>{t('analysis.completedAt')}</TableHead>
               <TableHead></TableHead>
             </TableRow>
           </TableHeader>
@@ -145,10 +148,10 @@ export default function AnalysesPage() {
       {/* 手动触发分析弹窗 */}
       <Dialog open={triggerDialogOpen} onOpenChange={setTriggerDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>手动触发分析</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('analysis.manualTriggerTitle')}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <Select value={selectedAlertId} onValueChange={(v) => { if (v != null) setSelectedAlertId(String(v)); }}>
-              <SelectTrigger><SelectValue placeholder="选择告警" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder={t('analysis.selectAlert')} /></SelectTrigger>
               <SelectContent>
                 {alertsData?.items.map((alert) => (
                   <SelectItem key={alert.id} value={alert.id}>
@@ -160,7 +163,7 @@ export default function AnalysesPage() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setTriggerDialogOpen(false)}>{t('common.cancel')}</Button>
               <Button disabled={!selectedAlertId || triggerAnalysis.isPending} onClick={handleTrigger}>
-                {triggerAnalysis.isPending ? t('common.loading') : '触发分析'}
+                {triggerAnalysis.isPending ? t('common.loading') : t('analysis.trigger')}
               </Button>
             </div>
           </div>

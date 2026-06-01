@@ -60,18 +60,18 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
               <p className="font-medium">{alert.value}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">触发时间</p>
+              <p className="text-muted-foreground">{t('alert.triggeredAt')}</p>
               <p className="font-medium">{new Date(alert.triggeredAt).toLocaleString()}</p>
             </div>
             {alert.acknowledgedAt && (
               <div>
-                <p className="text-muted-foreground">确认时间</p>
+                <p className="text-muted-foreground">{t('alert.acknowledgedAt')}</p>
                 <p className="font-medium">{new Date(alert.acknowledgedAt).toLocaleString()}</p>
               </div>
             )}
             {alert.resolvedAt && (
               <div>
-                <p className="text-muted-foreground">解决时间</p>
+                <p className="text-muted-foreground">{t('alert.resolvedAt')}</p>
                 <p className="font-medium">{new Date(alert.resolvedAt).toLocaleString()}</p>
               </div>
             )}

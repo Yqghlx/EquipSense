@@ -11,10 +11,10 @@ import type { CreateWorkOrderRequest } from '../../types';
 
 /** 工单表单校验规则 */
 const workOrderSchema = z.object({
-  title: z.string().min(1, '请输入标题'),
-  type: z.string().min(1, '请选择类型'),
-  priority: z.string().min(1, '请选择优先级'),
-  deviceId: z.string().min(1, '请选择设备'),
+  title: z.string().min(1, 'workorder.titleRequired'),
+  type: z.string().min(1, 'workorder.typeRequired'),
+  priority: z.string().min(1, 'workorder.priorityRequired'),
+  deviceId: z.string().min(1, 'workorder.deviceRequired'),
   description: z.string().optional(),
   dueDate: z.string().optional(),
 });
@@ -57,64 +57,64 @@ export function WorkOrderForm({ onSubmit, onCancel, loading, devices = [] }: Wor
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
       {/* 标题 */}
       <div className="space-y-2">
-        <Label>标题</Label>
-        <Input {...register('title')} placeholder="工单标题" />
-        {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
+        <Label>{t('workorder.titleField')}</Label>
+        <Input {...register('title')} placeholder={t('workorder.titlePlaceholder')} />
+        {errors.title && <p className="text-sm text-destructive">{t(errors.title.message!)}</p>}
       </div>
 
       {/* 类型和优先级 */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>类型</Label>
+          <Label>{t('workorder.type')}</Label>
           <Select onValueChange={(v) => { if (v != null) setValue('type', String(v)); }}>
-            <SelectTrigger><SelectValue placeholder="选择类型" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder={t('workorder.selectType')} /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="corrective">纠正性维护</SelectItem>
-              <SelectItem value="preventive">预防性维护</SelectItem>
-              <SelectItem value="predictive">预测性维护</SelectItem>
-              <SelectItem value="inspection">巡检</SelectItem>
+              <SelectItem value="corrective">{t('workorder.typeOptions.corrective')}</SelectItem>
+              <SelectItem value="preventive">{t('workorder.typeOptions.preventive')}</SelectItem>
+              <SelectItem value="predictive">{t('workorder.typeOptions.predictive')}</SelectItem>
+              <SelectItem value="inspection">{t('workorder.typeOptions.inspection')}</SelectItem>
             </SelectContent>
           </Select>
-          {errors.type && <p className="text-sm text-destructive">{errors.type.message}</p>}
+          {errors.type && <p className="text-sm text-destructive">{t(errors.type.message!)}</p>}
         </div>
         <div className="space-y-2">
-          <Label>优先级</Label>
+          <Label>{t('workorder.priority')}</Label>
           <Select onValueChange={(v) => { if (v != null) setValue('priority', String(v)); }}>
-            <SelectTrigger><SelectValue placeholder="选择优先级" /></SelectTrigger>
+            <SelectTrigger><SelectValue placeholder={t('workorder.selectPriority')} /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="critical">紧急</SelectItem>
-              <SelectItem value="high">高</SelectItem>
-              <SelectItem value="normal">普通</SelectItem>
-              <SelectItem value="low">低</SelectItem>
+              <SelectItem value="critical">{t('alert.critical')}</SelectItem>
+              <SelectItem value="high">{t('alert.high')}</SelectItem>
+              <SelectItem value="normal">{t('alert.normal')}</SelectItem>
+              <SelectItem value="low">{t('alert.low')}</SelectItem>
             </SelectContent>
           </Select>
-          {errors.priority && <p className="text-sm text-destructive">{errors.priority.message}</p>}
+          {errors.priority && <p className="text-sm text-destructive">{t(errors.priority.message!)}</p>}
         </div>
       </div>
 
       {/* 关联设备 */}
       <div className="space-y-2">
-        <Label>设备</Label>
+        <Label>{t('workorder.device')}</Label>
         <Select onValueChange={(v) => { if (v != null) setValue('deviceId', String(v)); }}>
-          <SelectTrigger><SelectValue placeholder="选择设备" /></SelectTrigger>
+          <SelectTrigger><SelectValue placeholder={t('workorder.selectDevice')} /></SelectTrigger>
           <SelectContent>
             {devices.map((d) => (
               <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        {errors.deviceId && <p className="text-sm text-destructive">{errors.deviceId.message}</p>}
+        {errors.deviceId && <p className="text-sm text-destructive">{t(errors.deviceId.message!)}</p>}
       </div>
 
       {/* 描述 */}
       <div className="space-y-2">
-        <Label>描述</Label>
-        <Textarea {...register('description')} placeholder="问题描述..." rows={3} />
+        <Label>{t('workorder.description')}</Label>
+        <Textarea {...register('description')} placeholder={t('workorder.descriptionPlaceholder')} rows={3} />
       </div>
 
       {/* 截止日期 */}
       <div className="space-y-2">
-        <Label>截止日期</Label>
+        <Label>{t('workorder.dueDate')}</Label>
         <Input type="date" {...register('dueDate')} />
       </div>
 

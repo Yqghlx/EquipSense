@@ -1,0 +1,72 @@
+- generic [ref=e21]:
+  - complementary [ref=e22]:
+    - generic [ref=e23]:
+      - generic [ref=e24]: EquipSense
+      - button "收起侧边栏" [ref=e25]:
+        - img [ref=e26]
+    - navigation [ref=e28]:
+      - link "仪表盘" [ref=e29] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e30]
+        - generic [ref=e35]: 仪表盘
+      - link "设备管理" [ref=e36] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e37]
+        - generic [ref=e39]: 设备管理
+      - link "告警中心" [ref=e40] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e41]
+        - generic [ref=e43]: 告警中心
+      - link "工单管理" [ref=e44] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e45]
+        - generic [ref=e48]: 工单管理
+      - link "AI 分析" [ref=e49] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e50]
+        - generic [ref=e58]: AI 分析
+      - link "系统设置" [ref=e59] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e60]
+        - generic [ref=e63]: 系统设置
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - generic [ref=e66]: EquipSense
+      - generic [ref=e67]:
+        - button [ref=e68]:
+          - button [ref=e69]:
+            - img
+        - button "切换主题" [ref=e70]:
+          - img
+        - button "切换语言" [ref=e71]:
+          - img
+        - button [ref=e72]:
+          - button [ref=e73]:
+            - img
+    - main [ref=e74]:
+      - generic [ref=e75]:
+        - heading "仪表盘" [level=1] [ref=e76]
+        - generic [ref=e77]:
+          - generic [ref=e79]:
+            - img [ref=e81]
+            - generic [ref=e83]:
+              - paragraph [ref=e84]: "0"
+              - paragraph [ref=e85]: 在线
+          - generic [ref=e87]:
+            - img [ref=e89]
+            - generic [ref=e91]:
+              - paragraph [ref=e92]: "0"
+              - paragraph [ref=e93]: 活跃
+          - generic [ref=e95]:
+            - img [ref=e97]
+            - generic [ref=e100]:
+              - paragraph [ref=e101]: "1"
+              - paragraph [ref=e102]: 待处理工单
+          - generic [ref=e104]:
+            - img [ref=e106]
+            - generic [ref=e108]:
+              - paragraph [ref=e109]: 0.0%
+              - paragraph [ref=e110]: 设备可用率
+        - generic [ref=e123]:
+          - heading "最近告警" [level=3] [ref=e124]
+          - paragraph [ref=e126]: 暂无数据

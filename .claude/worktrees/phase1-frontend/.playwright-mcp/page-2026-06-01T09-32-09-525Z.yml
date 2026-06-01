@@ -1,0 +1,80 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: EquipSense
+      - button "收起侧边栏" [ref=e7]:
+        - img [ref=e8]
+    - navigation [ref=e10]:
+      - link "仪表盘" [ref=e11] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e12]
+        - generic [ref=e17]: 仪表盘
+      - link "设备管理" [ref=e18] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e19]
+        - generic [ref=e21]: 设备管理
+      - link "告警中心" [ref=e22] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e23]
+        - generic [ref=e25]: 告警中心
+      - link "工单管理" [ref=e26] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e27]
+        - generic [ref=e30]: 工单管理
+      - link "AI 分析" [ref=e31] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e32]
+        - generic [ref=e40]: AI 分析
+      - link "系统设置" [ref=e41] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e42]
+        - generic [ref=e45]: 系统设置
+  - generic [ref=e46]:
+    - banner [ref=e47]:
+      - generic [ref=e48]: EquipSense
+      - generic [ref=e49]:
+        - button [ref=e50]:
+          - button [ref=e51]:
+            - img
+        - button "切换主题" [ref=e52]:
+          - img
+        - button "切换语言" [ref=e53]:
+          - img
+        - button [ref=e54]:
+          - button [ref=e55]:
+            - img
+    - main [ref=e56]:
+      - generic [ref=e142]:
+        - generic [ref=e143]:
+          - button [ref=e144]:
+            - img
+          - generic [ref=e145]:
+            - heading "检修2号电机" [level=1] [ref=e146]
+            - paragraph [ref=e147]: WO-20260601-0001
+          - generic [ref=e148]:
+            - generic [ref=e149]: 待派工
+            - generic [ref=e150]: High
+        - generic [ref=e152]:
+          - generic [ref=e153]:
+            - paragraph [ref=e154]: 类型
+            - paragraph [ref=e155]: Corrective
+          - generic [ref=e156]:
+            - paragraph [ref=e157]: 状态
+            - generic [ref=e158]: 待派工
+          - generic [ref=e159]:
+            - paragraph [ref=e160]: 派工人
+            - paragraph [ref=e161]: "-"
+          - generic [ref=e162]:
+            - paragraph [ref=e163]: 截止日期
+            - paragraph [ref=e164]: "-"
+          - generic [ref=e165]:
+            - paragraph [ref=e166]: 创建时间
+            - paragraph [ref=e167]: 2026/6/1 16:13:47
+        - button "派工" [ref=e170]
+        - generic [ref=e171]:
+          - generic [ref=e172]:
+            - generic [ref=e174]: 关联信息
+            - paragraph [ref=e176]: 暂无关联信息
+          - generic [ref=e177]:
+            - generic [ref=e179]: 操作记录
+            - paragraph [ref=e181]: 暂无操作记录

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import type { WorkOrderLog } from '../../types';
 
 interface StatusTimelineProps {
@@ -5,16 +6,16 @@ interface StatusTimelineProps {
   logs: WorkOrderLog[];
 }
 
-/** 操作类型对应的中文标签 */
-const actionLabels: Record<string, string> = {
-  created: '创建工单',
-  assigned: '派工',
-  started: '开始执行',
-  completed: '完成',
-  accepted: '验收通过',
-  rejected: '验收不通过',
-  closed: '关闭',
-  cancelled: '取消',
+/** 操作类型对应的翻译键映射 */
+const actionLabelKeys: Record<string, string> = {
+  created: 'workorder.action.created',
+  assigned: 'workorder.action.assigned',
+  started: 'workorder.action.started',
+  completed: 'workorder.action.completed',
+  accepted: 'workorder.action.accepted',
+  rejected: 'workorder.action.rejected',
+  closed: 'workorder.action.closed',
+  cancelled: 'workorder.action.cancelled',
 };
 
 /**
@@ -24,8 +25,10 @@ const actionLabels: Record<string, string> = {
  * 每条记录显示操作类型、时间、状态变化和备注。
  */
 export function StatusTimeline({ logs }: StatusTimelineProps) {
+  const { t } = useTranslation();
+
   if (logs.length === 0) {
-    return <p className="text-sm text-muted-foreground">暂无操作记录</p>;
+    return <p className="text-sm text-muted-foreground">{t('workorder.noOperationRecords')}</p>;
   }
 
   return (
@@ -37,7 +40,7 @@ export function StatusTimeline({ logs }: StatusTimelineProps) {
           {/* 日志卡片 */}
           <div className="rounded-md border border-border p-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">{actionLabels[log.action] ?? log.action}</span>
+              <span className="text-sm font-medium">{actionLabelKeys[log.action] ? t(actionLabelKeys[log.action]) : log.action}</span>
               <span className="text-xs text-muted-foreground">{new Date(log.createdAt).toLocaleString()}</span>
             </div>
             {/* 状态变化展示 */}

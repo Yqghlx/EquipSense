@@ -14,17 +14,6 @@ import { useWorkOrders, useCreateWorkOrder } from '../hooks/useWorkOrders';
 import { useDevices } from '../hooks/useDevices';
 import type { CreateWorkOrderRequest } from '../types';
 
-/** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
-const statusLabels: Record<string, string> = {
-  PendingDispatch: '待派工',
-  Assigned: '已派工',
-  InProgress: '执行中',
-  Completed: '已完成',
-  Accepted: '已验收',
-  Rejected: '验收不通过',
-  Closed: '已关闭',
-  Cancelled: '已取消',
-};
 
 /**
  * 工单列表页
@@ -35,6 +24,19 @@ const statusLabels: Record<string, string> = {
 export default function WorkOrderListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+
+  /** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
+  const statusLabels: Record<string, string> = {
+    PendingDispatch: t('workorder.status.pendingDispatch'),
+    Assigned: t('workorder.status.assigned'),
+    InProgress: t('workorder.status.inProgress'),
+    Completed: t('workorder.status.completed'),
+    Accepted: t('workorder.status.accepted'),
+    Rejected: t('workorder.status.rejected'),
+    Closed: t('workorder.status.closed'),
+    Cancelled: t('workorder.status.cancelled'),
+  };
+
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>('');
   const [search, setSearch] = useState('');
@@ -75,15 +77,15 @@ export default function WorkOrderListPage() {
         <Select value={status} onValueChange={(v) => { if (v != null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="PendingDispatch">待派工</SelectItem>
-            <SelectItem value="Assigned">已派工</SelectItem>
-            <SelectItem value="InProgress">执行中</SelectItem>
-            <SelectItem value="Completed">已完成</SelectItem>
-            <SelectItem value="Accepted">已验收</SelectItem>
-            <SelectItem value="Rejected">验收不通过</SelectItem>
-            <SelectItem value="Closed">已关闭</SelectItem>
-            <SelectItem value="Cancelled">已取消</SelectItem>
+            <SelectItem value="all">{t('common.all')}</SelectItem>
+            <SelectItem value="PendingDispatch">{t('workorder.status.pendingDispatch')}</SelectItem>
+            <SelectItem value="Assigned">{t('workorder.status.assigned')}</SelectItem>
+            <SelectItem value="InProgress">{t('workorder.status.inProgress')}</SelectItem>
+            <SelectItem value="Completed">{t('workorder.status.completed')}</SelectItem>
+            <SelectItem value="Accepted">{t('workorder.status.accepted')}</SelectItem>
+            <SelectItem value="Rejected">{t('workorder.status.rejected')}</SelectItem>
+            <SelectItem value="Closed">{t('workorder.status.closed')}</SelectItem>
+            <SelectItem value="Cancelled">{t('workorder.status.cancelled')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -97,11 +99,11 @@ export default function WorkOrderListPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>{t('workorder.code')}</TableHead>
-                <TableHead>标题</TableHead>
+                <TableHead>{t('workorder.titleField')}</TableHead>
                 <TableHead>{t('common.status')}</TableHead>
                 <TableHead>{t('workorder.priority')}</TableHead>
                 <TableHead>{t('common.createdAt')}</TableHead>
-                <TableHead>截止日期</TableHead>
+                <TableHead>{t('workorder.dueDate')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -127,10 +129,10 @@ export default function WorkOrderListPage() {
           {/* 分页控制 */}
           {data && data.total > 20 && (
             <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>共 {data.total} 条</span>
+              <span>{t('common.totalItems', { count: data.total })}</span>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</Button>
-                <Button variant="outline" size="sm" disabled={page * 20 >= data.total} onClick={() => setPage(page + 1)}>下一页</Button>
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>{t('common.previous')}</Button>
+                <Button variant="outline" size="sm" disabled={page * 20 >= data.total} onClick={() => setPage(page + 1)}>{t('common.next')}</Button>
               </div>
             </div>
           )}
@@ -140,7 +142,7 @@ export default function WorkOrderListPage() {
       {/* 新建工单弹窗 */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>新建工单</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t('workorder.create')}</DialogTitle></DialogHeader>
           <WorkOrderForm
             devices={devices}
             onSubmit={async (req: CreateWorkOrderRequest) => {

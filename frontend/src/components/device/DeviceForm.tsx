@@ -10,9 +10,9 @@ import type { Device, CreateDeviceRequest } from '../../types';
 
 /** 设备表单校验规则 */
 const deviceSchema = z.object({
-  deviceCode: z.string().min(1, '请输入设备编码'),
-  name: z.string().min(1, '请输入设备名称'),
-  type: z.string().min(1, '请选择设备类型'),
+  deviceCode: z.string().min(1, 'device.deviceCodeRequired'),
+  name: z.string().min(1, 'device.nameRequired'),
+  type: z.string().min(1, 'device.typeRequired'),
   model: z.string().optional(),
 });
 
@@ -53,14 +53,14 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
       <div className="space-y-2">
         <Label>{t('device.deviceCode')}</Label>
         <Input {...register('deviceCode')} placeholder={t('device.deviceCode')} />
-        {errors.deviceCode && <p className="text-sm text-destructive">{errors.deviceCode.message}</p>}
+        {errors.deviceCode && <p className="text-sm text-destructive">{t(errors.deviceCode.message!)}</p>}
       </div>
 
       {/* 设备名称 */}
       <div className="space-y-2">
         <Label>{t('device.name')}</Label>
         <Input {...register('name')} placeholder={t('device.name')} />
-        {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
+        {errors.name && <p className="text-sm text-destructive">{t(errors.name.message!)}</p>}
       </div>
 
       {/* 设备类型 */}
@@ -74,13 +74,13 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
             ))}
           </SelectContent>
         </Select>
-        {errors.type && <p className="text-sm text-destructive">{errors.type.message}</p>}
+        {errors.type && <p className="text-sm text-destructive">{t(errors.type.message!)}</p>}
       </div>
 
       {/* 设备型号 */}
       <div className="space-y-2">
-        <Label>型号</Label>
-        <Input {...register('model')} placeholder="设备型号" />
+        <Label>{t('device.model')}</Label>
+        <Input {...register('model')} placeholder={t('device.modelPlaceholder')} />
       </div>
 
       {/* 操作按钮 */}

@@ -43,7 +43,7 @@ export default function AlertCenterPage() {
         <Select value={status} onValueChange={(v) => { if (v !== null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="all">{t('common.all')}</SelectItem>
             <SelectItem value="active">{t('alert.active')}</SelectItem>
             <SelectItem value="acknowledged">{t('alert.acknowledged')}</SelectItem>
             <SelectItem value="resolved">{t('alert.resolved')}</SelectItem>
@@ -52,7 +52,7 @@ export default function AlertCenterPage() {
         <Select value={severity} onValueChange={(v) => { if (v !== null) { setSeverity(v === 'all' ? '' : v); setPage(1); } }}>
           <SelectTrigger className="w-32"><SelectValue placeholder={t('alert.severity')} /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">全部</SelectItem>
+            <SelectItem value="all">{t('common.all')}</SelectItem>
             <SelectItem value="critical">{t('alert.critical')}</SelectItem>
             <SelectItem value="high">{t('alert.high')}</SelectItem>
             <SelectItem value="normal">{t('alert.normal')}</SelectItem>
@@ -75,7 +75,7 @@ export default function AlertCenterPage() {
                 <TableHead>{t('alert.value')}</TableHead>
                 <TableHead>{t('alert.severity')}</TableHead>
                 <TableHead>{t('common.status')}</TableHead>
-                <TableHead>触发时间</TableHead>
+                <TableHead>{t('alert.triggeredAt')}</TableHead>
                 <TableHead>{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -99,7 +99,7 @@ export default function AlertCenterPage() {
                         {t(`alert.${alert.status}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}
                       </Button>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</TableCell>
                     <TableCell>
                       {/* 操作按钮：阻止行点击事件冒泡 */}
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
@@ -129,10 +129,10 @@ export default function AlertCenterPage() {
           {/* 分页控制 */}
           {data && data.total > 20 && (
             <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>共 {data.total} 条</span>
+              <span>{t('common.totalItems', { count: data.total })}</span>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</Button>
-                <Button variant="outline" size="sm" disabled={page * 20 >= data.total} onClick={() => setPage(page + 1)}>下一页</Button>
+                <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>{t('common.previous')}</Button>
+                <Button variant="outline" size="sm" disabled={page * 20 >= data.total} onClick={() => setPage(page + 1)}>{t('common.next')}</Button>
               </div>
             </div>
           )}

@@ -1,5 +1,10 @@
 using EquipAI.Application.Analysis;
+using EquipAI.Infrastructure.Data;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
+using Moq;
 using Xunit;
 
 namespace EquipAI.Tests.Unit.Analysis;
@@ -10,25 +15,60 @@ public class DataQualityServiceTests
 
     public DataQualityServiceTests()
     {
-        _service = new DataQualityService();
+        // 创建 InMemory 数据库的 DbContextFactory，用于单元测试
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"TestDataQuality_{Guid.NewGuid()}")
+            .Options;
+
+        var mockFactory = new Mock<IDbContextFactory<AppDbContext>>();
+        mockFactory
+            .Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new AppDbContext(
+                options,
+                new TestTenantContext()));
+
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var logger = LoggerFactory.Create(builder => { }).CreateLogger<DataQualityService>();
+
+        _service = new DataQualityService(mockFactory.Object, cache, logger);
     }
 
     [Fact]
-    public async Task CalculateScoreAsync_WithNoData_ReturnsDefaultValue()
+    public async Task CalculateScoreAsync_WithNoData_ReturnsNull()
     {
-        // 无数据时返回保守默认值 0.5
+        // 无数据时返回 null（样本不足）
         var score = await _service.CalculateScoreAsync(
             Guid.NewGuid(), Guid.NewGuid(), "temperature");
 
-        score.Should().Be(0.5);
+        score.Should().BeNull();
     }
 
     [Fact]
-    public async Task CalculateScoreAsync_ReturnsValueBetweenZeroAndOne()
+    public async Task CalculateReportAsync_WithNoData_ReturnsNull()
     {
-        var score = await _service.CalculateScoreAsync(
+        var report = await _service.CalculateReportAsync(
             Guid.NewGuid(), Guid.NewGuid(), "temperature");
 
-        score.Should().BeInRange(0.0, 1.0);
+        report.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CalculateOverviewAsync_WithNoData_ReturnsEmptyList()
+    {
+        var reports = await _service.CalculateOverviewAsync(
+            Guid.NewGuid(), Guid.NewGuid());
+
+        reports.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 测试用租户上下文，提供空的租户 ID
+    /// </summary>
+    private class TestTenantContext : EquipAI.Core.Interfaces.ITenantContext
+    {
+        public Guid TenantId { get; } = Guid.NewGuid();
+        public string IsolationMode { get; } = "shared";
+        public bool IsSystemAdmin { get; } = false;
+        public Guid UserId { get; } = Guid.NewGuid();
     }
 }

@@ -30,8 +30,8 @@ export default function DashboardPage() {
   const stats = [
     { label: t('device.online'), value: onlineCount, icon: Wrench, color: 'text-blue-500', bg: 'bg-blue-500/10' },
     { label: t('alert.active'), value: alertsData?.total ?? 0, icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10' },
-    { label: '待处理工单', value: workOrdersData?.total ?? 0, icon: ClipboardList, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
-    { label: '设备可用率', value: `${availability}%`, icon: Activity, color: 'text-green-500', bg: 'bg-green-500/10' },
+    { label: t('dashboard.pendingWorkOrders'), value: workOrdersData?.total ?? 0, icon: ClipboardList, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+    { label: t('dashboard.deviceAvailability'), value: `${availability}%`, icon: Activity, color: 'text-green-500', bg: 'bg-green-500/10' },
   ];
 
   /** 设备状态分布饼图数据 */
@@ -65,12 +65,12 @@ export default function DashboardPage() {
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardContent className="p-4">
-            <PieChart title="设备状态分布" data={devicePieData} height={280} />
+            <PieChart title={t('dashboard.deviceStatusDistribution')} data={devicePieData} height={280} />
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <TrendChart title="告警趋势（最近 7 天）" data={[]} height={280} />
+            <TrendChart title={t('dashboard.alertTrends')} data={[]} height={280} />
           </CardContent>
         </Card>
       </div>
@@ -78,7 +78,7 @@ export default function DashboardPage() {
       {/* 最近告警列表 */}
       <Card>
         <CardContent className="p-4">
-          <h3 className="mb-3 text-base font-semibold">最近告警</h3>
+          <h3 className="mb-3 text-base font-semibold">{t('dashboard.recentAlerts')}</h3>
           <div className="space-y-2">
             {alertsData?.items.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t('common.noData')}</p>
@@ -89,7 +89,7 @@ export default function DashboardPage() {
                     <SeverityBadge severity={alert.severity} />
                     <div>
                       <p className="text-sm font-medium">{alert.deviceId.slice(0,8)}… — {alert.metric}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</p>
                     </div>
                   </div>
                   <span className="text-sm text-muted-foreground">{alert.value}</span>

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { X } from 'lucide-react';
 
@@ -10,6 +11,7 @@ import { X } from 'lucide-react';
  * 点击跳转关联链接，5 秒后自动标记为已读。
  */
 export function NotificationToast() {
+  const { t } = useTranslation();
   const notifications = useNotificationStore((s) => s.notifications);
   const markRead = useNotificationStore((s) => s.markRead);
   const navigate = useNavigate();
@@ -48,7 +50,7 @@ export function NotificationToast() {
             markRead(latest.id);
           }}
           className="text-muted-foreground hover:text-foreground"
-          aria-label="关闭通知"
+          aria-label={t('notification.close')}
         >
           <X className="h-4 w-4" />
         </button>

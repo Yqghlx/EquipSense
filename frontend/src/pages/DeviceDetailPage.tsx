@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DeviceStatusBadge } from '../components/device/DeviceStatusBadge';
 import { TrendChart } from '../components/charts/TrendChart';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
+import { DataQualityOverviewCard } from '../components/dataquality/DataQualityOverview';
 import { useDevice } from '../hooks/useDevices';
 import { useTelemetry, type TelemetryDataPoint } from '../hooks/useTelemetry';
 import { useAlerts } from '../hooks/useAlerts';
@@ -75,33 +76,33 @@ export default function DeviceDetailPage() {
       <Card>
         <CardContent className="grid grid-cols-2 gap-4 p-4 md:grid-cols-4">
           <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.type}</p></div>
-          <div><p className="text-sm text-muted-foreground">型号</p><p className="font-medium">{device.model ?? '-'}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('device.model')}</p><p className="font-medium">{device.model ?? '-'}</p></div>
           <div><p className="text-sm text-muted-foreground">{t('common.status')}</p><DeviceStatusBadge status={device.status} /></div>
-          <div><p className="text-sm text-muted-foreground">健康评分</p><p className="font-medium">{device.healthScore}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('device.healthScore')}</p><p className="font-medium">{device.healthScore}</p></div>
         </CardContent>
       </Card>
 
       {/* 遥测数据趋势图（支持指标和时间范围切换） */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-base">遥测趋势</CardTitle>
+          <CardTitle className="text-base">{t('device.telemetryTrends')}</CardTitle>
           <div className="flex gap-2">
             <Select value={selectedMetric} onValueChange={(v) => { if (v) setSelectedMetric(v); }}>
               <SelectTrigger className="w-32 h-8"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="temperature">温度</SelectItem>
-                <SelectItem value="pressure">压力</SelectItem>
-                <SelectItem value="vibration">振动</SelectItem>
-                <SelectItem value="humidity">湿度</SelectItem>
+                <SelectItem value="temperature">{t('telemetry.temperature')}</SelectItem>
+                <SelectItem value="pressure">{t('telemetry.pressure')}</SelectItem>
+                <SelectItem value="vibration">{t('telemetry.vibration')}</SelectItem>
+                <SelectItem value="humidity">{t('telemetry.humidity')}</SelectItem>
               </SelectContent>
             </Select>
             <Select value={timeRange} onValueChange={(v) => { if (v) setTimeRange(v); }}>
               <SelectTrigger className="w-24 h-8"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="1h">1 小时</SelectItem>
-                <SelectItem value="6h">6 小时</SelectItem>
-                <SelectItem value="24h">24 小时</SelectItem>
-                <SelectItem value="7d">7 天</SelectItem>
+                <SelectItem value="1h">{t('time.1hour')}</SelectItem>
+                <SelectItem value="6h">{t('time.6hours')}</SelectItem>
+                <SelectItem value="24h">{t('time.24hours')}</SelectItem>
+                <SelectItem value="7d">{t('time.7days')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -115,40 +116,43 @@ export default function DeviceDetailPage() {
         </CardContent>
       </Card>
 
-      {/* 最近告警列表 */}
-      <Card>
-        <CardHeader><CardTitle className="text-base">最近告警</CardTitle></CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('alert.alertCode')}</TableHead>
-                <TableHead>{t('alert.metric')}</TableHead>
-                <TableHead>{t('alert.value')}</TableHead>
-                <TableHead>{t('alert.severity')}</TableHead>
-                <TableHead>{t('common.status')}</TableHead>
-                <TableHead>时间</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {alertsData?.items.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">{t('common.noData')}</TableCell></TableRow>
-              ) : (
-                alertsData?.items.map((alert) => (
-                  <TableRow key={alert.id}>
-                    <TableCell className="font-mono text-sm">{alert.alertCode}</TableCell>
-                    <TableCell>{alert.metric}</TableCell>
-                    <TableCell>{alert.value}</TableCell>
-                    <TableCell><SeverityBadge severity={alert.severity} /></TableCell>
-                    <TableCell><Badge variant="outline">{alert.status}</Badge></TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {/* 数据质量 + 最近告警（双列布局） */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <DataQualityOverviewCard deviceId={device.id} />
+        <Card>
+          <CardHeader><CardTitle className="text-base">{t('device.recentAlerts')}</CardTitle></CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('alert.alertCode')}</TableHead>
+                  <TableHead>{t('alert.metric')}</TableHead>
+                  <TableHead>{t('alert.value')}</TableHead>
+                  <TableHead>{t('alert.severity')}</TableHead>
+                  <TableHead>{t('common.status')}</TableHead>
+                  <TableHead>{t('common.time')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {alertsData?.items.length === 0 ? (
+                  <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">{t('common.noData')}</TableCell></TableRow>
+                ) : (
+                  alertsData?.items.map((alert) => (
+                    <TableRow key={alert.id}>
+                      <TableCell className="font-mono text-sm">{alert.alertCode}</TableCell>
+                      <TableCell>{alert.metric}</TableCell>
+                      <TableCell>{alert.value}</TableCell>
+                      <TableCell><SeverityBadge severity={alert.severity} /></TableCell>
+                      <TableCell><Badge variant="outline">{alert.status}</Badge></TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

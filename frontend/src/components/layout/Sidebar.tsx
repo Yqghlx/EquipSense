@@ -46,7 +46,7 @@ export function Sidebar() {
         <button
           onClick={() => setCollapsed(!collapsed)}
           className={cn('rounded p-1.5 text-muted-foreground hover:text-foreground', collapsed && 'mx-auto')}
-          aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          aria-label={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
         </button>

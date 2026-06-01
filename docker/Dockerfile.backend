@@ -1,0 +1,33 @@
+# 阶段1：构建
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# 先复制项目文件并还原依赖（利用 Docker 层缓存）
+COPY src/EquipAI.Core/EquipAI.Core.csproj EquipAI.Core/
+COPY src/EquipAI.Application/EquipAI.Application.csproj EquipAI.Application/
+COPY src/EquipAI.Infrastructure/EquipAI.Infrastructure.csproj EquipAI.Infrastructure/
+COPY src/EquipAI.WebAPI/EquipAI.WebAPI.csproj EquipAI.WebAPI/
+RUN dotnet restore EquipAI.WebAPI/EquipAI.WebAPI.csproj
+
+# 复制完整源码并构建
+COPY src/ ./
+RUN dotnet publish EquipAI.WebAPI/EquipAI.WebAPI.csproj \
+    -c Release -o /app/publish \
+    --no-restore
+
+# 阶段2：运行
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+# 安装 ICU 库（中文等 Unicode 排序所需）
+RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app/publish .
+
+ENV ASPNETCORE_URLS=http://+:8080
+ENV DOTNET_System_Globalization_Invariant=false
+
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "EquipAI.WebAPI.dll"]

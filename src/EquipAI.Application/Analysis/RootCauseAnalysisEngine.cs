@@ -38,8 +38,9 @@ public class RootCauseAnalysisEngine : IAnalysisService
     {
         var startTime = Stopwatch.GetTimestamp();
 
-        // 计算数据质量评分
-        var dataQuality = await _dataQualityService.CalculateScoreAsync(tenantId, deviceId, metric, ct);
+        // 计算数据质量评分，样本不足时默认为 0（触发 L1 降级）
+        var dataQualityNullable = await _dataQualityService.CalculateScoreAsync(tenantId, deviceId, metric, ct);
+        var dataQuality = dataQualityNullable ?? 0.0;
 
         string rootCause;
         string suggestion;

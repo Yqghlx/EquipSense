@@ -145,6 +145,8 @@ export interface Alert {
   ruleId?: string;
   /** 关联设备 ID */
   deviceId: string;
+  /** 关联设备名称 */
+  deviceName?: string;
   /** 告警严重级别（Critical / High / Normal / Low） */
   severity: string;
   /** 触发告警的指标名称 */
@@ -157,8 +159,12 @@ export interface Alert {
   message?: string;
   /** 告警状态（Active / Acknowledged / Resolved） */
   status: string;
-  /** 发生时间（ISO 8601） */
-  occurredAt: string;
+  /** 触发时间（ISO 8601） */
+  triggeredAt: string;
+  /** 确认时间（ISO 8601） */
+  acknowledgedAt?: string;
+  /** 解决时间（ISO 8601） */
+  resolvedAt?: string;
   /** 是否已确认 */
   acknowledged: boolean;
   /** 是否已解决 */

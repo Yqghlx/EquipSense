@@ -1,0 +1,163 @@
+<h2>整体布局风格</h2>
+<p class="subtitle">EquipSense 是工业设备监控平台，需要选择适合专业用户的布局方案</p>
+
+<div class="cards">
+  <div class="card" data-choice="sidebar" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;height:260px;background:#1a1a2e;border-radius:8px;overflow:hidden">
+        <div style="width:200px;background:#16213e;padding:16px;display:flex;flex-direction:column;gap:8px">
+          <div style="color:#e2e8f0;font-weight:700;font-size:14px;margin-bottom:12px">EquipSense</div>
+          <div style="background:#0f3460;color:#94a3b8;padding:8px 12px;border-radius:6px;font-size:12px">📊 仪表盘</div>
+          <div style="color:#94a3b8;padding:8px 12px;font-size:12px">🔧 设备管理</div>
+          <div style="color:#94a3b8;padding:8px 12px;font-size:12px">🚨 告警中心</div>
+          <div style="color:#94a3b8;padding:8px 12px;font-size:12px">📋 工单管理</div>
+          <div style="color:#94a3b8;padding:8px 12px;font-size:12px">🤖 AI 分析</div>
+          <div style="color:#94a3b8;padding:8px 12px;font-size:12px">⚙️ 设置</div>
+        </div>
+        <div style="flex:1;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="color:#e2e8f0;font-size:16px;font-weight:600">仪表盘</div>
+            <div style="display:flex;gap:8px">
+              <div style="background:#334155;color:#94a3b8;padding:4px 12px;border-radius:4px;font-size:11px">admin@tenant1</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#60a5fa;font-size:22px;font-weight:700">128</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">在线设备</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#f87171;font-size:22px;font-weight:700">5</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">活跃告警</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#fbbf24;font-size:22px;font-weight:700">12</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">待处理工单</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#34d399;font-size:22px;font-weight:700">98.5%</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">设备可用率</div>
+            </div>
+          </div>
+          <div style="flex:1;background:#1e293b;border-radius:8px;padding:14px">
+            <div style="color:#94a3b8;font-size:12px">📈 设备温度趋势图</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 固定侧边栏布局（推荐）</h3>
+      <p>左侧固定导航 + 右侧内容区。工业监控系统的经典布局，导航清晰、操作效率高，适合多页面切换频繁的场景。</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>优点</h4><ul><li>导航始终可见，快速切换</li><li>专业感强，符合工业软件习惯</li><li>告警数量、工单数可在侧边栏显示徽标</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>窄屏需折叠侧边栏</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="topnav" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;flex-direction:column;height:260px;background:#1a1a2e;border-radius:8px;overflow:hidden">
+        <div style="background:#16213e;padding:12px 20px;display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:24px">
+            <div style="color:#e2e8f0;font-weight:700;font-size:14px">EquipSense</div>
+            <div style="display:flex;gap:16px">
+              <span style="color:#60a5fa;font-size:12px;border-bottom:2px solid #60a5fa;padding-bottom:4px">仪表盘</span>
+              <span style="color:#94a3b8;font-size:12px">设备管理</span>
+              <span style="color:#94a3b8;font-size:12px">告警中心</span>
+              <span style="color:#94a3b8;font-size:12px">工单管理</span>
+              <span style="color:#94a3b8;font-size:12px">AI 分析</span>
+            </div>
+          </div>
+          <div style="background:#334155;color:#94a3b8;padding:4px 12px;border-radius:4px;font-size:11px">admin@tenant1</div>
+        </div>
+        <div style="flex:1;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#60a5fa;font-size:22px;font-weight:700">128</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">在线设备</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#f87171;font-size:22px;font-weight:700">5</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">活跃告警</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#fbbf24;font-size:22px;font-weight:700">12</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">待处理工单</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#34d399;font-size:22px;font-weight:700">98.5%</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">设备可用率</div>
+            </div>
+          </div>
+          <div style="flex:1;background:#1e293b;border-radius:8px;padding:14px">
+            <div style="color:#94a3b8;font-size:12px">📈 设备温度趋势图</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 顶部导航布局</h3>
+      <p>顶部水平导航 + 下方内容区。内容区更宽，适合数据密集型页面。</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>优点</h4><ul><li>内容区最大化</li><li>简洁现代感</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>导航项多时容易拥挤</li><li>无法方便地显示实时告警徽标</li><li>切换页面需要回到顶部</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="hybrid" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="display:flex;height:260px;background:#1a1a2e;border-radius:8px;overflow:hidden">
+        <div style="width:64px;background:#16213e;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:16px">
+          <div style="color:#60a5fa;font-size:18px">📊</div>
+          <div style="color:#94a3b8;font-size:18px">🔧</div>
+          <div style="color:#f87171;font-size:18px;position:relative">🚨<span style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:white;font-size:9px;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center">5</span></div>
+          <div style="color:#94a3b8;font-size:18px">📋</div>
+          <div style="color:#94a3b8;font-size:18px">🤖</div>
+          <div style="margin-top:auto;color:#94a3b8;font-size:18px">⚙️</div>
+        </div>
+        <div style="flex:1;padding:20px;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <div style="color:#94a3b8;font-size:11px">仪表盘</div>
+              <div style="color:#e2e8f0;font-size:16px;font-weight:600">总览</div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <div style="background:#334155;color:#94a3b8;padding:4px 12px;border-radius:4px;font-size:11px">admin@tenant1</div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#60a5fa;font-size:22px;font-weight:700">128</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">在线设备</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#f87171;font-size:22px;font-weight:700">5</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">活跃告警</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#fbbf24;font-size:22px;font-weight:700">12</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">待处理工单</div>
+            </div>
+            <div style="background:#1e293b;padding:14px;border-radius:8px;text-align:center">
+              <div style="color:#34d399;font-size:22px;font-weight:700">98.5%</div>
+              <div style="color:#94a3b8;font-size:11px;margin-top:4px">设备可用率</div>
+            </div>
+          </div>
+          <div style="flex:1;background:#1e293b;border-radius:8px;padding:14px">
+            <div style="color:#94a3b8;font-size:12px">📈 设备温度趋势图</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 图标侧边栏 + 内容区</h3>
+      <p>仅图标的窄侧边栏（64px）+ 宽内容区。节省空间，图标上可叠加告警徽标。</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>优点</h4><ul><li>最大化内容空间</li><li>告警徽标直观可见</li><li>现代感强</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>图标含义需要学习</li><li>中文字符空间少</li><li>Tooltip 依赖增加</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

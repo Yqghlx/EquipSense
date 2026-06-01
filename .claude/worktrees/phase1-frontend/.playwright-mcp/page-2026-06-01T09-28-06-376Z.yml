@@ -1,0 +1,79 @@
+- generic [ref=e21]:
+  - complementary [ref=e22]:
+    - generic [ref=e23]:
+      - generic [ref=e24]: EquipSense
+      - button "收起侧边栏" [ref=e25]:
+        - img [ref=e26]
+    - navigation [ref=e28]:
+      - link "仪表盘" [ref=e29] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e30]
+        - generic [ref=e35]: 仪表盘
+      - link "设备管理" [ref=e36] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e37]
+        - generic [ref=e39]: 设备管理
+      - link "告警中心" [ref=e40] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e41]
+        - generic [ref=e43]: 告警中心
+      - link "工单管理" [active] [ref=e44] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e45]
+        - generic [ref=e48]: 工单管理
+      - link "AI 分析" [ref=e49] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e50]
+        - generic [ref=e58]: AI 分析
+      - link "系统设置" [ref=e59] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e60]
+        - generic [ref=e63]: 系统设置
+  - generic [ref=e64]:
+    - banner [ref=e65]:
+      - generic [ref=e66]: EquipSense
+      - generic [ref=e67]:
+        - button [ref=e68]:
+          - button [ref=e69]:
+            - img
+        - button "切换主题" [ref=e70]:
+          - img
+        - button "切换语言" [ref=e71]:
+          - img
+        - button [ref=e72]:
+          - button [ref=e73]:
+            - img
+    - main [ref=e74]:
+      - generic [ref=e175]:
+        - generic [ref=e176]:
+          - heading "工单管理" [level=1] [ref=e177]
+          - button "新建" [ref=e178]:
+            - img
+            - text: 新建
+        - generic [ref=e179]:
+          - generic [ref=e180]:
+            - img [ref=e181]
+            - textbox "搜索..." [ref=e184]
+          - combobox [ref=e185]:
+            - generic [ref=e186]: 状态
+            - img: ▼
+          - textbox [ref=e187]
+        - table [ref=e189]:
+          - rowgroup [ref=e190]:
+            - row "工单编码 标题 状态 优先级 创建时间 截止日期" [ref=e191]:
+              - columnheader "工单编码" [ref=e192]
+              - columnheader "标题" [ref=e193]
+              - columnheader "状态" [ref=e194]
+              - columnheader "优先级" [ref=e195]
+              - columnheader "创建时间" [ref=e196]
+              - columnheader "截止日期" [ref=e197]
+          - rowgroup [ref=e198]:
+            - row "WO-20260601-0001 检修2号电机 PendingDispatch High 2026/6/1 16:13:47 -" [ref=e199] [cursor=pointer]:
+              - cell "WO-20260601-0001" [ref=e200]
+              - cell "检修2号电机" [ref=e201]
+              - cell "PendingDispatch" [ref=e202]:
+                - generic [ref=e203]: PendingDispatch
+              - cell "High" [ref=e204]:
+                - generic [ref=e205]: High
+              - cell "2026/6/1 16:13:47" [ref=e206]
+              - cell "-" [ref=e207]

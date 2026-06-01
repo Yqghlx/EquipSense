@@ -12,14 +12,11 @@ import api from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import type { AuthResponse } from '../types';
 
-/** 登录表单校验规则 */
-const loginSchema = z.object({
-  username: z.string().min(1, '请输入用户名'),
-  password: z.string().min(1, '请输入密码'),
-});
-
 /** 登录表单数据类型 */
-type LoginFormData = z.infer<typeof loginSchema>;
+type LoginFormData = {
+  username: string;
+  password: string;
+};
 
 /**
  * 登录页面组件
@@ -33,6 +30,12 @@ export default function LoginPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  /** 登录表单校验规则（放在组件内部以使用 t() 函数） */
+  const loginSchema = z.object({
+    username: z.string().min(1, t('auth.usernameRequired')),
+    password: z.string().min(1, t('auth.passwordRequired')),
+  });
 
   const {
     register,
@@ -61,7 +64,7 @@ export default function LoginPage() {
     <Card>
       <CardHeader>
         <CardTitle>{t('auth.login')}</CardTitle>
-        <CardDescription>登录到工业设备智能监控平台</CardDescription>
+        <CardDescription>{t('auth.loginSubtitle')}</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

@@ -16,21 +16,19 @@ import { z } from 'zod';
 import { useAlertRules, useCreateAlertRule, useUpdateAlertRule, useDeleteAlertRule } from '../hooks/useAlertRules';
 import type { CreateAlertRuleRequest, AlertRule } from '../types';
 
-/** 告警规则表单校验规则 */
-const ruleSchema = z.object({
-  name: z.string().min(1, '请输入规则名称'),
-  metric: z.string().min(1, '请输入指标名称'),
-  ruleType: z.enum(['threshold', 'composite', 'baseline']),
-  operator: z.string().optional(),
-  threshold: z.number().optional(),
-  baselineStddevMultiplier: z.number().optional(),
-  severity: z.enum(['critical', 'high', 'normal', 'low']),
-  cooldownSeconds: z.number().min(0),
-  autoCreateWorkorder: z.boolean(),
-  enabled: z.boolean(),
-});
-
-type RuleFormData = z.infer<typeof ruleSchema>;
+/** 告警规则表单数据类型 */
+type RuleFormData = {
+  name: string;
+  metric: string;
+  ruleType: 'threshold' | 'composite' | 'baseline';
+  operator?: string;
+  threshold?: number;
+  baselineStddevMultiplier?: number;
+  severity: 'critical' | 'high' | 'normal' | 'low';
+  cooldownSeconds: number;
+  autoCreateWorkorder: boolean;
+  enabled: boolean;
+};
 
 /**
  * 告警规则页
@@ -71,12 +69,12 @@ export default function AlertRulesPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名称</TableHead>
-              <TableHead>类型</TableHead>
-              <TableHead>指标</TableHead>
-              <TableHead>条件</TableHead>
-              <TableHead>级别</TableHead>
-              <TableHead>状态</TableHead>
+              <TableHead>{t('common.name')}</TableHead>
+              <TableHead>{t('common.type')}</TableHead>
+              <TableHead>{t('alertrule.metric')}</TableHead>
+              <TableHead>{t('alertrule.condition')}</TableHead>
+              <TableHead>{t('alertrule.level')}</TableHead>
+              <TableHead>{t('common.status')}</TableHead>
               <TableHead>{t('common.actions')}</TableHead>
             </TableRow>
           </TableHeader>
@@ -92,13 +90,13 @@ export default function AlertRulesPage() {
                   <TableCell className="text-sm">
                     {rule.ruleType === 'threshold' && `${rule.operator} ${rule.threshold}`}
                     {rule.ruleType === 'baseline' && `${rule.baselineStddevMultiplier}σ`}
-                    {rule.ruleType === 'composite' && '多条件'}
+                    {rule.ruleType === 'composite' && t('alertrule.multipleConditions')}
                   </TableCell>
                   <TableCell><SeverityBadge severity={rule.severity} /></TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Switch checked={rule.enabled} disabled />
-                      <span className="text-sm">{rule.enabled ? '启用' : '禁用'}</span>
+                      <span className="text-sm">{rule.enabled ? t('common.enabled') : t('common.disabled')}</span>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -155,6 +153,21 @@ interface RuleDialogProps {
  */
 function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps) {
   const { t } = useTranslation();
+
+  /** 告警规则表单校验规则（放在组件内部以使用 t() 函数） */
+  const ruleSchema = z.object({
+    name: z.string().min(1, t('alertrule.nameRequired')),
+    metric: z.string().min(1, t('alertrule.metricRequired')),
+    ruleType: z.enum(['threshold', 'composite', 'baseline']),
+    operator: z.string().optional(),
+    threshold: z.number().optional(),
+    baselineStddevMultiplier: z.number().optional(),
+    severity: z.enum(['critical', 'high', 'normal', 'low']),
+    cooldownSeconds: z.number().min(0),
+    autoCreateWorkorder: z.boolean(),
+    enabled: z.boolean(),
+  });
+
   const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<RuleFormData>({
     resolver: zodResolver(ruleSchema),
     defaultValues: rule
@@ -177,7 +190,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
         <form onSubmit={handleSubmit((data) => onSubmit(data as CreateAlertRuleRequest))} className="space-y-4">
           {/* 规则名称 */}
           <div className="space-y-2">
-            <Label>名称</Label>
+            <Label>{t('common.name')}</Label>
             <Input {...register('name')} />
             {errors.name && <p className="text-sm text-destructive">{errors.name.message}</p>}
           </div>
@@ -185,18 +198,18 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
           {/* 规则类型 + 指标 */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>规则类型</Label>
+              <Label>{t('alertrule.ruleType')}</Label>
               <Select value={ruleType} onValueChange={(v) => { if (v) setValue('ruleType', v as RuleFormData['ruleType']); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="threshold">阈值</SelectItem>
-                  <SelectItem value="composite">组合</SelectItem>
-                  <SelectItem value="baseline">基线</SelectItem>
+                  <SelectItem value="threshold">{t('alertrule.threshold')}</SelectItem>
+                  <SelectItem value="composite">{t('alertrule.composite')}</SelectItem>
+                  <SelectItem value="baseline">{t('alertrule.baseline')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>指标</Label>
+              <Label>{t('alertrule.metric')}</Label>
               <Input {...register('metric')} />
             </div>
           </div>
@@ -205,19 +218,19 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
           {ruleType === 'threshold' && (
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>运算符</Label>
+                <Label>{t('alertrule.operator')}</Label>
                 <Select onValueChange={(v) => { if (v != null) setValue('operator', String(v)); }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="GreaterThan">大于</SelectItem>
-                    <SelectItem value="LessThan">小于</SelectItem>
-                    <SelectItem value="GreaterThanOrEqual">大于等于</SelectItem>
-                    <SelectItem value="LessThanOrEqual">小于等于</SelectItem>
+                    <SelectItem value="GreaterThan">{t('operator.greaterThan')}</SelectItem>
+                    <SelectItem value="LessThan">{t('operator.lessThan')}</SelectItem>
+                    <SelectItem value="GreaterThanOrEqual">{t('operator.greaterThanOrEqual')}</SelectItem>
+                    <SelectItem value="LessThanOrEqual">{t('operator.lessThanOrEqual')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>阈值</Label>
+                <Label>{t('alertrule.threshold')}</Label>
                 <Input type="number" {...register('threshold', { valueAsNumber: true })} />
               </div>
             </div>
@@ -226,7 +239,7 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
           {/* 基线类型：显示标准差倍数 */}
           {ruleType === 'baseline' && (
             <div className="space-y-2">
-              <Label>标准差倍数</Label>
+              <Label>{t('alertrule.stddevMultiplier')}</Label>
               <Input type="number" step="0.5" {...register('baselineStddevMultiplier', { valueAsNumber: true })} />
             </div>
           )}
@@ -234,19 +247,19 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
           {/* 告警级别 + 冷却时间 */}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>告警级别</Label>
+              <Label>{t('alertrule.alertLevel')}</Label>
               <Select value={watch('severity')} onValueChange={(v) => { if (v) setValue('severity', v as RuleFormData['severity']); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="critical">紧急</SelectItem>
-                  <SelectItem value="high">高</SelectItem>
-                  <SelectItem value="normal">普通</SelectItem>
-                  <SelectItem value="low">低</SelectItem>
+                  <SelectItem value="critical">{t('alert.critical')}</SelectItem>
+                  <SelectItem value="high">{t('alert.high')}</SelectItem>
+                  <SelectItem value="normal">{t('alert.normal')}</SelectItem>
+                  <SelectItem value="low">{t('alert.low')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>冷却时间（秒）</Label>
+              <Label>{t('alertrule.cooldownSeconds')}</Label>
               <Input type="number" {...register('cooldownSeconds', { valueAsNumber: true })} />
             </div>
           </div>
@@ -255,11 +268,11 @@ function RuleDialog({ open, rule, onClose, onSubmit, loading }: RuleDialogProps)
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <Switch checked={watch('autoCreateWorkorder')} onCheckedChange={(v) => setValue('autoCreateWorkorder', v)} />
-              <Label className="text-sm">自动创建工单</Label>
+              <Label className="text-sm">{t('alertrule.autoCreateWorkOrder')}</Label>
             </div>
             <div className="flex items-center gap-2">
               <Switch checked={watch('enabled')} onCheckedChange={(v) => setValue('enabled', v)} />
-              <Label className="text-sm">启用</Label>
+              <Label className="text-sm">{t('common.enabled')}</Label>
             </div>
           </div>
 
