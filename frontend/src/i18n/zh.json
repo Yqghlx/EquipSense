@@ -1,0 +1,90 @@
+{
+  "common": {
+    "appName": "EquipSense",
+    "loading": "加载中...",
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "create": "新建",
+    "search": "搜索",
+    "filter": "筛选",
+    "export": "导出",
+    "confirm": "确认",
+    "actions": "操作",
+    "status": "状态",
+    "createdAt": "创建时间",
+    "noData": "暂无数据",
+    "success": "操作成功",
+    "error": "操作失败"
+  },
+  "auth": {
+    "login": "登录",
+    "username": "用户名",
+    "password": "密码",
+    "loginError": "用户名或密码错误",
+    "logout": "退出登录"
+  },
+  "nav": {
+    "dashboard": "仪表盘",
+    "devices": "设备管理",
+    "alerts": "告警中心",
+    "alertRules": "告警规则",
+    "workOrders": "工单管理",
+    "analyses": "AI 分析",
+    "settings": "系统设置"
+  },
+  "device": {
+    "title": "设备管理",
+    "deviceCode": "设备编码",
+    "name": "设备名称",
+    "type": "设备类型",
+    "location": "位置",
+    "lastCommunicatedAt": "最后通讯",
+    "online": "在线",
+    "offline": "离线",
+    "maintenance": "维护中"
+  },
+  "alert": {
+    "title": "告警中心",
+    "alertCode": "告警编码",
+    "metric": "指标",
+    "value": "当前值",
+    "severity": "级别",
+    "critical": "紧急",
+    "high": "高",
+    "normal": "普通",
+    "low": "低",
+    "active": "活跃",
+    "acknowledged": "已确认",
+    "resolved": "已解决",
+    "acknowledge": "确认",
+    "resolve": "解决"
+  },
+  "workorder": {
+    "title": "工单管理",
+    "code": "工单编码",
+    "priority": "优先级",
+    "assign": "派工",
+    "start": "开始执行",
+    "complete": "完成",
+    "accept": "验收通过",
+    "reject": "验收不通过",
+    "close": "关闭",
+    "cancel": "取消"
+  },
+  "analysis": {
+    "title": "AI 分析",
+    "level": "分析级别",
+    "confidence": "置信度",
+    "rootCause": "根因",
+    "suggestion": "建议"
+  },
+  "settings": {
+    "title": "系统设置",
+    "users": "用户管理",
+    "roles": "角色权限",
+    "llm": "LLM 配置",
+    "system": "系统参数"
+  }
+}

@@ -120,6 +120,9 @@ public static class ServiceCollectionExtensions
         // 遥测数据服务（Singleton — 内部维护定时器和队列）
         services.AddSingleton<ITelemetryService, TelemetryService>();
 
+        // 遥测数据查询服务（Scoped — 需要 DbContext）
+        services.AddScoped<TelemetryQueryService>();
+
         // 告警评估器（多个实现，通过 RuleType 区分）
         services.AddSingleton<IAlertRuleEvaluator, ThresholdEvaluator>();
         services.AddSingleton<IAlertRuleEvaluator, CombinedEvaluator>();
