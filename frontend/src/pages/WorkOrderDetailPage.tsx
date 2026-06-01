@@ -10,10 +10,8 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
-import { StatusTimeline } from '../components/workorder/StatusTimeline';
 import {
   useWorkOrder,
-  useWorkOrderLogs,
   useStartWorkOrder,
   useCompleteWorkOrder,
   useAcceptWorkOrder,
@@ -23,16 +21,16 @@ import {
 } from '../hooks/useWorkOrders';
 import type { WorkOrder } from '../types';
 
-/** 工单状态对应的中文标签 */
+/** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
 const statusLabels: Record<string, string> = {
-  pending_dispatch: '待派工',
-  dispatched: '已派工',
-  in_progress: '执行中',
-  completed: '已完成',
-  accepted: '已验收',
-  rejected: '验收不通过',
-  closed: '已关闭',
-  cancelled: '已取消',
+  PendingDispatch: '待派工',
+  Assigned: '已派工',
+  InProgress: '执行中',
+  Completed: '已完成',
+  Accepted: '已验收',
+  Rejected: '验收不通过',
+  Closed: '已关闭',
+  Cancelled: '已取消',
 };
 
 /**
@@ -50,7 +48,6 @@ export default function WorkOrderDetailPage() {
   const [resolution, setResolution] = useState('');
 
   const { data: workOrder, isLoading } = useWorkOrder(id ?? '');
-  const { data: logs } = useWorkOrderLogs(id ?? '');
   const startOrder = useStartWorkOrder();
   const completeOrder = useCompleteWorkOrder();
   const acceptOrder = useAcceptWorkOrder();
@@ -132,13 +129,13 @@ export default function WorkOrderDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">操作记录</CardTitle></CardHeader>
           <CardContent>
-            <StatusTimeline logs={logs ?? []} />
+            <p className="text-sm text-muted-foreground">暂无操作记录</p>
           </CardContent>
         </Card>
       </div>
 
       {/* 执行中状态：填写解决措施区域 */}
-      {workOrder.status === 'in_progress' && (
+      {workOrder.status === 'InProgress' && (
         <Card>
           <CardHeader><CardTitle className="text-base">填写解决措施</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -224,17 +221,17 @@ function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCanc
 
   /** 各状态对应的可用按钮配置 */
   const buttons: Record<string, Array<{ label: string; action: () => void; variant?: 'default' | 'outline' | 'destructive' }>> = {
-    pending_dispatch: [{ label: '派工', action: onStart }],
-    dispatched: [{ label: '开始执行', action: onStart }],
-    in_progress: [],
-    completed: [
+    PendingDispatch: [{ label: '派工', action: onStart }],
+    Assigned: [{ label: '开始执行', action: onStart }],
+    InProgress: [],
+    Completed: [
       { label: '验收通过', action: onAccept },
       { label: '验收不通过', action: () => setShowReject(true), variant: 'outline' },
     ],
-    accepted: [{ label: '关闭', action: onClose }],
-    rejected: [],
-    closed: [],
-    cancelled: [],
+    Accepted: [{ label: '关闭', action: onClose }],
+    Rejected: [],
+    Closed: [],
+    Cancelled: [],
   };
 
   const available = buttons[workOrder.status] ?? [];

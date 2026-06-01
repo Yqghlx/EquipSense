@@ -14,16 +14,16 @@ import { useWorkOrders, useCreateWorkOrder } from '../hooks/useWorkOrders';
 import { useDevices } from '../hooks/useDevices';
 import type { CreateWorkOrderRequest } from '../types';
 
-/** 工单状态对应的中文标签 */
+/** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
 const statusLabels: Record<string, string> = {
-  pending_dispatch: '待派工',
-  dispatched: '已派工',
-  in_progress: '执行中',
-  completed: '已完成',
-  accepted: '已验收',
-  rejected: '验收不通过',
-  closed: '已关闭',
-  cancelled: '已取消',
+  PendingDispatch: '待派工',
+  Assigned: '已派工',
+  InProgress: '执行中',
+  Completed: '已完成',
+  Accepted: '已验收',
+  Rejected: '验收不通过',
+  Closed: '已关闭',
+  Cancelled: '已取消',
 };
 
 /**
@@ -76,14 +76,14 @@ export default function WorkOrderListPage() {
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="pending_dispatch">待派工</SelectItem>
-            <SelectItem value="dispatched">已派工</SelectItem>
-            <SelectItem value="in_progress">执行中</SelectItem>
-            <SelectItem value="completed">已完成</SelectItem>
-            <SelectItem value="accepted">已验收</SelectItem>
-            <SelectItem value="rejected">验收不通过</SelectItem>
-            <SelectItem value="closed">已关闭</SelectItem>
-            <SelectItem value="cancelled">已取消</SelectItem>
+            <SelectItem value="PendingDispatch">待派工</SelectItem>
+            <SelectItem value="Assigned">已派工</SelectItem>
+            <SelectItem value="InProgress">执行中</SelectItem>
+            <SelectItem value="Completed">已完成</SelectItem>
+            <SelectItem value="Accepted">已验收</SelectItem>
+            <SelectItem value="Rejected">验收不通过</SelectItem>
+            <SelectItem value="Closed">已关闭</SelectItem>
+            <SelectItem value="Cancelled">已取消</SelectItem>
           </SelectContent>
         </Select>
       </div>

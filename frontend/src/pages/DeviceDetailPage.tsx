@@ -75,9 +75,9 @@ export default function DeviceDetailPage() {
       <Card>
         <CardContent className="grid grid-cols-2 gap-4 p-4 md:grid-cols-4">
           <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.type}</p></div>
-          <div><p className="text-sm text-muted-foreground">{t('device.location')}</p><p className="font-medium">{device.location ?? '-'}</p></div>
+          <div><p className="text-sm text-muted-foreground">型号</p><p className="font-medium">{device.model ?? '-'}</p></div>
           <div><p className="text-sm text-muted-foreground">{t('common.status')}</p><DeviceStatusBadge status={device.status} /></div>
-          <div><p className="text-sm text-muted-foreground">{t('device.lastCommunicatedAt')}</p><p className="font-medium">{device.lastCommunicatedAt ? new Date(device.lastCommunicatedAt).toLocaleString() : '-'}</p></div>
+          <div><p className="text-sm text-muted-foreground">健康评分</p><p className="font-medium">{device.healthScore}</p></div>
         </CardContent>
       </Card>
 
@@ -141,7 +141,7 @@ export default function DeviceDetailPage() {
                     <TableCell>{alert.value}</TableCell>
                     <TableCell><SeverityBadge severity={alert.severity} /></TableCell>
                     <TableCell><Badge variant="outline">{alert.status}</Badge></TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>
                   </TableRow>
                 ))
               )}

@@ -80,9 +80,9 @@ export default function DeviceListPage() {
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="online">{t('device.online')}</SelectItem>
-            <SelectItem value="offline">{t('device.offline')}</SelectItem>
-            <SelectItem value="maintenance">{t('device.maintenance')}</SelectItem>
+            <SelectItem value="Online">{t('device.online')}</SelectItem>
+            <SelectItem value="Offline">{t('device.offline')}</SelectItem>
+            <SelectItem value="Maintenance">{t('device.maintenance')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -99,7 +99,7 @@ export default function DeviceListPage() {
                 <TableHead>{t('device.name')}</TableHead>
                 <TableHead>{t('device.type')}</TableHead>
                 <TableHead>{t('common.status')}</TableHead>
-                <TableHead>{t('device.lastCommunicatedAt')}</TableHead>
+                <TableHead>型号</TableHead>
                 <TableHead>{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -118,7 +118,7 @@ export default function DeviceListPage() {
                     <TableCell>{device.type}</TableCell>
                     <TableCell><DeviceStatusBadge status={device.status} /></TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {device.lastCommunicatedAt ? new Date(device.lastCommunicatedAt).toLocaleString() : '-'}
+                      {device.model ?? '-'}
                     </TableCell>
                     <TableCell>
                       {/* 操作按钮区域：阻止行点击事件冒泡 */}

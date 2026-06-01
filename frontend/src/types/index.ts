@@ -89,14 +89,20 @@ export interface Device {
   name: string;
   /** 设备类型 */
   type: string;
-  /** 设备状态（online / offline / maintenance / alarm） */
+  /** 制造商 */
+  manufacturer?: string;
+  /** 型号 */
+  model?: string;
+  /** 设备状态（Online / Offline / Maintenance / Warning） */
   status: string;
-  /** 安装位置 */
-  location?: string;
-  /** 最后通信时间（ISO 8601） */
-  lastCommunicatedAt?: string;
+  /** 关键性等级（Normal / Important / Critical） */
+  criticality: string;
+  /** 健康评分（0-100） */
+  healthScore: number;
   /** 创建时间（ISO 8601） */
   createdAt: string;
+  /** 更新时间（ISO 8601） */
+  updatedAt: string;
 }
 
 /** 创建设备请求参数 */
@@ -107,8 +113,10 @@ export interface CreateDeviceRequest {
   name: string;
   /** 设备类型 */
   type: string;
-  /** 安装位置 */
-  location?: string;
+  /** 制造商 */
+  manufacturer?: string;
+  /** 型号 */
+  model?: string;
 }
 
 /** 设备遥测数据（时序窄表：一行一个指标） */
@@ -133,28 +141,30 @@ export interface Alert {
   id: string;
   /** 告警编码（业务唯一） */
   alertCode: string;
+  /** 关联的告警规则 ID */
+  ruleId?: string;
   /** 关联设备 ID */
   deviceId: string;
-  /** 设备名称（冗余字段，便于展示） */
-  deviceName?: string;
+  /** 告警严重级别（Critical / High / Normal / Low） */
+  severity: string;
   /** 触发告警的指标名称 */
   metric: string;
   /** 触发时的指标值 */
   value: number;
-  /** 告警严重级别（critical / warning / info） */
-  severity: string;
-  /** 告警状态（triggered / acknowledged / resolved / suppressed） */
+  /** 告警阈值 */
+  threshold?: number;
+  /** 告警消息 */
+  message?: string;
+  /** 告警状态（Active / Acknowledged / Resolved） */
   status: string;
-  /** 关联的告警规则 ID */
-  ruleId?: string;
-  /** 关联的告警规则名称 */
-  ruleName?: string;
-  /** 触发时间（ISO 8601） */
-  triggeredAt: string;
-  /** 确认时间（ISO 8601） */
-  acknowledgedAt?: string;
-  /** 解决时间（ISO 8601） */
-  resolvedAt?: string;
+  /** 发生时间（ISO 8601） */
+  occurredAt: string;
+  /** 是否已确认 */
+  acknowledged: boolean;
+  /** 是否已解决 */
+  resolved: boolean;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
 }
 
 /** 告警规则 */
@@ -179,7 +189,7 @@ export interface AlertRule {
   conditions?: string;
   /** 基线标准差倍数（基线规则使用） */
   baselineStddevMultiplier?: number;
-  /** 告警严重级别（critical / warning / info） */
+  /** 告警严重级别（Critical / High / Normal / Low） */
   severity: string;
   /** 冷却时间（秒），防止短时间内重复告警 */
   cooldownSeconds: number;
@@ -211,7 +221,7 @@ export interface CreateAlertRuleRequest {
   conditions?: string;
   /** 基线标准差倍数（基线规则使用） */
   baselineStddevMultiplier?: number;
-  /** 告警严重级别（critical / warning / info） */
+  /** 告警严重级别（Critical / High / Normal / Low） */
   severity: string;
   /** 冷却时间（秒），防止短时间内重复告警 */
   cooldownSeconds: number;
@@ -235,9 +245,9 @@ export interface WorkOrder {
   title: string;
   /** 工单类型（corrective / preventive / inspection） */
   type: string;
-  /** 工单状态（pending / assigned / in_progress / completed / cancelled） */
+  /** 工单状态（PendingDispatch / Assigned / InProgress / Completed / Accepted / Rejected / Closed / Cancelled） */
   status: string;
-  /** 优先级（urgent / high / medium / low） */
+  /** 优先级（Urgent / High / Medium / Low） */
   priority: string;
   /** 关联设备 ID */
   deviceId: string;
@@ -263,9 +273,9 @@ export interface WorkOrder {
 export interface CreateWorkOrderRequest {
   /** 工单标题 */
   title: string;
-  /** 工单类型（corrective / preventive / inspection） */
+  /** 工单类型（Corrective / Preventive / Inspection） */
   type: string;
-  /** 优先级（urgent / high / medium / low） */
+  /** 优先级（Urgent / High / Medium / Low） */
   priority: string;
   /** 关联设备 ID */
   deviceId: string;

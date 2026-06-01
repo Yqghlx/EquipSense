@@ -44,7 +44,7 @@ export default function AlertCenterPage() {
           <SelectTrigger className="w-32"><SelectValue placeholder={t('common.status')} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部</SelectItem>
-            <SelectItem value="triggered">{t('alert.active')}</SelectItem>
+            <SelectItem value="active">{t('alert.active')}</SelectItem>
             <SelectItem value="acknowledged">{t('alert.acknowledged')}</SelectItem>
             <SelectItem value="resolved">{t('alert.resolved')}</SelectItem>
           </SelectContent>
@@ -90,7 +90,7 @@ export default function AlertCenterPage() {
                     onClick={() => handleRowClick(alert)}
                   >
                     <TableCell className="font-mono text-sm">{alert.alertCode}</TableCell>
-                    <TableCell>{alert.deviceName ?? '-'}</TableCell>
+                    <TableCell className="font-mono text-xs">{alert.deviceId.slice(0,8)}…</TableCell>
                     <TableCell>{alert.metric}</TableCell>
                     <TableCell>{alert.value}</TableCell>
                     <TableCell><SeverityBadge severity={alert.severity} /></TableCell>
@@ -99,11 +99,11 @@ export default function AlertCenterPage() {
                         {t(`alert.${alert.status}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}
                       </Button>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>
                     <TableCell>
                       {/* 操作按钮：阻止行点击事件冒泡 */}
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        {alert.status === 'triggered' && (
+                        {alert.status === 'active' && (
                           <>
                             <Button variant="outline" size="sm" onClick={() => acknowledgeAlert.mutate(alert.id)}>
                               {t('alert.acknowledge')}

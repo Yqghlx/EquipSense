@@ -18,9 +18,9 @@ export default function DashboardPage() {
   const { t } = useTranslation();
 
   const { data: devicesData } = useDevices({ page: 1, pageSize: 1 });
-  const { data: onlineDevices } = useDevices({ page: 1, pageSize: 1, status: 'online' });
-  const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'triggered' });
-  const { data: workOrdersData } = useWorkOrders({ page: 1, pageSize: 1 }, { status: 'pending' });
+  const { data: onlineDevices } = useDevices({ page: 1, pageSize: 1, status: 'Online' });
+  const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
+  const { data: workOrdersData } = useWorkOrders({ page: 1, pageSize: 1 }, { status: 'PendingDispatch' });
 
   const totalDevices = devicesData?.total ?? 0;
   const onlineCount = onlineDevices?.total ?? 0;
@@ -88,8 +88,8 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-3">
                     <SeverityBadge severity={alert.severity} />
                     <div>
-                      <p className="text-sm font-medium">{alert.deviceName} — {alert.metric}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</p>
+                      <p className="text-sm font-medium">{alert.deviceId.slice(0,8)}… — {alert.metric}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</p>
                     </div>
                   </div>
                   <span className="text-sm text-muted-foreground">{alert.value}</span>

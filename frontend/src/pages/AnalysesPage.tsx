@@ -119,7 +119,7 @@ export default function AnalysesPage() {
                     <TableCell>{analysis.deviceId.slice(0, 8)}</TableCell>
                     <TableCell><Badge variant="outline">{levelLabels[analysis.level] ?? analysis.level}</Badge></TableCell>
                     <TableCell>{analysis.confidence != null ? `${Math.round(analysis.confidence * 100)}%` : '-'}</TableCell>
-                    <TableCell>{analysis.dataQualityScore != null ? `${Math.round(analysis.dataQualityScore * 100)}%` : '-'}</TableCell>
+                    <TableCell>{analysis.dataQualityScore != null ? `${Math.round(analysis.dataQualityScore)}%` : '-'}</TableCell>
                     <TableCell><Badge variant="outline">{statusLabels[analysis.status] ?? analysis.status}</Badge></TableCell>
                     <TableCell className="text-sm text-muted-foreground">{analysis.processingTimeMs ? `${analysis.processingTimeMs}ms` : '-'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{analysis.completedAt ? new Date(analysis.completedAt).toLocaleString() : '-'}</TableCell>

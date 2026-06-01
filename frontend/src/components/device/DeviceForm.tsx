@@ -13,7 +13,7 @@ const deviceSchema = z.object({
   deviceCode: z.string().min(1, '请输入设备编码'),
   name: z.string().min(1, '请输入设备名称'),
   type: z.string().min(1, '请选择设备类型'),
-  location: z.string().optional(),
+  model: z.string().optional(),
 });
 
 type DeviceFormData = z.infer<typeof deviceSchema>;
@@ -43,7 +43,7 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<DeviceFormData>({
     resolver: zodResolver(deviceSchema),
     defaultValues: device
-      ? { deviceCode: device.deviceCode, name: device.name, type: device.type, location: device.location }
+      ? { deviceCode: device.deviceCode, name: device.name, type: device.type, model: device.model }
       : undefined,
   });
 
@@ -77,10 +77,10 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
         {errors.type && <p className="text-sm text-destructive">{errors.type.message}</p>}
       </div>
 
-      {/* 安装位置 */}
+      {/* 设备型号 */}
       <div className="space-y-2">
-        <Label>{t('device.location')}</Label>
-        <Input {...register('location')} placeholder={t('device.location')} />
+        <Label>型号</Label>
+        <Input {...register('model')} placeholder="设备型号" />
       </div>
 
       {/* 操作按钮 */}
