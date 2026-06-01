@@ -1,5 +1,70 @@
-function App() {
-  return <div className="min-h-screen bg-background text-foreground">EquipSense</div>
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+import { AuthLayout } from './components/layout/AuthLayout';
+import { AppLayout } from './components/layout/AppLayout';
+import { NotificationToast } from './components/layout/NotificationToast';
+import LoginPage from './pages/LoginPage';
+import { useEffect } from 'react';
+import { useAuthStore } from './stores/authStore';
+
+/**
+ * 应用路由配置
+ *
+ * - /login 使用 AuthLayout（居中布局）
+ * - 其他路由使用 AppLayout（侧边栏+头部），需认证
+ * - 各业务页面目前为占位符，后续子计划逐步实现
+ */
+function AppRoutes() {
+  const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  /** 页面加载时从 localStorage 恢复认证状态 */
+  useEffect(() => {
+    loadFromStorage();
+  }, [loadFromStorage]);
+
+  return (
+    <Routes>
+      {/* 认证路由 */}
+      <Route element={<AuthLayout />}>
+        <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+      </Route>
+
+      {/* 业务路由（需认证） */}
+      <Route element={<AppLayout />}>
+        <Route path="/dashboard" element={<div className="text-muted-foreground">仪表盘（子计划 B 实现）</div>} />
+        <Route path="/devices" element={<div className="text-muted-foreground">设备管理（子计划 B 实现）</div>} />
+        <Route path="/devices/:id" element={<div className="text-muted-foreground">设备详情（子计划 B 实现）</div>} />
+        <Route path="/alerts" element={<div className="text-muted-foreground">告警中心（子计划 B 实现）</div>} />
+        <Route path="/alert-rules" element={<div className="text-muted-foreground">告警规则（子计划 B 实现）</div>} />
+        <Route path="/work-orders" element={<div className="text-muted-foreground">工单管理（子计划 C 实现）</div>} />
+        <Route path="/work-orders/:id" element={<div className="text-muted-foreground">工单详情（子计划 C 实现）</div>} />
+        <Route path="/analyses" element={<div className="text-muted-foreground">AI 分析（子计划 C 实现）</div>} />
+        <Route path="/settings" element={<div className="text-muted-foreground">系统设置（子计划 C 实现）</div>} />
+      </Route>
+
+      {/* 兜底路由 */}
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  );
 }
 
-export default App
+/**
+ * 应用根组件
+ *
+ * 顶层 Provider 依次为：
+ * 1. QueryClientProvider — TanStack Query 数据请求
+ * 2. BrowserRouter — 路由
+ * 3. NotificationToast — 全局通知浮层
+ */
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <AppRoutes />
+        <NotificationToast />
+      </BrowserRouter>
+    </QueryClientProvider>
+  );
+}
