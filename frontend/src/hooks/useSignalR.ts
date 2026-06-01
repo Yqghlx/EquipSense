@@ -60,5 +60,5 @@ export function useSignalR() {
     }).catch(console.error);
 
     // 不在组件卸载时断开连接 — SignalR 连接跨路由保持
-  }, [isAuthenticated]);
+  }, [isAuthenticated, push, queryClient]);
 }
