@@ -204,6 +204,9 @@ public static class ServiceCollectionExtensions
         // 基线计算后台服务
         services.AddHostedService<BaselineCalculationService>();
 
+        // 审计日志服务 — 记录系统敏感操作（登录、权限变更、数据修改等）
+        services.AddScoped<IAuditLogService, AuditLogService>();
+
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
         services.AddScoped<AlertEventHandler>();

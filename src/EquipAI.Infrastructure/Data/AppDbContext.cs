@@ -93,6 +93,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<TechnicianProfile> TechnicianProfiles => Set<TechnicianProfile>();
 
+    /// <summary>
+    /// 审计日志表
+    /// </summary>
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
