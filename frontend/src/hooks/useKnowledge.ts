@@ -146,9 +146,11 @@ export function useRejectPendingRule() {
 /**
  * 故障案例列表查询 Hook
  *
- * 支持分页查询。
+ * 支持分页查询和设备类型过滤。
  */
-export function useFaultCases(query: PagedQuery) {
+export function useFaultCases(
+  query: PagedQuery & { deviceType?: string },
+) {
   return useQuery({
     queryKey: ['fault-cases', query],
     queryFn: async () => {
@@ -156,10 +158,35 @@ export function useFaultCases(query: PagedQuery) {
         page: String(query.page),
         pageSize: String(query.pageSize),
       });
+      if (query.deviceType) params.set('deviceType', query.deviceType);
       const { data } = await api.get<PagedResult<FaultCase>>(
         '/knowledge/cases?' + params,
       );
       return data;
+    },
+  });
+}
+
+// ============================================================================
+// 行业预置数据导入
+// ============================================================================
+
+/**
+ * 导入行业预置数据 Mutation Hook
+ *
+ * 导入行业预置的知识规则到当前租户，成功后使规则列表缓存失效。
+ */
+export function useImportPresetData() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post('/knowledge/import', {
+        source: 'industry-preset',
+      });
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-rules'] });
     },
   });
 }

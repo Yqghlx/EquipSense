@@ -4,8 +4,10 @@ import {
   BookOpen,
   Search,
   CheckCircle2,
+  XCircle,
   Clock,
   TrendingUp,
+  Upload,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -14,28 +16,52 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import {
   useKnowledgeRules,
+  usePendingRules,
   useFaultCases,
+  useApprovePendingRule,
+  useRejectPendingRule,
+  useImportPresetData,
 } from '../hooks/useKnowledge';
-import type { KnowledgeRule, FaultCase } from '../types';
+import type { KnowledgeRule, PendingRule, FaultCase } from '../types';
 
 /**
- * 知识库主页面
+ * 知识库管理主页面
  *
  * 功能：
- * - Tab 切换：诊断规则 / 故障案例
+ * - 三个 Tab 切换：诊断规则 / 待审核规则 / 故障案例
  * - 诊断规则：卡片式展示，显示名称、设备类型、来源、应用次数、准确率
+ * - 待审核规则：展示 AI 生成的候选规则，支持批准/驳回操作
  * - 故障案例：卡片式展示，显示故障描述、根因、解决方案、维修时长
+ * - 导入行业预置数据按钮
  */
 export default function KnowledgePage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('rules');
   const [keyword, setKeyword] = useState('');
+  const importMutation = useImportPresetData();
+
+  /** 待审核规则数量，用于 Tab 徽标显示 */
+  const { data: pendingCountData } = usePendingRules({
+    page: 1,
+    pageSize: 1,
+    reviewStatus: 'Pending',
+  });
+  const pendingCount = pendingCountData?.total ?? 0;
 
   return (
     <div className="space-y-4">
-      {/* 页头 */}
+      {/* 页头：标题 + 导入按钮 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('knowledge.title')}</h1>
+        <Button
+          onClick={() => importMutation.mutate()}
+          disabled={importMutation.isPending}
+          variant="outline"
+          size="sm"
+        >
+          <Upload className="mr-2 h-4 w-4" />
+          {t('knowledge.importPreset')}
+        </Button>
       </div>
 
       {/* 搜索栏 */}
@@ -49,16 +75,29 @@ export default function KnowledgePage() {
         />
       </div>
 
-      {/* Tab 切换 */}
+      {/* Tab 切换：诊断规则 / 待审核 / 故障案例 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="rules">{t('knowledge.rules')}</TabsTrigger>
+          <TabsTrigger value="pending">
+            {t('knowledge.pending')}
+            {pendingCount > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {pendingCount}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="cases">{t('knowledge.cases')}</TabsTrigger>
         </TabsList>
 
         {/* 诊断规则 Tab */}
         <TabsContent value="rules" className="mt-4">
           <RulesList keyword={keyword} />
+        </TabsContent>
+
+        {/* 待审核规则 Tab */}
+        <TabsContent value="pending" className="mt-4">
+          <PendingRulesList keyword={keyword} />
         </TabsContent>
 
         {/* 故障案例 Tab */}
@@ -111,7 +150,7 @@ function RulesList({ keyword }: RulesListProps) {
   if (!filtered?.length) {
     return (
       <div className="py-20 text-center text-muted-foreground">
-        {t('common.noData')}
+        {t('knowledge.noRules')}
       </div>
     );
   }
@@ -157,9 +196,14 @@ function RuleCard({ rule }: RuleCardProps) {
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <CardTitle className="text-base leading-snug">{rule.name}</CardTitle>
-          <Badge variant={sourceBadge.variant} className="shrink-0">
-            {sourceBadge.label}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge variant={rule.enabled ? 'default' : 'secondary'}>
+              {rule.enabled ? t('knowledge.enabled') : t('knowledge.disabled')}
+            </Badge>
+            <Badge variant={sourceBadge.variant}>
+              {sourceBadge.label}
+            </Badge>
+          </div>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <BookOpen className="h-3.5 w-3.5" />
@@ -183,6 +227,16 @@ function RuleCard({ rule }: RuleCardProps) {
           <p className="text-sm line-clamp-2">{rule.conclusion}</p>
         </div>
 
+        {/* 推荐措施 */}
+        {rule.recommendedActions && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">
+              {t('knowledge.recommendedActions')}
+            </p>
+            <p className="text-sm line-clamp-2">{rule.recommendedActions}</p>
+          </div>
+        )}
+
         {/* 统计指标 */}
         <div className="flex items-center gap-4 pt-2 border-t">
           <div className="flex items-center gap-1.5 text-sm">
@@ -197,6 +251,167 @@ function RuleCard({ rule }: RuleCardProps) {
               <span className="font-medium">{rule.accuracyRate}%</span>
             </div>
           )}
+          <div className="flex items-center gap-1.5 text-sm">
+            <span className="text-muted-foreground">{t('knowledge.confidenceWeight')}:</span>
+            <span className="font-medium">{(rule.confidenceWeight * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ============================================================================
+// 待审核规则列表子组件
+// ============================================================================
+
+/** 待审核规则列表属性 */
+interface PendingRulesListProps {
+  keyword: string;
+}
+
+/**
+ * 待审核规则列表
+ *
+ * 以卡片网格展示所有 AI 生成的待审核候选规则，
+ * 支持批准和驳回操作。
+ */
+function PendingRulesList({ keyword }: PendingRulesListProps) {
+  const { t } = useTranslation();
+  const { data, isLoading } = usePendingRules({
+    page: 1,
+    pageSize: 50,
+    reviewStatus: 'Pending',
+  });
+  const approveMutation = useApprovePendingRule();
+  const rejectMutation = useRejectPendingRule();
+
+  if (isLoading) {
+    return (
+      <div className="py-20 text-center text-muted-foreground">
+        {t('common.loading')}
+      </div>
+    );
+  }
+
+  /** 按关键字过滤（前端本地过滤） */
+  const filtered = data?.items.filter(
+    (rule) =>
+      !keyword ||
+      rule.name.toLowerCase().includes(keyword.toLowerCase()) ||
+      rule.deviceType.toLowerCase().includes(keyword.toLowerCase()) ||
+      rule.conclusion.toLowerCase().includes(keyword.toLowerCase()),
+  );
+
+  if (!filtered?.length) {
+    return (
+      <div className="py-20 text-center text-muted-foreground">
+        {t('knowledge.noPending')}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {filtered.map((rule) => (
+        <PendingRuleCard
+          key={rule.id}
+          rule={rule}
+          onApprove={(id) => approveMutation.mutate({ id })}
+          onReject={(id) => rejectMutation.mutate({ id, comment: t('knowledge.defaultRejectComment') })}
+          approveDisabled={approveMutation.isPending}
+          rejectDisabled={rejectMutation.isPending}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** 待审核规则卡片属性 */
+interface PendingRuleCardProps {
+  rule: PendingRule;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  approveDisabled: boolean;
+  rejectDisabled: boolean;
+}
+
+/**
+ * 待审核规则卡片组件
+ *
+ * 展示 AI 生成的候选规则信息，并提供批准/驳回操作按钮。
+ */
+function PendingRuleCard({
+  rule,
+  onApprove,
+  onReject,
+  approveDisabled,
+  rejectDisabled,
+}: PendingRuleCardProps) {
+  const { t } = useTranslation();
+
+  return (
+    <Card className="flex flex-col border-yellow-200 bg-yellow-50/30 dark:border-yellow-800 dark:bg-yellow-950/20">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <CardTitle className="text-base leading-snug">{rule.name}</CardTitle>
+          <Badge variant="outline" className="shrink-0">
+            {rule.deviceType}
+          </Badge>
+        </div>
+        {rule.confidence != null && (
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+            <TrendingUp className="h-3.5 w-3.5" />
+            <span>AI {t('knowledge.confidence')}：{(rule.confidence * 100).toFixed(0)}%</span>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="flex-1 space-y-3">
+        {/* 条件 */}
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-1">
+            {t('knowledge.conditions')}
+          </p>
+          <p className="text-sm line-clamp-2">{rule.conditions}</p>
+        </div>
+
+        {/* 结论 */}
+        <div>
+          <p className="text-xs font-medium text-muted-foreground mb-1">
+            {t('knowledge.conclusion')}
+          </p>
+          <p className="text-sm line-clamp-2">{rule.conclusion}</p>
+        </div>
+
+        {/* 推荐措施 */}
+        {rule.recommendedActions && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">
+              {t('knowledge.recommendedActions')}
+            </p>
+            <p className="text-sm line-clamp-2">{rule.recommendedActions}</p>
+          </div>
+        )}
+
+        {/* 审核操作按钮 */}
+        <div className="flex items-center gap-2 pt-2 border-t">
+          <Button
+            size="sm"
+            onClick={() => onApprove(rule.id)}
+            disabled={approveDisabled}
+          >
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+            {t('knowledge.approve')}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => onReject(rule.id)}
+            disabled={rejectDisabled}
+          >
+            <XCircle className="mr-1 h-3.5 w-3.5" />
+            {t('knowledge.reject')}
+          </Button>
         </div>
       </CardContent>
     </Card>
@@ -241,7 +456,7 @@ function CasesList({ keyword }: CasesListProps) {
   if (!filtered?.length) {
     return (
       <div className="py-20 text-center text-muted-foreground">
-        {t('common.noData')}
+        {t('knowledge.noCases')}
       </div>
     );
   }
@@ -276,12 +491,9 @@ function CaseCard({ caseItem }: CaseCardProps) {
             {caseItem.deviceType}
           </CardTitle>
           <div className="flex items-center gap-1.5">
-            {caseItem.isVerified && (
-              <Badge variant="default" className="shrink-0">
-                <CheckCircle2 className="mr-1 h-3 w-3" />
-                {t('knowledge.verified')}
-              </Badge>
-            )}
+            <Badge variant={caseItem.isVerified ? 'default' : 'secondary'}>
+              {caseItem.isVerified ? t('knowledge.verified') : t('knowledge.unverified')}
+            </Badge>
           </div>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
