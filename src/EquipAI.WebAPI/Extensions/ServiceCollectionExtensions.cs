@@ -51,13 +51,6 @@ public static class ServiceCollectionExtensions
             options.UseNpgsql(configuration.GetConnectionString("Default"));
         });
 
-        // 注册 DbContext 工厂，供 Singleton 服务（如 DataQualityService）创建独立的 Scoped DbContext
-        // Singleton 无法直接注入 Scoped 的 AppDbContext，通过工厂手动创建以避免生命周期冲突
-        services.AddDbContextFactory<AppDbContext>(options =>
-        {
-            options.UseNpgsql(configuration.GetConnectionString("Default"));
-        });
-
         // 租户上下文注册为 Scoped，从 HttpContext.Items["TenantContext"] 中获取
         // TenantResolutionMiddleware 在管道中先于业务逻辑执行，将解析好的 ITenantContext 存入 HttpContext.Items
         services.AddScoped<ITenantContext>(sp =>

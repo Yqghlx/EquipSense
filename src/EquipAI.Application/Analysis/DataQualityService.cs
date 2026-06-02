@@ -4,6 +4,7 @@ using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Application.Analysis;
@@ -15,7 +16,7 @@ namespace EquipAI.Application.Analysis;
 /// </summary>
 public class DataQualityService : IDataQualityService
 {
-    private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IMemoryCache _cache;
     private readonly ILogger<DataQualityService> _logger;
 
@@ -66,11 +67,11 @@ public class DataQualityService : IDataQualityService
     };
 
     public DataQualityService(
-        IDbContextFactory<AppDbContext> dbContextFactory,
+        IServiceScopeFactory scopeFactory,
         IMemoryCache cache,
         ILogger<DataQualityService> logger)
     {
-        _dbContextFactory = dbContextFactory;
+        _scopeFactory = scopeFactory;
         _cache = cache;
         _logger = logger;
     }
@@ -112,7 +113,8 @@ public class DataQualityService : IDataQualityService
         var endTime = DateTime.UtcNow;
         var startTime = endTime - EvaluationWindow;
 
-        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(ct);
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 查询该设备最近时间窗口内所有不重复的指标名称
         var metrics = await dbContext.DeviceTelemetry
@@ -142,7 +144,8 @@ public class DataQualityService : IDataQualityService
         var endTime = DateTime.UtcNow;
         var startTime = endTime - EvaluationWindow;
 
-        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(ct);
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 查询最近 1 小时的遥测数据，按时间升序排列
         var telemetryData = await dbContext.DeviceTelemetry
