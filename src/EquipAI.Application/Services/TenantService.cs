@@ -1,5 +1,6 @@
 using AutoMapper;
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Core.Models;
 using EquipAI.Application.DTOs.Tenants;
 using EquipAI.Application.Interfaces;
 using EquipAI.Infrastructure.Data;

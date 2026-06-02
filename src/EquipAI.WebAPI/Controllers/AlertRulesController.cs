@@ -3,6 +3,7 @@ using EquipAI.Application.Alerts.DTOs;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;

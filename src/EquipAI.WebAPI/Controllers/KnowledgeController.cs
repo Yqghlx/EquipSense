@@ -2,6 +2,7 @@ using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.Knowledge;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;

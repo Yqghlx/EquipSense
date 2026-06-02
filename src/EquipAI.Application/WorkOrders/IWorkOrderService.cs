@@ -1,4 +1,5 @@
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Core.Models;
 using EquipAI.Application.WorkOrders.DTOs;
 
 namespace EquipAI.Application.WorkOrders;

@@ -4,6 +4,7 @@ using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.WorkOrders.DTOs;
+using EquipAI.Core.Models;
 using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
 

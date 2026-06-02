@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using EquipAI.Application.Alerts.DTOs;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Core.Models;
 using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
 

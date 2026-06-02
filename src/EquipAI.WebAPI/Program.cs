@@ -5,6 +5,7 @@ using EquipAI.Application.WorkOrders.Handlers;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.HealthChecks;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
 using EquipAI.WebAPI.Extensions;
@@ -41,10 +42,13 @@ try
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
     });
 
-    // 健康检查：PostgreSQL 和 Redis 连通性
+    // 健康检查：PostgreSQL、Redis、MQTT、LLM 连通性
     builder.Services.AddHealthChecks()
-        .AddNpgSql(builder.Configuration.GetConnectionString("Default")!)
-        .AddRedis(builder.Configuration["Redis:ConnectionString"]!);
+        .AddNpgSql(builder.Configuration.GetConnectionString("Default")!, name: "postgresql")
+        .AddRedis(builder.Configuration["Redis:ConnectionString"]!, name: "redis")
+        .AddCheck<MqttHealthCheck>("mqtt", tags: new[] { "infra" })
+        .AddCheck<LlmHealthCheck>(
+            "llm", tags: new[] { "infra" }, timeout: TimeSpan.FromSeconds(5));
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
     builder.Services.AddCors(options =>
@@ -100,6 +104,29 @@ try
     app.MapControllers();
     app.MapHub<EquipAI.WebAPI.Hubs.IndustrialHub>("/hubs/industrial");
     app.MapHealthChecks("/health");
+    app.MapHealthChecks("/health/detail", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+    {
+        ResponseWriter = async (context, report) =>
+        {
+            context.Response.ContentType = "application/json";
+            var result = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                status = report.Status.ToString(),
+                duration = report.TotalDuration.TotalMilliseconds,
+                checks = report.Entries.Select(e => new
+                {
+                    name = e.Key,
+                    status = e.Value.Status.ToString(),
+                    description = e.Value.Description,
+                    duration = e.Value.Duration.TotalMilliseconds
+                })
+            }, new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+            await context.Response.WriteAsync(result);
+        }
+    });
 
     // 种子数据初始化：开发环境或传入 --seed 参数时执行
     if (args.Contains("--seed") || app.Environment.IsDevelopment())

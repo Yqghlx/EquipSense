@@ -1,5 +1,6 @@
 using AutoMapper;
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Core.Models;
 using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;

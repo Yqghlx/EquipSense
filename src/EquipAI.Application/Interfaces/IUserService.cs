@@ -1,4 +1,5 @@
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Core.Models;
 using EquipAI.Application.DTOs.Users;
 
 namespace EquipAI.Application.Interfaces;

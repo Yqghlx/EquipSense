@@ -1,4 +1,4 @@
-namespace EquipAI.Application.DTOs.Common;
+namespace EquipAI.Core.Models;
 
 /// <summary>
 /// 通用分页结果，包装列表数据及分页元信息

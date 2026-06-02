@@ -2,6 +2,7 @@ using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
