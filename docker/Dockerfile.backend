@@ -22,10 +22,19 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# 创建非 root 用户运行应用
+RUN groupadd -r equipai && useradd -r -g equipai equipai
+
 COPY --from=build /app/publish .
+
+# 设置文件所有权
+RUN chown -R equipai:equipai /app
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV DOTNET_System_Globalization_Invariant=false
+
+# 切换到非 root 用户
+USER equipai
 
 EXPOSE 8080
 
