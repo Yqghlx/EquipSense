@@ -89,6 +89,11 @@ public class AppDbContext : DbContext
     public DbSet<FaultCase> FaultCases => Set<FaultCase>();
 
     /// <summary>
+    /// 知识规则版本快照表
+    /// </summary>
+    public DbSet<KnowledgeRuleVersion> KnowledgeRuleVersions => Set<KnowledgeRuleVersion>();
+
+    /// <summary>
     /// 技术人员画像表
     /// </summary>
     public DbSet<TechnicianProfile> TechnicianProfiles => Set<TechnicianProfile>();

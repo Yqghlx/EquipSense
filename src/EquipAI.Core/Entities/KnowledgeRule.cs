@@ -69,4 +69,9 @@ public class KnowledgeRule : BaseEntity
     /// 创建人
     /// </summary>
     public string? CreatedBy { get; set; }
+
+    /// <summary>
+    /// 当前版本号（从 1 开始，每次编辑递增）
+    /// </summary>
+    public int Version { get; set; } = 1;
 }

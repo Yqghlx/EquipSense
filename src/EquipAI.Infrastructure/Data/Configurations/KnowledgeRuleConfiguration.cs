@@ -22,5 +22,8 @@ public class KnowledgeRuleConfiguration : IEntityTypeConfiguration<KnowledgeRule
 
         // 按租户+启用状态查询：用于获取当前生效的规则列表
         builder.HasIndex(e => new { e.TenantId, e.Enabled });
+
+        // Version 字段默认值
+        builder.Property(e => e.Version).HasDefaultValue(1);
     }
 }
