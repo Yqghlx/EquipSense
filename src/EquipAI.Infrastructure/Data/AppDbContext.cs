@@ -128,6 +128,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.IntegrationPushLog> IntegrationPushLogs => Set<Core.Entities.IntegrationPushLog>();
 
+    /// <summary>
+    /// Web Push 推送订阅表
+    /// </summary>
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

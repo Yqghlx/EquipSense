@@ -16,6 +16,7 @@
     </PackageReference>
     <PackageReference Include="Serilog.AspNetCore" Version="8.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5" />
+    <PackageReference Include="WebPush" Version="1.0.13" />
   </ItemGroup>
 
   <PropertyGroup>

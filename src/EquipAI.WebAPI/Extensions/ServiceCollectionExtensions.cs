@@ -1,4 +1,5 @@
 using System.Text;
+using EquipAI.Application.Notifications;
 using EquipAI.Application.Alerts;
 using EquipAI.Application.Alerts.Evaluators;
 using EquipAI.Application.Alerts.Handlers;
@@ -218,6 +219,9 @@ public static class ServiceCollectionExtensions
 
         // 审计日志服务 — 记录系统敏感操作（登录、权限变更、数据修改等）
         services.AddScoped<IAuditLogService, AuditLogService>();
+
+        // 推送通知服务
+        services.AddScoped<IPushNotificationService, PushNotificationService>();
 
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
