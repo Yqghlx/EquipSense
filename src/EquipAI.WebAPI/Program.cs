@@ -43,13 +43,12 @@ try
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
     });
 
-    // 健康检查：PostgreSQL、Redis、MQTT、LLM 连通性
+    // 健康检查：三级探针 — startup(仅DB) / liveness(DB+Redis) / ready(全部)
     builder.Services.AddHealthChecks()
-        .AddNpgSql(builder.Configuration.GetConnectionString("Default")!, name: "postgresql")
-        .AddRedis(builder.Configuration["Redis:ConnectionString"]!, name: "redis")
-        .AddCheck<MqttHealthCheck>("mqtt", tags: new[] { "infra" })
-        .AddCheck<LlmHealthCheck>(
-            "llm", tags: new[] { "infra" }, timeout: TimeSpan.FromSeconds(5));
+        .AddNpgSql(builder.Configuration.GetConnectionString("Default")!, name: "postgresql", tags: new[] { "startup", "liveness", "ready" })
+        .AddRedis(builder.Configuration["Redis:ConnectionString"]!, name: "redis", tags: new[] { "liveness", "ready" })
+        .AddCheck<MqttHealthCheck>("mqtt", tags: new[] { "ready" })
+        .AddCheck<LlmHealthCheck>("llm", tags: new[] { "ready" }, timeout: TimeSpan.FromSeconds(5));
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
     builder.Services.AddCors(options =>
@@ -117,9 +116,42 @@ try
 
     app.MapControllers();
     app.MapHub<EquipAI.WebAPI.Hubs.IndustrialHub>("/hubs/industrial");
-    app.MapHealthChecks("/health");
-    app.MapHealthChecks("/health/detail", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+    // 启动探针：仅检查数据库连接（Docker start_period 使用）
+    app.MapHealthChecks("/health/startup", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
     {
+        Predicate = check => check.Tags.Contains("startup"),
+        ResponseWriter = async (context, report) =>
+        {
+            context.Response.ContentType = "application/json";
+            var result = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                status = report.Status.ToString(),
+                checks = report.Entries.Select(e => new { name = e.Key, status = e.Value.Status.ToString() })
+            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+            await context.Response.WriteAsync(result);
+        }
+    });
+
+    // 存活探针：检查数据库 + Redis
+    app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+    {
+        Predicate = check => check.Tags.Contains("liveness"),
+        ResponseWriter = async (context, report) =>
+        {
+            context.Response.ContentType = "application/json";
+            var result = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                status = report.Status.ToString(),
+                checks = report.Entries.Select(e => new { name = e.Key, status = e.Value.Status.ToString() })
+            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+            await context.Response.WriteAsync(result);
+        }
+    });
+
+    // 就绪探针：检查所有依赖（数据库 + Redis + MQTT + LLM）
+    app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+    {
+        Predicate = check => check.Tags.Contains("ready"),
         ResponseWriter = async (context, report) =>
         {
             context.Response.ContentType = "application/json";
@@ -134,10 +166,7 @@ try
                     description = e.Value.Description,
                     duration = e.Value.Duration.TotalMilliseconds
                 })
-            }, new System.Text.Json.JsonSerializerOptions
-            {
-                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
-            });
+            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
             await context.Response.WriteAsync(result);
         }
     });
