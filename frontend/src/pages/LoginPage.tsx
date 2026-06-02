@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
@@ -27,6 +27,7 @@ type LoginFormData = {
 export default function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -52,7 +53,8 @@ export default function LoginPage() {
     try {
       const response = await api.post<AuthResponse>('/auth/login', data);
       setAuth(response.data.accessToken, response.data.userInfo);
-      navigate('/dashboard', { replace: true });
+      const from = (location.state as { from?: string })?.from || '/dashboard';
+      navigate(from, { replace: true });
     } catch {
       setError(t('auth.loginError'));
     } finally {

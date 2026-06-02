@@ -3,6 +3,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './lib/queryClient';
 import { AuthLayout } from './components/layout/AuthLayout';
 import { AppLayout } from './components/layout/AppLayout';
+import { AuthGuard } from './components/layout/AuthGuard';
 import { NotificationToast } from './components/layout/NotificationToast';
 import { InstallPrompt } from './components/layout/InstallPrompt';
 import LoginPage from './pages/LoginPage';
@@ -45,21 +46,23 @@ function AppRoutes() {
         <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
       </Route>
 
-      {/* 业务路由（需认证） */}
-      <Route element={<AppLayout />}>
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/devices" element={<DeviceListPage />} />
-        <Route path="/devices/:id" element={<DeviceDetailPage />} />
-        <Route path="/device-setup" element={<DeviceSetupPage />} />
-        <Route path="/alerts" element={<AlertCenterPage />} />
-        <Route path="/alert-rules" element={<AlertRulesPage />} />
-        <Route path="/work-orders" element={<WorkOrderListPage />} />
-        <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
-        <Route path="/dispatch" element={<DispatchBoardPage />} />
-        <Route path="/analyses" element={<AnalysesPage />} />
-        <Route path="/knowledge" element={<KnowledgePage />} />
-        <Route path="/pending-rules" element={<PendingRulesPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+      {/* 业务路由（需认证，AuthGuard 保护） */}
+      <Route element={<AuthGuard />}>
+        <Route element={<AppLayout />}>
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/devices" element={<DeviceListPage />} />
+          <Route path="/devices/:id" element={<DeviceDetailPage />} />
+          <Route path="/device-setup" element={<DeviceSetupPage />} />
+          <Route path="/alerts" element={<AlertCenterPage />} />
+          <Route path="/alert-rules" element={<AlertRulesPage />} />
+          <Route path="/work-orders" element={<WorkOrderListPage />} />
+          <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
+          <Route path="/dispatch" element={<DispatchBoardPage />} />
+          <Route path="/analyses" element={<AnalysesPage />} />
+          <Route path="/knowledge" element={<KnowledgePage />} />
+          <Route path="/pending-rules" element={<PendingRulesPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+        </Route>
       </Route>
 
       {/* 兜底路由 */}
