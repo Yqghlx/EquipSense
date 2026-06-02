@@ -421,6 +421,8 @@ export interface KnowledgeRule {
   successCount: number;
   /** 是否启用 */
   enabled: boolean;
+  /** 版本号 */
+  version: number;
   /** 创建人 ID */
   createdBy?: string;
   /** 创建时间（ISO 8601） */
@@ -489,6 +491,110 @@ export interface FaultCase {
   isVerified: boolean;
   /** 创建时间（ISO 8601） */
   createdAt: string;
+}
+
+/** 知识规则版本快照 */
+export interface KnowledgeRuleVersion {
+  /** 版本记录唯一标识（UUID） */
+  id: string;
+  /** 关联规则 ID */
+  ruleId: string;
+  /** 版本号 */
+  version: number;
+  /** 规则快照（JSON 字符串，记录该版本的完整规则内容） */
+  snapshot: string;
+  /** 变更操作人 */
+  changedBy?: string;
+  /** 变更摘要 */
+  changeSummary?: string;
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
+}
+
+/** 导入预览项（文件解析后的有效数据行） */
+export interface ImportPreviewItem {
+  /** 行号 */
+  rowNumber: number;
+  /** 适用设备类型 */
+  deviceType: string;
+  /** 规则名称 */
+  name: string;
+  /** 触发条件 */
+  conditions: string;
+  /** 结论 */
+  conclusion: string;
+  /** 推荐措施 */
+  recommendedActions?: string;
+  /** 检查步骤 */
+  checkSteps?: string;
+  /** 置信度权重（0-1） */
+  confidenceWeight: number;
+}
+
+/** 导入错误项（文件解析失败的行） */
+export interface ImportErrorItem {
+  /** 行号 */
+  rowNumber: number;
+  /** 错误信息 */
+  message: string;
+  /** 原始内容 */
+  rawContent?: string;
+}
+
+/** 导入预览结果（上传文件后的预览响应） */
+export interface ImportPreviewResult {
+  /** 有效数据列表 */
+  validItems: ImportPreviewItem[];
+  /** 错误列表 */
+  errors: ImportErrorItem[];
+  /** 文件总行数 */
+  totalRows: number;
+  /** 有效行数 */
+  validCount: number;
+  /** 错误行数 */
+  errorCount: number;
+}
+
+/** 批量导入结果 */
+export interface ImportResult {
+  /** 成功导入数 */
+  imported: number;
+  /** 跳过数 */
+  skipped: number;
+  /** 失败数 */
+  failed: number;
+  /** 失败详情 */
+  errors: ImportErrorItem[];
+}
+
+/** 编辑知识规则请求参数 */
+export interface UpdateKnowledgeRuleRequest {
+  /** 规则名称 */
+  name?: string;
+  /** 适用设备类型 */
+  deviceType?: string;
+  /** 触发条件 */
+  conditions?: string;
+  /** 结论 */
+  conclusion?: string;
+  /** 推荐措施 */
+  recommendedActions?: string;
+  /** 检查步骤 */
+  checkSteps?: string;
+  /** 置信度权重（0-1） */
+  confidenceWeight?: number;
+  /** 变更摘要 */
+  changeSummary?: string;
+}
+
+/** 条件项（用于条件编辑器的结构化条件数据） */
+export interface ConditionItem {
+  /** 指标名称 */
+  metric: string;
+  /** 比较运算符（> / >= / < / <= / == / !=） */
+  operator: string;
+  /** 阈值 */
+  threshold: number;
 }
 
 // ============================================================================

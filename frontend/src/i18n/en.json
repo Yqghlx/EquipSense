@@ -342,7 +342,62 @@
     "noCases": "No fault cases",
     "sourceManual": "Manual",
     "sourceAI": "AI Generated",
-    "sourceImported": "Imported"
+    "sourceImported": "Imported",
+    "editDialog": {
+      "title": "Edit Knowledge Rule",
+      "description": "Modify rule content. Only changed fields will be submitted.",
+      "ruleName": "Rule Name",
+      "deviceType": "Device Type",
+      "conditions": "Conditions",
+      "conclusion": "Conclusion",
+      "recommendedActions": "Recommended Actions",
+      "checkSteps": "Check Steps",
+      "confidenceWeight": "Confidence Weight",
+      "changeSummary": "Change Summary",
+      "changeSummaryPlaceholder": "Briefly describe the reason for this change (optional)",
+      "switchToText": "Switch to Text Mode",
+      "switchToStructured": "Switch to Structured Editor"
+    },
+    "conditionEditor": {
+      "title": "Conditions",
+      "addCondition": "Add Condition",
+      "emptyHint": "No conditions yet. Click the button above to add.",
+      "metricPlaceholder": "Metric name",
+      "thresholdPlaceholder": "Threshold"
+    },
+    "importExport": {
+      "import": "Import File",
+      "export": "Export",
+      "exportCSV": "Export as CSV",
+      "exportJSON": "Export as JSON"
+    },
+    "importPreview": {
+      "title": "Import Preview",
+      "description": "Review file parsing results before confirming import",
+      "doneDescription": "Import completed. Review the results.",
+      "startPreview": "Start Preview",
+      "totalRows": "Total Rows",
+      "validCount": "Valid Rows",
+      "errorCount": "Error Rows",
+      "validItems": "Valid Data Preview",
+      "errors": "Error Details",
+      "row": "Row",
+      "moreItems": "{{count}} more items not shown",
+      "confirmImport": "Confirm Import ({{count}} rules)",
+      "imported": "Imported",
+      "skipped": "Skipped",
+      "failed": "Failed"
+    },
+    "versionHistory": {
+      "title": "Version History",
+      "currentVersion": "Current version v{{version}}",
+      "current": "Current",
+      "noHistory": "No version history",
+      "unknownUser": "Unknown user",
+      "rollback": "Rollback to this version",
+      "rollbackConfirmTitle": "Confirm Rollback",
+      "rollbackConfirm": "Are you sure you want to rollback to v{{version}}? The current version will be overwritten."
+    }
   },
   "pendingRules": {
     "title": "Pending Rule Review",

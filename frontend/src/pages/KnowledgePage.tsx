@@ -7,7 +7,9 @@ import {
   XCircle,
   Clock,
   TrendingUp,
-  Upload,
+  Pencil,
+  History,
+  Power,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -20,9 +22,12 @@ import {
   useFaultCases,
   useApprovePendingRule,
   useRejectPendingRule,
-  useImportPresetData,
+  useToggleKnowledgeRule,
 } from '../hooks/useKnowledge';
 import type { KnowledgeRule, PendingRule, FaultCase } from '../types';
+import ImportExportToolbar from '../components/knowledge/ImportExportToolbar';
+import RuleEditDialog from '../components/knowledge/RuleEditDialog';
+import VersionHistoryPanel from '../components/knowledge/VersionHistoryPanel';
 
 /**
  * 知识库管理主页面
@@ -38,7 +43,6 @@ export default function KnowledgePage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('rules');
   const [keyword, setKeyword] = useState('');
-  const importMutation = useImportPresetData();
 
   /** 待审核规则数量，用于 Tab 徽标显示 */
   const { data: pendingCountData } = usePendingRules({
@@ -50,18 +54,10 @@ export default function KnowledgePage() {
 
   return (
     <div className="space-y-4">
-      {/* 页头：标题 + 导入按钮 */}
+      {/* 页头：标题 + 导入导出工具栏 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('knowledge.title')}</h1>
-        <Button
-          onClick={() => importMutation.mutate()}
-          disabled={importMutation.isPending}
-          variant="outline"
-          size="sm"
-        >
-          <Upload className="mr-2 h-4 w-4" />
-          {t('knowledge.importPreset')}
-        </Button>
+        <ImportExportToolbar />
       </div>
 
       {/* 搜索栏 */}
@@ -172,10 +168,17 @@ interface RuleCardProps {
 /**
  * 规则卡片组件
  *
- * 展示规则的名称、设备类型、来源、应用次数和准确率。
+ * 展示规则的名称、设备类型、版本号、来源、应用次数和准确率。
+ * 提供编辑、启用/禁用切换和版本历史查看操作。
  */
 function RuleCard({ rule }: RuleCardProps) {
   const { t } = useTranslation();
+  const toggleMutation = useToggleKnowledgeRule();
+
+  // 编辑对话框状态
+  const [editingRule, setEditingRule] = useState<KnowledgeRule | null>(null);
+  // 版本历史面板状态
+  const [showHistory, setShowHistory] = useState(false);
 
   /** 来源标签的显示文本和样式 */
   const sourceBadge = (() => {
@@ -194,72 +197,107 @@ function RuleCard({ rule }: RuleCardProps) {
   })();
 
   return (
-    <Card className="flex flex-col">
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base leading-snug">{rule.name}</CardTitle>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <Badge variant={rule.enabled ? 'default' : 'secondary'}>
-              {rule.enabled ? t('knowledge.enabled') : t('knowledge.disabled')}
-            </Badge>
-            <Badge variant={sourceBadge.variant}>
-              {sourceBadge.label}
-            </Badge>
+    <>
+      <Card className="flex flex-col">
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-base leading-snug">{rule.name}</CardTitle>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Badge variant="outline" className="text-xs font-mono">
+                v{rule.version}
+              </Badge>
+              <Badge
+                variant={rule.enabled ? 'default' : 'secondary'}
+                className="cursor-pointer"
+                onClick={() => toggleMutation.mutate(rule.id)}
+              >
+                <Power className="mr-1 h-3 w-3" />
+                {rule.enabled ? t('knowledge.enabled') : t('knowledge.disabled')}
+              </Badge>
+              <Badge variant={sourceBadge.variant}>
+                {sourceBadge.label}
+              </Badge>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <BookOpen className="h-3.5 w-3.5" />
-          <span>{rule.deviceType}</span>
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 space-y-3">
-        {/* 条件 */}
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">
-            {t('knowledge.conditions')}
-          </p>
-          <p className="text-sm line-clamp-2">{rule.conditions}</p>
-        </div>
-
-        {/* 结论 */}
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-1">
-            {t('knowledge.conclusion')}
-          </p>
-          <p className="text-sm line-clamp-2">{rule.conclusion}</p>
-        </div>
-
-        {/* 推荐措施 */}
-        {rule.recommendedActions && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <BookOpen className="h-3.5 w-3.5" />
+            <span>{rule.deviceType}</span>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 space-y-3">
+          {/* 条件 */}
           <div>
             <p className="text-xs font-medium text-muted-foreground mb-1">
-              {t('knowledge.recommendedActions')}
+              {t('knowledge.conditions')}
             </p>
-            <p className="text-sm line-clamp-2">{rule.recommendedActions}</p>
+            <p className="text-sm line-clamp-2">{rule.conditions}</p>
           </div>
-        )}
 
-        {/* 统计指标 */}
-        <div className="flex items-center gap-4 pt-2 border-t">
-          <div className="flex items-center gap-1.5 text-sm">
-            <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground">{t('knowledge.successCount')}:</span>
-            <span className="font-medium">{rule.successCount}</span>
+          {/* 结论 */}
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">
+              {t('knowledge.conclusion')}
+            </p>
+            <p className="text-sm line-clamp-2">{rule.conclusion}</p>
           </div>
-          {rule.accuracyRate != null && (
-            <div className="flex items-center gap-1.5 text-sm">
-              <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-              <span className="text-muted-foreground">{t('knowledge.accuracyRate')}:</span>
-              <span className="font-medium">{rule.accuracyRate}%</span>
+
+          {/* 推荐措施 */}
+          {rule.recommendedActions && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-1">
+                {t('knowledge.recommendedActions')}
+              </p>
+              <p className="text-sm line-clamp-2">{rule.recommendedActions}</p>
             </div>
           )}
-          <div className="flex items-center gap-1.5 text-sm">
-            <span className="text-muted-foreground">{t('knowledge.confidenceWeight')}:</span>
-            <span className="font-medium">{(rule.confidenceWeight * 100).toFixed(0)}%</span>
+
+          {/* 统计指标 */}
+          <div className="flex items-center gap-4 pt-2 border-t">
+            <div className="flex items-center gap-1.5 text-sm">
+              <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-muted-foreground">{t('knowledge.successCount')}:</span>
+              <span className="font-medium">{rule.successCount}</span>
+            </div>
+            {rule.accuracyRate != null && (
+              <div className="flex items-center gap-1.5 text-sm">
+                <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                <span className="text-muted-foreground">{t('knowledge.accuracyRate')}:</span>
+                <span className="font-medium">{rule.accuracyRate}%</span>
+              </div>
+            )}
+            <div className="flex items-center gap-1.5 text-sm">
+              <span className="text-muted-foreground">{t('knowledge.confidenceWeight')}:</span>
+              <span className="font-medium">{(rule.confidenceWeight * 100).toFixed(0)}%</span>
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
+
+          {/* 操作按钮区 */}
+          <div className="flex items-center gap-2 pt-2 border-t">
+            <Button size="sm" variant="outline" onClick={() => setEditingRule(rule)}>
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              {t('common.edit')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowHistory(true)}>
+              <History className="mr-1 h-3.5 w-3.5" />
+              {t('knowledge.versionHistory.title')}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 规则编辑对话框 */}
+      <RuleEditDialog
+        rule={editingRule}
+        onClose={() => setEditingRule(null)}
+      />
+
+      {/* 版本历史面板 */}
+      <VersionHistoryPanel
+        rule={rule}
+        open={showHistory}
+        onClose={() => setShowHistory(false)}
+      />
+    </>
   );
 }
 

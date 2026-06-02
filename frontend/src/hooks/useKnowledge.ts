@@ -6,6 +6,10 @@ import type {
   FaultCase,
   PagedResult,
   PagedQuery,
+  UpdateKnowledgeRuleRequest,
+  ImportPreviewResult,
+  ImportResult,
+  KnowledgeRuleVersion,
 } from '../types';
 
 // ============================================================================
@@ -172,17 +176,15 @@ export function useFaultCases(
 // ============================================================================
 
 /**
- * 导入行业预置数据 Mutation Hook
+ * 导入行业预置规则 Mutation Hook
  *
  * 导入行业预置的知识规则到当前租户，成功后使规则列表缓存失效。
  */
-export function useImportPresetData() {
+export function useImportPresetRules() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () => {
-      const { data } = await api.post('/knowledge/import', {
-        source: 'industry-preset',
-      });
+      const { data } = await api.post<ImportResult>('/knowledge/rules/preset-import');
       return data;
     },
     onSuccess: () => {
@@ -220,6 +222,165 @@ export function useApproveWithEdit() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pending-rules'] });
       qc.invalidateQueries({ queryKey: ['knowledge-rules'] });
+    },
+  });
+}
+
+// ============================================================================
+// 规则编辑 + 启用/禁用
+// ============================================================================
+
+/**
+ * 更新知识规则 Mutation Hook
+ *
+ * 支持部分更新（仅发送变更字段），成功后使规则列表缓存失效。
+ */
+export function useUpdateKnowledgeRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...request }: { id: string } & UpdateKnowledgeRuleRequest) => {
+      const { data } = await api.put<KnowledgeRule>(`/knowledge/rules/${id}`, request);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-rules'] });
+    },
+  });
+}
+
+/**
+ * 切换知识规则启用/禁用状态 Mutation Hook
+ *
+ * 调用后端 toggle 端点切换规则启用状态，成功后使规则列表缓存失效。
+ */
+export function useToggleKnowledgeRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.patch<KnowledgeRule>(`/knowledge/rules/${id}/toggle`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-rules'] });
+    },
+  });
+}
+
+// ============================================================================
+// 导入导出
+// ============================================================================
+
+/**
+ * 导入预览 Mutation Hook
+ *
+ * 上传文件并获取预览结果（有效数据 + 错误列表），不执行实际导入。
+ */
+export function useImportPreview() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post<ImportPreviewResult>(
+        '/knowledge/rules/import?preview=true',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return data;
+    },
+  });
+}
+
+/**
+ * 批量导入规则 Mutation Hook
+ *
+ * 上传文件执行实际导入，成功后使规则列表缓存失效。
+ */
+export function useImportRules() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post<ImportResult>(
+        '/knowledge/rules/import',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-rules'] });
+    },
+  });
+}
+
+/**
+ * 导出规则 Mutation Hook
+ *
+ * 按指定格式（CSV/JSON）导出规则文件，自动触发浏览器下载。
+ */
+export function useExportRules() {
+  return useMutation({
+    mutationFn: async ({ format, deviceType }: { format: 'csv' | 'json'; deviceType?: string }) => {
+      const params = new URLSearchParams({ format });
+      if (deviceType) params.set('deviceType', deviceType);
+      const response = await api.get(`/knowledge/rules/export?${params}`, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `knowledge_rules_${new Date().toISOString().slice(0, 10)}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    },
+  });
+}
+
+// ============================================================================
+// 版本管理
+// ============================================================================
+
+/**
+ * 规则版本历史查询 Hook
+ *
+ * 查询指定规则的所有历史版本，仅当 ruleId 非空时启用。
+ */
+export function useRuleVersions(ruleId: string | null) {
+  return useQuery({
+    queryKey: ['knowledge-rule-versions', ruleId],
+    queryFn: async () => {
+      const { data } = await api.get<KnowledgeRuleVersion[]>(
+        `/knowledge/rules/${ruleId}/versions`,
+      );
+      return data;
+    },
+    enabled: !!ruleId,
+  });
+}
+
+/**
+ * 回滚规则版本 Mutation Hook
+ *
+ * 将规则回滚到指定版本，成功后同时使规则列表和版本历史缓存失效。
+ */
+export function useRollbackRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ruleId, version }: { ruleId: string; version: number }) => {
+      const { data } = await api.post<KnowledgeRule>(
+        `/knowledge/rules/${ruleId}/rollback?version=${version}`,
+      );
+      return data;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge-rules'] });
+      queryClient.invalidateQueries({
+        queryKey: ['knowledge-rule-versions', variables.ruleId],
+      });
     },
   });
 }
