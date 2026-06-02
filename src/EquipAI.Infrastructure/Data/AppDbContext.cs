@@ -123,6 +123,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.WorkOrderApproval> WorkOrderApprovals => Set<Core.Entities.WorkOrderApproval>();
 
+    /// <summary>
+    /// 集成推送日志表 — 记录每次外部集成调用的完整信息
+    /// </summary>
+    public DbSet<Core.Entities.IntegrationPushLog> IntegrationPushLogs => Set<Core.Entities.IntegrationPushLog>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
