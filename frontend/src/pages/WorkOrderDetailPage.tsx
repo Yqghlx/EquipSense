@@ -10,6 +10,7 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
+import { ApprovalProgressPanel } from '../components/workorder/ApprovalProgressPanel';
 import {
   useWorkOrder,
   useStartWorkOrder,
@@ -19,6 +20,10 @@ import {
   useCloseWorkOrder,
   useCancelWorkOrder,
 } from '../hooks/useWorkOrders';
+import {
+  useWorkOrderApprovals,
+  useSubmitWorkOrder,
+} from '../hooks/useApprovals';
 import type { WorkOrder } from '../types';
 
 
@@ -39,6 +44,7 @@ export default function WorkOrderDetailPage() {
     PendingDispatch: t('workorder.status.pendingDispatch'),
     Assigned: t('workorder.status.assigned'),
     InProgress: t('workorder.status.inProgress'),
+    SubmittedForApproval: '待审批',
     Completed: t('workorder.status.completed'),
     Accepted: t('workorder.status.accepted'),
     Rejected: t('workorder.status.rejected'),
@@ -50,12 +56,14 @@ export default function WorkOrderDetailPage() {
   const [resolution, setResolution] = useState('');
 
   const { data: workOrder, isLoading } = useWorkOrder(id ?? '');
+  const { data: approvals } = useWorkOrderApprovals(id);
   const startOrder = useStartWorkOrder();
   const completeOrder = useCompleteWorkOrder();
   const acceptOrder = useAcceptWorkOrder();
   const rejectOrder = useRejectWorkOrder();
   const closeOrder = useCloseWorkOrder();
   const cancelOrder = useCancelWorkOrder();
+  const submitOrder = useSubmitWorkOrder();
 
   if (isLoading) return <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>;
   if (!workOrder) return <div className="py-20 text-center text-muted-foreground">{t('common.noData')}</div>;
@@ -102,6 +110,7 @@ export default function WorkOrderDetailPage() {
         onReject={(reason) => rejectOrder.mutate({ id: workOrder.id, reason })}
         onClose={() => closeOrder.mutate(workOrder.id)}
         onCancel={() => setCancelDialogOpen(true)}
+        onSubmitForApproval={() => submitOrder.mutate(workOrder.id)}
       />
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -157,6 +166,19 @@ export default function WorkOrderDetailPage() {
         </Card>
       )}
 
+      {/* 待审批状态：审批进度面板 */}
+      {workOrder.status === 'SubmittedForApproval' && approvals && approvals.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-base">审批进度</CardTitle></CardHeader>
+          <CardContent>
+            <ApprovalProgressPanel
+              workOrderId={workOrder.id}
+              approvals={approvals}
+            />
+          </CardContent>
+        </Card>
+      )}
+
       {/* 取消工单对话框 */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent>
@@ -205,6 +227,8 @@ interface ActionButtonsProps {
   onClose: () => void;
   /** 取消工单回调 */
   onCancel: () => void;
+  /** 提交验收（发起审批流程）回调 */
+  onSubmitForApproval: () => void;
 }
 
 /**
@@ -217,7 +241,7 @@ interface ActionButtonsProps {
  * - completed → 验收通过 / 验收不通过
  * - accepted → 关闭
  */
-function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCancel }: ActionButtonsProps) {
+function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCancel, onSubmitForApproval }: ActionButtonsProps) {
   const { t } = useTranslation();
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
@@ -226,7 +250,8 @@ function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCanc
   const buttons: Record<string, Array<{ label: string; action: () => void; variant?: 'default' | 'outline' | 'destructive' }>> = {
     PendingDispatch: [{ label: t('workorder.dispatch'), action: onStart }],
     Assigned: [{ label: t('workorder.startExecution'), action: onStart }],
-    InProgress: [],
+    InProgress: [{ label: '提交验收', action: onSubmitForApproval }],
+    SubmittedForApproval: [],
     Completed: [
       { label: t('workorder.accept'), action: onAccept },
       { label: t('workorder.reject'), action: () => setShowReject(true), variant: 'outline' },

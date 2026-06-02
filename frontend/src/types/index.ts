@@ -251,7 +251,7 @@ export interface WorkOrder {
   title: string;
   /** 工单类型（corrective / preventive / inspection） */
   type: string;
-  /** 工单状态（PendingDispatch / Assigned / InProgress / Completed / Accepted / Rejected / Closed / Cancelled） */
+  /** 工单状态（PendingDispatch / Assigned / InProgress / SubmittedForApproval / Completed / Accepted / Rejected / Closed / Cancelled） */
   status: string;
   /** 优先级（Urgent / High / Medium / Low） */
   priority: string;
@@ -527,5 +527,89 @@ export interface QuickRegisterRequest {
     threshold: number;
     /** 告警严重级别（Critical / High / Normal / Low） */
     severity?: string;
+  }[];
+}
+
+// ============================================================================
+// 审批链
+// ============================================================================
+
+/** 审批动作 */
+export type ApprovalAction = 'Pending' | 'Approved' | 'Rejected';
+
+/** 审批步骤 */
+export interface ApprovalStepDto {
+  /** 步骤唯一标识 */
+  id: string;
+  /** 步骤顺序（从 1 开始） */
+  stepOrder: number;
+  /** 审批角色 */
+  role: string;
+  /** 指定审批人 ID（可选，为空则按角色匹配） */
+  specificApproverId?: string;
+  /** 是否必填步骤 */
+  isRequired: boolean;
+}
+
+/** 审批链模板 */
+export interface ApprovalChainTemplate {
+  /** 模板唯一标识（UUID） */
+  id: string;
+  /** 适用的工单类型（为空则通用） */
+  workOrderType?: string;
+  /** 适用的优先级（为空则通用） */
+  priority?: string;
+  /** 模板名称 */
+  name: string;
+  /** 是否为默认模板 */
+  isDefault: boolean;
+  /** 是否启用 */
+  enabled: boolean;
+  /** 审批步骤列表 */
+  steps: ApprovalStepDto[];
+  /** 创建时间（ISO 8601） */
+  createdAt: string;
+}
+
+/** 工单审批记录 */
+export interface WorkOrderApprovalDto {
+  /** 记录唯一标识（UUID） */
+  id: string;
+  /** 关联工单 ID */
+  workOrderId: string;
+  /** 审批步骤顺序 */
+  stepOrder: number;
+  /** 期望审批角色 */
+  expectedRole: string;
+  /** 实际审批人 ID */
+  approverId?: string;
+  /** 审批动作（Pending / Approved / Rejected） */
+  action: ApprovalAction;
+  /** 审批意见 */
+  comment?: string;
+  /** 审批操作时间（ISO 8601） */
+  actedAt?: string;
+}
+
+/** 创建审批链请求 */
+export interface CreateApprovalChainRequest {
+  /** 适用的工单类型（为空则通用） */
+  workOrderType?: string;
+  /** 适用的优先级（为空则通用） */
+  priority?: string;
+  /** 模板名称 */
+  name: string;
+  /** 是否为默认模板 */
+  isDefault: boolean;
+  /** 审批步骤列表 */
+  steps: {
+    /** 步骤顺序 */
+    stepOrder: number;
+    /** 审批角色 */
+    role: string;
+    /** 指定审批人 ID（可选） */
+    specificApproverId?: string;
+    /** 是否必填 */
+    isRequired: boolean;
   }[];
 }
