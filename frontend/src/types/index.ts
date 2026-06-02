@@ -719,3 +719,45 @@ export interface CreateApprovalChainRequest {
     isRequired: boolean;
   }[];
 }
+
+// ============================================================================
+// 注册
+// ============================================================================
+
+/** 注册请求参数 */
+export interface RegisterRequest {
+  /** 企业名称 */
+  tenantName: string;
+  /** 企业标识（用于 URL 子域名） */
+  slug: string;
+  /** 管理员用户名 */
+  username: string;
+  /** 管理员密码 */
+  password: string;
+  /** 显示名称 */
+  displayName?: string;
+  /** 邮箱 */
+  email?: string;
+  /** 套餐 ID */
+  plan: string;
+}
+
+/** 套餐信息 */
+export interface PlanInfo {
+  /** 套餐唯一标识 */
+  planId: string;
+  /** 套餐显示名称 */
+  displayName: string;
+  /** 套餐描述 */
+  description: string;
+  /** 最大设备数 */
+  maxDevices: number;
+  /** 最大用户数 */
+  maxUsers: number;
+  /** 数据保留天数 */
+  dataRetentionDays: number;
+  /** 月价格 */
+  monthlyPrice: number;
+  /** 是否免费套餐 */
+  isFree: boolean;
+}

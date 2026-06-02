@@ -484,5 +484,85 @@
     "loadScore": "空闲",
     "activeWork": "进行中",
     "assign": "派工"
+  },
+  "register": {
+    "title": "注册新租户",
+    "step1Title": "选择套餐",
+    "step2Title": "填写企业信息",
+    "step3Title": "创建管理员账户",
+    "selectPlanHint": "选择适合您企业的套餐",
+    "maxDevices": "最大设备数",
+    "maxUsers": "最大用户数",
+    "dataRetention": "数据保留",
+    "free": "免费",
+    "month": "月",
+    "tenantName": "企业名称",
+    "tenantNamePlaceholder": "例如：青岛西海岸新区塑料制品厂",
+    "tenantNameMin": "企业名称至少 2 个字符",
+    "slug": "企业标识",
+    "slugPlaceholder": "例如：qd-plastic",
+    "slugHint": "用于登录地址，仅支持小写字母、数字和连字符",
+    "slugMin": "企业标识至少 2 个字符",
+    "slugPattern": "仅支持小写字母、数字和连字符，不能以连字符开头或结尾",
+    "usernameMin": "用户名至少 3 个字符",
+    "passwordMin": "密码至少 6 个字符",
+    "confirmPassword": "确认密码",
+    "confirmPasswordRequired": "请再次输入密码",
+    "passwordMismatch": "两次输入的密码不一致",
+    "displayName": "显示名称",
+    "displayNamePlaceholder": "例如：张三",
+    "email": "邮箱",
+    "emailPlaceholder": "例如：admin@example.com",
+    "emailInvalid": "请输入有效的邮箱地址",
+    "submit": "完成注册",
+    "registerError": "注册失败，请稍后重试",
+    "hasAccount": "已有账户？",
+    "noAccount": "没有账户？"
+  },
+  "admin": {
+    "tenants": {
+      "title": "租户管理",
+      "searchPlaceholder": "搜索企业名称或标识...",
+      "notFound": "租户不存在",
+      "backToList": "返回列表",
+      "freeze": "冻结",
+      "unfreeze": "解冻",
+      "columns": {
+        "name": "企业名称",
+        "plan": "套餐",
+        "status": "状态",
+        "devices": "设备数",
+        "users": "用户数",
+        "createdAt": "创建时间"
+      },
+      "status": {
+        "active": "活跃",
+        "frozen": "已冻结",
+        "trial": "试用中"
+      },
+      "detail": {
+        "basicInfo": "基础信息",
+        "resourceUsage": "资源用量",
+        "actions": "操作",
+        "admin": "管理员",
+        "trialEndsAt": "试用期截止",
+        "subscriptionEndsAt": "订阅到期时间",
+        "dataRetention": "数据保留",
+        "devices": "设备",
+        "users": "用户",
+        "activeAlerts": "活跃告警",
+        "pendingWorkOrders": "待处理工单",
+        "monthlyAnalysis": "本月 AI 分析"
+      }
+    },
+    "globalStats": {
+      "title": "全局统计",
+      "totalTenants": "总租户",
+      "activeTenants": "活跃租户",
+      "trialTenants": "试用租户",
+      "frozenTenants": "冻结租户",
+      "totalDevices": "总设备",
+      "totalUsers": "总用户"
+    }
   }
 }

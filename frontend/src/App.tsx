@@ -7,6 +7,7 @@ import { AuthGuard } from './components/layout/AuthGuard';
 import { NotificationToast } from './components/layout/NotificationToast';
 import { InstallPrompt } from './components/layout/InstallPrompt';
 import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import DeviceListPage from './pages/DeviceListPage';
 import DeviceDetailPage from './pages/DeviceDetailPage';
@@ -20,6 +21,8 @@ import PendingRulesPage from './pages/PendingRulesPage';
 import SettingsPage from './pages/SettingsPage';
 import DeviceSetupPage from './pages/DeviceSetupPage';
 import DispatchBoardPage from './pages/DispatchBoardPage';
+import TenantsPage from './pages/admin/TenantsPage';
+import TenantDetailPage from './pages/admin/TenantDetailPage';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 
@@ -44,6 +47,7 @@ function AppRoutes() {
       {/* 认证路由 */}
       <Route element={<AuthLayout />}>
         <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+        <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
       </Route>
 
       {/* 业务路由（需认证，AuthGuard 保护） */}
@@ -62,6 +66,9 @@ function AppRoutes() {
           <Route path="/knowledge" element={<KnowledgePage />} />
           <Route path="/pending-rules" element={<PendingRulesPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* system_admin 管理路由 */}
+          <Route path="/admin/tenants" element={<TenantsPage />} />
+          <Route path="/admin/tenants/:id" element={<TenantDetailPage />} />
         </Route>
       </Route>
 

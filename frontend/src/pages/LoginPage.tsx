@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
@@ -84,6 +84,12 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? t('common.loading') : t('auth.login')}
           </Button>
+          <p className="text-center text-sm text-muted-foreground">
+            {t('register.noAccount')}{' '}
+            <Link to="/register" className="text-primary underline-offset-4 hover:underline">
+              {t('register.title')}
+            </Link>
+          </p>
         </form>
       </CardContent>
     </Card>
