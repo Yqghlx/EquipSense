@@ -174,6 +174,55 @@ public class KnowledgeController : ControllerBase
     }
 
     /// <summary>
+    /// 编辑后批准候选规则
+    /// 允许审核人在批准前对规则的名称、条件和结论进行微调
+    /// </summary>
+    /// <param name="id">候选规则 ID</param>
+    /// <param name="request">编辑后批准请求（可调整字段 + 审核意见）</param>
+    /// <returns>操作结果</returns>
+    [HttpPut("pending-rules/{id:guid}/approve-with-edit")]
+    [RequirePermission("knowledge:create")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ApproveWithEdit(Guid id, [FromBody] ApproveWithEditRequest request)
+    {
+        try
+        {
+            var reviewerId = _tenantContext.UserId;
+
+            var pending = await _dbContext.PendingRules.FindAsync([id]);
+            if (pending is null)
+                return NotFound(new { code = 404, message = "候选规则不存在" });
+
+            if (pending.ReviewStatus != ReviewStatus.Pending)
+                return BadRequest(new { code = 400, message = $"规则已审核，当前状态: {pending.ReviewStatus}" });
+
+            // 应用编辑修改
+            if (!string.IsNullOrWhiteSpace(request.AdjustedConditions))
+                pending.Conditions = request.AdjustedConditions;
+            if (!string.IsNullOrWhiteSpace(request.AdjustedConclusion))
+                pending.Conclusion = request.AdjustedConclusion;
+            if (!string.IsNullOrWhiteSpace(request.AdjustedName))
+                pending.Name = request.AdjustedName;
+
+            await _dbContext.SaveChangesAsync();
+
+            await _captureService.ApproveRuleAsync(id, reviewerId, request.Comment, HttpContext.RequestAborted);
+
+            return Ok(new { message = "规则已编辑并批准" });
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { code = 404, message = "候选规则不存在" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { code = 400, message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// 驳回候选规则
     /// </summary>
     /// <param name="id">候选规则 ID</param>
@@ -336,6 +385,24 @@ public class KnowledgeController : ControllerBase
     }
 
     /// <summary>
+    /// 编辑后批准请求
+    /// </summary>
+    public class ApproveWithEditRequest
+    {
+        /// <summary>调整后的触发条件</summary>
+        public string? AdjustedConditions { get; set; }
+
+        /// <summary>调整后的结论描述</summary>
+        public string? AdjustedConclusion { get; set; }
+
+        /// <summary>调整后的规则名称</summary>
+        public string? AdjustedName { get; set; }
+
+        /// <summary>审核意见</summary>
+        public string? Comment { get; set; }
+    }
+
+    /// <summary>
     /// 正式知识规则响应
     /// </summary>
     public class KnowledgeRuleResponse
@@ -370,6 +437,8 @@ public class KnowledgeController : ControllerBase
         public string? CheckSteps { get; set; }
         public Guid? SourceWorkorderId { get; set; }
         public Guid? SourceCaseId { get; set; }
+        public Guid? SourceAlertId { get; set; }
+        public Guid? SourceAnalysisId { get; set; }
         public decimal? Confidence { get; set; }
         public string ReviewStatus { get; set; } = string.Empty;
         public Guid? ReviewedBy { get; set; }
@@ -449,6 +518,8 @@ public class KnowledgeController : ControllerBase
         CheckSteps = rule.CheckSteps,
         SourceWorkorderId = rule.SourceWorkorderId,
         SourceCaseId = rule.SourceCaseId,
+        SourceAlertId = rule.SourceAlertId,
+        SourceAnalysisId = rule.SourceAnalysisId,
         Confidence = rule.Confidence,
         ReviewStatus = rule.ReviewStatus.ToString(),
         ReviewedBy = rule.ReviewedBy,
