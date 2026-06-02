@@ -135,17 +135,8 @@ public class SubscriptionServiceTests : IAsyncDisposable
             Slug = "test4",
             Plan = TenantPlan.Basic,
             MaxDevices = 3,
+            CurrentDeviceCount = 3,
         });
-        for (int i = 0; i < 3; i++)
-        {
-            db.Devices.Add(new Device
-            {
-                TenantId = tenantId,
-                DeviceCode = $"DEV-FULL-{i}",
-                Name = $"满设备{i}",
-                Type = "电机"
-            });
-        }
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
