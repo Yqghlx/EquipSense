@@ -7,6 +7,18 @@ public class WebhookConfig
 {
     public string Url { get; set; } = string.Empty;
     public string? Secret { get; set; }
+
+    /// <summary>
+    /// Body 模板（支持变量插值）
+    /// 支持的变量格式：{{workOrder.code}}、{{workOrder.title}} 等
+    /// </summary>
+    public string? BodyTemplate { get; set; }
+
+    /// <summary>
+    /// 签名密钥（用于生成 X-EquipSense-Signature 头）
+    /// 使用 HMAC-SHA256 算法对请求 Body 进行签名
+    /// </summary>
+    public string? SignatureSecret { get; set; }
 }
 
 /// <summary>
