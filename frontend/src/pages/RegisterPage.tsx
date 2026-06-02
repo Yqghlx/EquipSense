@@ -57,7 +57,7 @@ export default function RegisterPage() {
       password: z.string().min(6, t('register.passwordMin')),
       confirmPassword: z.string().min(1, t('register.confirmPasswordRequired')),
       displayName: z.string().optional(),
-      email: z.string().email(t('register.emailInvalid')).optional().or(z.literal('')),
+      email: z.string().email({ message: t('register.emailInvalid') }).optional().or(z.literal('')),
     })
     .refine((d) => d.password === d.confirmPassword, {
       message: t('register.passwordMismatch'),
