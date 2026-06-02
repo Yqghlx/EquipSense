@@ -48,7 +48,9 @@ public class AlertEvaluationService : IAlertEvaluationService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 查询当前设备当前指标的基线数据，供 BaselineEvaluator 使用
+        // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
         var baseline = await dbContext.Set<Core.Entities.MetricBaseline>()
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(b =>
                 b.TenantId == tenantId &&
                 b.DeviceId == deviceId &&
@@ -63,7 +65,9 @@ public class AlertEvaluationService : IAlertEvaluationService
         // - 同租户、已启用、指标匹配
         // - 设备 ID 为空（通用规则）或等于当前设备
         // - 设备类型为空（通用规则）或等于当前设备类型
+        // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
         var rules = await dbContext.AlertRules
+            .IgnoreQueryFilters()
             .Where(r => r.TenantId == tenantId && r.Enabled && r.Metric == metric)
             .Where(r => r.DeviceId == null || r.DeviceId == deviceId)
             .Where(r => r.DeviceType == null || r.DeviceType == deviceType)

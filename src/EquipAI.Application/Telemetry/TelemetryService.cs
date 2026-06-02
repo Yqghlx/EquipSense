@@ -87,8 +87,15 @@ public class TelemetryService : ITelemetryService, IDisposable
                 Source = i.Source
             }).ToList();
 
-            dbContext.DeviceTelemetry.AddRange(rows);
-            await dbContext.SaveChangesAsync();
+            // HasNoKey 实体无法使用 AddRange，改用原始 SQL 批量插入
+            foreach (var row in rows)
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) " +
+                    "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6})",
+                    row.Time, row.TenantId, row.DeviceId, row.Metric,
+                    (object?)row.Value ?? DBNull.Value, row.Quality, row.Source);
+            }
 
             _logger.LogDebug("已写入 {Count} 条遥测数据", rows.Count);
 

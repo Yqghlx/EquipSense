@@ -51,7 +51,7 @@ public class MqttMessageHandler
             }
 
             var timestamp = timestampEl.ValueKind == JsonValueKind.String
-                ? DateTime.Parse(timestampEl.GetString()!)
+                ? DateTime.Parse(timestampEl.GetString()!, null, System.Globalization.DateTimeStyles.AdjustToUniversal)
                 : DateTime.UtcNow;
 
             var quality = json.TryGetProperty("quality", out var qEl) ? qEl.GetString() ?? "good" : "good";
