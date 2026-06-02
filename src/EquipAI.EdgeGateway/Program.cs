@@ -28,6 +28,7 @@ try
     {
         "opcua" => new OpcUaAdapter(),
         "modbus-tcp" => new ModbusTcpAdapter(),
+        "modbus-rtu" => new ModbusRtuAdapter(),
         _ => throw new ArgumentException($"不支持的协议: {protocol}")
     });
 

@@ -48,8 +48,9 @@ public class KnowledgeCaptureServiceTests
 
         _llmServiceMock = new Mock<ILLMService>();
 
+        var auditLogMock = new Mock<IAuditLogService>();
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<KnowledgeCaptureService>();
-        _sut = new KnowledgeCaptureService(_scopeFactoryMock.Object, _llmServiceMock.Object, logger);
+        _sut = new KnowledgeCaptureService(_scopeFactoryMock.Object, _llmServiceMock.Object, auditLogMock.Object, logger);
     }
 
     [Fact]

@@ -52,7 +52,7 @@ export default function PendingRulesPage() {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? '')}>
             <SelectTrigger className="w-40">
               <SelectValue placeholder={t('pendingRules.filterStatus')} />
             </SelectTrigger>

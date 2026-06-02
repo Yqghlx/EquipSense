@@ -15,5 +15,6 @@
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.145" />
     <PackageReference Include="Serilog.Extensions.Hosting" Version="8.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0" />
+    <PackageReference Include="System.IO.Ports" Version="9.0.0" />
   </ItemGroup>
 </Project>
