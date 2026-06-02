@@ -197,6 +197,8 @@ public static class ServiceCollectionExtensions
         // 工单外部集成 — 多个 IWorkOrderIntegration 实现，通过 GetServices 解析后按 IntegrationType 匹配
         services.AddScoped<IWorkOrderIntegration, WebhookIntegration>();
         services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();
+        services.AddScoped<IWorkOrderIntegration, FeishuIntegration>();
+        services.AddScoped<IWorkOrderIntegration, EamIntegration>();
 
         // 集成路由服务 — 统一管理外部集成的推送分发、重试和日志记录
         services.AddScoped<IntegrationRouter>();
