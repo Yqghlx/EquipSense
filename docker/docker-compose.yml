@@ -81,6 +81,10 @@ services:
       Llm__ApiKey: "${LLM_API_KEY:-}"
       Llm__ModelId: "${LLM_MODEL:-qwen-plus}"
       Llm__Endpoint: "${LLM_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+      Vapid__Subject: "${VAPID__SUBJECT:-mailto:admin@example.com}"
+      Vapid__PublicKey: "${VAPID__PUBLICKEY:-}"
+      Vapid__PrivateKey: "${VAPID__PRIVATEKEY:-}"
+      BEHIND_PROXY: "${BEHIND_PROXY:-true}"
     depends_on:
       postgres:
         condition: service_healthy
