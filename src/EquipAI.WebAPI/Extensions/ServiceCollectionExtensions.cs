@@ -24,9 +24,11 @@ using EquipAI.Infrastructure.Messaging;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Tenant;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using System.Threading.RateLimiting;
 
 namespace EquipAI.WebAPI.Extensions;
 
@@ -104,6 +106,20 @@ public static class ServiceCollectionExtensions
         // TimescaleDB 初始化服务
         services.AddScoped<TimescaleDbSetup>();
         services.AddScoped<DataSeeder>();
+
+        // IP 限流 — 使用 ASP.NET Core 8 内置 RateLimiter
+        // 固定窗口策略：每 IP 每分钟最多 60 次请求
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddFixedWindowLimiter("fixed", opt =>
+            {
+                opt.PermitLimit = 60;
+                opt.Window = TimeSpan.FromMinutes(1);
+                opt.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
+                opt.QueueLimit = 0;
+            });
+        });
     }
 
     /// <summary>

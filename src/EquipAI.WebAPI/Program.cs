@@ -77,6 +77,8 @@ try
     app.UseSerilogRequestLogging();
     // 3. CORS — 跨域处理，在认证之前执行
     app.UseCors();
+    // 3.5 IP 限流 — 固定窗口策略，每 IP 每分钟 60 次请求，在 CORS 之后、认证之前执行
+    app.UseRateLimiter();
     // 4. JWT 认证 — 解析并验证 Bearer Token，填充 context.User
     app.UseAuthentication();
     // 5. 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（必须在认证之后）
