@@ -13,6 +13,7 @@ using EquipAI.Infrastructure.Seeding;
 using EquipAI.Application.Telemetry;
 using EquipAI.Application.WorkOrders;
 using EquipAI.Application.WorkOrders.Handlers;
+using EquipAI.Application.WorkOrders.Integration;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.AI;
 using EquipAI.Infrastructure.Cache;
@@ -169,6 +170,11 @@ public static class ServiceCollectionExtensions
 
         // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
         services.AddScoped<KnowledgeCaptureService>();
+
+        // 工单外部集成 — 多个 IWorkOrderIntegration 实现，通过 GetServices 解析后按 IntegrationType 匹配
+        services.AddScoped<IWorkOrderIntegration, WebhookIntegration>();
+        services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();
+        services.AddScoped<WorkOrderIntegrationHandler>();
 
         // 事件处理器
         services.AddScoped<RootCauseAnalysisHandler>();
