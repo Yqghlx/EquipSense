@@ -190,3 +190,36 @@ export function useImportPresetData() {
     },
   });
 }
+
+/**
+ * 编辑后批准请求参数
+ */
+export interface ApproveWithEditParams {
+  /** 调整后的触发条件 */
+  adjustedConditions?: string;
+  /** 调整后的结论描述 */
+  adjustedConclusion?: string;
+  /** 调整后的规则名称 */
+  adjustedName?: string;
+  /** 审核意见 */
+  comment?: string;
+}
+
+/**
+ * 编辑后批准候选规则 Mutation Hook
+ *
+ * 允许审核人在批准前对规则内容进行微调，成功后同时使候选规则和正式规则列表缓存失效。
+ */
+export function useApproveWithEdit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...params }: { id: string } & ApproveWithEditParams) => {
+      const { data } = await api.put(`/knowledge/pending-rules/${id}/approve-with-edit`, params);
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pending-rules'] });
+      qc.invalidateQueries({ queryKey: ['knowledge-rules'] });
+    },
+  });
+}

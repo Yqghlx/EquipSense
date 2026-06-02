@@ -182,12 +182,14 @@ function RuleCard({ rule }: RuleCardProps) {
     switch (rule.source) {
       case 'manual':
         return { label: t('knowledge.sourceManual'), variant: 'default' as const };
+      case 'expert':
+        return { label: '专家创建', variant: 'default' as const };
       case 'ai_generated':
-        return { label: t('knowledge.sourceAI'), variant: 'secondary' as const };
+        return { label: 'AI 推荐', variant: 'secondary' as const };
       case 'imported':
-        return { label: t('knowledge.sourceImported'), variant: 'outline' as const };
+        return { label: '行业导入', variant: 'outline' as const };
       default:
-        return { label: rule.source, variant: 'outline' as const };
+        return { label: rule.source || '未知', variant: 'outline' as const };
     }
   })();
 

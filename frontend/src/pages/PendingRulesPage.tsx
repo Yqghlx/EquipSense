@@ -6,16 +6,19 @@ import {
   Brain,
   Filter,
   MessageSquare,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Textarea } from '../components/ui/textarea';
+import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import {
   usePendingRules,
   useApprovePendingRule,
   useRejectPendingRule,
+  useApproveWithEdit,
 } from '../hooks/useKnowledge';
 import type { PendingRule } from '../types';
 
@@ -102,8 +105,16 @@ function PendingRuleCard({ rule }: PendingRuleCardProps) {
   const { t } = useTranslation();
   const approveRule = useApprovePendingRule();
   const rejectRule = useRejectPendingRule();
+  const approveWithEditRule = useApproveWithEdit();
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
   const [rejectComment, setRejectComment] = useState('');
+
+  // 编辑后批准表单状态
+  const [editName, setEditName] = useState(rule.name);
+  const [editConditions, setEditConditions] = useState(rule.conditions);
+  const [editConclusion, setEditConclusion] = useState(rule.conclusion);
+  const [editComment, setEditComment] = useState('');
 
   /** 审核状态对应的 Badge 样式 */
   const statusBadge = (() => {
@@ -137,6 +148,25 @@ function PendingRuleCard({ rule }: PendingRuleCardProps) {
     );
   };
 
+  /** 处理编辑后批准操作 */
+  const handleApproveWithEdit = () => {
+    approveWithEditRule.mutate(
+      {
+        id: rule.id,
+        adjustedName: editName !== rule.name ? editName : undefined,
+        adjustedConditions: editConditions !== rule.conditions ? editConditions : undefined,
+        adjustedConclusion: editConclusion !== rule.conclusion ? editConclusion : undefined,
+        comment: editComment || undefined,
+      },
+      {
+        onSuccess: () => {
+          setShowEditForm(false);
+          setEditComment('');
+        },
+      },
+    );
+  };
+
   return (
     <Card className="flex flex-col">
       <CardHeader className="pb-3">
@@ -153,6 +183,12 @@ function PendingRuleCard({ rule }: PendingRuleCardProps) {
               <Brain className="h-3.5 w-3.5" />
               <span>{t('pendingRules.confidence')}: {(rule.confidence * 100).toFixed(0)}%</span>
             </div>
+          )}
+          {rule.sourceAlertId && (
+            <Badge variant="secondary" className="text-xs">
+              <Brain className="mr-1 h-3 w-3" />
+              AI 分析推荐
+            </Badge>
           )}
         </div>
       </CardHeader>
@@ -214,8 +250,28 @@ function PendingRuleCard({ rule }: PendingRuleCardProps) {
               </Button>
               <Button
                 size="sm"
+                variant="outline"
+                onClick={() => {
+                  setEditName(rule.name);
+                  setEditConditions(rule.conditions);
+                  setEditConclusion(rule.conclusion);
+                  setEditComment('');
+                  setShowEditForm(!showEditForm);
+                  setShowRejectForm(false);
+                }}
+                disabled={approveWithEditRule.isPending}
+                className="flex-1"
+              >
+                <Pencil className="mr-1.5 h-4 w-4" />
+                编辑后批准
+              </Button>
+              <Button
+                size="sm"
                 variant="destructive"
-                onClick={() => setShowRejectForm(!showRejectForm)}
+                onClick={() => {
+                  setShowRejectForm(!showRejectForm);
+                  setShowEditForm(false);
+                }}
                 disabled={rejectRule.isPending}
                 className="flex-1"
               >
@@ -223,6 +279,76 @@ function PendingRuleCard({ rule }: PendingRuleCardProps) {
                 {t('pendingRules.reject')}
               </Button>
             </div>
+
+            {/* 编辑后批准表单 */}
+            {showEditForm && (
+              <div className="space-y-2 p-3 bg-muted/50 rounded-md">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    {t('knowledge.ruleName', { defaultValue: '规则名称' })}
+                  </label>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    {t('knowledge.conditions')}
+                  </label>
+                  <Textarea
+                    value={editConditions}
+                    onChange={(e) => setEditConditions(e.target.value)}
+                    rows={2}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    {t('knowledge.conclusion')}
+                  </label>
+                  <Textarea
+                    value={editConclusion}
+                    onChange={(e) => setEditConclusion(e.target.value)}
+                    rows={2}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    {t('pendingRules.reviewComment')}
+                  </label>
+                  <Textarea
+                    value={editComment}
+                    onChange={(e) => setEditComment(e.target.value)}
+                    placeholder={t('pendingRules.rejectReasonPlaceholder', { defaultValue: '可选审核意见' })}
+                    rows={2}
+                    className="mt-1"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setShowEditForm(false);
+                      setEditComment('');
+                    }}
+                  >
+                    {t('common.cancel')}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleApproveWithEdit}
+                    disabled={approveWithEditRule.isPending}
+                  >
+                    <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                    {approveWithEditRule.isPending ? t('common.loading') : '确认批准'}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* 驳回意见输入框 */}
             {showRejectForm && (

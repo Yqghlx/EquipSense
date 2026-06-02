@@ -447,6 +447,10 @@ export interface PendingRule {
   checkSteps?: string;
   /** 关联工单 ID */
   sourceWorkorderId?: string;
+  /** 来源告警 ID（分析引擎自动生成时关联的告警） */
+  sourceAlertId?: string;
+  /** 来源分析 ID（分析引擎自动生成时关联的分析记录） */
+  sourceAnalysisId?: string;
   /** AI 置信度（0-1） */
   confidence?: number;
   /** 审核状态 */
