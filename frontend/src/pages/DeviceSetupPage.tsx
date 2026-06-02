@@ -89,7 +89,7 @@ export default function DeviceSetupPage() {
   const [step, setStep] = useState<WizardStep>('protocol');
   const [selectedProtocol, setSelectedProtocol] = useState<Protocol | null>(null);
   const [connectionConfig, setConnectionConfig] = useState('');
-  const [connectionTested, setConnectionTested] = useState(false);
+
   const [deviceName, setDeviceName] = useState('');
   const [pollIntervalMs, setPollIntervalMs] = useState(1000);
   const [dataPoints, setDataPoints] = useState<DataPointRow[]>([
@@ -147,7 +147,6 @@ export default function DeviceSetupPage() {
   const goNext = () => {
     if (step === 'protocol') {
       // 切换协议时重置配置和测试状态
-      setConnectionTested(false);
       if (selectedProtocol === 'opcua') setConnectionConfig(DEFAULT_OPC_UA_CONFIG);
       else if (selectedProtocol === 'modbus-tcp') setConnectionConfig(DEFAULT_MODBUS_TCP_CONFIG);
       else if (selectedProtocol === 'modbus-rtu') setConnectionConfig(DEFAULT_MODBUS_RTU_CONFIG);
@@ -185,15 +184,13 @@ export default function DeviceSetupPage() {
 
   /** 测试连接是否成功 */
   const handleTestConnection = async () => {
-    setConnectionTested(false);
     try {
-      const result = await testConnection.mutateAsync({
+      await testConnection.mutateAsync({
         protocol: selectedProtocol!,
         connectionConfig,
       });
-      setConnectionTested(result.success);
     } catch {
-      setConnectionTested(false);
+      // 测试失败由 mutation 状态体现
     }
   };
 
@@ -340,7 +337,6 @@ export default function DeviceSetupPage() {
           value={connectionConfig}
           onChange={(e) => {
             setConnectionConfig(e.target.value);
-            setConnectionTested(false);
           }}
           placeholder="{}"
         />
