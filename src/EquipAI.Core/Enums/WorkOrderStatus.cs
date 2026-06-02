@@ -36,6 +36,11 @@ public enum WorkOrderStatus
     Rejected,
 
     /// <summary>
+    /// 已提交审批
+    /// </summary>
+    SubmittedForApproval,
+
+    /// <summary>
     /// 已关闭
     /// </summary>
     Closed,

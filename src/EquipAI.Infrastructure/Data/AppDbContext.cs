@@ -103,6 +103,16 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.GatewayDevice> GatewayDevices => Set<Core.Entities.GatewayDevice>();
 
+    /// <summary>
+    /// 审批链模板表
+    /// </summary>
+    public DbSet<Core.Entities.ApprovalChainTemplate> ApprovalChainTemplates => Set<Core.Entities.ApprovalChainTemplate>();
+
+    /// <summary>
+    /// 审批步骤表
+    /// </summary>
+    public DbSet<Core.Entities.ApprovalStep> ApprovalSteps => Set<Core.Entities.ApprovalStep>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
