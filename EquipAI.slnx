@@ -4,6 +4,7 @@
     <Project Path="src/EquipAI.Core/EquipAI.Core.csproj" />
     <Project Path="src/EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj" />
     <Project Path="src/EquipAI.Infrastructure/EquipAI.Infrastructure.csproj" />
+    <Project Path="src/EquipAI.Simulator/EquipAI.Simulator.csproj" />
     <Project Path="src/EquipAI.WebAPI/EquipAI.WebAPI.csproj" />
   </Folder>
   <Folder Name="/tests/">

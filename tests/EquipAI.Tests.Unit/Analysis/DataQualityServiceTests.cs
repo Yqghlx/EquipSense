@@ -3,6 +3,7 @@ using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -15,22 +16,19 @@ public class DataQualityServiceTests
 
     public DataQualityServiceTests()
     {
-        // 创建 InMemory 数据库的 DbContextFactory，用于单元测试
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"TestDataQuality_{Guid.NewGuid()}")
-            .Options;
+        // 创建 InMemory 数据库的 ServiceProvider，通过 IServiceScopeFactory 注入
+        var tenantContext = new TestTenantContext();
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(options =>
+            options.UseInMemoryDatabase($"TestDataQuality_{Guid.NewGuid()}"));
+        services.AddSingleton<EquipAI.Core.Interfaces.ITenantContext>(tenantContext);
+        var serviceProvider = services.BuildServiceProvider();
 
-        var mockFactory = new Mock<IDbContextFactory<AppDbContext>>();
-        mockFactory
-            .Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new AppDbContext(
-                options,
-                new TestTenantContext()));
-
+        var scopeFactory = serviceProvider.GetRequiredService<IServiceScopeFactory>();
         var cache = new MemoryCache(new MemoryCacheOptions());
         var logger = LoggerFactory.Create(builder => { }).CreateLogger<DataQualityService>();
 
-        _service = new DataQualityService(mockFactory.Object, cache, logger);
+        _service = new DataQualityService(scopeFactory, cache, logger);
     }
 
     [Fact]

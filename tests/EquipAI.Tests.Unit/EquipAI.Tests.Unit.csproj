@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\src\EquipAI.Application\EquipAI.Application.csproj" />
     <ProjectReference Include="..\..\src\EquipAI.Infrastructure\EquipAI.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\EquipAI.EdgeGateway\EquipAI.EdgeGateway.csproj" />
+    <ProjectReference Include="..\..\src\EquipAI.Simulator\EquipAI.Simulator.csproj" />
   </ItemGroup>
 
 </Project>
