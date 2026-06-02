@@ -18,8 +18,8 @@ RUN dotnet publish EquipAI.WebAPI/EquipAI.WebAPI.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
-# 安装 ICU 库（中文等 Unicode 排序所需）
-RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev \
+# 安装 ICU 库（中文等 Unicode 排序所需）、netcat（等待 PG 就绪）、curl（健康检查）
+RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev netcat-openbsd curl \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建非 root 用户运行应用
@@ -30,6 +30,10 @@ COPY --from=build /app/publish .
 # 设置文件所有权
 RUN chown -R equipai:equipai /app
 
+# 复制启动脚本（等待 PG 就绪 + 自动迁移准备）
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && chown equipai:equipai /app/entrypoint.sh
+
 ENV ASPNETCORE_URLS=http://+:8080
 ENV DOTNET_System_Globalization_Invariant=false
 
@@ -38,4 +42,4 @@ USER equipai
 
 EXPOSE 8080
 
-ENTRYPOINT ["dotnet", "EquipAI.WebAPI.dll"]
+ENTRYPOINT ["/app/entrypoint.sh"]
