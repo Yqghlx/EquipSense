@@ -17,6 +17,7 @@ public class KnowledgeCaptureService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILLMService _llmService;
+    private readonly IAuditLogService _auditLogService;
     private readonly ILogger<KnowledgeCaptureService> _logger;
 
     /// <summary>
@@ -32,10 +33,12 @@ public class KnowledgeCaptureService
     public KnowledgeCaptureService(
         IServiceScopeFactory scopeFactory,
         ILLMService llmService,
+        IAuditLogService auditLogService,
         ILogger<KnowledgeCaptureService> logger)
     {
         _scopeFactory = scopeFactory;
         _llmService = llmService;
+        _auditLogService = auditLogService;
         _logger = logger;
     }
 
@@ -227,6 +230,10 @@ public class KnowledgeCaptureService
 
         await db.SaveChangesAsync(ct);
 
+        await _auditLogService.LogFromContextAsync(
+            "KnowledgeRuleApproved", "PendingRule", pendingRuleId.ToString(),
+            $"批准候选规则「{pending.Name}」为正式知识规则，置信度: {pending.Confidence:P}", ct);
+
         _logger.LogInformation("候选规则已批准: {PendingRuleId} -> {KnowledgeRuleId}", pendingRuleId, rule.Id);
     }
 
@@ -253,6 +260,10 @@ public class KnowledgeCaptureService
         pending.ReviewedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
+
+        await _auditLogService.LogFromContextAsync(
+            "KnowledgeRuleRejected", "PendingRule", pendingRuleId.ToString(),
+            $"驳回候选规则「{pending.Name}」，原因: {comment ?? "无"}", ct);
 
         _logger.LogInformation("候选规则已驳回: {PendingRuleId}", pendingRuleId);
     }
