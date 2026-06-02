@@ -11,6 +11,9 @@ import { Textarea } from '../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
 import { ApprovalProgressPanel } from '../components/workorder/ApprovalProgressPanel';
+import { OfflineSyncPanel } from '../components/workorder/OfflineSyncPanel';
+import { OfflineStatusBadge } from '../components/workorder/OfflineStatusBadge';
+import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import {
   useWorkOrder,
   useStartWorkOrder,
@@ -64,6 +67,7 @@ export default function WorkOrderDetailPage() {
   const closeOrder = useCloseWorkOrder();
   const cancelOrder = useCancelWorkOrder();
   const submitOrder = useSubmitWorkOrder();
+  const { enqueue } = useOfflineQueue();
 
   if (isLoading) return <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>;
   if (!workOrder) return <div className="py-20 text-center text-muted-foreground">{t('common.noData')}</div>;
@@ -80,6 +84,7 @@ export default function WorkOrderDetailPage() {
           <p className="text-sm text-muted-foreground">{workOrder.workOrderCode}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <OfflineStatusBadge />
           <Badge variant="outline">{statusLabels[workOrder.status] ?? workOrder.status}</Badge>
           <PriorityBadge priority={workOrder.priority} />
         </div>
@@ -157,10 +162,21 @@ export default function WorkOrderDetailPage() {
               rows={3}
             />
             <Button
-              onClick={() => completeOrder.mutate({ id: workOrder.id, resolution })}
+              onClick={async () => {
+                if (navigator.onLine) {
+                  completeOrder.mutate({ id: workOrder.id, resolution });
+                } else {
+                  await enqueue(
+                    'work-order-complete',
+                    `/api/v1/work-orders/${workOrder.id}/complete`,
+                    'PUT',
+                    { id: workOrder.id, resolution },
+                  );
+                }
+              }}
               disabled={!resolution || completeOrder.isPending}
             >
-              {t('workorder.complete')}
+              {navigator.onLine ? t('workorder.complete') : '保存到离线队列'}
             </Button>
           </CardContent>
         </Card>
@@ -178,6 +194,9 @@ export default function WorkOrderDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* 离线同步面板 */}
+      <OfflineSyncPanel />
 
       {/* 取消工单对话框 */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>

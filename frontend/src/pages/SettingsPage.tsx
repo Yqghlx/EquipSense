@@ -12,6 +12,7 @@ import { Separator } from '../components/ui/separator';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Switch } from '../components/ui/switch';
 import { useIntegrations, useUpdateIntegration, useTestIntegration } from '../hooks/useIntegration';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useSubscription, useChangePlan } from '../hooks/useSubscription';
 import {
   useApprovalChains,
@@ -827,6 +828,7 @@ function IntegrationSettings() {
  */
 export default function SettingsPage() {
   const { t } = useTranslation();
+  const { isSupported: pushSupported, isSubscribed, subscribe, unsubscribe, permission } = usePushNotifications();
 
   return (
     <div className="space-y-4">
@@ -996,6 +998,45 @@ export default function SettingsPage() {
           <SubscriptionPanel />
         </TabsContent>
       </Tabs>
+
+      {/* 推送通知设置 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">推送通知</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!pushSupported ? (
+            <p className="text-sm text-muted-foreground">当前浏览器不支持推送通知</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">浏览器推送通知</p>
+                  <p className="text-xs text-muted-foreground">
+                    在浏览器未打开时也能收到告警和工单通知
+                  </p>
+                </div>
+                <Switch
+                  checked={isSubscribed}
+                  disabled={permission === 'denied'}
+                  onCheckedChange={async (checked) => {
+                    if (checked) {
+                      await subscribe();
+                    } else {
+                      await unsubscribe();
+                    }
+                  }}
+                />
+              </div>
+              {permission === 'denied' && (
+                <p className="text-xs text-orange-600">
+                  通知权限已被拒绝，请在浏览器设置中手动开启
+                </p>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
