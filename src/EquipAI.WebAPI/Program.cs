@@ -77,6 +77,10 @@ try
     // 中间件管线（顺序很重要，决定请求的处理流程）
     // 1. 全局异常处理 — 最外层捕获所有未处理异常
     app.UseMiddleware<ExceptionHandlingMiddleware>();
+    // 1.5 安全响应头 — 为所有响应添加 X-Content-Type-Options、X-Frame-Options 等安全头
+    app.UseMiddleware<SecurityHeadersMiddleware>();
+    // 1.6 输入净化 — 检查请求体中的 XSS 攻击模式（script 标签、事件处理器等）
+    app.UseMiddleware<InputSanitizationMiddleware>();
     // 2. 请求日志记录 — 记录每个请求的方法、路径、耗时和状态码
     app.UseSerilogRequestLogging();
     // 3. CORS — 跨域处理，在认证之前执行

@@ -23,4 +23,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- 允许单元测试项目访问 internal 成员 -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="EquipAI.Tests.Unit" />
+  </ItemGroup>
+
 </Project>
