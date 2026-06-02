@@ -761,3 +761,44 @@ export interface PlanInfo {
   /** 是否免费套餐 */
   isFree: boolean;
 }
+
+// ============================================================================
+// 离线操作队列
+// ============================================================================
+
+/** 离线操作类型 */
+export type OfflineOperationType =
+  | 'work-order-complete'
+  | 'work-order-accept'
+  | 'work-order-reject'
+  | 'device-note';
+
+/** 离线操作队列条目 */
+export interface PendingOperation {
+  /** 操作唯一标识（UUID） */
+  id: string;
+  /** 操作类型 */
+  type: OfflineOperationType;
+  /** 请求 URL */
+  url: string;
+  /** HTTP 方法 */
+  method: string;
+  /** 请求体（JSON 序列化） */
+  body: string;
+  /** 创建时间戳（毫秒） */
+  timestamp: number;
+  /** 重试次数 */
+  retryCount: number;
+  /** 最大重试次数 */
+  maxRetries: number;
+}
+
+/** 离线操作同步结果 */
+export interface SyncResult {
+  /** 成功同步的操作 ID 列表 */
+  succeeded: string[];
+  /** 失败的操作（包含 ID 和错误信息） */
+  failed: Array<{ id: string; error: string }>;
+  /** 因冲突（409）而失败的操作 ID 列表 */
+  conflicts: string[];
+}

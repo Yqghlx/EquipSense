@@ -6,6 +6,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { AuthGuard } from './components/layout/AuthGuard';
 import { NotificationToast } from './components/layout/NotificationToast';
 import { InstallPrompt } from './components/layout/InstallPrompt';
+import { OfflineIndicator } from './components/layout/OfflineIndicator';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
@@ -94,6 +95,7 @@ export default function App() {
         <AppRoutes />
         <NotificationToast />
         <InstallPrompt />
+        <OfflineIndicator />
       </BrowserRouter>
     </QueryClientProvider>
   );
