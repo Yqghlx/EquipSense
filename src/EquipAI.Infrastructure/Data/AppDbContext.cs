@@ -113,6 +113,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.ApprovalStep> ApprovalSteps => Set<Core.Entities.ApprovalStep>();
 
+    /// <summary>
+    /// 工单审批记录表
+    /// </summary>
+    public DbSet<Core.Entities.WorkOrderApproval> WorkOrderApprovals => Set<Core.Entities.WorkOrderApproval>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

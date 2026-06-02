@@ -4,6 +4,7 @@ using EquipAI.Application.Alerts.Evaluators;
 using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Analysis;
 using EquipAI.Application.Analysis.Handlers;
+using EquipAI.Application.Approvals;
 using EquipAI.Application.Eventing;
 using EquipAI.Application.Knowledge;
 using EquipAI.Application.Interfaces;
@@ -173,6 +174,9 @@ public static class ServiceCollectionExtensions
 
         // 工单服务
         services.AddScoped<IWorkOrderService, WorkOrderService>();
+
+        // 审批链服务 — 管理审批链模板和工单多级审批流程
+        services.AddScoped<IApprovalChainService, ApprovalChainService>();
 
         // 智能派工服务 — 基于技能匹配 + 负载均衡推荐最佳技术人员
         services.AddScoped<ISmartDispatchService, SmartDispatchService>();
