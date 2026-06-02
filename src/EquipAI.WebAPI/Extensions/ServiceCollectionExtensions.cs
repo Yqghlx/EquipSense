@@ -187,6 +187,9 @@ public static class ServiceCollectionExtensions
         // 知识规则版本管理服务（Scoped — 需要 DbContext）
         services.AddScoped<KnowledgeVersionService>();
 
+        // 知识规则导入导出服务（Scoped — 需要 DbContext）— 支持 CSV/JSON 批量导入导出
+        services.AddScoped<KnowledgeImportService>();
+
         // 订阅管理服务 — 检查租户配额限制（设备数量、用户数量）
         services.AddScoped<ISubscriptionService, SubscriptionService>();
 
