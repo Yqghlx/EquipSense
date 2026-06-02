@@ -1,5 +1,7 @@
+using System.Text;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.Knowledge;
+using EquipAI.Application.Knowledge.DTOs;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
@@ -13,7 +15,7 @@ namespace EquipAI.WebAPI.Controllers;
 
 /// <summary>
 /// 知识库管理控制器
-/// 提供正式规则 CRUD、候选规则审核、故障案例查询和批量导入等接口
+/// 提供正式规则 CRUD、候选规则审核、故障案例查询、批量导入导出和版本管理等接口
 /// </summary>
 [ApiController]
 [Route("api/v1/knowledge")]
@@ -22,6 +24,8 @@ public class KnowledgeController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
     private readonly KnowledgeCaptureService _captureService;
+    private readonly KnowledgeImportService _importService;
+    private readonly KnowledgeVersionService _versionService;
     private readonly ITenantContext _tenantContext;
 
     /// <summary>
@@ -29,14 +33,20 @@ public class KnowledgeController : ControllerBase
     /// </summary>
     /// <param name="dbContext">数据库上下文</param>
     /// <param name="captureService">知识沉淀服务，用于候选规则审核</param>
+    /// <param name="importService">知识规则导入导出服务</param>
+    /// <param name="versionService">知识规则版本管理服务</param>
     /// <param name="tenantContext">租户上下文，用于获取当前请求的租户 ID</param>
     public KnowledgeController(
         AppDbContext dbContext,
         KnowledgeCaptureService captureService,
+        KnowledgeImportService importService,
+        KnowledgeVersionService versionService,
         ITenantContext tenantContext)
     {
         _dbContext = dbContext;
         _captureService = captureService;
+        _importService = importService;
+        _versionService = versionService;
         _tenantContext = tenantContext;
     }
 
@@ -105,6 +115,221 @@ public class KnowledgeController : ControllerBase
         await _dbContext.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetRules), new { id = rule.Id }, MapToRuleResponse(rule));
+    }
+
+    /// <summary>
+    /// 编辑正式知识规则
+    /// 编辑前自动保存版本快照，仅更新非空字段，版本号自动递增
+    /// </summary>
+    /// <param name="id">规则 ID</param>
+    /// <param name="request">编辑请求（仅非空字段会被更新）</param>
+    /// <returns>更新后的规则信息</returns>
+    [HttpPut("rules/{id:guid}")]
+    [RequirePermission("knowledge:update")]
+    [ProducesResponseType(typeof(KnowledgeRuleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<KnowledgeRuleResponse>> UpdateRule(
+        Guid id, [FromBody] UpdateKnowledgeRuleRequest request)
+    {
+        var rule = await _dbContext.KnowledgeRules.FindAsync([id], HttpContext.RequestAborted);
+        if (rule is null)
+            return NotFound(new { code = 404, message = "知识规则不存在" });
+
+        // 编辑前先保存版本快照
+        await _versionService.CreateVersionSnapshotAsync(
+            rule, _tenantContext.UserId, request.ChangeSummary, HttpContext.RequestAborted);
+
+        // 仅更新非空字段
+        if (!string.IsNullOrWhiteSpace(request.DeviceType))
+            rule.DeviceType = request.DeviceType;
+        if (!string.IsNullOrWhiteSpace(request.Name))
+            rule.Name = request.Name;
+        if (!string.IsNullOrWhiteSpace(request.Conditions))
+            rule.Conditions = request.Conditions;
+        if (!string.IsNullOrWhiteSpace(request.Conclusion))
+            rule.Conclusion = request.Conclusion;
+        if (request.RecommendedActions is not null)
+            rule.RecommendedActions = request.RecommendedActions;
+        if (request.CheckSteps is not null)
+            rule.CheckSteps = request.CheckSteps;
+        if (request.ConfidenceWeight.HasValue)
+            rule.ConfidenceWeight = request.ConfidenceWeight.Value;
+
+        // 版本号递增
+        rule.Version++;
+
+        await _dbContext.SaveChangesAsync(HttpContext.RequestAborted);
+
+        return Ok(MapToRuleResponse(rule));
+    }
+
+    /// <summary>
+    /// 启用/禁用规则切换
+    /// 将规则的 Enabled 状态取反
+    /// </summary>
+    /// <param name="id">规则 ID</param>
+    /// <returns>更新后的规则信息</returns>
+    [HttpPatch("rules/{id:guid}/toggle")]
+    [RequirePermission("knowledge:update")]
+    [ProducesResponseType(typeof(KnowledgeRuleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<KnowledgeRuleResponse>> ToggleRule(Guid id)
+    {
+        var rule = await _dbContext.KnowledgeRules.FindAsync([id], HttpContext.RequestAborted);
+        if (rule is null)
+            return NotFound(new { code = 404, message = "知识规则不存在" });
+
+        rule.Enabled = !rule.Enabled;
+        await _dbContext.SaveChangesAsync(HttpContext.RequestAborted);
+
+        return Ok(MapToRuleResponse(rule));
+    }
+
+    /// <summary>
+    /// CSV/JSON 文件批量导入知识规则
+    /// 支持预览模式（仅校验不写入）和正式导入模式
+    /// </summary>
+    /// <param name="file">上传的文件（CSV 或 JSON 格式）</param>
+    /// <param name="preview">是否预览模式（true=仅校验，false=正式导入）</param>
+    /// <returns>预览结果或导入结果</returns>
+    [HttpPost("rules/import")]
+    [RequirePermission("knowledge:create")]
+    [ProducesResponseType(typeof(ImportPreviewResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ImportResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [RequestSizeLimit(5 * 1024 * 1024)] // 5MB 文件大小限制
+    public async Task<IActionResult> ImportRules(
+        IFormFile file, [FromQuery] bool preview = false)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { code = 400, message = "请上传文件" });
+
+        // 文件大小限制 5MB
+        if (file.Length > 5 * 1024 * 1024)
+            return BadRequest(new { code = 400, message = "文件大小不能超过 5MB" });
+
+        // 仅支持 .csv 和 .json
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (extension is not (".csv" or ".json"))
+            return BadRequest(new { code = 400, message = "仅支持 .csv 和 .json 格式文件" });
+
+        // 读取文件内容
+        string content;
+        using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8))
+        {
+            content = await reader.ReadToEndAsync(HttpContext.RequestAborted);
+        }
+
+        if (string.IsNullOrWhiteSpace(content))
+            return BadRequest(new { code = 400, message = "文件内容不能为空" });
+
+        if (preview)
+        {
+            // 预览模式：仅解析校验，不写入数据库
+            var previewResult = _importService.PreviewImport(content, file.FileName);
+            return Ok(previewResult);
+        }
+
+        // 正式导入模式：解析并写入数据库
+        var importResult = await _importService.ExecuteImportAsync(
+            content, file.FileName, _tenantContext.TenantId, _tenantContext.UserId,
+            HttpContext.RequestAborted);
+        return Ok(importResult);
+    }
+
+    /// <summary>
+    /// 批量导出知识规则
+    /// 支持 JSON 和 CSV 两种导出格式，可选按设备类型过滤
+    /// </summary>
+    /// <param name="format">导出格式（json 或 csv）</param>
+    /// <param name="deviceType">可选：按设备类型过滤</param>
+    /// <returns>导出文件</returns>
+    [HttpGet("rules/export")]
+    [RequirePermission("knowledge:read")]
+    [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportRules(
+        [FromQuery] string format = "json",
+        [FromQuery] string? deviceType = null)
+    {
+        var ct = HttpContext.RequestAborted;
+
+        if (format.Equals("csv", StringComparison.OrdinalIgnoreCase))
+        {
+            var csv = await _importService.ExportAsCsvAsync(_tenantContext.TenantId, deviceType, ct);
+            var bytes = Encoding.UTF8.GetBytes(csv);
+            return File(bytes, "text/csv", $"knowledge-rules-{DateTime.Now:yyyyMMddHHmmss}.csv");
+        }
+
+        // 默认 JSON 格式导出
+        var json = await _importService.ExportAsJsonAsync(_tenantContext.TenantId, deviceType, ct);
+        var jsonBytes = Encoding.UTF8.GetBytes(json);
+        return File(jsonBytes, "application/json", $"knowledge-rules-{DateTime.Now:yyyyMMddHHmmss}.json");
+    }
+
+    /// <summary>
+    /// 行业预置规则一键导入
+    /// 从系统租户读取行业预置规则复制到当前租户，自动跳过已存在的同名规则
+    /// </summary>
+    /// <returns>导入结果</returns>
+    [HttpPost("rules/preset-import")]
+    [RequirePermission("knowledge:create")]
+    [ProducesResponseType(typeof(ImportResult), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ImportResult>> ImportIndustryPreset()
+    {
+        var result = await _importService.ImportIndustryPresetAsync(
+            _tenantContext.TenantId, _tenantContext.UserId, HttpContext.RequestAborted);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// 获取规则的版本历史
+    /// 按版本号降序返回该规则的所有历史快照
+    /// </summary>
+    /// <param name="id">规则 ID</param>
+    /// <returns>版本历史列表</returns>
+    [HttpGet("rules/{id:guid}/versions")]
+    [RequirePermission("knowledge:read")]
+    [ProducesResponseType(typeof(List<KnowledgeRuleVersionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<KnowledgeRuleVersionDto>>> GetRuleVersions(Guid id)
+    {
+        // 先检查规则是否存在
+        var exists = await _dbContext.KnowledgeRules.AnyAsync(r => r.Id == id, HttpContext.RequestAborted);
+        if (!exists)
+            return NotFound(new { code = 404, message = "知识规则不存在" });
+
+        var versions = await _versionService.GetVersionHistoryAsync(id, HttpContext.RequestAborted);
+        return Ok(versions);
+    }
+
+    /// <summary>
+    /// 回滚规则到指定版本
+    /// 回滚前自动保存当前状态为快照，从目标版本快照恢复规则内容
+    /// </summary>
+    /// <param name="id">规则 ID</param>
+    /// <param name="version">目标版本号（必须 >= 1）</param>
+    /// <returns>回滚后的规则信息</returns>
+    [HttpPost("rules/{id:guid}/rollback")]
+    [RequirePermission("knowledge:update")]
+    [ProducesResponseType(typeof(KnowledgeRuleResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<KnowledgeRuleResponse>> RollbackRule(
+        Guid id, [FromQuery] int version)
+    {
+        if (version < 1)
+            return BadRequest(new { code = 400, message = "版本号必须 >= 1" });
+
+        try
+        {
+            var rule = await _versionService.RollbackToVersionAsync(
+                id, version, _tenantContext.UserId, HttpContext.RequestAborted);
+            return Ok(MapToRuleResponse(rule));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(new { code = 404, message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -285,67 +510,6 @@ public class KnowledgeController : ControllerBase
         });
     }
 
-    /// <summary>
-    /// 批量导入行业知识库规则
-    /// 将一批预定义的行业规则批量写入正式知识规则表
-    /// </summary>
-    /// <param name="rules">待导入的规则列表</param>
-    /// <returns>导入结果</returns>
-    [HttpPost("import")]
-    [RequirePermission("knowledge:create")]
-    [ProducesResponseType(typeof(BatchImportResponse), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<BatchImportResponse>> ImportRules(
-        [FromBody] List<CreateKnowledgeRuleRequest> rules)
-    {
-        if (rules == null || rules.Count == 0)
-            return BadRequest(new { code = 400, message = "导入列表不能为空" });
-
-        var imported = 0;
-        var failed = 0;
-        var errors = new List<string>();
-
-        for (var i = 0; i < rules.Count; i++)
-        {
-            var r = rules[i];
-
-            // 基本参数校验
-            if (string.IsNullOrWhiteSpace(r.DeviceType) || string.IsNullOrWhiteSpace(r.Name))
-            {
-                failed++;
-                errors.Add($"第 {i + 1} 条规则缺少必填字段（DeviceType 或 Name）");
-                continue;
-            }
-
-            var rule = new Core.Entities.KnowledgeRule
-            {
-                TenantId = _tenantContext.TenantId,
-                DeviceType = r.DeviceType,
-                Name = r.Name,
-                Conditions = r.Conditions,
-                Conclusion = r.Conclusion,
-                RecommendedActions = r.RecommendedActions,
-                CheckSteps = r.CheckSteps,
-                ConfidenceWeight = r.ConfidenceWeight ?? 0.5m,
-                Source = "imported",
-                CreatedBy = _tenantContext.UserId.ToString()
-            };
-
-            _dbContext.KnowledgeRules.Add(rule);
-            imported++;
-        }
-
-        if (imported > 0)
-            await _dbContext.SaveChangesAsync();
-
-        return Ok(new BatchImportResponse
-        {
-            Imported = imported,
-            Failed = failed,
-            Errors = errors
-        });
-    }
-
     #region 请求/响应 DTO
 
     /// <summary>
@@ -421,6 +585,9 @@ public class KnowledgeController : ControllerBase
         public bool Enabled { get; set; }
         public string? CreatedBy { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        /// <summary>当前版本号</summary>
+        public int Version { get; set; }
     }
 
     /// <summary>
@@ -504,7 +671,8 @@ public class KnowledgeController : ControllerBase
         SuccessCount = rule.SuccessCount,
         Enabled = rule.Enabled,
         CreatedBy = rule.CreatedBy,
-        CreatedAt = rule.CreatedAt
+        CreatedAt = rule.CreatedAt,
+        Version = rule.Version
     };
 
     private static PendingRuleResponse MapToPendingRuleResponse(Core.Entities.PendingRule rule) => new()
