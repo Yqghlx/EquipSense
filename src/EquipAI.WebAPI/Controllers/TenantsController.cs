@@ -1,6 +1,7 @@
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Tenants;
 using EquipAI.Application.Interfaces;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,14 +18,17 @@ namespace EquipAI.WebAPI.Controllers;
 public class TenantsController : ControllerBase
 {
     private readonly ITenantService _tenantService;
+    private readonly ISubscriptionService _subscriptionService;
 
     /// <summary>
     /// 初始化租户管理控制器
     /// </summary>
     /// <param name="tenantService">租户管理服务</param>
-    public TenantsController(ITenantService tenantService)
+    /// <param name="subscriptionService">订阅管理服务</param>
+    public TenantsController(ITenantService tenantService, ISubscriptionService subscriptionService)
     {
         _tenantService = tenantService;
+        _subscriptionService = subscriptionService;
     }
 
     /// <summary>
@@ -104,5 +108,29 @@ public class TenantsController : ControllerBase
     {
         var usage = await _tenantService.GetTenantUsageAsync(id);
         return Ok(usage);
+    }
+
+    /// <summary>
+    /// 获取租户订阅信息（计划、用量、配额）
+    /// </summary>
+    [HttpGet("{id:guid}/subscription")]
+    [RequirePermission("tenant:read")]
+    [ProducesResponseType(typeof(SubscriptionInfo), StatusCodes.Status200OK)]
+    public async Task<ActionResult<SubscriptionInfo>> GetSubscription(Guid id)
+    {
+        var subscription = await _subscriptionService.GetSubscriptionAsync(id);
+        return Ok(subscription);
+    }
+
+    /// <summary>
+    /// 变更租户计划（升级/降级）
+    /// </summary>
+    [HttpPut("{id:guid}/plan")]
+    [RequirePermission("tenant:update")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> ChangePlan(Guid id, [FromBody] ChangePlanRequest request)
+    {
+        await _subscriptionService.ChangePlanAsync(id, request.Plan);
+        return Ok(new { message = "计划变更成功" });
     }
 }
