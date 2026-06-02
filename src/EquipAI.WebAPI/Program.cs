@@ -64,6 +64,15 @@ try
 
     var app = builder.Build();
 
+    // 生产环境 HTTPS 安全（当不在反向代理之后时启用）
+    // BEHIND_PROXY=true 时由 Nginx 负责 TLS 终止，后端不需要 HTTPS 重定向
+    var behindProxy = builder.Configuration["BEHIND_PROXY"]?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+    if (!behindProxy && !app.Environment.IsDevelopment())
+    {
+        app.UseHsts();
+        app.UseHttpsRedirection();
+    }
+
     // 注册事件订阅：遥测数据 → 告警评估
     var eventBus = app.Services.GetRequiredService<IEventBus>();
     eventBus.Subscribe<TelemetryReceivedEvent, TelemetryEventHandler>();

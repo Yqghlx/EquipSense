@@ -36,6 +36,10 @@ public class SecurityHeadersMiddleware
         // 禁止缓存敏感 API 响应，防止代理或浏览器存储敏感数据
         context.Response.Headers.Append("Cache-Control", "no-store, no-cache, must-revalidate");
         context.Response.Headers.Append("Pragma", "no-cache");
+        // 限制浏览器 API 访问（摄像头、麦克风、地理位置、支付）
+        context.Response.Headers.Append("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
+        // 禁止跨域策略文件
+        context.Response.Headers.Append("X-Permitted-Cross-Domain-Policies", "none");
 
         await _next(context);
     }
