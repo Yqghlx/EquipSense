@@ -9,6 +9,7 @@ import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Separator } from '../components/ui/separator';
 import { useIntegrations, useUpdateIntegration } from '../hooks/useIntegration';
+import { useSubscription, useChangePlan } from '../hooks/useSubscription';
 
 /** 系统角色列表 */
 const roles = ['system_admin', 'maintenance_lead', 'technician', 'operator', 'viewer'];
@@ -48,6 +49,96 @@ const roleLabelKeys: Record<string, string> = {
   operator: 'settings.role.operator',
   viewer: 'settings.role.viewer',
 };
+
+/** 可选计划列表 */
+const plans = [
+  { value: 'Trial', label: '试用版', devices: 5, users: 3, retention: 30 },
+  { value: 'Basic', label: '基础版', devices: 50, users: 20, retention: 90 },
+  { value: 'Professional', label: '专业版', devices: 200, users: 50, retention: 180 },
+  { value: 'Enterprise', label: '企业版', devices: 500, users: 200, retention: 365 },
+];
+
+/**
+ * 订阅管理面板
+ *
+ * 展示当前租户的订阅信息（设备/用户用量、数据保留天数），
+ * 并支持在四种计划之间切换。
+ */
+function SubscriptionPanel() {
+  const { t } = useTranslation();
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+  const tenantId = user?.tenantId;
+  const { data: sub } = useSubscription(tenantId);
+  const changePlanMutation = useChangePlan();
+
+  if (!sub) return <p className="text-center text-muted-foreground py-8">{t('subscription.noData')}</p>;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('subscription.title')}</CardTitle>
+        <CardDescription>{t('subscription.currentPlan')}: {sub.planDisplayName}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* 用量概览 */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-lg border p-4">
+            <p className="text-sm text-muted-foreground">{t('subscription.devices')}</p>
+            <p className="text-2xl font-bold">{sub.currentDevices} <span className="text-sm font-normal text-muted-foreground">/ {sub.maxDevices}</span></p>
+            <div className="mt-2 h-2 rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${Math.min(100, (sub.currentDevices / sub.maxDevices) * 100)}%` }}
+              />
+            </div>
+          </div>
+          <div className="rounded-lg border p-4">
+            <p className="text-sm text-muted-foreground">{t('subscription.users')}</p>
+            <p className="text-2xl font-bold">{sub.currentUsers} <span className="text-sm font-normal text-muted-foreground">/ {sub.maxUsers}</span></p>
+            <div className="mt-2 h-2 rounded-full bg-secondary">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${Math.min(100, (sub.currentUsers / sub.maxUsers) * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          {t('subscription.dataRetention')}: {sub.dataRetentionDays} {t('subscription.days')}
+        </p>
+
+        <Separator />
+
+        <h3 className="font-medium">{t('subscription.changePlan')}</h3>
+        <div className="grid grid-cols-2 gap-3">
+          {plans.map((plan) => (
+            <Card
+              key={plan.value}
+              className={`cursor-pointer transition-colors ${sub.plan === plan.value ? 'ring-2 ring-primary' : ''}`}
+              onClick={() => {
+                if (sub.plan !== plan.value) {
+                  changePlanMutation.mutate({ tenantId: sub.tenantId, plan: plan.value });
+                }
+              }}
+            >
+              <CardContent className="p-4">
+                <p className="font-medium">{plan.label}</p>
+                <p className="text-xs text-muted-foreground">
+                  {plan.devices} {t('subscription.devices')} / {plan.users} {t('subscription.users')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {plan.retention} {t('subscription.days')} {t('subscription.dataRetention')}
+                </p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * 外部集成配置面板
@@ -143,12 +234,13 @@ function IntegrationSettings() {
 /**
  * 系统设置页面
  *
- * 采用 Tab 布局，包含五个面板：
+ * 采用 Tab 布局，包含六个面板：
  * - 用户管理：管理用户账号（待后端 API 实现）
  * - 角色权限：展示 RBAC 权限矩阵（只读）
  * - LLM 配置：配置 AI 服务参数
  * - 系统参数：全局系统参数配置
  * - 外部集成：配置 Webhook / 钉钉等外部系统对接
+ * - 订阅管理：查看用量、切换租户计划
  */
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -164,6 +256,7 @@ export default function SettingsPage() {
           <TabsTrigger value="llm">{t('settings.llm')}</TabsTrigger>
           <TabsTrigger value="system">{t('settings.system')}</TabsTrigger>
           <TabsTrigger value="integration">{t('settings.integration')}</TabsTrigger>
+          <TabsTrigger value="subscription">{t('settings.subscription')}</TabsTrigger>
         </TabsList>
 
         {/* 用户管理 */}
@@ -307,6 +400,11 @@ export default function SettingsPage() {
         {/* 外部集成 */}
         <TabsContent value="integration">
           <IntegrationSettings />
+        </TabsContent>
+
+        {/* 订阅管理 */}
+        <TabsContent value="subscription">
+          <SubscriptionPanel />
         </TabsContent>
       </Tabs>
     </div>

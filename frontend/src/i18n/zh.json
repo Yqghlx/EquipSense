@@ -284,7 +284,8 @@
     "maxAggregationCount": "最大聚合次数",
     "dataRetentionDays": "数据保留天数",
     "integration": "外部集成",
-    "integrationDesc": "配置工单与外部系统的集成"
+    "integrationDesc": "配置工单与外部系统的集成",
+    "subscription": "订阅管理"
   },
   "integration": {
     "dingtalk": "钉钉机器人",
@@ -292,6 +293,16 @@
     "signSecret": "加签密钥",
     "enable": "启用",
     "disable": "禁用"
+  },
+  "subscription": {
+    "title": "当前订阅",
+    "currentPlan": "当前计划",
+    "noData": "暂无订阅信息",
+    "devices": "设备数",
+    "users": "用户数",
+    "dataRetention": "数据保留",
+    "days": "天",
+    "changePlan": "变更计划"
   },
   "dataquality": {
     "title": "数据质量",

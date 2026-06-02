@@ -284,7 +284,8 @@
     "maxAggregationCount": "Max Aggregation Count",
     "dataRetentionDays": "Data Retention Days",
     "integration": "External Integrations",
-    "integrationDesc": "Configure work order integrations with external systems"
+    "integrationDesc": "Configure work order integrations with external systems",
+    "subscription": "Subscription"
   },
   "integration": {
     "dingtalk": "DingTalk Robot",
@@ -292,6 +293,16 @@
     "signSecret": "Sign Secret",
     "enable": "Enable",
     "disable": "Disable"
+  },
+  "subscription": {
+    "title": "Current Subscription",
+    "currentPlan": "Current Plan",
+    "noData": "No subscription data",
+    "devices": "Devices",
+    "users": "Users",
+    "dataRetention": "Data Retention",
+    "days": "days",
+    "changePlan": "Change Plan"
   },
   "dataquality": {
     "title": "Data Quality",
