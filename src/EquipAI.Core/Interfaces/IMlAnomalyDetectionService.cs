@@ -27,8 +27,12 @@ public interface IMlAnomalyDetectionService
 /// <param name="AnomalyScore">异常概率（0-1）</param>
 /// <param name="ExpectedValue">预期值（历史均值）</param>
 /// <param name="Description">检测描述文本</param>
+/// <param name="SampleCount">用于检测的样本数量</param>
+/// <param name="WindowSize">SrCnn 窗口大小</param>
 public record MlAnomalyResult(
     bool IsAnomaly,
     double AnomalyScore,
     double ExpectedValue,
-    string Description);
+    string Description,
+    int SampleCount = 0,
+    int WindowSize = 0);

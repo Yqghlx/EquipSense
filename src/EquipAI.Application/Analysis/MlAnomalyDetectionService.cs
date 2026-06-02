@@ -120,7 +120,7 @@ public class MlAnomalyDetectionService : IMlAnomalyDetectionService
                 ? $"ML 检测到异常：当前值 {currentValue:F2} 偏离预期 {expectedValue:F2}，异常概率 {probability:P}"
                 : $"ML 检测正常：当前值 {currentValue:F2}，预期 {expectedValue:F2}，异常概率 {probability:P}";
 
-            return new MlAnomalyResult(isAnomaly, probability, expectedValue, description);
+            return new MlAnomalyResult(isAnomaly, probability, expectedValue, description, validData.Count, windowSize);
         }
         catch (Exception ex)
         {
