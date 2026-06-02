@@ -1,0 +1,337 @@
+using System.Net;
+using System.Net.Http.Json;
+using EquipAI.Application.DTOs.Auth;
+using EquipAI.Application.DTOs.Devices;
+using EquipAI.Application.DTOs.Tenants;
+using EquipAI.Core.Constants;
+using EquipAI.Core.Entities;
+using EquipAI.Core.Enums;
+using EquipAI.Core.Models;
+using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Identity;
+using EquipAI.Tests.Integration.Infrastructure;
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace EquipAI.Tests.Integration.Controllers;
+
+/// <summary>
+/// 多租户数据隔离集成测试
+/// 验证 EF Core 全局租户过滤器、冻结租户限制、系统管理员跨租户访问等核心多租户机制
+/// 使用共享测试集合确保 WebApplicationFactory 单例
+/// </summary>
+[Collection("SharedFactory")]
+public class TenantIsolationTests
+{
+    private readonly CustomWebApplicationFactory _factory;
+
+    public TenantIsolationTests(CustomWebApplicationFactory factory)
+    {
+        _factory = factory;
+    }
+
+    /// <summary>
+    /// 验证：租户 A 创建的设备，租户 B 无法看到
+/// 这是多租户隔离的核心测试，确保 EF Core 全局查询过滤器在 API 层正确生效
+/// 测试流程：
+/// 1. 直接向数据库插入两个租户及各自关联的用户和设备
+/// 2. 分别使用两个租户的用户 JWT 调用 GET /api/v1/devices
+/// 3. 断言每个用户只能看到自己租户的设备
+    /// </summary>
+    [Fact]
+    public async Task DeviceList_TenantA_CannotSee_TenantB_Devices()
+    {
+        // Arrange: 创建两个独立的租户，各自拥有用户和设备
+        var tenantAId = Guid.NewGuid();
+        var tenantBId = Guid.NewGuid();
+        var userAId = Guid.NewGuid();
+        var userBId = Guid.NewGuid();
+
+        // 使用 Seed 初始化基础数据（系统租户、默认租户、admin 用户等）
+        var seedClient = await _factory.CreateClientWithSeedAsync();
+
+        // 通过独立作用域直接操作数据库，插入测试所需的租户和设备
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            // 创建租户 A
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantAId,
+                Name = "租户A-测试工厂",
+                Slug = $"tenant-a-{tenantAId:N}",
+                Plan = TenantPlan.Basic,
+                Status = TenantStatus.Active,
+                IsActive = true,
+                MaxDevices = 50,
+                MaxUsers = 20,
+                DataRetentionDays = 90
+            });
+
+            // 创建租户 B
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantBId,
+                Name = "租户B-测试工厂",
+                Slug = $"tenant-b-{tenantBId:N}",
+                Plan = TenantPlan.Basic,
+                Status = TenantStatus.Active,
+                IsActive = true,
+                MaxDevices = 50,
+                MaxUsers = 20,
+                DataRetentionDays = 90
+            });
+
+            // 创建租户 A 的用户（Operator 角色，拥有 device:read 权限）
+            db.Users.Add(new User
+            {
+                Id = userAId,
+                TenantId = tenantAId,
+                Username = $"user-a-{userAId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "租户A操作员",
+                Role = UserRole.Operator,
+                IsActive = true
+            });
+
+            // 创建租户 B 的用户（Operator 角色）
+            db.Users.Add(new User
+            {
+                Id = userBId,
+                TenantId = tenantBId,
+                Username = $"user-b-{userBId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "租户B操作员",
+                Role = UserRole.Operator,
+                IsActive = true
+            });
+
+            // 租户 A 添加 2 台设备
+            db.Devices.Add(new Device
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantAId,
+                DeviceCode = $"DEV-A1-{Guid.NewGuid():N}".Substring(0, 20),
+                Name = "租户A-电机-001",
+                Type = "电机"
+            });
+            db.Devices.Add(new Device
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantAId,
+                DeviceCode = $"DEV-A2-{Guid.NewGuid():N}".Substring(0, 20),
+                Name = "租户A-泵-001",
+                Type = "泵"
+            });
+
+            // 租户 B 添加 1 台设备
+            db.Devices.Add(new Device
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantBId,
+                DeviceCode = $"DEV-B1-{Guid.NewGuid():N}".Substring(0, 20),
+                Name = "租户B-压缩机-001",
+                Type = "压缩机"
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        // Act & Assert: 租户 A 用户只能看到自己的 2 台设备
+        var clientA = await CreateAuthenticatedClientAsync(userAId, tenantAId, UserRole.Operator);
+        var responseA = await clientA.GetAsync("/api/v1/devices?page=1&pageSize=100");
+        responseA.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var resultA = await responseA.Content.ReadFromJsonAsync<PagedResult<DeviceDto>>();
+        resultA.Should().NotBeNull();
+        resultA!.Items.Should().HaveCount(2, "租户 A 应该只能看到自己的 2 台设备");
+        resultA.Items.Should().OnlyContain(d => d.Name.StartsWith("租户A"), "租户 A 不应看到其他租户的设备");
+
+        // Act & Assert: 租户 B 用户只能看到自己的 1 台设备
+        var clientB = await CreateAuthenticatedClientAsync(userBId, tenantBId, UserRole.Operator);
+        var responseB = await clientB.GetAsync("/api/v1/devices?page=1&pageSize=100");
+        responseB.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var resultB = await responseB.Content.ReadFromJsonAsync<PagedResult<DeviceDto>>();
+        resultB.Should().NotBeNull();
+        resultB!.Items.Should().HaveCount(1, "租户 B 应该只能看到自己的 1 台设备");
+        resultB.Items.Should().OnlyContain(d => d.Name.StartsWith("租户B"), "租户 B 不应看到其他租户的设备");
+    }
+
+    /// <summary>
+    /// 验证：冻结状态的租户无法通过 POST /api/v1/devices 创建设备，应返回 403 Forbidden
+/// 完整链路：UsageLimitMiddleware -> SubscriptionService.CanCreateResourceAsync
+/// 当租户状态为 Frozen 时，CanCreateResourceAsync 返回 false，中间件拦截并返回 403
+    /// </summary>
+    [Fact]
+    public async Task FrozenTenant_CannotCreateDevice_Returns403()
+    {
+        // Arrange: 创建一个冻结状态的租户及其用户
+        var frozenTenantId = Guid.NewGuid();
+        var frozenUserId = Guid.NewGuid();
+
+        // 使用 Seed 初始化基础数据
+        await _factory.CreateClientWithSeedAsync();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            // 创建冻结租户
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = frozenTenantId,
+                Name = "冻结租户-测试",
+                Slug = $"frozen-{frozenTenantId:N}",
+                Plan = TenantPlan.Basic,
+                Status = TenantStatus.Frozen,   // 关键：冻结状态
+                IsActive = false,               // 冻结时 IsActive 也会被设为 false
+                MaxDevices = 50,
+                MaxUsers = 20,
+                DataRetentionDays = 90
+            });
+
+            // 创建 SystemAdmin 角色用户（拥有 device:create 权限，可绕过权限检查）
+            db.Users.Add(new User
+            {
+                Id = frozenUserId,
+                TenantId = frozenTenantId,
+                Username = $"frozen-user-{frozenUserId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "冻结租户管理员",
+                Role = UserRole.MaintenanceLead, // 拥有 device:read 但不拥有 device:create
+                IsActive = true
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        // 使用 MaintenanceLead 用户（无 device:create 权限）会先被权限中间件拦截返回 403
+        // 但我们想验证的是冻结拦截而非权限拦截，所以使用有 device:create 权限的角色
+        // 重新创建用户为 SystemAdmin
+        using (var scope2 = _factory.Services.CreateScope())
+        {
+            var db2 = scope2.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db2.Users.IgnoreQueryFilters()
+                .FirstAsync(u => u.Id == frozenUserId);
+            user.Role = UserRole.SystemAdmin; // 赋予全部权限，确保能通过权限中间件
+            await db2.SaveChangesAsync();
+        }
+
+        var client = await CreateAuthenticatedClientAsync(frozenUserId, frozenTenantId, UserRole.SystemAdmin);
+
+        var createRequest = new CreateDeviceRequest
+        {
+            DeviceCode = $"DEV-FROZEN-{Guid.NewGuid():N}".Substring(0, 20),
+            Name = "冻结租户尝试创建设备",
+            Type = "电机"
+        };
+
+        // Act: 冻结租户尝试创建设备
+        var response = await client.PostAsJsonAsync("/api/v1/devices", createRequest);
+
+        // Assert: 应返回 403 Forbidden（由 UsageLimitMiddleware 拦截）
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "冻结租户应被 UsageLimitMiddleware 拦截，返回 403");
+    }
+
+    /// <summary>
+    /// 验证：system_admin 角色可以调用 GET /api/v1/admin/tenants 查看所有租户列表
+/// 完整链路：
+/// 1. TenantResolutionMiddleware 解析 JWT 设置 TenantContext（IsSystemAdmin=true）
+/// 2. PermissionMiddleware 校验 tenant:read 权限（SystemAdmin 拥有全部权限）
+/// 3. TenantService.GetTenantsAsync 使用 UnfilteredSet 跨租户查询
+    /// </summary>
+    [Fact]
+    public async Task SystemAdmin_CanListAllTenants()
+    {
+        // Arrange: 初始化种子数据（包含系统租户和默认租户）
+        var client = await _factory.CreateClientWithSeedAsync();
+
+        // 额外插入一个租户，确保列表中不止种子数据
+        var extraTenantId = Guid.NewGuid();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = extraTenantId,
+                Name = "额外测试租户",
+                Slug = $"extra-{extraTenantId:N}",
+                Plan = TenantPlan.Professional,
+                Status = TenantStatus.Active,
+                IsActive = true,
+                MaxDevices = 200,
+                MaxUsers = 50,
+                DataRetentionDays = 180
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // 使用 admin 用户登录获取 JWT（种子数据中的 admin 是 SystemAdmin 角色）
+        var loginResponse = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest { Username = "admin", Password = "Admin@123" });
+        loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var loginData = await loginResponse.Content.ReadFromJsonAsync<AuthResponse>();
+        loginData.Should().NotBeNull();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginData!.AccessToken);
+
+        // Act: system_admin 查询所有租户
+        var response = await client.GetAsync("/api/v1/admin/tenants?page=1&pageSize=100");
+
+        // Assert: 应返回 200 OK 且包含所有租户
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "system_admin 应有权限访问租户列表");
+
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<TenantDto>>();
+        result.Should().NotBeNull();
+        result!.Items.Should().NotBeEmpty("应该至少包含种子数据中的租户");
+
+        // 验证至少包含：系统租户、默认租户、额外测试租户
+        result.Total.Should().BeGreaterOrEqualTo(3,
+            "租户列表应包含系统租户、默认租户和额外测试租户");
+
+        // 验证能看到其他租户（跨租户可见性）
+        result.Items.Should().Contain(t => t.Name == "额外测试租户",
+            "system_admin 应能看到所有租户，包括新创建的租户");
+    }
+
+    /// <summary>
+    /// 创建带有 JWT 认证头的 HttpClient
+/// 通过 JwtTokenService 直接生成令牌，绕过登录流程，适合测试不同租户/角色场景
+/// 生成的 JWT 包含 tenant_id、role、username 等 Claims，
+/// TenantResolutionMiddleware 会从 JWT 中解析这些信息设置租户上下文
+    /// </summary>
+    /// <param name="userId">用户 ID</param>
+    /// <param name="tenantId">租户 ID</param>
+    /// <param name="role">用户角色</param>
+    /// <returns>已设置 Authorization 头的 HttpClient</returns>
+    private async Task<HttpClient> CreateAuthenticatedClientAsync(Guid userId, Guid tenantId, UserRole role)
+    {
+        // 使用 Seed 初始化基础数据（确保数据库已创建且包含基础种子数据）
+        var client = await _factory.CreateClientWithSeedAsync();
+
+        using var scope = _factory.Services.CreateScope();
+        var jwtService = scope.ServiceProvider.GetRequiredService<JwtTokenService>();
+
+        // 构造 User 实体供 JwtTokenService 生成令牌
+        // 只需填充 GenerateAccessToken 方法中用到的字段
+        var user = new User
+        {
+            Id = userId,
+            TenantId = tenantId,
+            Role = role,
+            Username = $"test-{userId:N}",
+            TokenVersion = 0
+        };
+
+        var token = jwtService.GenerateAccessToken(user);
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        return client;
+    }
+}
