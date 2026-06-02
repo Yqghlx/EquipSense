@@ -134,4 +134,64 @@ public class TenantsController : ControllerBase
         await _subscriptionService.ChangePlanAsync(id, request.Plan);
         return Ok(new { message = "计划变更成功" });
     }
+
+    /// <summary>
+    /// 获取租户详情（包含基础信息 + 资源用量）
+    /// </summary>
+    /// <param name="id">租户 ID</param>
+    /// <returns>租户详情信息</returns>
+    [HttpGet("{id:guid}/detail")]
+    [RequirePermission("tenant:read")]
+    [ProducesResponseType(typeof(TenantDetailDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<TenantDetailDto>> GetTenantDetail(Guid id)
+    {
+        var detail = await _tenantService.GetTenantDetailAsync(id);
+        if (detail == null)
+        {
+            return NotFound(new { code = 404, message = "租户不存在" });
+        }
+        return Ok(detail);
+    }
+
+    /// <summary>
+    /// 冻结租户 — 禁止创建资源，用于违规或欠费场景
+    /// </summary>
+    /// <param name="id">租户 ID</param>
+    [HttpPut("{id:guid}/freeze")]
+    [RequirePermission("tenant:update")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> FreezeTenant(Guid id)
+    {
+        await _tenantService.FreezeTenantAsync(id);
+        return Ok(new { message = "租户已冻结" });
+    }
+
+    /// <summary>
+    /// 解冻租户 — 恢复正常使用
+    /// </summary>
+    /// <param name="id">租户 ID</param>
+    [HttpPut("{id:guid}/unfreeze")]
+    [RequirePermission("tenant:update")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> UnfreezeTenant(Guid id)
+    {
+        await _tenantService.UnfreezeTenantAsync(id);
+        return Ok(new { message = "租户已解冻" });
+    }
+
+    /// <summary>
+    /// 获取全局统计（总租户数、活跃数、试用数、冻结数、总设备、总用户）
+    /// 排除系统租户
+    /// </summary>
+    [HttpGet("stats")]
+    [RequirePermission("tenant:read")]
+    [ProducesResponseType(typeof(Dictionary<string, object>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<Dictionary<string, object>>> GetGlobalStats()
+    {
+        var stats = await _tenantService.GetGlobalStatsAsync();
+        return Ok(stats);
+    }
 }

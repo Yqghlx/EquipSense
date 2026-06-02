@@ -11,12 +11,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
+  Building2,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
+import { useAuthStore } from '../../stores/authStore';
 
 /** 侧边栏导航项配置 */
-const navItems = [
+const baseNavItems = [
   { path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { path: '/devices', icon: Wrench, labelKey: 'nav.devices' },
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },
@@ -25,6 +27,11 @@ const navItems = [
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
   { path: '/knowledge', icon: BookOpen, labelKey: 'nav.knowledge' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },
+];
+
+/** system_admin 专用导航项 */
+const adminNavItems = [
+  { path: '/admin/tenants', icon: Building2, labelKey: 'nav.tenantManagement' },
 ];
 
 /**
@@ -36,6 +43,12 @@ const navItems = [
 export function Sidebar() {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
+  const user = useAuthStore((s) => s.user);
+
+  /** 根据角色动态构建导航项列表 */
+  const navItems = user?.role === 'SystemAdmin'
+    ? [...baseNavItems, ...adminNavItems]
+    : baseNavItems;
 
   return (
     <aside

@@ -6,7 +6,9 @@ import { SeverityBadge } from '../components/alert/SeverityBadge';
 import { useDevices } from '../hooks/useDevices';
 import { useAlerts } from '../hooks/useAlerts';
 import { useWorkOrders } from '../hooks/useWorkOrders';
-import { Wrench, AlertTriangle, ClipboardList, Activity } from 'lucide-react';
+import { useGlobalStats } from '../hooks/useTenantsAdmin';
+import { useAuthStore } from '../stores/authStore';
+import { Wrench, AlertTriangle, ClipboardList, Activity, Building2, Users, Snowflake } from 'lucide-react';
 
 /**
  * 仪表盘页
@@ -16,11 +18,16 @@ import { Wrench, AlertTriangle, ClipboardList, Activity } from 'lucide-react';
  */
 export default function DashboardPage() {
   const { t } = useTranslation();
+  const user = useAuthStore((s) => s.user);
+  const isSystemAdmin = user?.role === 'SystemAdmin';
 
   const { data: devicesData } = useDevices({ page: 1, pageSize: 1 });
   const { data: onlineDevices } = useDevices({ page: 1, pageSize: 1, status: 'Online' });
   const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
   const { data: workOrdersData } = useWorkOrders({ page: 1, pageSize: 1 }, { status: 'PendingDispatch' });
+
+  /** system_admin 全局统计 */
+  const { data: globalStats } = useGlobalStats();
 
   const totalDevices = devicesData?.total ?? 0;
   const onlineCount = onlineDevices?.total ?? 0;
@@ -43,6 +50,47 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">{t('nav.dashboard')}</h1>
+
+      {/* system_admin 全局统计卡片 */}
+      {isSystemAdmin && globalStats && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-4">
+            <h3 className="mb-3 text-sm font-semibold text-primary">{t('admin.globalStats.title')}</h3>
+            <div className="grid gap-4 md:grid-cols-6">
+              <GlobalStatItem
+                icon={<Building2 className="h-4 w-4" />}
+                label={t('admin.globalStats.totalTenants')}
+                value={String(globalStats.totalTenants)}
+              />
+              <GlobalStatItem
+                icon={<Building2 className="h-4 w-4 text-green-500" />}
+                label={t('admin.globalStats.activeTenants')}
+                value={String(globalStats.activeTenants)}
+              />
+              <GlobalStatItem
+                icon={<Building2 className="h-4 w-4 text-blue-500" />}
+                label={t('admin.globalStats.trialTenants')}
+                value={String(globalStats.trialTenants)}
+              />
+              <GlobalStatItem
+                icon={<Snowflake className="h-4 w-4 text-red-500" />}
+                label={t('admin.globalStats.frozenTenants')}
+                value={String(globalStats.frozenTenants)}
+              />
+              <GlobalStatItem
+                icon={<Wrench className="h-4 w-4" />}
+                label={t('admin.globalStats.totalDevices')}
+                value={String(globalStats.totalDevices)}
+              />
+              <GlobalStatItem
+                icon={<Users className="h-4 w-4" />}
+                label={t('admin.globalStats.totalUsers')}
+                value={String(globalStats.totalUsers)}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 统计卡片 */}
       <div className="grid gap-4 md:grid-cols-4">
@@ -99,6 +147,19 @@ export default function DashboardPage() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/** 全局统计项组件 — 用于 system_admin 仪表盘顶部的统计数据展示 */
+function GlobalStatItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      {icon}
+      <div>
+        <p className="text-lg font-bold">{value}</p>
+        <p className="text-xs text-muted-foreground">{label}</p>
+      </div>
     </div>
   );
 }

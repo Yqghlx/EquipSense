@@ -49,7 +49,8 @@
     "dispatch": "Dispatch Board",
     "analyses": "AI Analysis",
     "knowledge": "Knowledge Base",
-    "settings": "Settings"
+    "settings": "Settings",
+    "tenantManagement": "Tenant Management"
   },
   "sidebar": {
     "expand": "Expand Sidebar",
@@ -518,5 +519,51 @@
     "registerError": "Registration failed. Please try again later.",
     "hasAccount": "Already have an account?",
     "noAccount": "Don't have an account?"
+  },
+  "admin": {
+    "tenants": {
+      "title": "Tenant Management",
+      "searchPlaceholder": "Search by name or slug...",
+      "notFound": "Tenant not found",
+      "backToList": "Back to list",
+      "freeze": "Freeze",
+      "unfreeze": "Unfreeze",
+      "columns": {
+        "name": "Company Name",
+        "plan": "Plan",
+        "status": "Status",
+        "devices": "Devices",
+        "users": "Users",
+        "createdAt": "Created At"
+      },
+      "status": {
+        "active": "Active",
+        "frozen": "Frozen",
+        "trial": "Trial"
+      },
+      "detail": {
+        "basicInfo": "Basic Information",
+        "resourceUsage": "Resource Usage",
+        "actions": "Actions",
+        "admin": "Admin",
+        "trialEndsAt": "Trial Ends At",
+        "subscriptionEndsAt": "Subscription Ends At",
+        "dataRetention": "Data Retention",
+        "devices": "Devices",
+        "users": "Users",
+        "activeAlerts": "Active Alerts",
+        "pendingWorkOrders": "Pending Work Orders",
+        "monthlyAnalysis": "Monthly AI Analysis"
+      }
+    },
+    "globalStats": {
+      "title": "Global Statistics",
+      "totalTenants": "Total Tenants",
+      "activeTenants": "Active Tenants",
+      "trialTenants": "Trial Tenants",
+      "frozenTenants": "Frozen Tenants",
+      "totalDevices": "Total Devices",
+      "totalUsers": "Total Users"
+    }
   }
 }
