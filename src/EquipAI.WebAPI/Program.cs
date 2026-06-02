@@ -6,6 +6,7 @@ using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
 using EquipAI.WebAPI.Extensions;
@@ -158,6 +159,24 @@ try
         {
             var timescaleSetup = scope.ServiceProvider.GetRequiredService<TimescaleDbSetup>();
             await timescaleSetup.InitializeAsync();
+        }
+    }
+
+    // 生产环境自动迁移：启动时检查并应用待执行的 EF Core 迁移
+    if (!app.Environment.IsDevelopment() || args.Contains("--migrate"))
+    {
+        using var migrateScope = app.Services.CreateScope();
+        var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        try
+        {
+            Log.Information("正在检查数据库迁移...");
+            db.Database.Migrate();
+            Log.Information("数据库迁移完成");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "数据库迁移失败");
+            throw;
         }
     }
 
