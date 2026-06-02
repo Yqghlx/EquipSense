@@ -1,3 +1,5 @@
+using EquipAI.Core.Entities;
+using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -108,6 +110,14 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
             ), cancellationToken);
 
             _logger.LogDebug("已发布 AnalysisCompletedEvent: AnalysisId={AnalysisId}", analysis.Id);
+
+            // 分析完成后自动生成候选规则（置信度 >= 0.7 且根因非空）
+            if (analysis.Confidence >= 0.7 && !string.IsNullOrWhiteSpace(analysis.RootCause))
+            {
+                await GenerateCandidateRuleFromAnalysisAsync(
+                    @event.TenantId, @event.DeviceId, @event.Metric,
+                    @event.AlertId, analysis, cancellationToken);
+            }
         }
         catch (Exception ex)
         {
@@ -116,6 +126,61 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
             _logger.LogError(ex,
                 "根因分析失败: AlertId={AlertId}, DeviceId={DeviceId}, Metric={Metric}",
                 @event.AlertId, @event.DeviceId, @event.Metric);
+        }
+    }
+
+    /// <summary>
+    /// 从分析结果中提取因果模式，自动生成候选规则
+    /// </summary>
+    private async Task GenerateCandidateRuleFromAnalysisAsync(
+        Guid tenantId, Guid deviceId, string metric,
+        Guid alertId, AnalysisEntity analysis, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            var device = await db.Devices.FindAsync([deviceId], ct);
+            var deviceType = device?.Type ?? "通用";
+
+            var conditions = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                metric,
+                level = analysis.Level.ToString(),
+                confidence = Math.Round(analysis.Confidence ?? 0, 2)
+            });
+
+            var conclusion = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                rootCause = analysis.RootCause,
+                suggestion = analysis.Suggestion
+            });
+
+            var pendingRule = new PendingRule
+            {
+                TenantId = tenantId,
+                DeviceType = deviceType,
+                Name = $"AI推荐: {metric} 异常处理规则",
+                Conditions = conditions,
+                Conclusion = conclusion,
+                RecommendedActions = analysis.Suggestion,
+                Confidence = (decimal)(analysis.Confidence ?? 0),
+                SourceAlertId = alertId,
+                SourceAnalysisId = analysis.Id,
+                ReviewStatus = ReviewStatus.Pending
+            };
+
+            db.PendingRules.Add(pendingRule);
+            await db.SaveChangesAsync(ct);
+
+            _logger.LogInformation(
+                "已从分析结果生成候选规则: PendingRuleId={PendingRuleId}, 置信度={Confidence:F2}",
+                pendingRule.Id, analysis.Confidence);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "生成候选规则失败: AlertId={AlertId}", alertId);
         }
     }
 }
