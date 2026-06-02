@@ -171,6 +171,9 @@ public static class ServiceCollectionExtensions
         // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
         services.AddScoped<KnowledgeCaptureService>();
 
+        // 订阅管理服务 — 检查租户配额限制（设备数量、用户数量）
+        services.AddScoped<ISubscriptionService, SubscriptionService>();
+
         // 工单外部集成 — 多个 IWorkOrderIntegration 实现，通过 GetServices 解析后按 IntegrationType 匹配
         services.AddScoped<IWorkOrderIntegration, WebhookIntegration>();
         services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();

@@ -81,6 +81,8 @@ try
     app.UseAuthentication();
     // 5. 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（必须在认证之后）
     app.UseMiddleware<TenantResolutionMiddleware>();
+    // 5.5 用量限制 — 在创建资源前检查租户配额（必须在租户解析之后、权限校验之前）
+    app.UseMiddleware<UsageLimitMiddleware>();
     // 6. 权限校验 — 基于角色和权限标识的细粒度访问控制
     app.UseMiddleware<PermissionMiddleware>();
     // 7. 授权 — ASP.NET Core 内置的 [Authorize] 特性支持
