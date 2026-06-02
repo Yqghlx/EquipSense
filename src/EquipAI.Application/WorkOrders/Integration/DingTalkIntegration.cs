@@ -10,13 +10,16 @@ namespace EquipAI.Application.WorkOrders.Integration;
 /// <summary>
 /// 钉钉自定义机器人集成
 /// 使用钉钉自定义机器人 Webhook 推送工单通知
-/// 支持加签安全模式（Secret 签名验证）
-/// 消息格式：Markdown 卡片（标题 + 工单详情）
+/// 支持加签安全模式（HmacSHA256 签名验证）
+/// 消息格式：ActionCard 卡片（支持在钉钉内直接查看工单详情）
 /// </summary>
 public class DingTalkIntegration : IWorkOrderIntegration
 {
     private readonly HttpClient _httpClient;
     private readonly ILogger<DingTalkIntegration> _logger;
+
+    /// <summary>日期格式化常量</summary>
+    private const string DateFormat = "yyyy-MM-dd HH:mm";
 
     public string IntegrationType => "dingtalk";
 
@@ -26,7 +29,13 @@ public class DingTalkIntegration : IWorkOrderIntegration
         _logger = logger;
     }
 
-    public async Task<string?> PushCreatedAsync(Guid tenantId, Guid workOrderId, string title, string priority, string config, CancellationToken ct = default)
+    /// <summary>
+    /// 推送工单创建通知
+    /// 使用 ActionCard 消息格式，支持在钉钉内直接跳转查看工单详情
+    /// </summary>
+    public async Task<string?> PushCreatedAsync(
+        Guid tenantId, Guid workOrderId, string title, string priority,
+        string config, CancellationToken ct = default)
     {
         var dingConfig = DeserializeConfig(config);
         if (dingConfig == null || string.IsNullOrEmpty(dingConfig.WebhookUrl))
@@ -36,25 +45,42 @@ public class DingTalkIntegration : IWorkOrderIntegration
         }
 
         var url = BuildSignedUrl(dingConfig);
-        var message = BuildMarkdownMessage(
-            $"【新工单】{title}",
-            $"### 新工单通知\n\n" +
-            $"- **工单 ID**: {workOrderId}\n" +
+        var now = DateTime.UtcNow.ToString(DateFormat);
+
+        // 构建 ActionCard 正文 Markdown
+        var text =
+            "## 新工单通知\n\n" +
+            $"- **工单编号**: {workOrderId}\n" +
             $"- **标题**: {title}\n" +
             $"- **优先级**: {priority}\n" +
-            $"- **时间**: {DateTime.UtcNow:yyyy-MM-dd HH:mm}\n\n" +
-            $"请及时处理",
+            $"- **创建时间**: {now}\n\n" +
+            "请及时处理";
+
+        var message = BuildActionCardMessage(
+            $"新工单：{title}",
+            text,
+            dingConfig.BaseUrl,
+            workOrderId,
             dingConfig.AtMobiles);
 
         return await SendDingTalkAsync(url, message, ct);
     }
 
-    public async Task PushStatusChangedAsync(Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default)
+    /// <summary>
+    /// 推送工单状态变更通知
+    /// 使用 ActionCard 消息格式，支持在钉钉内直接跳转查看工单详情
+    /// </summary>
+    public async Task PushStatusChangedAsync(
+        Guid tenantId, Guid workOrderId, string status, string? externalId,
+        string config, CancellationToken ct = default)
     {
         var dingConfig = DeserializeConfig(config);
-        if (dingConfig == null || string.IsNullOrEmpty(dingConfig.WebhookUrl)) return;
+        if (dingConfig == null || string.IsNullOrEmpty(dingConfig.WebhookUrl))
+            return;
 
         var url = BuildSignedUrl(dingConfig);
+        var now = DateTime.UtcNow.ToString(DateFormat);
+
         var statusText = status switch
         {
             "Assigned" => "已派工",
@@ -64,12 +90,17 @@ public class DingTalkIntegration : IWorkOrderIntegration
             _ => status
         };
 
-        var message = BuildMarkdownMessage(
-            $"【工单状态更新】{statusText}",
-            $"### 工单状态更新\n\n" +
-            $"- **工单 ID**: {workOrderId}\n" +
+        var text =
+            "## 工单状态变更\n\n" +
+            $"- **工单编号**: {workOrderId}\n" +
             $"- **当前状态**: {statusText}\n" +
-            $"- **更新时间**: {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
+            $"- **更新时间**: {now}";
+
+        var message = BuildActionCardMessage(
+            $"工单状态变更：{statusText}",
+            text,
+            dingConfig.BaseUrl,
+            workOrderId,
             dingConfig.AtMobiles);
 
         await SendDingTalkAsync(url, message, ct);
@@ -95,12 +126,35 @@ public class DingTalkIntegration : IWorkOrderIntegration
         return $"{url}{separator}timestamp={timestamp}&sign={encodedSign}";
     }
 
-    private static object BuildMarkdownMessage(string title, string text, List<string> atMobiles)
+    /// <summary>
+    /// 构建 ActionCard 消息体
+    /// 当 BaseUrl 已配置时，添加"查看详情"按钮；否则不添加按钮
+    /// </summary>
+    private static object BuildActionCardMessage(
+        string title, string text, string? baseUrl, Guid workOrderId, List<string> atMobiles)
     {
+        // 根据 BaseUrl 是否配置决定是否添加按钮
+        object? btns = null;
+        if (!string.IsNullOrEmpty(baseUrl))
+        {
+            // 拼接查看详情链接，确保 baseUrl 末尾无多余斜杠
+            var cleanBaseUrl = baseUrl.TrimEnd('/');
+            btns = new[]
+            {
+                new { title = "查看详情", actionURL = $"{cleanBaseUrl}/work-orders/{workOrderId}" }
+            };
+        }
+
         return new
         {
-            msgtype = "markdown",
-            markdown = new { title, text },
+            msgtype = "actionCard",
+            actionCard = new
+            {
+                title,
+                text,
+                btnOrientation = "1", // 按钮竖直排列
+                btns
+            },
             at = new { atMobiles, isAtAll = false }
         };
     }
