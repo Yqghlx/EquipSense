@@ -75,7 +75,7 @@ export default function ImportExportToolbar() {
 
         {/* 导出下拉菜单 */}
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+          <DropdownMenuTrigger>
             <Button variant="outline" size="sm">
               <Download className="mr-2 h-4 w-4" />
               {t('knowledge.importExport.export')}

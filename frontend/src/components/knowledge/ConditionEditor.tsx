@@ -114,7 +114,7 @@ export default function ConditionEditor({ conditions, onChange }: ConditionEdito
           {/* 运算符选择 */}
           <Select
             value={condition.operator}
-            onValueChange={(val) => handleUpdate(index, 'operator', val)}
+            onValueChange={(val) => handleUpdate(index, 'operator', val ?? '>')}
           >
             <SelectTrigger className="w-24">
               <SelectValue />

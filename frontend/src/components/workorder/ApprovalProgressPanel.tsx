@@ -11,7 +11,6 @@
  * - 已驳回 → 红色圆点 + ✗ 图标
  */
 import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Check, X, Clock } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -89,7 +88,6 @@ function getStepDisplay(action: string, isCurrent: boolean) {
  * 驳回时可填写驳回原因。
  */
 export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgressPanelProps) {
-  const { t } = useTranslation();
   const [rejectingStep, setRejectingStep] = useState<number | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [approveComment, setApproveComment] = useState('');
@@ -112,7 +110,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
   };
 
   /** 处理审批驳回 */
-  const handleReject = (stepOrder: number) => {
+  const handleReject = (_stepOrder: number) => {
     rejectMutation.mutate(
       { id: workOrderId, comment: rejectComment || undefined },
       {
