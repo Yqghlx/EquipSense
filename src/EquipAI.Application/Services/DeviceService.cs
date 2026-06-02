@@ -96,6 +96,7 @@ public class DeviceService : IDeviceService
     /// <summary>
     /// 创建新设备
     /// 检查设备编码的租户内唯一性，新建设备默认状态为 Offline
+    /// 同时维护租户的 CurrentDeviceCount 计数器
     /// </summary>
     /// <param name="request">创建设备请求</param>
     /// <param name="tenantId">所属租户 ID</param>
@@ -117,6 +118,15 @@ public class DeviceService : IDeviceService
         device.Status = DeviceStatus.Offline;
 
         _dbContext.Devices.Add(device);
+
+        // 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
+        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+            .FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant != null)
+        {
+            tenant.CurrentDeviceCount++;
+        }
+
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("设备 {DeviceCode}（名称：{Name}）创建成功（租户：{TenantId}）",
@@ -152,6 +162,7 @@ public class DeviceService : IDeviceService
     /// <summary>
     /// 删除设备（硬删除）
     /// Phase 1 采用硬删除，后续阶段可改为软删除配合审计日志
+    /// 同时维护租户的 CurrentDeviceCount 计数器
     /// </summary>
     /// <param name="deviceId">设备 ID</param>
     /// <param name="tenantId">租户 ID</param>
@@ -162,6 +173,15 @@ public class DeviceService : IDeviceService
             ?? throw new KeyNotFoundException($"设备 {deviceId} 不存在");
 
         _dbContext.Devices.Remove(device);
+
+        // 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
+        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+            .FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant != null && tenant.CurrentDeviceCount > 0)
+        {
+            tenant.CurrentDeviceCount--;
+        }
+
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("设备 {DeviceId}（编码：{DeviceCode}）已删除", deviceId, device.DeviceCode);

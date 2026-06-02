@@ -58,4 +58,44 @@ public class RedisService
         var key = $"refresh:{userId}";
         await _database.KeyDeleteAsync(key);
     }
+
+    /// <summary>
+    /// 获取租户配额缓存
+    /// 键格式：quota:{tenantId}:{resourceType}
+    /// </summary>
+    /// <param name="tenantId">租户 ID</param>
+    /// <param name="resourceType">资源类型（device/user）</param>
+    /// <returns>缓存的数量值，不存在则返回 null</returns>
+    public virtual async Task<int?> GetQuotaCacheAsync(Guid tenantId, string resourceType)
+    {
+        var key = $"quota:{tenantId}:{resourceType}";
+        var value = await _database.StringGetAsync(key);
+        return value.HasValue ? (int?)value : null;
+    }
+
+    /// <summary>
+    /// 设置租户配额缓存
+    /// 默认过期时间为 5 分钟，避免缓存与实际数据长时间不一致
+    /// </summary>
+    /// <param name="tenantId">租户 ID</param>
+    /// <param name="resourceType">资源类型（device/user）</param>
+    /// <param name="count">当前资源数量</param>
+    /// <param name="expiry">可选过期时间，默认 5 分钟</param>
+    public virtual async Task SetQuotaCacheAsync(Guid tenantId, string resourceType, int count, TimeSpan? expiry = null)
+    {
+        var key = $"quota:{tenantId}:{resourceType}";
+        await _database.StringSetAsync(key, count, expiry ?? TimeSpan.FromMinutes(5));
+    }
+
+    /// <summary>
+    /// 使租户配额缓存失效
+    /// 在创建/删除资源后调用，确保下次查询获取最新数据
+    /// </summary>
+    /// <param name="tenantId">租户 ID</param>
+    /// <param name="resourceType">资源类型（device/user）</param>
+    public virtual async Task InvalidateQuotaCacheAsync(Guid tenantId, string resourceType)
+    {
+        var key = $"quota:{tenantId}:{resourceType}";
+        await _database.KeyDeleteAsync(key);
+    }
 }

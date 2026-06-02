@@ -82,6 +82,7 @@ public class UserService : IUserService
     /// 创建新用户
     /// 使用 IgnoreQueryFilters 检查用户名的全局唯一性，防止不同租户间用户名冲突
     /// 新建用户默认需要修改密码（MustChangePassword = true）
+    /// 同时维护租户的 CurrentUserCount 计数器
     /// </summary>
     /// <param name="request">创建用户请求</param>
     /// <param name="tenantId">所属租户 ID</param>
@@ -104,6 +105,15 @@ public class UserService : IUserService
         user.MustChangePassword = true;
 
         _dbContext.Users.Add(user);
+
+        // 维护租户 CurrentUserCount（使用 UnfilteredSet 跨租户查询）
+        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+            .FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant != null)
+        {
+            tenant.CurrentUserCount++;
+        }
+
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("用户 {Username} 创建成功（租户：{TenantId}）", user.Username, tenantId);

@@ -106,17 +106,35 @@ public class SubscriptionService : ISubscriptionService
         var tenant = await db.UnfilteredSet<Core.Entities.Tenant>()
             .FirstOrDefaultAsync(t => t.Id == tenantId, ct);
 
-        // 租户不存在或未激活时不允许创建资源
-        if (tenant == null || !tenant.IsActive) return false;
+        // 租户不存在时不允许创建资源
+        if (tenant == null) return false;
 
+        // 检查租户状态：Expired/Frozen/Closed 状态不允许创建资源
+        if (tenant.Status == TenantStatus.Expired
+            || tenant.Status == TenantStatus.Frozen
+            || tenant.Status == TenantStatus.Closed)
+        {
+            _logger.LogWarning("租户 {TenantId} 状态为 {Status}，不允许创建资源", tenantId, tenant.Status);
+            return false;
+        }
+
+        // 检查试用期是否过期：Trial 状态 + TrialEndsAt 已过期不允许创建资源
+        if (tenant.Status == TenantStatus.Trial
+            && tenant.TrialEndsAt.HasValue
+            && tenant.TrialEndsAt.Value < DateTime.UtcNow)
+        {
+            _logger.LogWarning("租户 {TenantId} 试用期已于 {TrialEndsAt} 过期，不允许创建资源",
+                tenantId, tenant.TrialEndsAt.Value);
+            return false;
+        }
+
+        // 使用 CurrentDeviceCount/CurrentUserCount 字段判断配额（避免 COUNT 查询）
         return resourceType.ToLowerInvariant() switch
         {
             // 检查设备数是否已达上限
-            "device" => await db.UnfilteredSet<Core.Entities.Device>()
-                .CountAsync(d => d.TenantId == tenantId, ct) < tenant.MaxDevices,
+            "device" => tenant.CurrentDeviceCount < tenant.MaxDevices,
             // 检查用户数是否已达上限
-            "user" => await db.UnfilteredSet<Core.Entities.User>()
-                .CountAsync(u => u.TenantId == tenantId, ct) < tenant.MaxUsers,
+            "user" => tenant.CurrentUserCount < tenant.MaxUsers,
             // 未知资源类型默认允许（保持前向兼容）
             _ => true
         };
