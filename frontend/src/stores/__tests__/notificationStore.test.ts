@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { useNotificationStore } from '../notificationStore';
 
 /** 每个测试前重置 store 和 crypto mock */
@@ -110,8 +110,6 @@ describe('notificationStore', () => {
 
   describe('clearAll（清除已读通知）', () => {
     it('应清除已读且超过1小时的通知', () => {
-      const store = useNotificationStore.getState();
-
       // 手动构造带时间戳的通知，模拟已读且超过1小时
       const oldReadNotification = {
         id: 'old-1',
