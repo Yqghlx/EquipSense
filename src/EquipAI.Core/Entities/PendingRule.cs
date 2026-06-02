@@ -53,6 +53,16 @@ public class PendingRule : BaseEntity
     public Guid? SourceCaseId { get; set; }
 
     /// <summary>
+    /// 来源告警 ID（分析引擎自动生成时关联的告警）
+    /// </summary>
+    public Guid? SourceAlertId { get; set; }
+
+    /// <summary>
+    /// 来源分析 ID（分析引擎自动生成时关联的分析记录）
+    /// </summary>
+    public Guid? SourceAnalysisId { get; set; }
+
+    /// <summary>
     /// AI 给出的置信度评分（0-1）
     /// </summary>
     public decimal? Confidence { get; set; }
