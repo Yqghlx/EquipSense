@@ -4,6 +4,7 @@ import { queryClient } from './lib/queryClient';
 import { AuthLayout } from './components/layout/AuthLayout';
 import { AppLayout } from './components/layout/AppLayout';
 import { NotificationToast } from './components/layout/NotificationToast';
+import { InstallPrompt } from './components/layout/InstallPrompt';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import DeviceListPage from './pages/DeviceListPage';
@@ -74,6 +75,7 @@ function AppRoutes() {
  * 1. QueryClientProvider — TanStack Query 数据请求
  * 2. BrowserRouter — 路由
  * 3. NotificationToast — 全局通知浮层
+ * 4. InstallPrompt — PWA 安装提示（仅在可安装时显示）
  */
 export default function App() {
   return (
@@ -81,6 +83,7 @@ export default function App() {
       <BrowserRouter>
         <AppRoutes />
         <NotificationToast />
+        <InstallPrompt />
       </BrowserRouter>
     </QueryClientProvider>
   );
