@@ -282,7 +282,16 @@
     "alertCooldown": "Alert Cooldown (seconds)",
     "aggregationWindow": "Aggregation Window (minutes)",
     "maxAggregationCount": "Max Aggregation Count",
-    "dataRetentionDays": "Data Retention Days"
+    "dataRetentionDays": "Data Retention Days",
+    "integration": "External Integrations",
+    "integrationDesc": "Configure work order integrations with external systems"
+  },
+  "integration": {
+    "dingtalk": "DingTalk Robot",
+    "webhookUrl": "Webhook URL",
+    "signSecret": "Sign Secret",
+    "enable": "Enable",
+    "disable": "Disable"
   },
   "dataquality": {
     "title": "Data Quality",
@@ -295,10 +304,16 @@
   },
   "knowledge": {
     "title": "Knowledge Base",
+    "importPreset": "Import Industry Presets",
     "rules": "Diagnostic Rules",
+    "pending": "Pending Review",
     "cases": "Fault Cases",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
     "conditions": "Conditions",
     "conclusion": "Conclusion",
+    "recommendedActions": "Recommended Actions",
+    "confidenceWeight": "Confidence Weight",
     "successCount": "Applied",
     "accuracyRate": "Accuracy",
     "faultDescription": "Fault Description",
@@ -307,6 +322,13 @@
     "repairDuration": "Repair Duration",
     "minutes": "min",
     "verified": "Verified",
+    "unverified": "Unverified",
+    "approve": "Approve",
+    "reject": "Reject",
+    "defaultRejectComment": "Not applicable",
+    "noRules": "No knowledge rules",
+    "noPending": "No pending rules",
+    "noCases": "No fault cases",
     "sourceManual": "Manual",
     "sourceAI": "AI Generated",
     "sourceImported": "Imported"

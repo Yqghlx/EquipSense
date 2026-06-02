@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -7,6 +8,7 @@ import { Label } from '../components/ui/label';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Separator } from '../components/ui/separator';
+import { useIntegrations, useUpdateIntegration } from '../hooks/useIntegration';
 
 /** 系统角色列表 */
 const roles = ['system_admin', 'maintenance_lead', 'technician', 'operator', 'viewer'];
@@ -48,13 +50,105 @@ const roleLabelKeys: Record<string, string> = {
 };
 
 /**
+ * 外部集成配置面板
+ *
+ * 支持配置 Webhook 和钉钉机器人两种外部集成。
+ * 每种集成可独立启用/禁用，并配置对应的连接参数。
+ */
+function IntegrationSettings() {
+  const { t } = useTranslation();
+  const { data: integrations } = useIntegrations();
+  const updateMutation = useUpdateIntegration();
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [dingtalkUrl, setDingtalkUrl] = useState('');
+  const [dingtalkSecret, setDingtalkSecret] = useState('');
+
+  const webhook = integrations?.webhook;
+  const dingtalk = integrations?.dingtalk;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('settings.integration')}</CardTitle>
+        <CardDescription>{t('settings.integrationDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Webhook 集成 */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium">Webhook</h3>
+            <Button
+              size="sm"
+              variant={webhook?.enabled ? "destructive" : "default"}
+              onClick={() => updateMutation.mutate({
+                type: 'webhook',
+                enabled: !webhook?.enabled,
+                config: JSON.stringify({ url: webhookUrl, secret: '' }),
+              })}
+            >
+              {webhook?.enabled ? t('integration.disable') : t('integration.enable')}
+            </Button>
+          </div>
+          <div className="space-y-2">
+            <Label>Webhook URL</Label>
+            <Input
+              placeholder="https://your-server.com/webhook"
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* 钉钉集成 */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-medium">{t('integration.dingtalk')}</h3>
+            <Button
+              size="sm"
+              variant={dingtalk?.enabled ? "destructive" : "default"}
+              onClick={() => updateMutation.mutate({
+                type: 'dingtalk',
+                enabled: !dingtalk?.enabled,
+                config: JSON.stringify({ webhookUrl: dingtalkUrl, secret: dingtalkSecret, atMobiles: [] }),
+              })}
+            >
+              {dingtalk?.enabled ? t('integration.disable') : t('integration.enable')}
+            </Button>
+          </div>
+          <div className="space-y-2">
+            <Label>{t('integration.webhookUrl')}</Label>
+            <Input
+              placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
+              value={dingtalkUrl}
+              onChange={(e) => setDingtalkUrl(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('integration.signSecret')}</Label>
+            <Input
+              type="password"
+              placeholder="SEC..."
+              value={dingtalkSecret}
+              onChange={(e) => setDingtalkSecret(e.target.value)}
+            />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
  * 系统设置页面
  *
- * 采用 Tab 布局，包含四个面板：
+ * 采用 Tab 布局，包含五个面板：
  * - 用户管理：管理用户账号（待后端 API 实现）
  * - 角色权限：展示 RBAC 权限矩阵（只读）
  * - LLM 配置：配置 AI 服务参数
  * - 系统参数：全局系统参数配置
+ * - 外部集成：配置 Webhook / 钉钉等外部系统对接
  */
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -69,6 +163,7 @@ export default function SettingsPage() {
           <TabsTrigger value="roles">{t('settings.roles')}</TabsTrigger>
           <TabsTrigger value="llm">{t('settings.llm')}</TabsTrigger>
           <TabsTrigger value="system">{t('settings.system')}</TabsTrigger>
+          <TabsTrigger value="integration">{t('settings.integration')}</TabsTrigger>
         </TabsList>
 
         {/* 用户管理 */}
@@ -207,6 +302,11 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* 外部集成 */}
+        <TabsContent value="integration">
+          <IntegrationSettings />
         </TabsContent>
       </Tabs>
     </div>

@@ -282,7 +282,16 @@
     "alertCooldown": "告警冷却时间（秒）",
     "aggregationWindow": "聚合窗口（分钟）",
     "maxAggregationCount": "最大聚合次数",
-    "dataRetentionDays": "数据保留天数"
+    "dataRetentionDays": "数据保留天数",
+    "integration": "外部集成",
+    "integrationDesc": "配置工单与外部系统的集成"
+  },
+  "integration": {
+    "dingtalk": "钉钉机器人",
+    "webhookUrl": "Webhook URL",
+    "signSecret": "加签密钥",
+    "enable": "启用",
+    "disable": "禁用"
   },
   "dataquality": {
     "title": "数据质量",
@@ -294,11 +303,17 @@
     "validity": "有效性"
   },
   "knowledge": {
-    "title": "知识库",
+    "title": "知识库管理",
+    "importPreset": "导入行业预置数据",
     "rules": "诊断规则",
+    "pending": "待审核",
     "cases": "故障案例",
+    "enabled": "启用",
+    "disabled": "禁用",
     "conditions": "触发条件",
     "conclusion": "结论",
+    "recommendedActions": "推荐措施",
+    "confidenceWeight": "置信度权重",
     "successCount": "应用次数",
     "accuracyRate": "准确率",
     "faultDescription": "故障描述",
@@ -307,6 +322,13 @@
     "repairDuration": "维修时长",
     "minutes": "分钟",
     "verified": "已验证",
+    "unverified": "待验证",
+    "approve": "批准",
+    "reject": "驳回",
+    "defaultRejectComment": "不适用",
+    "noRules": "暂无知识规则",
+    "noPending": "暂无待审核规则",
+    "noCases": "暂无故障案例",
     "sourceManual": "手动创建",
     "sourceAI": "AI 生成",
     "sourceImported": "批量导入"
