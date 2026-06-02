@@ -19,4 +19,11 @@ public interface IWorkOrderService
     Task<WorkOrderDto> RejectAsync(Guid tenantId, Guid id, Guid userId, string? note = null, CancellationToken ct = default);
     Task<WorkOrderDto> CloseAsync(Guid tenantId, Guid id, Guid userId, string? note = null, CancellationToken ct = default);
     Task<WorkOrderDto> CancelAsync(Guid tenantId, Guid id, Guid userId, string? note = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// 提交验收 — 记录解决措施并触发审批链
+    /// 工单状态必须为 InProgress 或 Completed，提交后自动匹配审批链模板
+    /// 若无匹配的审批链模板，则直接走原来的 Complete 流程
+    /// </summary>
+    Task<WorkOrderDto> SubmitAsync(Guid tenantId, Guid id, CompleteWorkOrderRequest request, Guid userId, CancellationToken ct = default);
 }

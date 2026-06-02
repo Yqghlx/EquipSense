@@ -1,4 +1,5 @@
 using AutoMapper;
+using EquipAI.Application.Approvals;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Core.Models;
 using EquipAI.Application.WorkOrders.DTOs;
@@ -28,6 +29,7 @@ public class WorkOrderService : IWorkOrderService
     private readonly IEventBus _eventBus;
     private readonly IMapper _mapper;
     private readonly ILogger<WorkOrderService> _logger;
+    private readonly IApprovalChainService _approvalChainService;
 
     /// <summary>
     /// 合法的状态流转映射表
@@ -37,8 +39,9 @@ public class WorkOrderService : IWorkOrderService
     {
         [WorkOrderStatus.PendingDispatch] = [WorkOrderStatus.Assigned, WorkOrderStatus.Cancelled],
         [WorkOrderStatus.Assigned] = [WorkOrderStatus.InProgress, WorkOrderStatus.Cancelled],
-        [WorkOrderStatus.InProgress] = [WorkOrderStatus.Completed, WorkOrderStatus.Cancelled],
-        [WorkOrderStatus.Completed] = [WorkOrderStatus.Accepted, WorkOrderStatus.Rejected],
+        [WorkOrderStatus.InProgress] = [WorkOrderStatus.Completed, WorkOrderStatus.Cancelled, WorkOrderStatus.SubmittedForApproval],
+        [WorkOrderStatus.Completed] = [WorkOrderStatus.Accepted, WorkOrderStatus.Rejected, WorkOrderStatus.SubmittedForApproval],
+        [WorkOrderStatus.SubmittedForApproval] = [WorkOrderStatus.Accepted, WorkOrderStatus.InProgress],
         [WorkOrderStatus.Accepted] = [WorkOrderStatus.Closed],
         [WorkOrderStatus.Rejected] = [WorkOrderStatus.InProgress],
         // Closed 和 Cancelled 为终态，不允许再变更
@@ -48,12 +51,14 @@ public class WorkOrderService : IWorkOrderService
         IServiceScopeFactory scopeFactory,
         IEventBus eventBus,
         IMapper mapper,
-        ILogger<WorkOrderService> logger)
+        ILogger<WorkOrderService> logger,
+        IApprovalChainService approvalChainService)
     {
         _scopeFactory = scopeFactory;
         _eventBus = eventBus;
         _mapper = mapper;
         _logger = logger;
+        _approvalChainService = approvalChainService;
     }
 
     /// <inheritdoc />
@@ -389,6 +394,55 @@ public class WorkOrderService : IWorkOrderService
         _logger.LogInformation("工单 {WorkOrderCode} 已取消", workOrder.WorkOrderCode);
 
         await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
+
+        return MapToDto(workOrder);
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkOrderDto> SubmitAsync(
+        Guid tenantId, Guid id, CompleteWorkOrderRequest request, Guid userId, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        if (workOrder == null)
+        {
+            throw new KeyNotFoundException($"工单不存在: {id}");
+        }
+
+        // 提交验收前置校验：工单必须处于 InProgress 或 Completed 状态
+        if (workOrder.Status != WorkOrderStatus.InProgress && workOrder.Status != WorkOrderStatus.Completed)
+        {
+            throw new InvalidOperationException(
+                $"工单 {workOrder.WorkOrderCode} 当前状态为 {workOrder.Status}，仅支持从 InProgress 或 Completed 状态提交验收");
+        }
+
+        // 记录解决措施和完成时间
+        var oldStatus = workOrder.Status;
+        workOrder.Resolution = request.Resolution;
+        if (workOrder.CompletedAt == null)
+        {
+            workOrder.CompletedAt = DateTime.UtcNow;
+        }
+
+        await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.StatusChanged,
+            oldStatus.ToString(), "SubmittedForApproval",
+            userId, note: $"提交验收（解决措施: {request.Resolution}）", ct);
+
+        await dbContext.SaveChangesAsync(ct);
+
+        // 尝试匹配审批链模板并创建审批记录
+        // CreateApprovalRecordsAsync 内部会匹配模板，若无匹配则不创建审批记录，工单状态不变
+        await _approvalChainService.CreateApprovalRecordsAsync(
+            tenantId, workOrder.Id, workOrder.Type, workOrder.Priority, ct);
+
+        _logger.LogInformation(
+            "工单 {WorkOrderCode} 已提交验收（解决措施: {Resolution}）",
+            workOrder.WorkOrderCode, request.Resolution);
+
+        // 重新加载工单以获取最新状态（CreateApprovalRecordsAsync 可能已更新状态）
+        await dbContext.Entry(workOrder).ReloadAsync(ct);
 
         return MapToDto(workOrder);
     }

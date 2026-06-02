@@ -1,3 +1,5 @@
+using EquipAI.Application.Approvals;
+using EquipAI.Application.Approvals.DTOs;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.WorkOrders;
 using EquipAI.Application.WorkOrders.DTOs;
@@ -11,7 +13,7 @@ namespace EquipAI.WebAPI.Controllers;
 
 /// <summary>
 /// 工单管理控制器
-/// 提供工单的完整生命周期管理：创建、派工、执行、验收和关闭
+/// 提供工单的完整生命周期管理：创建、派工、执行、审批、验收和关闭
 /// </summary>
 [ApiController]
 [Route("api/v1/work-orders")]
@@ -19,11 +21,16 @@ namespace EquipAI.WebAPI.Controllers;
 public class WorkOrdersController : ControllerBase
 {
     private readonly IWorkOrderService _workOrderService;
+    private readonly IApprovalChainService _approvalChainService;
     private readonly ITenantContext _tenantContext;
 
-    public WorkOrdersController(IWorkOrderService workOrderService, ITenantContext tenantContext)
+    public WorkOrdersController(
+        IWorkOrderService workOrderService,
+        IApprovalChainService approvalChainService,
+        ITenantContext tenantContext)
     {
         _workOrderService = workOrderService;
+        _approvalChainService = approvalChainService;
         _tenantContext = tenantContext;
     }
 
@@ -144,6 +151,59 @@ public class WorkOrdersController : ControllerBase
     public async Task<ActionResult<WorkOrderDto>> CancelWorkOrder(Guid id, [FromBody] NoteRequest? note = null)
     {
         return Ok(await _workOrderService.CancelAsync(_tenantContext.TenantId, id, _tenantContext.UserId, note?.Note));
+    }
+
+    /// <summary>
+    /// 提交验收 — 触发审批链
+    /// 工单状态必须为 InProgress 或 Completed，提交后自动匹配审批链模板并创建审批记录
+    /// 若无匹配的审批链模板，则直接走原来的 Complete 流程
+    /// </summary>
+    [HttpPost("{id:guid}/submit")]
+    [RequirePermission("workorder:execute")]
+    [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<WorkOrderDto>> SubmitWorkOrder(Guid id, [FromBody] CompleteWorkOrderRequest request)
+    {
+        return Ok(await _workOrderService.SubmitAsync(
+            _tenantContext.TenantId, id, request, _tenantContext.UserId));
+    }
+
+    /// <summary>
+    /// 审批通过 — 当前审批步骤通过
+    /// 所有步骤通过后，工单状态自动变为 Accepted
+    /// </summary>
+    [HttpPost("{id:guid}/approve")]
+    [RequirePermission("workorder:accept")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<ActionResult> ApproveWorkOrder(Guid id, [FromBody] ApprovalActionRequest? request = null)
+    {
+        await _approvalChainService.ApproveAsync(
+            _tenantContext.TenantId, id, _tenantContext.UserId, request?.Comment);
+        return Ok(new { message = "审批通过" });
+    }
+
+    /// <summary>
+    /// 审批驳回 — 当前审批步骤驳回，工单回到 InProgress
+    /// </summary>
+    [HttpPost("{id:guid}/reject-approval")]
+    [RequirePermission("workorder:accept")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<ActionResult> RejectApproval(Guid id, [FromBody] ApprovalActionRequest? request = null)
+    {
+        await _approvalChainService.RejectAsync(
+            _tenantContext.TenantId, id, _tenantContext.UserId, request?.Comment);
+        return Ok(new { message = "审批已驳回" });
+    }
+
+    /// <summary>
+    /// 获取工单审批记录
+    /// 按步骤顺序返回该工单的所有审批记录
+    /// </summary>
+    [HttpGet("{id:guid}/approvals")]
+    [RequirePermission("workorder:read")]
+    [ProducesResponseType(typeof(List<WorkOrderApprovalDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<WorkOrderApprovalDto>>> GetApprovals(Guid id)
+    {
+        return Ok(await _approvalChainService.GetApprovalsAsync(_tenantContext.TenantId, id));
     }
 }
 
