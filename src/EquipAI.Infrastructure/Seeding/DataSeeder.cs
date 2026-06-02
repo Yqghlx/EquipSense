@@ -74,7 +74,12 @@ public class DataSeeder
                 MaxDevices = int.MaxValue,
                 MaxUsers = int.MaxValue,
                 DataRetentionDays = 365,
-                IsActive = true
+                IsActive = true,
+                Status = TenantStatus.Active,
+                TrialEndsAt = null,
+                SubscriptionEndsAt = DateTime.UtcNow.AddYears(10),
+                CurrentDeviceCount = 0,
+                CurrentUserCount = 1
             };
 
             _dbContext.Tenants.Add(systemTenant);
@@ -99,7 +104,12 @@ public class DataSeeder
                 MaxDevices = 50,
                 MaxUsers = 20,
                 DataRetentionDays = 90,
-                IsActive = true
+                IsActive = true,
+                Status = TenantStatus.Active,
+                TrialEndsAt = null,
+                SubscriptionEndsAt = DateTime.UtcNow.AddYears(1),
+                CurrentDeviceCount = 0,
+                CurrentUserCount = 1
             };
 
             _dbContext.Tenants.Add(defaultTenant);

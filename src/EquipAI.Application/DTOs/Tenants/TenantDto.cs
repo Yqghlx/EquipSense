@@ -44,4 +44,34 @@ public class TenantDto
     /// 创建时间（UTC）
     /// </summary>
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// 租户状态名称
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 当前设备数量
+    /// </summary>
+    public int CurrentDeviceCount { get; set; }
+
+    /// <summary>
+    /// 当前用户数量
+    /// </summary>
+    public int CurrentUserCount { get; set; }
+
+    /// <summary>
+    /// 试用期截止时间
+    /// </summary>
+    public DateTime? TrialEndsAt { get; set; }
+
+    /// <summary>
+    /// 订阅到期时间
+    /// </summary>
+    public DateTime? SubscriptionEndsAt { get; set; }
+
+    /// <summary>
+    /// 数据保留天数
+    /// </summary>
+    public int DataRetentionDays { get; set; }
 }

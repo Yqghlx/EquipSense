@@ -86,9 +86,10 @@ public class MappingProfile : Profile
 
         // ========== 租户映射 ==========
 
-        // Tenant 实体 -> TenantDto（Plan 枚举转为字符串）
+        // Tenant 实体 -> TenantDto（Plan、Status 枚举转为字符串）
         CreateMap<Tenant, TenantDto>()
-            .ForMember(dest => dest.Plan, opt => opt.MapFrom(src => src.Plan.ToString()));
+            .ForMember(dest => dest.Plan, opt => opt.MapFrom(src => src.Plan.ToString()))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
 
         // CreateTenantRequest -> Tenant 实体
         CreateMap<CreateTenantRequest, Tenant>()
@@ -101,6 +102,11 @@ public class MappingProfile : Profile
             .ForMember(dest => dest.Settings, opt => opt.Ignore())
             .ForMember(dest => dest.IsActive, opt => opt.Ignore())
             .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())
+            .ForMember(dest => dest.Status, opt => opt.Ignore())
+            .ForMember(dest => dest.CurrentDeviceCount, opt => opt.Ignore())
+            .ForMember(dest => dest.CurrentUserCount, opt => opt.Ignore())
+            .ForMember(dest => dest.TrialEndsAt, opt => opt.Ignore())
+            .ForMember(dest => dest.SubscriptionEndsAt, opt => opt.Ignore())
             .ForMember(dest => dest.Users, opt => opt.Ignore())
             .ForMember(dest => dest.Devices, opt => opt.Ignore())
             .ForMember(dest => dest.DeviceTypeTemplates, opt => opt.Ignore());

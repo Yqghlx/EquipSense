@@ -57,6 +57,33 @@ public class Tenant : BaseEntity
     /// </summary>
     public bool IsActive { get; set; } = true;
 
+    // --- SaaS 字段 ---
+
+    /// <summary>
+    /// 租户状态（Trial/Active/Expired/Frozen/Closed）
+    /// </summary>
+    public TenantStatus Status { get; set; } = TenantStatus.Trial;
+
+    /// <summary>
+    /// 当前设备数量（由应用层维护，避免每次 COUNT 查询）
+    /// </summary>
+    public int CurrentDeviceCount { get; set; }
+
+    /// <summary>
+    /// 当前用户数量（由应用层维护，避免每次 COUNT 查询）
+    /// </summary>
+    public int CurrentUserCount { get; set; }
+
+    /// <summary>
+    /// 试用期截止时间（注册时设置为当前时间 +14 天）
+    /// </summary>
+    public DateTime? TrialEndsAt { get; set; }
+
+    /// <summary>
+    /// 订阅到期时间（付费套餐到期日）
+    /// </summary>
+    public DateTime? SubscriptionEndsAt { get; set; }
+
     // 导航属性
 
     /// <summary>

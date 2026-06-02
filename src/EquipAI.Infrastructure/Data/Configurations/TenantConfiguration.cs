@@ -75,6 +75,31 @@ public class TenantConfiguration : IEntityTypeConfiguration<Core.Entities.Tenant
             .HasColumnName("is_active")
             .IsRequired();
 
+        // --- SaaS 字段 ---
+
+        // 租户状态枚举 → 字符串存储
+        builder.Property(e => e.Status)
+            .HasColumnName("status")
+            .HasConversion<string>()
+            .HasMaxLength(20)
+            .IsRequired();
+
+        builder.Property(e => e.CurrentDeviceCount)
+            .HasColumnName("current_device_count")
+            .HasDefaultValue(0)
+            .IsRequired();
+
+        builder.Property(e => e.CurrentUserCount)
+            .HasColumnName("current_user_count")
+            .HasDefaultValue(0)
+            .IsRequired();
+
+        builder.Property(e => e.TrialEndsAt)
+            .HasColumnName("trial_ends_at");
+
+        builder.Property(e => e.SubscriptionEndsAt)
+            .HasColumnName("subscription_ends_at");
+
         builder.Property(e => e.CreatedAt)
             .HasColumnName("created_at")
             .IsRequired();
