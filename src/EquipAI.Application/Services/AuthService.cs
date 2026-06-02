@@ -2,6 +2,8 @@ using AutoMapper;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
+using EquipAI.Core.Entities;
+using EquipAI.Core.Enums;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
@@ -22,6 +24,27 @@ public class AuthService : IAuthService
     private readonly RedisService _redisService;
     private readonly IMapper _mapper;
     private readonly ILogger<AuthService> _logger;
+
+    /// <summary>
+    /// 各套餐对应的配额限制（最大设备数、最大用户数、数据保留天数）
+    /// 0 表示不限制
+    /// </summary>
+    private static readonly Dictionary<TenantPlan, (int MaxDevices, int MaxUsers, int RetentionDays)> PlanLimits = new()
+    {
+        [TenantPlan.Trial] = (5, 3, 7),
+        [TenantPlan.Professional] = (50, 20, 90),
+        [TenantPlan.Enterprise] = (0, 0, 365),
+    };
+
+    /// <summary>
+    /// 套餐的展示信息（标识、名称、描述、月度价格）
+    /// </summary>
+    private static readonly List<(TenantPlan Plan, string DisplayName, string Description, decimal Price)> PlanDisplayInfo = new()
+    {
+        (TenantPlan.Trial, "试用版", "14 天免费试用，最多 5 台设备、3 个用户", 0m),
+        (TenantPlan.Professional, "专业版", "适合中小团队，最多 50 台设备、20 个用户", 299m),
+        (TenantPlan.Enterprise, "企业版", "不限设备与用户，365 天数据保留", 999m),
+    };
 
     /// <summary>
     /// 初始化认证服务
@@ -143,5 +166,136 @@ public class AuthService : IAuthService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("用户 {UserId} 密码修改成功", userId);
+    }
+
+    /// <summary>
+    /// 公开注册，创建租户和管理员账户并自动登录
+    /// 使用 UnfilteredSet 跨租户查询 Slug 和用户名的唯一性
+    /// </summary>
+    /// <param name="request">注册请求（含企业信息和管理员信息）</param>
+    /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
+    /// <exception cref="InvalidOperationException">企业标识或用户名已被占用</exception>
+    public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
+    {
+        // 1. 检查企业标识（Slug）唯一性
+        var slugExists = await _dbContext.UnfilteredSet<Tenant>()
+            .AnyAsync(t => t.Slug == request.Slug);
+        if (slugExists)
+        {
+            _logger.LogWarning("注册失败：企业标识 {Slug} 已被占用", request.Slug);
+            throw new InvalidOperationException($"企业标识 '{request.Slug}' 已被占用");
+        }
+
+        // 2. 检查用户名全局唯一性（用户名跨租户唯一，避免混淆）
+        var usernameExists = await _dbContext.UnfilteredSet<User>()
+            .AnyAsync(u => u.Username == request.Username);
+        if (usernameExists)
+        {
+            _logger.LogWarning("注册失败：用户名 {Username} 已被占用", request.Username);
+            throw new InvalidOperationException($"用户名 '{request.Username}' 已被占用");
+        }
+
+        // 3. 解析套餐并获取配额
+        if (!Enum.TryParse<TenantPlan>(request.Plan, ignoreCase: true, out var plan))
+        {
+            plan = TenantPlan.Trial;
+        }
+        // Basic 套餐不允许公开注册，降级为 Trial
+        if (plan == TenantPlan.Basic)
+        {
+            plan = TenantPlan.Trial;
+        }
+
+        var (maxDevices, maxUsers, retentionDays) = PlanLimits.GetValueOrDefault(plan, (5, 3, 7));
+
+        // 4. 创建租户
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = request.TenantName,
+            Slug = request.Slug,
+            Plan = plan,
+            Status = TenantStatus.Trial,
+            IsolationMode = TenantIsolationMode.Shared,
+            MaxDevices = maxDevices,
+            MaxUsers = maxUsers,
+            DataRetentionDays = retentionDays,
+            WorkOrderMode = WorkOrderMode.Independent,
+            CurrentDeviceCount = 0,
+            CurrentUserCount = 1,
+            TrialEndsAt = DateTime.UtcNow.AddDays(14),
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _dbContext.Add(tenant);
+
+        // 5. 创建管理员用户
+        var adminUser = new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            Username = request.Username,
+            PasswordHash = PasswordHasher.HashPassword(request.Password),
+            DisplayName = request.DisplayName ?? request.Username,
+            Email = request.Email,
+            Role = UserRole.SystemAdmin,
+            IsActive = true,
+            MustChangePassword = false,
+            TokenVersion = 0,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+        _dbContext.Add(adminUser);
+
+        // 6. 保存到数据库
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "新租户注册成功：{TenantName}（Slug={Slug}, Plan={Plan}），管理员：{Username}",
+            request.TenantName, request.Slug, plan, request.Username);
+
+        // 7. 自动登录，生成 JWT
+        var accessToken = _jwtTokenService.GenerateAccessToken(adminUser);
+        var refreshToken = _jwtTokenService.GenerateRefreshToken();
+
+        // 刷新令牌存入 Redis，有效期 7 天
+        await _redisService.SetRefreshTokenAsync(adminUser.Id, refreshToken, TimeSpan.FromDays(7));
+
+        // 更新最后登录时间
+        adminUser.LastLoginAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
+        return new AuthResponse
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            UserInfo = _mapper.Map<UserDto>(adminUser)!
+        };
+    }
+
+    /// <summary>
+    /// 获取所有可用套餐列表，用于注册页面展示
+    /// </summary>
+    /// <returns>套餐信息列表</returns>
+    public Task<List<PlanDto>> GetPlansAsync()
+    {
+        var plans = PlanDisplayInfo.Select(info =>
+        {
+            var (maxDevices, maxUsers, retentionDays) = PlanLimits.GetValueOrDefault(info.Plan, (0, 0, 0));
+            return new PlanDto
+            {
+                PlanId = info.Plan.ToString(),
+                DisplayName = info.DisplayName,
+                Description = info.Description,
+                MaxDevices = maxDevices,
+                MaxUsers = maxUsers,
+                DataRetentionDays = retentionDays,
+                MonthlyPrice = info.Price,
+                IsFree = info.Price == 0m,
+            };
+        }).ToList();
+
+        return Task.FromResult(plans);
     }
 }

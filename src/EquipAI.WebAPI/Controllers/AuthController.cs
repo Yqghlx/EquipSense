@@ -45,6 +45,39 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// 公开注册，创建租户和管理员账户并自动登录
+    /// </summary>
+    /// <param name="request">注册请求（含企业信息和管理员信息）</param>
+    /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
+    [HttpPost("register")]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<AuthResponse>> Register([FromBody] RegisterRequest request)
+    {
+        try
+        {
+            var response = await _authService.RegisterAsync(request);
+            return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { code = 400, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 获取所有可用套餐列表，用于注册页面展示
+    /// </summary>
+    /// <returns>套餐信息列表</returns>
+    [HttpGet("plans")]
+    [ProducesResponseType(typeof(List<PlanDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<PlanDto>>> GetPlans()
+    {
+        var plans = await _authService.GetPlansAsync();
+        return Ok(plans);
+    }
+
+    /// <summary>
     /// 使用 Refresh Token 刷新 Access Token
     /// </summary>
     /// <param name="request">刷新令牌请求</param>
