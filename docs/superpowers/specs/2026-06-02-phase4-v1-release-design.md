@@ -65,7 +65,7 @@ form-action 'self';
 2. 生产环境添加 `UseHttpsRedirection()`
 3. `SecurityHeadersMiddleware` 添加 CSP 和 HSTS 头（仅在非 Nginx 代理时生效）
 
-**注意：** 当 Nginx 负责 TLS 终止时，后端不需要 HTTPS 重定向。通过环境变量 `BEHIND_PROXY=true` 控制。
+**注意：** 当 Nginx 负责 TLS 终止时，后端不需要 HTTPS 重定向。通过环境变量 `BEHIND_PROXY=true`（默认 `false`）控制 — 当为 `true` 时跳过 `UseHsts()` 和 `UseHttpsRedirection()`。
 
 ### A3. 依赖安全审计
 
