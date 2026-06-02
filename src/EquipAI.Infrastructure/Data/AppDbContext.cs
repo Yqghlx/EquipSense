@@ -98,6 +98,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
+    /// <summary>
+    /// 网关设备配置表 — 边缘网关的设备连接参数
+    /// </summary>
+    public DbSet<Core.Entities.GatewayDevice> GatewayDevices => Set<Core.Entities.GatewayDevice>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
