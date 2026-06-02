@@ -10,6 +10,7 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Users,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
@@ -20,6 +21,7 @@ const navItems = [
   { path: '/devices', icon: Wrench, labelKey: 'nav.devices' },
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },
   { path: '/work-orders', icon: ClipboardList, labelKey: 'nav.workOrders' },
+  { path: '/dispatch', icon: Users, labelKey: 'nav.dispatch' },
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
   { path: '/knowledge', icon: BookOpen, labelKey: 'nav.knowledge' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },

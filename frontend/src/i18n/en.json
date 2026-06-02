@@ -46,6 +46,7 @@
     "alerts": "Alerts",
     "alertRules": "Alert Rules",
     "workOrders": "Work Orders",
+    "dispatch": "Dispatch Board",
     "analyses": "AI Analysis",
     "knowledge": "Knowledge Base",
     "settings": "Settings"
@@ -349,5 +350,18 @@
     "noAlertRules": "No alert rules configured yet. Click the button below to add.",
     "addAlertRule": "Add Alert Rule",
     "submitRegister": "Complete Registration"
+  },
+  "dispatch": {
+    "title": "Smart Dispatch Board",
+    "pendingOrders": "Pending Dispatch",
+    "recommendations": "Recommended Technicians",
+    "noPending": "No pending work orders",
+    "selectOrder": "Select a work order first",
+    "noTechnicians": "No available technicians",
+    "match": "Match",
+    "skillScore": "Skill",
+    "loadScore": "Available",
+    "activeWork": "Active",
+    "assign": "Assign"
   }
 }

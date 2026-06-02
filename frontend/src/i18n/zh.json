@@ -46,6 +46,7 @@
     "alerts": "告警中心",
     "alertRules": "告警规则",
     "workOrders": "工单管理",
+    "dispatch": "派工看板",
     "analyses": "AI 分析",
     "knowledge": "知识库",
     "settings": "系统设置"
@@ -349,5 +350,18 @@
     "noAlertRules": "暂未配置告警规则，点击下方按钮添加",
     "addAlertRule": "添加告警规则",
     "submitRegister": "完成注册"
+  },
+  "dispatch": {
+    "title": "智能派工看板",
+    "pendingOrders": "待派工工单",
+    "recommendations": "推荐技术人员",
+    "noPending": "暂无待派工工单",
+    "selectOrder": "请先选择工单",
+    "noTechnicians": "无可用技术人员",
+    "match": "匹配",
+    "skillScore": "技能",
+    "loadScore": "空闲",
+    "activeWork": "进行中",
+    "assign": "派工"
   }
 }

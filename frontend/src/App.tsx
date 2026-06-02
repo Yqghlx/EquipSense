@@ -17,6 +17,7 @@ import KnowledgePage from './pages/KnowledgePage';
 import PendingRulesPage from './pages/PendingRulesPage';
 import SettingsPage from './pages/SettingsPage';
 import DeviceSetupPage from './pages/DeviceSetupPage';
+import DispatchBoardPage from './pages/DispatchBoardPage';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 
@@ -53,6 +54,7 @@ function AppRoutes() {
         <Route path="/alert-rules" element={<AlertRulesPage />} />
         <Route path="/work-orders" element={<WorkOrderListPage />} />
         <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
+        <Route path="/dispatch" element={<DispatchBoardPage />} />
         <Route path="/analyses" element={<AnalysesPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/pending-rules" element={<PendingRulesPage />} />
