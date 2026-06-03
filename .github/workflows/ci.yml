@@ -11,7 +11,7 @@ env:
   DOTNET_VERSION: '8.0.x'
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository }}
+  IMAGE_PREFIX: ${{ github.repository_owner }}/equipsense
 
 jobs:
   # ============================================================================
@@ -178,27 +178,17 @@ jobs:
           dotnet restore EquipAI.slnx
           dotnet build EquipAI.slnx --configuration Release --no-restore
 
-      - name: 启动后端
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 运行 E2E 测试（Playwright 自动启动前后端）
+        working-directory: frontend
         env:
           ASPNETCORE_ENVIRONMENT: Development
           ConnectionStrings__DefaultConnection: "Host=localhost;Port=5432;Database=equipai_test;Username=postgres;Password=test_pw"
           Redis__ConnectionString: "localhost:6379"
           Jwt__Secret: "e2e-test-secret-key-that-is-at-least-32-characters-long!!"
-        run: |
-          dotnet run --project src/EquipAI.WebAPI --configuration Release -- --seed &
-          sleep 20
-
-      - name: 启动前端开发服务器
-        working-directory: frontend
-        run: |
-          npm ci
-          npx vite --host 0.0.0.0 --port 5173 &
-          sleep 10
-
-      - name: 运行 E2E 测试
-        working-directory: frontend
-        env:
-          BASE_URL: http://localhost:5173
         run: npx playwright test --reporter=list
 
       - name: 上传测试报告
