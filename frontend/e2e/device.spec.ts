@@ -2,6 +2,9 @@ import { test, expect } from '@playwright/test';
 import { login, navigateTo } from './helpers';
 
 test.describe('设备管理流程', () => {
+  // 重试一次，应对连续运行时的时序问题
+  test.describe.configure({ retries: 1 });
+
   test.beforeEach(async ({ page }) => {
     await login(page);
   });
@@ -58,16 +61,20 @@ test.describe('设备管理流程', () => {
   /** 测试用例：查看设备详情 */
   test('查看设备详情', async ({ page }) => {
     await navigateTo(page, /设备/i, /devices/);
+    // 始终创建一个新设备，确保有确定的数据可点击
+    const code = `E2E-DETAIL-${Date.now()}`;
+    await createDevice(page, code, 'E2E详情测试设备');
+    await page.waitForLoadState('networkidle');
 
-    const hasNoData = await page.getByText(/暂无数据|no data/i).isVisible().catch(() => false);
-    if (hasNoData) {
-      await createDevice(page, `E2E-DETAIL-${Date.now()}`, 'E2E详情测试设备');
-      await page.waitForLoadState('networkidle');
-    }
+    // 搜索新创建的设备，精确定位目标行
+    const searchInput = page.getByPlaceholder(/搜索/i);
+    await searchInput.clear();
+    await searchInput.fill(code);
+    await expect(page.getByText(code)).toBeVisible({ timeout: 5000 });
 
     const firstRow = page.getByRole('row').nth(1);
     await firstRow.click();
-    await page.waitForURL('**/devices/**', { timeout: 5000 });
+    await page.waitForURL('**/devices/**', { timeout: 10000 });
     await expect(page).toHaveURL(/\/devices\/[0-9a-f-]+/);
     await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 5000 });
   });

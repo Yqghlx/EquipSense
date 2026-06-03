@@ -14,8 +14,14 @@ export async function login(page: Page) {
   await page.waitForTimeout(1000);
 }
 
-/** 通过侧边栏导航到指定路径 */
+/** 通过侧边栏导航到指定路径（先回到仪表盘确保干净状态） */
 export async function navigateTo(page: Page, linkPattern: RegExp, expectedUrl: RegExp) {
+  // 先回到仪表盘，清除可能残留的搜索/过滤状态
+  const currentUrl = page.url();
+  if (!currentUrl.includes('/dashboard')) {
+    await page.getByRole('link', { name: /仪表盘/i }).first().click();
+    await page.waitForTimeout(300);
+  }
   await page.getByRole('link', { name: linkPattern }).first().click();
   await page.waitForURL(`**/${expectedUrl.source}`, { timeout: 5000 });
   await page.waitForLoadState('networkidle');

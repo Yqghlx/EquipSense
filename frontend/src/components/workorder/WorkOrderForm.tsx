@@ -49,7 +49,8 @@ export function WorkOrderForm({ onSubmit, onCancel, loading, devices = [] }: Wor
     onSubmit({
       ...data,
       description: data.description ?? '',
-      dueDate: data.dueDate,
+      // 空字符串会导致后端 DateTime 反序列化失败，转为 undefined
+      dueDate: data.dueDate || undefined,
     });
   };
 
