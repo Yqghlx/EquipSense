@@ -171,8 +171,8 @@ try
         }
     });
 
-    // 种子数据初始化：开发环境或传入 --seed 参数时执行
-    if (args.Contains("--seed") || app.Environment.IsDevelopment())
+    // 种子数据初始化：首次启动自动执行，确保生产环境有基础数据
+    if (args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction())
     {
         using (var scope = app.Services.CreateScope())
         {
@@ -182,7 +182,7 @@ try
     }
 
     // TimescaleDB 初始化：创建超级表、配置压缩和保留策略
-    if (args.Contains("--seed") || app.Environment.IsDevelopment())
+    if (args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction())
     {
         using (var scope = app.Services.CreateScope())
         {
