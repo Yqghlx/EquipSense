@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-06-03
+
+### Added
+
+#### CI/CD 增强
+- 四阶段流水线：后端测试 → 前端测试 → Docker 构建推送 → E2E 测试
+- Docker 镜像自动推送到 GitHub Container Registry（GHCR）
+- E2E 自动化测试（PostgreSQL + Redis 服务容器 + Playwright）
+- 前端 ESLint 检查步骤
+
+#### 性能优化
+- 前端路由懒加载：15 个业务页面改为 `React.lazy` 动态加载，减少首屏包体积
+- TanStack Query 缓存优化：staleTime 30s → 5min，关闭窗口聚焦自动刷新
+- 后端 OutputCache：设备列表 2min、告警规则 5min、租户配置 10min 缓存策略
+- DataQualityService N+1 修复：指标质量报告从串行查询改为 `Task.WhenAll` 并行计算
+
+### Security
+
+- SystemController 添加 `[Authorize]` 认证，移除 machineName/runtime/commitHash 指纹信息
+- 集成测试更新：验证未认证请求返回 401
+
+### Tests
+
+- 后端：339 单元 + 86 集成 = 425 通过
+- 前端：186 单元通过
+- 总计 611 个测试，零失败
+
+## [1.0.1] - 2026-06-03
+
+### Security
+
+- 首次登录强制修改密码：默认 admin 账户 `MustChangePassword = true`，前端弹出不可关闭的改密对话框
+- JWT 刷新令牌：实现完整 Refresh Token 流程（Redis 存储 + 令牌轮换），前端 axios 拦截器自动续期
+- JWT_SECRET 启动校验：生产环境验证密钥长度 ≥ 32 且非占位符，不满足则拒绝启动
+- Docker 配置加固：Redis 强制密码认证、Mosquitto 禁用匿名访问、.env.example 安全提示
+- SystemController 移除 `AllowAnonymous`，删除机器名/运行时等指纹信息
+- PostgreSQL 自动备份脚本 `docker/backup.sh`（pg_dump + gzip，保留 7 天）
+
 ## [1.0.0] - 2026-06-03
 
 ### Added
