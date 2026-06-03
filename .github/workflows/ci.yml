@@ -30,10 +30,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 还原依赖
-        run: dotnet restore EquipAI.sln
+        run: dotnet restore EquipAI.slnx
 
       - name: 构建后端
-        run: dotnet build EquipAI.sln --configuration Release --no-restore
+        run: dotnet build EquipAI.slnx --configuration Release --no-restore
 
       - name: 运行单元测试
         run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal
@@ -66,13 +66,13 @@ jobs:
         run: npm ci
 
       - name: 类型检查
-        run: npx tsc --noEmit
+        run: npx tsc -p tsconfig.json --noEmit
 
       - name: Lint 检查
         run: npx eslint src/ --max-warnings 0 || true
 
       - name: 运行单元测试
-        run: npx vitest run --coverage
+        run: npx vitest run
 
       - name: 构建前端
         run: npm run build
@@ -175,8 +175,8 @@ jobs:
 
       - name: 还原并构建后端
         run: |
-          dotnet restore EquipAI.sln
-          dotnet build EquipAI.sln --configuration Release --no-restore
+          dotnet restore EquipAI.slnx
+          dotnet build EquipAI.slnx --configuration Release --no-restore
 
       - name: 启动后端
         env:
@@ -185,8 +185,8 @@ jobs:
           Redis__ConnectionString: "localhost:6379"
           Jwt__Secret: "e2e-test-secret-key-that-is-at-least-32-characters-long!!"
         run: |
-          dotnet run --project src/EquipAI.WebAPI --configuration Release &
-          sleep 15
+          dotnet run --project src/EquipAI.WebAPI --configuration Release -- --seed &
+          sleep 20
 
       - name: 启动前端开发服务器
         working-directory: frontend
