@@ -49,8 +49,8 @@ const mockChain: ApprovalChainTemplate = {
   isDefault: true,
   enabled: true,
   steps: [
-    { stepOrder: 1, role: 'maintenance_lead', isRequired: true },
-    { stepOrder: 2, role: 'system_admin', isRequired: true },
+    { id: 'step-001', stepOrder: 1, role: 'maintenance_lead', isRequired: true },
+    { id: 'step-002', stepOrder: 2, role: 'system_admin', isRequired: true },
   ],
   createdAt: '2026-01-01T00:00:00Z',
 };

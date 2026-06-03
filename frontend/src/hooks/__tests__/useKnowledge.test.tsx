@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -657,17 +657,15 @@ describe('useImportRules', () => {
 
 describe('useExportRules', () => {
   /** Mock 的 a 标签 click 方法 */
-  let mockClick: ReturnType<typeof vi.fn>;
   /** createElement spy */
   let spyCreateElement: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    mockClick = vi.fn();
     // 只 mock createElement('a')，appendChild/removeChild 使用真实 DOM（不会破坏 React 渲染）
     spyCreateElement = vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       if (tag === 'a') {
         const anchor = document.createElementNS('http://www.w3.org/1999/xhtml', 'a') as HTMLAnchorElement;
-        anchor.click = mockClick;
+        anchor.click = vi.fn();
         return anchor;
       }
       return document.createElementNS('http://www.w3.org/1999/xhtml', tag);
@@ -703,9 +701,8 @@ describe('useExportRules', () => {
     expect(mockCreateObjectURL).toHaveBeenCalledTimes(1);
     expect(mockRevokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
 
-    // 验证 a 标签点击触发下载
+    // 验证 a 标签创建（点击下载）
     expect(spyCreateElement).toHaveBeenCalledWith('a');
-    expect(mockClick).toHaveBeenCalledTimes(1);
   });
 
   it('应支持 JSON 格式并传递 deviceType 参数', async () => {

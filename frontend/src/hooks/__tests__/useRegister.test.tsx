@@ -73,8 +73,8 @@ const mockAuthResponse: AuthResponse = {
     displayName: '管理员',
     email: 'admin@example.com',
     role: 'system_admin',
-    tenantId: 'tenant-001',
-    tenantName: '青岛西海岸新区测试企业',
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00Z',
   },
 };
 

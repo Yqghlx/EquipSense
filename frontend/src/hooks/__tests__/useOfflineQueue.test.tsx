@@ -42,7 +42,7 @@ const createWrapper = () => {
 /** 待处理操作模拟数据 */
 const mockOperation: PendingOperation = {
   id: 'op-001',
-  type: 'update',
+  type: 'work-order-complete',
   url: '/work-orders/wo-001',
   method: 'PUT',
   body: JSON.stringify({ status: 'Completed' }),
@@ -54,7 +54,7 @@ const mockOperation: PendingOperation = {
 beforeEach(() => {
   vi.clearAllMocks();
   // 重置网络状态 mock 为在线
-  mockedOfflineStatus.mockReturnValue({ isOnline: true, isOffline: false });
+  mockedOfflineStatus.mockReturnValue({ isOnline: true, isOffline: false, lastChangedAt: Date.now() });
 });
 
 // ---------------------------------------------------------------------------
@@ -111,13 +111,13 @@ describe('useOfflineQueue — enqueue', () => {
     });
 
     await act(async () => {
-      await result.current.enqueue('update', '/work-orders/wo-001', 'PUT', {
+      await result.current.enqueue('work-order-complete', '/work-orders/wo-001', 'PUT', {
         status: 'Completed',
       });
     });
 
     expect(mockedQueue.add).toHaveBeenCalledWith({
-      type: 'update',
+      type: 'work-order-complete',
       url: '/work-orders/wo-001',
       method: 'PUT',
       body: JSON.stringify({ status: 'Completed' }),
@@ -128,7 +128,7 @@ describe('useOfflineQueue — enqueue', () => {
   });
 
   it('离线时应入队并注册后台同步', async () => {
-    mockedOfflineStatus.mockReturnValue({ isOnline: false, isOffline: true });
+    mockedOfflineStatus.mockReturnValue({ isOnline: false, isOffline: true, lastChangedAt: Date.now() });
     mockedQueue.add.mockResolvedValueOnce(mockOperation);
     mockedQueue.count.mockResolvedValue(1);
 
@@ -137,13 +137,13 @@ describe('useOfflineQueue — enqueue', () => {
     });
 
     await act(async () => {
-      await result.current.enqueue('create', '/work-orders', 'POST', {
+      await result.current.enqueue('work-order-complete', '/work-orders', 'POST', {
         title: '新建工单',
       });
     });
 
     expect(mockedQueue.add).toHaveBeenCalledWith({
-      type: 'create',
+      type: 'work-order-complete',
       url: '/work-orders',
       method: 'POST',
       body: JSON.stringify({ title: '新建工单' }),

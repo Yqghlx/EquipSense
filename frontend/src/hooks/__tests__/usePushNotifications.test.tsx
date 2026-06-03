@@ -89,10 +89,10 @@ afterEach(() => {
   globalThis.Notification = originalNotification;
 
   // 恢复 navigator.serviceWorker（删除 mock 属性）
-  delete (window.navigator as Record<string, unknown>).serviceWorker;
+  delete (window.navigator as unknown as Record<string, unknown>).serviceWorker;
 
   // 删除 mock 的 PushManager
-  delete (window as Record<string, unknown>).PushManager;
+  delete (window as unknown as Record<string, unknown>).PushManager;
 });
 
 // ---------------------------------------------------------------------------
