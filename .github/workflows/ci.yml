@@ -11,7 +11,7 @@ env:
   DOTNET_VERSION: '8.0.x'
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}/equipsense
+  IMAGE_PREFIX: yqghlx/equipsense
 
 jobs:
   # ============================================================================
@@ -110,8 +110,8 @@ jobs:
           file: docker/Dockerfile.backend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:${{ steps.meta.outputs.sha_short }}
+            ${{ env.IMAGE_PREFIX }}/backend:latest
+            ${{ env.IMAGE_PREFIX }}/backend:${{ steps.meta.outputs.sha_short }}
 
       - name: 构建并推送前端镜像
         uses: docker/build-push-action@v5
@@ -120,8 +120,8 @@ jobs:
           file: docker/Dockerfile.frontend
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta.outputs.sha_short }}
+            ${{ env.IMAGE_PREFIX }}/frontend:latest
+            ${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta.outputs.sha_short }}
 
   # ============================================================================
   # E2E 测试（仅 main 分支，需要完整环境）

@@ -19,7 +19,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'cd .. && dotnet run --project src/EquipAI.WebAPI -- --seed',
+      command: 'dotnet run --project ../src/EquipAI.WebAPI -- --seed',
       port: 8080,
       reuseExistingServer: true,
       timeout: 60000,
@@ -28,7 +28,7 @@ export default defineConfig({
       },
     },
     {
-      command: 'npm run dev',
+      command: 'npm run dev -- --host 0.0.0.0',
       port: 5173,
       reuseExistingServer: true,
       timeout: 30000,
