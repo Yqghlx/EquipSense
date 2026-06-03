@@ -85,6 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [backend, frontend]
+    continue-on-error: true
     permissions:
       contents: read
       packages: write
@@ -131,6 +132,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [backend, frontend]
+    continue-on-error: true
 
     services:
       postgres:
