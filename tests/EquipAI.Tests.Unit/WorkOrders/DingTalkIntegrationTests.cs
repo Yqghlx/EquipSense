@@ -35,13 +35,12 @@ public class DingTalkIntegrationTests
                 Content = new StringContent("{\"errcode\":0,\"errmsg\":\"ok\"}")
             });
 
-        var logger = new Mock<ILogger<DingTalkIntegration>>();
-        var integration = new DingTalkIntegration(logger.Object);
+        var httpClient = new HttpClient(handler.Object) { Timeout = TimeSpan.FromSeconds(10) };
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(f => f.CreateClient("WorkOrderIntegration")).Returns(httpClient);
 
-        // 反射替换私有 _httpClient 字段
-        var field = typeof(DingTalkIntegration).GetField("_httpClient",
-            BindingFlags.NonPublic | BindingFlags.Instance);
-        field!.SetValue(integration, new HttpClient(handler.Object) { Timeout = TimeSpan.FromSeconds(10) });
+        var logger = new Mock<ILogger<DingTalkIntegration>>();
+        var integration = new DingTalkIntegration(httpClientFactory.Object, logger.Object);
 
         requestCapture = () => capturedRequest;
         return (integration, handler);
@@ -61,7 +60,7 @@ public class DingTalkIntegrationTests
     public void IntegrationType_应返回_dingtalk()
     {
         var logger = new Mock<ILogger<DingTalkIntegration>>();
-        var integration = new DingTalkIntegration(logger.Object);
+        var integration = new DingTalkIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
         integration.IntegrationType.Should().Be("dingtalk");
     }
 
@@ -69,7 +68,7 @@ public class DingTalkIntegrationTests
     public async Task PushCreatedAsync_无效配置应返回Null()
     {
         var logger = new Mock<ILogger<DingTalkIntegration>>();
-        var integration = new DingTalkIntegration(logger.Object);
+        var integration = new DingTalkIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var result = await integration.PushCreatedAsync(
             Guid.NewGuid(), Guid.NewGuid(), "测试", "High", "{}");
@@ -81,7 +80,7 @@ public class DingTalkIntegrationTests
     public async Task PushCreatedAsync_空WebhookUrl应返回Null()
     {
         var logger = new Mock<ILogger<DingTalkIntegration>>();
-        var integration = new DingTalkIntegration(logger.Object);
+        var integration = new DingTalkIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new DingTalkConfig { WebhookUrl = "" });
         var result = await integration.PushCreatedAsync(
@@ -94,7 +93,7 @@ public class DingTalkIntegrationTests
     public async Task PushStatusChangedAsync_应不抛出异常()
     {
         var logger = new Mock<ILogger<DingTalkIntegration>>();
-        var integration = new DingTalkIntegration(logger.Object);
+        var integration = new DingTalkIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new DingTalkConfig
         {

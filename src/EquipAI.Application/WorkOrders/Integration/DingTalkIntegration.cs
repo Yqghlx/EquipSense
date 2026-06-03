@@ -15,7 +15,7 @@ namespace EquipAI.Application.WorkOrders.Integration;
 /// </summary>
 public class DingTalkIntegration : IWorkOrderIntegration
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DingTalkIntegration> _logger;
 
     /// <summary>日期格式化常量</summary>
@@ -23,9 +23,9 @@ public class DingTalkIntegration : IWorkOrderIntegration
 
     public string IntegrationType => "dingtalk";
 
-    public DingTalkIntegration(ILogger<DingTalkIntegration> logger)
+    public DingTalkIntegration(IHttpClientFactory httpClientFactory, ILogger<DingTalkIntegration> logger)
     {
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -166,7 +166,7 @@ public class DingTalkIntegration : IWorkOrderIntegration
     {
         try
         {
-            var response = await _httpClient.PostAsJsonAsync(url, message, ct);
+            var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(url, message, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
 
             _logger.LogInformation("钉钉推送完成: Status={Status}, Body={Body}", response.StatusCode, body);

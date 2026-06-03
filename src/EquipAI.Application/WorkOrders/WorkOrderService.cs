@@ -1,4 +1,3 @@
-using AutoMapper;
 using EquipAI.Application.Approvals;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Core.Models;
@@ -27,7 +26,6 @@ public class WorkOrderService : IWorkOrderService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEventBus _eventBus;
-    private readonly IMapper _mapper;
     private readonly ILogger<WorkOrderService> _logger;
     private readonly IApprovalChainService _approvalChainService;
 
@@ -50,13 +48,11 @@ public class WorkOrderService : IWorkOrderService
     public WorkOrderService(
         IServiceScopeFactory scopeFactory,
         IEventBus eventBus,
-        IMapper mapper,
         ILogger<WorkOrderService> logger,
         IApprovalChainService approvalChainService)
     {
         _scopeFactory = scopeFactory;
         _eventBus = eventBus;
-        _mapper = mapper;
         _logger = logger;
         _approvalChainService = approvalChainService;
     }

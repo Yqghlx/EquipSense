@@ -133,7 +133,7 @@ internal class FakeRedisService : RedisService
     /// 在 CustomWebApplicationFactory 中通过 FormatterServices.GetUninitializedObject 创建实例
     /// </summary>
     private FakeRedisService()
-        : base(CreateDummyConfig())
+        : base(CreateDummyConfig(), Microsoft.Extensions.Logging.Abstractions.NullLogger<RedisService>.Instance)
     {
     }
 

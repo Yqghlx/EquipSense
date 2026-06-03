@@ -12,7 +12,7 @@ public class FeishuIntegrationTests
     public void IntegrationType_应返回_feishu()
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         integration.IntegrationType.Should().Be("feishu");
     }
@@ -21,7 +21,7 @@ public class FeishuIntegrationTests
     public async Task PushCreatedAsync_未启用应返回Null()
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new FeishuConfig { Enabled = false, WebhookUrl = "https://example.com/webhook" });
         var result = await integration.PushCreatedAsync(
@@ -34,7 +34,7 @@ public class FeishuIntegrationTests
     public async Task PushCreatedAsync_空WebhookUrl应返回Null()
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new FeishuConfig { Enabled = true, WebhookUrl = "" });
         var result = await integration.PushCreatedAsync(
@@ -49,7 +49,7 @@ public class FeishuIntegrationTests
         // 验证飞书集成在配置正确时能正常发送请求
         // 由于使用真实 HttpClient，此处验证不抛出异常（目标地址不可达时内部容错）
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
         var workOrderId = Guid.NewGuid();
 
         var config = JsonSerializer.Serialize(new FeishuConfig
@@ -69,7 +69,7 @@ public class FeishuIntegrationTests
     public async Task PushStatusChangedAsync_应包含状态变更信息()
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new FeishuConfig
         {
@@ -88,7 +88,7 @@ public class FeishuIntegrationTests
     public async Task PushCreatedAsync_无效JSON配置应返回Null()
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var result = await integration.PushCreatedAsync(
             Guid.NewGuid(), Guid.NewGuid(), "测试", "High", "invalid-json");
@@ -100,7 +100,7 @@ public class FeishuIntegrationTests
     public async Task PushStatusChangedAsync_未启用应正常返回()
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new FeishuConfig { Enabled = false });
         var act = () => integration.PushStatusChangedAsync(
@@ -118,7 +118,7 @@ public class FeishuIntegrationTests
     public async Task PushCreatedAsync_各种优先级应不抛出异常(string priority)
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new FeishuConfig
         {
@@ -142,7 +142,7 @@ public class FeishuIntegrationTests
     public async Task PushStatusChangedAsync_各种状态应不抛出异常(string status)
     {
         var logger = new Mock<ILogger<FeishuIntegration>>();
-        var integration = new FeishuIntegration(logger.Object);
+        var integration = new FeishuIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new FeishuConfig
         {

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -27,6 +28,7 @@ import {
   useWorkOrderApprovals,
   useSubmitWorkOrder,
 } from '../hooks/useApprovals';
+import { getWorkOrderStatusLabels } from '../utils/workorder';
 import type { WorkOrder } from '../types';
 
 
@@ -42,18 +44,8 @@ export default function WorkOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  /** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
-  const statusLabels: Record<string, string> = {
-    PendingDispatch: t('workorder.status.pendingDispatch'),
-    Assigned: t('workorder.status.assigned'),
-    InProgress: t('workorder.status.inProgress'),
-    SubmittedForApproval: '待审批',
-    Completed: t('workorder.status.completed'),
-    Accepted: t('workorder.status.accepted'),
-    Rejected: t('workorder.status.rejected'),
-    Closed: t('workorder.status.closed'),
-    Cancelled: t('workorder.status.cancelled'),
-  };
+  /** 工单状态对应的中文标签（使用共享工具函数，匹配后端 PascalCase 枚举序列化） */
+  const statusLabels = getWorkOrderStatusLabels(t);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [resolution, setResolution] = useState('');
@@ -163,15 +155,21 @@ export default function WorkOrderDetailPage() {
             />
             <Button
               onClick={async () => {
-                if (navigator.onLine) {
-                  completeOrder.mutate({ id: workOrder.id, resolution });
-                } else {
-                  await enqueue(
-                    'work-order-complete',
-                    `/api/v1/work-orders/${workOrder.id}/complete`,
-                    'PUT',
-                    { id: workOrder.id, resolution },
-                  );
+                try {
+                  if (navigator.onLine) {
+                    completeOrder.mutate({ id: workOrder.id, resolution });
+                  } else {
+                    await enqueue(
+                      'work-order-complete',
+                      `/api/v1/work-orders/${workOrder.id}/complete`,
+                      'PUT',
+                      { id: workOrder.id, resolution },
+                    );
+                  }
+                } catch (err) {
+                  toast.error(t('common.error'), {
+                    description: err instanceof Error ? err.message : String(err),
+                  });
                 }
               }}
               disabled={!resolution || completeOrder.isPending}
@@ -281,7 +279,8 @@ function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCanc
     Cancelled: [],
   };
 
-  const available = buttons[workOrder.status] ?? [];
+  /** 创建按钮数组副本，防止后续 push 操作修改原始常量数组 */
+  const available = [...(buttons[workOrder.status] ?? [])];
 
   // 非 terminal 状态添加取消按钮
   if (available.length === 0 && workOrder.status !== 'cancelled' && workOrder.status !== 'closed') {

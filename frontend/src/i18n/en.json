@@ -192,6 +192,7 @@
       "pendingDispatch": "Pending Dispatch",
       "assigned": "Assigned",
       "inProgress": "In Progress",
+      "submittedForApproval": "Pending Approval",
       "completed": "Completed",
       "accepted": "Accepted",
       "rejected": "Rejected",
@@ -342,6 +343,7 @@
     "noPending": "No pending rules",
     "noCases": "No fault cases",
     "sourceManual": "Manual",
+    "sourceExpert": "Expert",
     "sourceAI": "AI Generated",
     "sourceImported": "Imported",
     "editDialog": {

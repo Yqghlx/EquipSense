@@ -22,6 +22,7 @@ public class GatewayConfigController : ControllerBase
     private readonly AppDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<GatewayConfigController> _logger;
 
     /// <summary>
     /// 初始化网关配置管理控制器
@@ -32,11 +33,13 @@ public class GatewayConfigController : ControllerBase
     public GatewayConfigController(
         AppDbContext dbContext,
         ITenantContext tenantContext,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<GatewayConfigController> logger)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
         _configuration = configuration;
+        _logger = logger;
     }
 
     /// <summary>
@@ -273,7 +276,7 @@ public class GatewayConfigController : ControllerBase
     /// </summary>
     /// <param name="dataPointsJson">JSON 格式的数据点映射</param>
     /// <returns>指标名到点位地址的映射字典</returns>
-    private static Dictionary<string, string> ParseDataPoints(string dataPointsJson)
+    private Dictionary<string, string> ParseDataPoints(string dataPointsJson)
     {
         if (string.IsNullOrEmpty(dataPointsJson) || dataPointsJson == "{}")
             return new Dictionary<string, string>();
@@ -283,8 +286,10 @@ public class GatewayConfigController : ControllerBase
             return JsonSerializer.Deserialize<Dictionary<string, string>>(dataPointsJson)
                    ?? new Dictionary<string, string>();
         }
-        catch
+        catch (Exception ex)
         {
+            // DataPoints JSON 解析失败，返回空字典
+            _logger.LogWarning(ex, "DataPoints JSON 解析失败，返回空字典");
             return new Dictionary<string, string>();
         }
     }

@@ -12,6 +12,7 @@ import { PriorityBadge } from '../components/workorder/PriorityBadge';
 import { WorkOrderForm } from '../components/workorder/WorkOrderForm';
 import { useWorkOrders, useCreateWorkOrder } from '../hooks/useWorkOrders';
 import { useDevices } from '../hooks/useDevices';
+import { getWorkOrderStatusLabels } from '../utils/workorder';
 import type { CreateWorkOrderRequest } from '../types';
 
 
@@ -25,17 +26,8 @@ export default function WorkOrderListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  /** 工单状态对应的中文标签（匹配后端 PascalCase 枚举序列化） */
-  const statusLabels: Record<string, string> = {
-    PendingDispatch: t('workorder.status.pendingDispatch'),
-    Assigned: t('workorder.status.assigned'),
-    InProgress: t('workorder.status.inProgress'),
-    Completed: t('workorder.status.completed'),
-    Accepted: t('workorder.status.accepted'),
-    Rejected: t('workorder.status.rejected'),
-    Closed: t('workorder.status.closed'),
-    Cancelled: t('workorder.status.cancelled'),
-  };
+  /** 工单状态对应的中文标签（使用共享工具函数，匹配后端 PascalCase 枚举序列化） */
+  const statusLabels = getWorkOrderStatusLabels(t);
 
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>('');

@@ -3,6 +3,7 @@ using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
@@ -33,7 +34,8 @@ public class RootCauseAnalysisEngineTests
             _mockLLMService.Object,
             _mockDataQuality.Object,
             _mockRuleEngine.Object,
-            _mockMlService.Object);
+            _mockMlService.Object,
+            Mock.Of<ILogger<RootCauseAnalysisEngine>>());
     }
 
     private static MetricBaseline CreateBaseline(double avg = 50, double stdDev = 5, int count = 200)

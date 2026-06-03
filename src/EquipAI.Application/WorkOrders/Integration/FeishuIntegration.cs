@@ -18,7 +18,7 @@ namespace EquipAI.Application.WorkOrders.Integration;
 /// </summary>
 public class FeishuIntegration : IWorkOrderIntegration
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FeishuIntegration> _logger;
 
     /// <summary>
@@ -28,9 +28,9 @@ public class FeishuIntegration : IWorkOrderIntegration
 
     public string IntegrationType => "feishu";
 
-    public FeishuIntegration(ILogger<FeishuIntegration> logger)
+    public FeishuIntegration(IHttpClientFactory httpClientFactory, ILogger<FeishuIntegration> logger)
     {
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -158,7 +158,7 @@ public class FeishuIntegration : IWorkOrderIntegration
     /// </summary>
     private async Task<string?> SendViaWebhookAsync(string webhookUrl, object card, CancellationToken ct)
     {
-        var response = await _httpClient.PostAsJsonAsync(webhookUrl, card, ct);
+        var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(webhookUrl, card, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
 
         _logger.LogInformation("飞书 Webhook 推送完成: Status={Status}, Body={Body}", response.StatusCode, body);
@@ -172,7 +172,7 @@ public class FeishuIntegration : IWorkOrderIntegration
     private async Task<string?> SendViaAppAsync(string appId, string appSecret, object card, CancellationToken ct)
     {
         // 第一步：获取 TenantAccessToken
-        var tokenResponse = await _httpClient.PostAsJsonAsync(TokenEndpoint, new
+        var tokenResponse = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(TokenEndpoint, new
         {
             app_id = appId,
             app_secret = appSecret

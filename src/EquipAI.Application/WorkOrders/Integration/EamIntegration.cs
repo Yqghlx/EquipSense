@@ -23,14 +23,14 @@ namespace EquipAI.Application.WorkOrders.Integration;
 /// </summary>
 public class EamIntegration : IWorkOrderIntegration
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<EamIntegration> _logger;
 
     public string IntegrationType => "eam";
 
-    public EamIntegration(ILogger<EamIntegration> logger)
+    public EamIntegration(IHttpClientFactory httpClientFactory, ILogger<EamIntegration> logger)
     {
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -79,7 +79,7 @@ public class EamIntegration : IWorkOrderIntegration
 
             ApplyAuthentication(request, eamConfig);
 
-            var response = await _httpClient.SendAsync(request, ct);
+            var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             if (response.IsSuccessStatusCode)
@@ -138,7 +138,7 @@ public class EamIntegration : IWorkOrderIntegration
 
             ApplyAuthentication(request, eamConfig);
 
-            var response = await _httpClient.SendAsync(request, ct);
+            var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             if (response.IsSuccessStatusCode)
@@ -240,7 +240,7 @@ public class EamIntegration : IWorkOrderIntegration
     /// 从 EAM 响应体中提取外部工单编号
     /// 尝试从 JSON 响应中读取常见的工单编号字段
     /// </summary>
-    private static string? ExtractExternalId(string responseBody)
+    private string? ExtractExternalId(string responseBody)
     {
         try
         {
@@ -261,8 +261,10 @@ public class EamIntegration : IWorkOrderIntegration
 
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            // JSON 解析失败，无法提取外部工单编号
+            _logger.LogWarning(ex, "EAM 响应 JSON 解析失败，无法提取外部工单编号");
             return null;
         }
     }

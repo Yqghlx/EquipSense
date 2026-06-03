@@ -51,11 +51,13 @@ try
         .AddCheck<LlmHealthCheck>("llm", tags: new[] { "ready" }, timeout: TimeSpan.FromSeconds(5));
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
+    // 从配置中读取允许的域名列表，未配置时使用默认值
+    var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? new[] { "http://localhost:5173" };
     builder.Services.AddCors(options =>
     {
         options.AddDefaultPolicy(policy =>
         {
-            policy.WithOrigins("http://localhost:5173")
+            policy.WithOrigins(corsOrigins)
                   .AllowAnyMethod()
                   .AllowAnyHeader()
                   .AllowCredentials();
@@ -171,21 +173,16 @@ try
         }
     });
 
-    // 种子数据初始化：首次启动自动执行，确保生产环境有基础数据
+    // 种子数据初始化 + TimescaleDB 初始化：首次启动自动执行，确保生产环境有基础数据
     if (args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction())
     {
         using (var scope = app.Services.CreateScope())
         {
+            // 种子数据：插入初始用户、角色、租户等基础数据
             var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
             await seeder.SeedAsync();
-        }
-    }
 
-    // TimescaleDB 初始化：创建超级表、配置压缩和保留策略
-    if (args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction())
-    {
-        using (var scope = app.Services.CreateScope())
-        {
+            // TimescaleDB：创建超级表、配置压缩和保留策略
             var timescaleSetup = scope.ServiceProvider.GetRequiredService<TimescaleDbSetup>();
             await timescaleSetup.InitializeAsync();
         }

@@ -105,14 +105,15 @@ public class SmartDispatchService : ISmartDispatchService
     /// <summary>
     /// 解析技术人员技能 JSON 数组
     /// </summary>
-    private static List<string> ParseSkills(string skillsJson)
+    private List<string> ParseSkills(string skillsJson)
     {
         try
         {
             return JsonSerializer.Deserialize<List<string>>(skillsJson) ?? [];
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "技能 JSON 解析失败，返回空列表");
             return [];
         }
     }

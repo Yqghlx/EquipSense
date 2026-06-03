@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
 namespace EquipAI.Infrastructure.Cache;
@@ -15,10 +16,16 @@ public class RedisService
     /// 初始化 Redis 服务，从配置中读取连接字符串并建立连接
     /// </summary>
     /// <param name="configuration">应用配置，需包含 Redis:ConnectionString 配置项</param>
-    public RedisService(IConfiguration configuration)
+    /// <param name="logger">日志记录器</param>
+    public RedisService(IConfiguration configuration, ILogger<RedisService> logger)
     {
-        var connectionString = configuration["Redis:ConnectionString"]
-            ?? "localhost:6379";
+        var connectionString = configuration["Redis:ConnectionString"];
+        if (string.IsNullOrEmpty(connectionString))
+        {
+            // 配置缺失时使用默认值并记录警告
+            logger.LogWarning("Redis 连接字符串未配置（Redis:ConnectionString），使用默认值 localhost:6379");
+            connectionString = "localhost:6379";
+        }
 
         var multiplexer = ConnectionMultiplexer.Connect(connectionString);
         _database = multiplexer.GetDatabase();

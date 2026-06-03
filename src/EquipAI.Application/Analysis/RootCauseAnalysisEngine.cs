@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 using AnalysisEntity = EquipAI.Core.Entities.Analysis;
 using MetricBaselineEntity = EquipAI.Core.Entities.MetricBaseline;
 
@@ -19,6 +20,7 @@ public class RootCauseAnalysisEngine : IAnalysisService
     private readonly IDataQualityService _dataQualityService;
     private readonly IRuleEngineAnalysisService _ruleEngineService;
     private readonly IMlAnomalyDetectionService _mlService;
+    private readonly ILogger<RootCauseAnalysisEngine> _logger;
 
     /// <summary>
     /// 数据质量阈值：≥ 此值时使用统计基线分析（L3），否则降级到 LLM 诊断
@@ -34,12 +36,14 @@ public class RootCauseAnalysisEngine : IAnalysisService
         ILLMService llmService,
         IDataQualityService dataQualityService,
         IRuleEngineAnalysisService ruleEngineService,
-        IMlAnomalyDetectionService mlService)
+        IMlAnomalyDetectionService mlService,
+        ILogger<RootCauseAnalysisEngine> logger)
     {
         _llmService = llmService;
         _dataQualityService = dataQualityService;
         _ruleEngineService = ruleEngineService;
         _mlService = mlService;
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -204,9 +208,10 @@ public class RootCauseAnalysisEngine : IAnalysisService
 
             return (true, rootCause, suggestion, confidence, response.Content, null);
         }
-        catch
+        catch (Exception ex)
         {
             // JSON 解析失败，使用原始内容作为根因，降低置信度
+            _logger.LogWarning(ex, "LLM 响应 JSON 解析失败，使用原始内容作为根因");
             return (true, response.Content, "请结合人工判断", 0.3, response.Content, null);
         }
     }

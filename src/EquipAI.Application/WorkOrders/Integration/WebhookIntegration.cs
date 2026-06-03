@@ -16,7 +16,7 @@ namespace EquipAI.Application.WorkOrders.Integration;
 /// </summary>
 public class WebhookIntegration : IWorkOrderIntegration
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<WebhookIntegration> _logger;
 
     /// <summary>
@@ -28,9 +28,9 @@ public class WebhookIntegration : IWorkOrderIntegration
 
     public string IntegrationType => "webhook";
 
-    public WebhookIntegration(ILogger<WebhookIntegration> logger)
+    public WebhookIntegration(IHttpClientFactory httpClientFactory, ILogger<WebhookIntegration> logger)
     {
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -154,7 +154,7 @@ public class WebhookIntegration : IWorkOrderIntegration
                 request.Headers.Add("X-EquipSense-Signature", signature);
             }
 
-            var response = await _httpClient.SendAsync(request, ct);
+            var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
             _logger.LogInformation("Webhook 推送完成: URL={Url}, Status={Status}, Body={Body}",

@@ -30,6 +30,12 @@ public class MqttClientService
     {
         _options = options.Value;
         _logger = logger;
+
+        // 检测是否使用了默认连接参数（可能配置节缺失），记录警告便于排查
+        if (_options.Host == "localhost" && _options.Port == 1883)
+        {
+            _logger.LogWarning("MQTT 使用默认连接参数（localhost:1883），请确认配置节 Mqtt 是否已正确设置");
+        }
     }
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)

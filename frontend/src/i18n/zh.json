@@ -192,6 +192,7 @@
       "pendingDispatch": "待派工",
       "assigned": "已派工",
       "inProgress": "执行中",
+      "submittedForApproval": "待审批",
       "completed": "已完成",
       "accepted": "已验收",
       "rejected": "验收不通过",
@@ -342,6 +343,7 @@
     "noPending": "暂无待审核规则",
     "noCases": "暂无故障案例",
     "sourceManual": "手动创建",
+    "sourceExpert": "专家创建",
     "sourceAI": "AI 生成",
     "sourceImported": "批量导入",
     "editDialog": {

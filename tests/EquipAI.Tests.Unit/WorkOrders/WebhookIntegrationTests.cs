@@ -35,13 +35,12 @@ public class WebhookIntegrationTests
                 Content = new StringContent("{\"success\":true}")
             });
 
-        var logger = new Mock<ILogger<WebhookIntegration>>();
-        var integration = new WebhookIntegration(logger.Object);
+        var httpClient = new HttpClient(handler.Object) { Timeout = TimeSpan.FromSeconds(10) };
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(f => f.CreateClient("WorkOrderIntegration")).Returns(httpClient);
 
-        // 反射替换私有 _httpClient 字段
-        var field = typeof(WebhookIntegration).GetField("_httpClient",
-            BindingFlags.NonPublic | BindingFlags.Instance);
-        field!.SetValue(integration, new HttpClient(handler.Object) { Timeout = TimeSpan.FromSeconds(10) });
+        var logger = new Mock<ILogger<WebhookIntegration>>();
+        var integration = new WebhookIntegration(httpClientFactory.Object, logger.Object);
 
         requestCapture = () => capturedRequest;
         return (integration, handler);
@@ -83,7 +82,7 @@ public class WebhookIntegrationTests
     public void IntegrationType_应返回_webhook()
     {
         var logger = new Mock<ILogger<WebhookIntegration>>();
-        var integration = new WebhookIntegration(logger.Object);
+        var integration = new WebhookIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
         integration.IntegrationType.Should().Be("webhook");
     }
 
@@ -255,7 +254,7 @@ public class WebhookIntegrationTests
     public async Task PushCreatedAsync_无效配置应返回Null()
     {
         var logger = new Mock<ILogger<WebhookIntegration>>();
-        var integration = new WebhookIntegration(logger.Object);
+        var integration = new WebhookIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var result = await integration.PushCreatedAsync(
             Guid.NewGuid(), Guid.NewGuid(), "测试", "High", "{}");
@@ -267,7 +266,7 @@ public class WebhookIntegrationTests
     public async Task PushCreatedAsync_无效URL应不抛出异常()
     {
         var logger = new Mock<ILogger<WebhookIntegration>>();
-        var integration = new WebhookIntegration(logger.Object);
+        var integration = new WebhookIntegration(new Mock<IHttpClientFactory>().Object, logger.Object);
 
         var config = JsonSerializer.Serialize(new WebhookConfig
         {

@@ -230,7 +230,7 @@ public class IntegrationController : ControllerBase
     /// <summary>
     /// 解析租户 Settings 中的 integrations 节点
     /// </summary>
-    private static Dictionary<string, object>? ParseIntegrationSettings(string? settings)
+    private Dictionary<string, object>? ParseIntegrationSettings(string? settings)
     {
         if (string.IsNullOrEmpty(settings) || settings == "{}")
             return new Dictionary<string, object>();
@@ -239,8 +239,10 @@ public class IntegrationController : ControllerBase
         {
             return JsonSerializer.Deserialize<Dictionary<string, object>>(settings);
         }
-        catch
+        catch (Exception ex)
         {
+            // 集成配置 JSON 解析失败，返回空字典
+            _logger.LogWarning(ex, "集成配置 JSON 解析失败，返回空字典");
             return new Dictionary<string, object>();
         }
     }

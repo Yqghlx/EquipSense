@@ -196,6 +196,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISubscriptionService, SubscriptionService>();
 
         // 工单外部集成 — 多个 IWorkOrderIntegration 实现，通过 GetServices 解析后按 IntegrationType 匹配
+        // 注册命名 HttpClient 工厂，统一超时配置，避免集成类自行 new HttpClient()
+        services.AddHttpClient("WorkOrderIntegration", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         services.AddScoped<IWorkOrderIntegration, WebhookIntegration>();
         services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();
         services.AddScoped<IWorkOrderIntegration, FeishuIntegration>();

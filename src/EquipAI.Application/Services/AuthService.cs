@@ -119,7 +119,7 @@ public class AuthService : IAuthService
     public Task<AuthResponse> RefreshTokenAsync(string refreshToken)
     {
         // Phase 1 简化：刷新令牌机制将在后续阶段实现
-        throw new NotImplementedException("刷新令牌功能将在后续阶段实现");
+        throw new InvalidOperationException("刷新令牌功能暂未实现");
     }
 
     /// <summary>
