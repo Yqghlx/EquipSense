@@ -207,8 +207,10 @@ try
         }
     }
 
-    // 生产环境自动迁移：启动时检查并应用待执行的 EF Core 迁移
-    if (!app.Environment.IsDevelopment() || args.Contains("--migrate"))
+    // 数据库迁移：仅在显式传入 --migrate 参数时执行
+    // 注意：DataSeeder 使用 EnsureCreatedAsync 创建 schema，与 Migrate 不兼容
+    // 如果需要使用迁移模式，应在第一次部署前删除 EnsureCreatedAsync 的调用
+    if (args.Contains("--migrate"))
     {
         using var migrateScope = app.Services.CreateScope();
         var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();

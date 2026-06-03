@@ -24,6 +24,7 @@ import {
   useCloseWorkOrder,
   useCancelWorkOrder,
 } from '../hooks/useWorkOrders';
+import { useTechnicians, useAssignFromRecommendation } from '../hooks/useDispatch';
 import {
   useWorkOrderApprovals,
   useSubmitWorkOrder,
@@ -49,6 +50,8 @@ export default function WorkOrderDetailPage() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [resolution, setResolution] = useState('');
+  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
+  const [selectedTechnician, setSelectedTechnician] = useState('');
 
   const { data: workOrder, isLoading } = useWorkOrder(id ?? '');
   const { data: approvals } = useWorkOrderApprovals(id);
@@ -60,6 +63,8 @@ export default function WorkOrderDetailPage() {
   const cancelOrder = useCancelWorkOrder();
   const submitOrder = useSubmitWorkOrder();
   const { enqueue } = useOfflineQueue();
+  const { data: technicians } = useTechnicians(true);
+  const assignOrder = useAssignFromRecommendation();
 
   if (isLoading) return <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>;
   if (!workOrder) return <div className="py-20 text-center text-muted-foreground">{t('common.noData')}</div>;
@@ -102,6 +107,7 @@ export default function WorkOrderDetailPage() {
       {/* 状态流转操作按钮 */}
       <ActionButtons
         workOrder={workOrder}
+        onDispatch={() => setDispatchDialogOpen(true)}
         onStart={() => startOrder.mutate(workOrder.id)}
         onAccept={() => acceptOrder.mutate(workOrder.id)}
         onReject={(reason) => rejectOrder.mutate({ id: workOrder.id, reason })}
@@ -196,6 +202,69 @@ export default function WorkOrderDetailPage() {
       {/* 离线同步面板 */}
       <OfflineSyncPanel />
 
+      {/* 派工对话框 */}
+      <Dialog open={dispatchDialogOpen} onOpenChange={setDispatchDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{t('workorder.dispatch')}</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>{t('workorder.selectTechnician')}</Label>
+              {technicians && technicians.length > 0 ? (
+                <div className="max-h-60 space-y-2 overflow-y-auto">
+                  {technicians.map((tech) => (
+                    <button
+                      key={tech.userId}
+                      type="button"
+                      className={`w-full rounded-md border p-3 text-left transition-colors ${selectedTechnician === tech.userId ? 'border-primary bg-primary/5' : 'hover:bg-muted'}`}
+                      onClick={() => setSelectedTechnician(tech.userId)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{tech.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {t('workorder.activeWorkCount', { count: tech.activeWorkCount })}
+                        </span>
+                      </div>
+                      {tech.skills.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {tech.skills.map((s) => (
+                            <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-xs">{s}</span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="py-4 text-center text-sm text-muted-foreground">{t('workorder.noTechnicians')}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDispatchDialogOpen(false)}>{t('common.cancel')}</Button>
+              <Button
+                disabled={!selectedTechnician || assignOrder.isPending}
+                onClick={() => {
+                  assignOrder.mutate(
+                    { workOrderId: workOrder.id, technicianUserId: selectedTechnician },
+                    {
+                      onSuccess: () => {
+                        toast.success(t('workorder.dispatchSuccess'));
+                        setDispatchDialogOpen(false);
+                        setSelectedTechnician('');
+                      },
+                      onError: (err) => {
+                        toast.error(t('common.error'), { description: err.message });
+                      },
+                    },
+                  );
+                }}
+              >
+                {t('workorder.confirmDispatch')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* 取消工单对话框 */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent>
@@ -234,6 +303,8 @@ export default function WorkOrderDetailPage() {
 interface ActionButtonsProps {
   /** 当前工单数据 */
   workOrder: WorkOrder;
+  /** 派工回调 */
+  onDispatch: () => void;
   /** 开始执行回调 */
   onStart: () => void;
   /** 验收通过回调 */
@@ -258,14 +329,14 @@ interface ActionButtonsProps {
  * - completed → 验收通过 / 验收不通过
  * - accepted → 关闭
  */
-function ActionButtons({ workOrder, onStart, onAccept, onReject, onClose, onCancel, onSubmitForApproval }: ActionButtonsProps) {
+function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onClose, onCancel, onSubmitForApproval }: ActionButtonsProps) {
   const { t } = useTranslation();
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
 
   /** 各状态对应的可用按钮配置 */
   const buttons: Record<string, Array<{ label: string; action: () => void; variant?: 'default' | 'outline' | 'destructive' }>> = {
-    PendingDispatch: [{ label: t('workorder.dispatch'), action: onStart }],
+    PendingDispatch: [{ label: t('workorder.dispatch'), action: onDispatch }],
     Assigned: [{ label: t('workorder.startExecution'), action: onStart }],
     InProgress: [{ label: '提交验收', action: onSubmitForApproval }],
     SubmittedForApproval: [],

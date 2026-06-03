@@ -26,7 +26,7 @@ export function DataQualityOverviewCard({ deviceId }: DataQualityOverviewProps) 
     );
   }
 
-  if (!data || data.metrics.length === 0) {
+  if (!data || !Array.isArray(data.metrics) || data.metrics.length === 0) {
     return (
       <Card>
         <CardHeader><CardTitle>{t('dataquality.title')}</CardTitle></CardHeader>

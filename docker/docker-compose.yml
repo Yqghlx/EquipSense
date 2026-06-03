@@ -55,7 +55,7 @@ services:
     volumes:
       - ./mosquitto.prod.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto_data:/mosquitto/data
-      - ./mosquitto_passwd:/mosquitto/config/passwd:ro
+      - ./mosquitto_passwd/passwd:/mosquitto/config/passwd:ro
     deploy:
       resources:
         limits:
@@ -117,8 +117,8 @@ services:
     container_name: equipai-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-80}:80"
-      - "443:443"
+      - "${FRONTEND_PORT:-8443}:443"
+      - "80:80"
     environment:
       BACKEND_URL: http://backend:8080
       SSL_CERT_PATH: "${SSL_CERT_PATH:-/etc/nginx/ssl/cert.pem}"
@@ -129,7 +129,7 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -151,6 +151,7 @@ services:
       - "${SEQ_PORT:-5341}:80"
     environment:
       ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORD: "${SEQ_ADMIN_PASSWORD:-SeqAdmin2026!}"
     volumes:
       - seq_data:/data
     deploy:
