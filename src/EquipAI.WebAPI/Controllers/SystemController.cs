@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EquipAI.WebAPI.Controllers;
@@ -9,7 +10,7 @@ namespace EquipAI.WebAPI.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/system")]
-public class SystemController : ControllerBase
+public class SystemController(IHostEnvironment env) : ControllerBase
 {
     /// <summary>
     /// 获取系统版本和构建信息
@@ -26,7 +27,7 @@ public class SystemController : ControllerBase
         {
             version = informationalVersion.Split('+')[0],
             commitHash = informationalVersion.Contains('+') ? informationalVersion.Split('+')[1] : "unknown",
-            environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production",
+            environment = env.EnvironmentName,
             buildTime = assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Release",
             runtime = $".NET {Environment.Version}",
             machineName = Environment.MachineName,
