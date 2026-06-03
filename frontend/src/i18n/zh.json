@@ -38,7 +38,18 @@
     "usernameRequired": "请输入用户名",
     "passwordRequired": "请输入密码",
     "loginSubtitle": "登录到工业设备智能监控平台",
-    "platformName": "工业设备智能监控平台"
+    "platformName": "工业设备智能监控平台",
+    "changePassword": "修改密码",
+    "changePasswordHint": "请输入当前密码和新密码",
+    "forceChangePasswordHint": "检测到您正在使用默认密码，请立即修改以确保账户安全",
+    "currentPassword": "当前密码",
+    "currentPasswordRequired": "请输入当前密码",
+    "newPassword": "新密码",
+    "newPasswordMin": "新密码长度不能少于 8 位",
+    "confirmPassword": "确认新密码",
+    "confirmPasswordRequired": "请再次输入新密码",
+    "passwordMismatch": "两次输入的密码不一致",
+    "changePasswordError": "密码修改失败，请检查当前密码是否正确"
   },
   "nav": {
     "dashboard": "仪表盘",

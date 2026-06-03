@@ -44,4 +44,9 @@ public class UserDto
     /// 创建时间（UTC）
     /// </summary>
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// 是否需要在下次登录时强制修改密码
+    /// </summary>
+    public bool MustChangePassword { get; set; }
 }

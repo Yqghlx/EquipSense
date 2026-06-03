@@ -8,6 +8,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import { ChangePasswordDialog } from '../components/auth/ChangePasswordDialog';
 import api from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import type { AuthResponse } from '../types';
@@ -31,6 +32,7 @@ export default function LoginPage() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   /** 登录表单校验规则（放在组件内部以使用 t() 函数） */
   const loginSchema = z.object({
@@ -53,8 +55,15 @@ export default function LoginPage() {
     try {
       const response = await api.post<AuthResponse>('/auth/login', data);
       setAuth(response.data.accessToken, response.data.userInfo);
-      const from = (location.state as { from?: string })?.from || '/dashboard';
-      navigate(from, { replace: true });
+      // 保存刷新令牌到 localStorage，用于自动续期
+      localStorage.setItem('refreshToken', response.data.refreshToken);
+      // 首次登录需要强制修改密码
+      if (response.data.userInfo.mustChangePassword) {
+        setMustChangePassword(true);
+      } else {
+        const from = (location.state as { from?: string })?.from || '/dashboard';
+        navigate(from, { replace: true });
+      }
     } catch {
       setError(t('auth.loginError'));
     } finally {
@@ -92,6 +101,16 @@ export default function LoginPage() {
           </p>
         </form>
       </CardContent>
+      {mustChangePassword && (
+        <ChangePasswordDialog
+          forced
+          onSuccess={() => {
+            setMustChangePassword(false);
+            const from = (location.state as { from?: string })?.from || '/dashboard';
+            navigate(from, { replace: true });
+          }}
+        />
+      )}
     </Card>
   );
 }

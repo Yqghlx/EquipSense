@@ -66,6 +66,15 @@ try
 
     var app = builder.Build();
 
+    // 生产环境启动校验：拒绝不安全的占位符 JWT 密钥
+    var jwtSecret = builder.Configuration["Jwt:Secret"] ?? string.Empty;
+    var insecureSecrets = new[] { "请修改为随机密钥-至少32个字符!!", "your-secret-key", "change-me", "secret" };
+    if (!app.Environment.IsDevelopment() && (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32 || insecureSecrets.Contains(jwtSecret, StringComparer.OrdinalIgnoreCase)))
+    {
+        Log.Fatal("JWT 密钥不安全（长度不足 32 位或为占位符值），请修改 .env 中的 JWT_SECRET 后重新启动");
+        throw new InvalidOperationException("JWT 密钥不安全，应用拒绝启动。请在环境变量中设置至少 32 位的随机密钥");
+    }
+
     // 生产环境 HTTPS 安全（当不在反向代理之后时启用）
     // BEHIND_PROXY=true 时由 Nginx 负责 TLS 终止，后端不需要 HTTPS 重定向
     var behindProxy = builder.Configuration["BEHIND_PROXY"]?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;

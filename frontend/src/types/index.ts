@@ -73,6 +73,8 @@ export interface UserInfo {
   isActive: boolean;
   /** 创建时间（ISO 8601） */
   createdAt: string;
+  /** 是否需要强制修改密码 */
+  mustChangePassword: boolean;
 }
 
 // ============================================================================

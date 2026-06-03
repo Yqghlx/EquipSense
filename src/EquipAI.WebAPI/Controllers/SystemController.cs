@@ -1,5 +1,4 @@
 using System.Reflection;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,10 +12,9 @@ namespace EquipAI.WebAPI.Controllers;
 public class SystemController(IHostEnvironment env) : ControllerBase
 {
     /// <summary>
-    /// 获取系统版本和构建信息
+    /// 获取系统版本和构建信息（需认证）
     /// </summary>
     [HttpGet("info")]
-    [AllowAnonymous]
     public IActionResult GetInfo()
     {
         var assembly = Assembly.GetExecutingAssembly();
@@ -26,11 +24,7 @@ public class SystemController(IHostEnvironment env) : ControllerBase
         return Ok(new
         {
             version = informationalVersion.Split('+')[0],
-            commitHash = informationalVersion.Contains('+') ? informationalVersion.Split('+')[1] : "unknown",
             environment = env.EnvironmentName,
-            buildTime = assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Release",
-            runtime = $".NET {Environment.Version}",
-            machineName = Environment.MachineName,
             uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()
         });
     }

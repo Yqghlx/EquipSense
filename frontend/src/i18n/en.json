@@ -38,7 +38,18 @@
     "usernameRequired": "Please enter username",
     "passwordRequired": "Please enter password",
     "loginSubtitle": "Login to Industrial Equipment Intelligent Monitoring Platform",
-    "platformName": "Industrial Equipment Intelligent Monitoring Platform"
+    "platformName": "Industrial Equipment Intelligent Monitoring Platform",
+    "changePassword": "Change Password",
+    "changePasswordHint": "Enter your current password and a new password",
+    "forceChangePasswordHint": "Default password detected. Please change it immediately to secure your account",
+    "currentPassword": "Current Password",
+    "currentPasswordRequired": "Please enter current password",
+    "newPassword": "New Password",
+    "newPasswordMin": "New password must be at least 8 characters",
+    "confirmPassword": "Confirm New Password",
+    "confirmPasswordRequired": "Please confirm your new password",
+    "passwordMismatch": "Passwords do not match",
+    "changePasswordError": "Failed to change password. Please check your current password"
   },
   "nav": {
     "dashboard": "Dashboard",

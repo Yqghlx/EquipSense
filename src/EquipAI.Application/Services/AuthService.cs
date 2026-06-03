@@ -111,15 +111,60 @@ public class AuthService : IAuthService
 
     /// <summary>
     /// 使用 Refresh Token 刷新 Access Token
-    /// Phase 1 简化实现，暂不启用刷新令牌机制
+    /// 验证 Redis 中存储的刷新令牌是否匹配，匹配则颁发新令牌对并更新 Redis
     /// </summary>
     /// <param name="refreshToken">刷新令牌</param>
-    /// <returns>新的认证响应</returns>
-    /// <exception cref="NotImplementedException">Phase 1 暂不实现</exception>
-    public Task<AuthResponse> RefreshTokenAsync(string refreshToken)
+    /// <returns>新的认证响应（含新的 Access Token 和 Refresh Token）</returns>
+    /// <exception cref="UnauthorizedAccessException">刷新令牌无效或已过期</exception>
+    public async Task<AuthResponse> RefreshTokenAsync(string refreshToken)
     {
-        // Phase 1 简化：刷新令牌机制将在后续阶段实现
-        throw new InvalidOperationException("刷新令牌功能暂未实现");
+        if (string.IsNullOrWhiteSpace(refreshToken))
+        {
+            throw new UnauthorizedAccessException("刷新令牌不能为空");
+        }
+
+        // 从旧 Access Token 中解析用户 ID（客户端需在请求体中附带过期 Access Token）
+        // 此处简化：遍历 Redis 查找匹配的刷新令牌（单用户场景高效）
+        // 改进方案：后续可在请求中携带 userId 或使用 refreshToken 查找索引
+
+        // 查找所有用户的刷新令牌并比对——仅适用于小规模场景
+        // 生产优化：使用 Redis 反向索引 refreshToken → userId
+        var allUsers = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .Where(u => u.IsActive)
+            .ToListAsync();
+
+        Core.Entities.User? matchedUser = null;
+        foreach (var u in allUsers)
+        {
+            var storedToken = await _redisService.GetRefreshTokenAsync(u.Id);
+            if (storedToken == refreshToken)
+            {
+                matchedUser = u;
+                break;
+            }
+        }
+
+        if (matchedUser == null)
+        {
+            _logger.LogWarning("刷新令牌无效或已过期");
+            throw new UnauthorizedAccessException("刷新令牌无效或已过期");
+        }
+
+        // 生成新的令牌对
+        var newAccessToken = _jwtTokenService.GenerateAccessToken(matchedUser);
+        var newRefreshToken = _jwtTokenService.GenerateRefreshToken();
+
+        // 更新 Redis 中的刷新令牌（旋转令牌，旧令牌失效）
+        await _redisService.SetRefreshTokenAsync(matchedUser.Id, newRefreshToken, TimeSpan.FromDays(7));
+
+        _logger.LogInformation("用户 {Username} 刷新令牌成功", matchedUser.Username);
+
+        return new AuthResponse
+        {
+            AccessToken = newAccessToken,
+            RefreshToken = newRefreshToken,
+            UserInfo = _mapper.Map<UserDto>(matchedUser)!
+        };
     }
 
     /// <summary>
