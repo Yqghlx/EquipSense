@@ -1,4 +1,3 @@
-using System.Reflection;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Seeding;
@@ -8,27 +7,57 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Tests.Integration.Infrastructure;
 
 /// <summary>
-/// 集成测试的 WebApplicationFactory，使用内存数据库替代 PostgreSQL，
-/// 并用模拟的 Redis 服务替代真实的 Redis 连接，确保测试环境完全自包含
+/// 集成测试的 WebApplicationFactory，使用 SQLite 内存数据库替代 PostgreSQL，
+/// 并用模拟的 Redis 服务替代真实的 Redis 连接，确保测试环境完全自包含。
+/// 使用 TestAppDbContext 子类将 jsonb 列类型映射替换为 TEXT，解决 SQLite 兼容性问题。
 /// </summary>
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// SQLite 内存连接需要保持打开状态，否则数据库会被销毁
+    /// 使用静态实例确保所有测试共享同一个内存数据库连接
+    /// </summary>
+    private static readonly Microsoft.Data.Sqlite.SqliteConnection _sqliteConnection;
+
+    /// <summary>
+    /// 标记数据库 schema 是否已初始化，避免重复创建
+    /// </summary>
+    private static bool _databaseCreated;
+
+    static CustomWebApplicationFactory()
+    {
+        // 创建并打开 SQLite 内存连接
+        _sqliteConnection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+        _sqliteConnection.Open();
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
 
         builder.ConfigureServices(services =>
         {
-            // 替换真实的 DbContext 为内存数据库
+            // 替换真实的 DbContext 为 SQLite 内存数据库
+            // 使用 TestAppDbContext 子类覆写 OnModelCreating，将 jsonb 映射替换为 TEXT
+            // 注意：必须先注册 DbContextOptions，再注册 AppDbContext 的工厂
             services.RemoveAll(typeof(DbContextOptions<AppDbContext>));
-            services.AddDbContext<AppDbContext>(options =>
+            services.RemoveAll<AppDbContext>();
+
+            // 注册 DbContextOptions<AppDbContext>，使用 SQLite 连接
+            services.AddSingleton(new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(_sqliteConnection)
+                .Options);
+
+            // 注册 AppDbContext 工厂，创建 TestAppDbContext 实例
+            services.AddScoped<AppDbContext>(sp =>
             {
-                options.UseInMemoryDatabase("EquipAI_TestDb");
+                var options = sp.GetRequiredService<DbContextOptions<AppDbContext>>();
+                var tenantContext = sp.GetRequiredService<EquipAI.Core.Interfaces.ITenantContext>();
+                return new TestAppDbContext(options, tenantContext);
             });
 
             // 移除真实的 RedisService，替换为不依赖 Redis 连接的存根
@@ -53,12 +82,37 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     /// <summary>
     /// 初始化种子数据并返回 HttpClient
-    /// 每次调用都会重新填充种子数据，确保测试之间相互独立
+    /// 首次调用时通过 EnsureCreatedAsync 创建 SQLite schema，后续调用只重置种子数据
     /// </summary>
     public async Task<HttpClient> CreateClientWithSeedAsync()
     {
         var client = CreateClient();
         using var scope = Services.CreateScope();
+
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // 首次调用时创建数据库 schema
+        // 使用 EnsureCreatedAsync 而非 Migrate()，因为：
+        // 1. EnsureCreatedAsync 基于 OnModelCreating 的模型创建表，不依赖 migration SQL
+        // 2. Migration 是为 Npgsql 生成的，包含 PG 特有语法（如 text[]），SQLite 无法执行
+        // 3. Program.cs 中的 Migrate() 只创建了 __EFMigrationsHistory 表但未创建业务表
+        if (!_databaseCreated)
+        {
+            // 删除 Migrate() 创建的空 __EFMigrationsHistory 表
+            // 确保 EnsureCreatedAsync 不会因为检测到该表而跳过 schema 创建
+            await dbContext.Database.ExecuteSqlRawAsync(
+                "DROP TABLE IF EXISTS __EFMigrationsHistory");
+
+            var options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(_sqliteConnection)
+                .Options;
+            using var initContext = new TestAppDbContext(options,
+                scope.ServiceProvider.GetRequiredService<EquipAI.Core.Interfaces.ITenantContext>());
+            await initContext.Database.EnsureCreatedAsync();
+
+            _databaseCreated = true;
+        }
+
         var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
         await seeder.SeedAsync();
         return client;
