@@ -123,15 +123,12 @@ public class DataQualityService : IDataQualityService
             .Distinct()
             .ToListAsync(ct);
 
-        var reports = new List<DataQualityReport>();
-        foreach (var metric in metrics)
-        {
-            var report = await CalculateReportAsync(tenantId, deviceId, metric, ct);
-            if (report != null)
-            {
-                reports.Add(report);
-            }
-        }
+        // 并行计算所有指标的质量报告，避免 N+1 串行查询
+        var reportTasks = metrics.Select(metric => CalculateReportAsync(tenantId, deviceId, metric, ct));
+        var reports = (await Task.WhenAll(reportTasks))
+            .Where(r => r != null)
+            .Cast<DataQualityReport>()
+            .ToList();
 
         return reports;
     }

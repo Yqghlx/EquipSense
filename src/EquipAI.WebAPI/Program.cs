@@ -37,6 +37,14 @@ try
     builder.Services.AddJwtAuthentication(builder.Configuration);
     builder.Services.AddSwagger();
     builder.Services.AddControllers();
+    // API 响应输出缓存（减少重复查询对数据库的压力）
+    builder.Services.AddOutputCache(options =>
+    {
+        options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
+        options.AddPolicy("Devices", policy => policy.Expire(TimeSpan.FromMinutes(2)).Tag("devices"));
+        options.AddPolicy("AlertRules", policy => policy.Expire(TimeSpan.FromMinutes(5)).Tag("alert-rules"));
+        options.AddPolicy("TenantConfig", policy => policy.Expire(TimeSpan.FromMinutes(10)).Tag("tenant-config"));
+    });
     builder.Services.AddSignalR(options =>
     {
         options.KeepAliveInterval = TimeSpan.FromSeconds(15);
@@ -107,6 +115,8 @@ try
     app.UseCors();
     // 3.5 IP 限流 — 固定窗口策略，每 IP 每分钟 60 次请求，在 CORS 之后、认证之前执行
     app.UseRateLimiter();
+    // 3.6 输出缓存 — 对 GET 请求的响应进行短期缓存
+    app.UseOutputCache();
     // 4. JWT 认证 — 解析并验证 Bearer Token，填充 context.User
     app.UseAuthentication();
     // 5. 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（必须在认证之后）

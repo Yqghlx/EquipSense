@@ -1,18 +1,20 @@
 using System.Reflection;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 
 namespace EquipAI.WebAPI.Controllers;
 
 /// <summary>
-/// 系统信息控制器 — 返回版本号、构建时间、运行环境等
+/// 系统信息控制器 — 返回版本号和运行环境信息（需认证）
 /// </summary>
 [ApiController]
 [Route("api/v1/system")]
+[Authorize]
 public class SystemController(IHostEnvironment env) : ControllerBase
 {
     /// <summary>
-    /// 获取系统版本和构建信息（需认证）
+    /// 获取系统版本和构建信息
     /// </summary>
     [HttpGet("info")]
     public IActionResult GetInfo()

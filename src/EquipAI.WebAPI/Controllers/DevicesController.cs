@@ -6,6 +6,7 @@ using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -41,6 +42,7 @@ public class DevicesController : ControllerBase
     /// <returns>分页设备结果</returns>
     [HttpGet]
     [RequirePermission("device:read")]
+    [OutputCache(PolicyName = "Devices")]
     [ProducesResponseType(typeof(PagedResult<DeviceDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<DeviceDto>>> GetDevices(
         [FromQuery] PagedQuery query,
