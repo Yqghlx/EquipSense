@@ -224,7 +224,7 @@ export default function WorkOrderDetailPage() {
                           {t('workorder.activeWorkCount', { count: tech.activeWorkCount })}
                         </span>
                       </div>
-                      {tech.skills.length > 0 && (
+                      {Array.isArray(tech.skills) && tech.skills.length > 0 && (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {tech.skills.map((s) => (
                             <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-xs">{s}</span>
