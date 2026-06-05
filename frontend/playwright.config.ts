@@ -1,37 +1,5 @@
-import { defineConfig, devices } from '@playwright/test';
-
-export default defineConfig({
-  testDir: './e2e',
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
-  use: {
-    baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
-  },
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-  ],
-  webServer: [
-    {
-      command: 'dotnet run --project ../src/EquipAI.WebAPI -- --seed',
-      port: 8080,
-      reuseExistingServer: true,
-      timeout: 60000,
-      env: {
-        ASPNETCORE_ENVIRONMENT: 'Development',
-      },
-    },
-    {
-      command: 'npm run dev -- --host 0.0.0.0',
-      port: 5173,
-      reuseExistingServer: true,
-      timeout: 30000,
-    },
-  ],
-});
+/**
+ * 默认 Playwright 配置
+ * 直接指向 e2e-comprehensive 测试套件
+ */
+export { default } from './e2e-comprehensive/playwright.config';
