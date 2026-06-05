@@ -253,9 +253,10 @@ export async function triggerAlertViaAPI(
   const token = await getToken(page);
   const { deviceId, metric = 'temperature', value = 100 } = options;
 
-  const resp = await page.request.post(`${BASE_URL}/api/v1/devices/${deviceId}/telemetry`, {
+  const resp = await page.request.post(`${BASE_URL}/api/v1/telemetry`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: {
+      deviceId,
       metrics: { [metric]: value },
       timestamp: new Date().toISOString(),
     },

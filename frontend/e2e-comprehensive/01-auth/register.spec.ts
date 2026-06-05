@@ -35,7 +35,7 @@ test.describe('01-注册功能', () => {
     }
 
     // 点击"下一步"按钮
-    await page.getByRole('button', { name: /下一步|next/i }).click();
+    await page.getByRole('button', { name: /下一页|下一步|next/i }).click();
     await page.waitForTimeout(1000);
 
     // 步骤 2：填写企业信息
@@ -51,7 +51,7 @@ test.describe('01-注册功能', () => {
     }
 
     // 提交步骤 2
-    await page.getByRole('button', { name: /下一步|next/i }).click();
+    await page.getByRole('button', { name: /下一页|下一步|next/i }).click();
     await page.waitForTimeout(1000);
   }
 
@@ -69,8 +69,8 @@ test.describe('01-注册功能', () => {
     await expect(page.locator('text=2').first()).toBeVisible();
     await expect(page.locator('text=3').first()).toBeVisible();
 
-    // 验证步骤 1 标题
-    await expect(page.getByText(/套餐|plan/i)).toBeVisible();
+    // 验证步骤 1 标题（使用 first 避免 strict mode 匹配多个元素）
+    await expect(page.getByText(/套餐|plan/i).first()).toBeVisible();
 
     // 验证已有账户链接
     await expect(page.getByRole('link', { name: /登录|login/i })).toBeVisible();
