@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { DeviceStatusBadge } from '../components/device/DeviceStatusBadge';
 import { DeviceForm } from '../components/device/DeviceForm';
 import { useDevices, useCreateDevice, useUpdateDevice, useDeleteDevice } from '../hooks/useDevices';
+import { usePermission } from '../hooks/usePermission';
 import type { CreateDeviceRequest, Device } from '../types';
 
 /**
@@ -20,6 +21,7 @@ import type { CreateDeviceRequest, Device } from '../types';
  */
 export default function DeviceListPage() {
   const { t } = useTranslation();
+  const perm = usePermission('device');
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>('');
@@ -60,7 +62,7 @@ export default function DeviceListPage() {
       {/* 页头：标题 + 新建按钮 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('device.title')}</h1>
-        <Button onClick={() => { setEditingDevice(undefined); setDialogOpen(true); }}>
+        <Button onClick={() => { setEditingDevice(undefined); setDialogOpen(true); }} disabled={!perm.canCreate}>
           <Plus className="mr-2 h-4 w-4" />{t('common.create')}
         </Button>
       </div>
@@ -126,10 +128,10 @@ export default function DeviceListPage() {
                         <Button variant="ghost" size="icon" onClick={() => navigate(`/devices/${device.id}`)}>
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingDevice(device); setDialogOpen(true); }}>
+                        <Button variant="ghost" size="icon" onClick={() => { setEditingDevice(device); setDialogOpen(true); }} disabled={!perm.canEdit}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(device.id)}>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(device.id)} disabled={!perm.canDelete}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

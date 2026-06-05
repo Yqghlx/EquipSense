@@ -1,5 +1,22 @@
 import axios from 'axios';
 
+/**
+ * 显示全局错误提示（通过 toast 通知）
+ * 使用动态导入避免循环依赖，并在 store 未初始化时静默降级
+ */
+async function showGlobalError(message: string): Promise<void> {
+  try {
+    const { useNotificationStore } = await import('../stores/notificationStore');
+    useNotificationStore.getState().push({
+      type: 'system',
+      title: '操作失败',
+      message,
+    });
+  } catch {
+    // store 未初始化时静默处理
+  }
+}
+
 const api = axios.create({
   baseURL: '/api/v1',
   headers: { 'Content-Type': 'application/json' },
@@ -31,14 +48,32 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// 响应拦截器：401 时尝试刷新令牌，失败则跳转登录
+// 响应拦截器：全局错误处理 + 401 时尝试刷新令牌
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const status = error.response?.status;
+    const data = error.response?.data;
+
+    // 403 权限不足：显示友好提示
+    if (status === 403) {
+      const msg = data?.message || '您没有权限执行此操作';
+      showGlobalError(msg);
+    }
+    // 404 资源不存在：显示友好提示
+    else if (status === 404) {
+      const msg = data?.message || '请求的资源不存在';
+      showGlobalError(msg);
+    }
+    // 500 服务器错误：显示友好提示
+    else if (status === 500) {
+      showGlobalError('服务器内部错误，请稍后重试');
+    }
+
     const originalRequest = error.config;
 
     // 非 401 或已重试过，直接拒绝
-    if (error.response?.status !== 401 || originalRequest._retry) {
+    if (status !== 401 || originalRequest._retry) {
       return Promise.reject(error);
     }
 

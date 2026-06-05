@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/badge';
 import { AnalysisDetail } from '../components/analysis/AnalysisDetail';
 import { useAnalyses, useTriggerAnalysis } from '../hooks/useAnalyses';
 import { useAlerts } from '../hooks/useAlerts';
+import { usePermission } from '../hooks/usePermission';
 
 /** 分析级别标签 */
 const levelLabels: Record<string, string> = { L1: 'L1', L2: 'L2', L3: 'L3' };
@@ -23,6 +24,7 @@ const levelLabels: Record<string, string> = { L1: 'L1', L2: 'L2', L3: 'L3' };
  */
 export default function AnalysesPage() {
   const { t } = useTranslation();
+  const perm = usePermission('ai');
 
   /** 分析状态中文标签 */
   const statusLabels: Record<string, string> = {
@@ -59,7 +61,7 @@ export default function AnalysesPage() {
       {/* 页面头部 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('analysis.title')}</h1>
-        <Button onClick={() => setTriggerDialogOpen(true)}>
+        <Button disabled={!perm.canTriggerAI} onClick={() => setTriggerDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />{t('analysis.manualTrigger')}
         </Button>
       </div>

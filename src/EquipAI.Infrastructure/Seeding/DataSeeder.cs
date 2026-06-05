@@ -120,38 +120,52 @@ public class DataSeeder
     }
 
     /// <summary>
-    /// 创建超级管理员账户
+    /// 创建超级管理员账户及其他角色用户
     /// 默认用户名 admin，密码 Admin@123，归属默认租户
+    /// 同时创建维保主管、技术员、操作员、观察者四种角色的测试用户
     /// 首次登录后必须修改密码（MustChangePassword = true）
     /// </summary>
     private async Task SeedAdminUserAsync()
     {
-        var adminUsername = "admin";
-        var adminExists = await _dbContext.Users
-            .IgnoreQueryFilters()
-            .AnyAsync(u => u.Username == adminUsername);
+        var defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
-        if (!adminExists)
+        // 定义种子用户列表
+        var seedUsers = new[]
         {
-            var defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            new { Username = "admin", Password = "Admin@123", DisplayName = "系统管理员", Role = UserRole.SystemAdmin },
+            new { Username = "lead", Password = "Lead@123", DisplayName = "维保主管", Role = UserRole.MaintenanceLead },
+            new { Username = "tech", Password = "Tech@123", DisplayName = "技术员", Role = UserRole.Technician },
+            new { Username = "operator", Password = "Operator@123", DisplayName = "操作员", Role = UserRole.Operator },
+            new { Username = "viewer", Password = "Viewer@123", DisplayName = "观察者", Role = UserRole.Viewer }
+        };
 
-            var adminUser = new User
+        foreach (var seedUser in seedUsers)
+        {
+            var userExists = await _dbContext.Users
+                .IgnoreQueryFilters()
+                .AnyAsync(u => u.Username == seedUser.Username);
+
+            if (!userExists)
             {
-                TenantId = defaultTenantId,
-                Username = adminUsername,
-                PasswordHash = PasswordHasher.HashPassword("Admin@123"),
-                DisplayName = "系统管理员",
-                Role = UserRole.SystemAdmin,
-                IsActive = true,
-                // 首次登录后必须修改密码，提升安全性
-                MustChangePassword = true,
-                Language = "zh-CN"
-            };
+                var user = new User
+                {
+                    TenantId = defaultTenantId,
+                    Username = seedUser.Username,
+                    PasswordHash = PasswordHasher.HashPassword(seedUser.Password),
+                    DisplayName = seedUser.DisplayName,
+                    Role = seedUser.Role,
+                    IsActive = true,
+                    // 首次登录后必须修改密码，提升安全性
+                    MustChangePassword = seedUser.Username == "admin",
+                    Language = "zh-CN"
+                };
 
-            _dbContext.Users.Add(adminUser);
-            await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("已创建超级管理员账户（用户名: admin）");
+                _dbContext.Users.Add(user);
+                _logger.LogInformation("已创建用户账户：{Username}（角色：{Role}）", seedUser.Username, seedUser.Role);
+            }
         }
+
+        await _dbContext.SaveChangesAsync();
     }
 
     /// <summary>

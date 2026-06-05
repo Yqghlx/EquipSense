@@ -24,6 +24,8 @@ import {
   useRejectPendingRule,
   useToggleKnowledgeRule,
 } from '../hooks/useKnowledge';
+import { usePermission } from '../hooks/usePermission';
+import type { PermissionResult } from '../hooks/usePermission';
 import type { KnowledgeRule, PendingRule, FaultCase } from '../types';
 import ImportExportToolbar from '../components/knowledge/ImportExportToolbar';
 import RuleEditDialog from '../components/knowledge/RuleEditDialog';
@@ -43,6 +45,9 @@ export default function KnowledgePage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('rules');
   const [keyword, setKeyword] = useState('');
+
+  /** 获取知识库模块权限 */
+  const perm = usePermission('knowledge');
 
   /** 待审核规则数量，用于 Tab 徽标显示 */
   const { data: pendingCountData } = usePendingRules({
@@ -88,12 +93,12 @@ export default function KnowledgePage() {
 
         {/* 诊断规则 Tab */}
         <TabsContent value="rules" className="mt-4">
-          <RulesList keyword={keyword} />
+          <RulesList keyword={keyword} perm={perm} />
         </TabsContent>
 
         {/* 待审核规则 Tab */}
         <TabsContent value="pending" className="mt-4">
-          <PendingRulesList keyword={keyword} />
+          <PendingRulesList keyword={keyword} perm={perm} />
         </TabsContent>
 
         {/* 故障案例 Tab */}
@@ -112,6 +117,7 @@ export default function KnowledgePage() {
 /** 诊断规则列表属性 */
 interface RulesListProps {
   keyword: string;
+  perm: PermissionResult;
 }
 
 /**
@@ -119,7 +125,7 @@ interface RulesListProps {
  *
  * 以卡片网格展示所有已审核通过的知识规则。
  */
-function RulesList({ keyword }: RulesListProps) {
+function RulesList({ keyword, perm }: RulesListProps) {
   const { t } = useTranslation();
   const { data, isLoading } = useKnowledgeRules({
     page: 1,
@@ -154,7 +160,7 @@ function RulesList({ keyword }: RulesListProps) {
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {filtered.map((rule) => (
-        <RuleCard key={rule.id} rule={rule} />
+        <RuleCard key={rule.id} rule={rule} perm={perm} />
       ))}
     </div>
   );
@@ -163,6 +169,7 @@ function RulesList({ keyword }: RulesListProps) {
 /** 规则卡片属性 */
 interface RuleCardProps {
   rule: KnowledgeRule;
+  perm: PermissionResult;
 }
 
 /**
@@ -171,7 +178,7 @@ interface RuleCardProps {
  * 展示规则的名称、设备类型、版本号、来源、应用次数和准确率。
  * 提供编辑、启用/禁用切换和版本历史查看操作。
  */
-function RuleCard({ rule }: RuleCardProps) {
+function RuleCard({ rule, perm }: RuleCardProps) {
   const { t } = useTranslation();
   const toggleMutation = useToggleKnowledgeRule();
 
@@ -209,7 +216,7 @@ function RuleCard({ rule }: RuleCardProps) {
               <Badge
                 variant={rule.enabled ? 'default' : 'secondary'}
                 className="cursor-pointer"
-                onClick={() => toggleMutation.mutate(rule.id)}
+                onClick={() => perm.canEdit && toggleMutation.mutate(rule.id)}
               >
                 <Power className="mr-1 h-3 w-3" />
                 {rule.enabled ? t('knowledge.enabled') : t('knowledge.disabled')}
@@ -273,7 +280,7 @@ function RuleCard({ rule }: RuleCardProps) {
 
           {/* 操作按钮区 */}
           <div className="flex items-center gap-2 pt-2 border-t">
-            <Button size="sm" variant="outline" onClick={() => setEditingRule(rule)}>
+            <Button size="sm" variant="outline" onClick={() => setEditingRule(rule)} disabled={!perm.canEdit}>
               <Pencil className="mr-1 h-3.5 w-3.5" />
               {t('common.edit')}
             </Button>
@@ -308,6 +315,7 @@ function RuleCard({ rule }: RuleCardProps) {
 /** 待审核规则列表属性 */
 interface PendingRulesListProps {
   keyword: string;
+  perm: PermissionResult;
 }
 
 /**
@@ -316,7 +324,7 @@ interface PendingRulesListProps {
  * 以卡片网格展示所有 AI 生成的待审核候选规则，
  * 支持批准和驳回操作。
  */
-function PendingRulesList({ keyword }: PendingRulesListProps) {
+function PendingRulesList({ keyword, perm }: PendingRulesListProps) {
   const { t } = useTranslation();
   const { data, isLoading } = usePendingRules({
     page: 1,
@@ -359,8 +367,8 @@ function PendingRulesList({ keyword }: PendingRulesListProps) {
           rule={rule}
           onApprove={(id) => approveMutation.mutate({ id })}
           onReject={(id) => rejectMutation.mutate({ id, comment: t('knowledge.defaultRejectComment') })}
-          approveDisabled={approveMutation.isPending}
-          rejectDisabled={rejectMutation.isPending}
+          approveDisabled={approveMutation.isPending || !perm.canApprove}
+          rejectDisabled={rejectMutation.isPending || !perm.canApprove}
         />
       ))}
     </div>

@@ -6,23 +6,167 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EquipSense（内部代号 EquipAI）是一个工业设备智能监控与预测维护平台。核心目标：**在故障发生前预警，在告警触发后秒级给出根因和建议，在确认问题后自动创建工单闭环。**
 
-**当前状态：设计阶段**，仅包含技术设计文档，尚未开始编码。完整技术方案（2,457 行）见 `docs/FINAL_TECHNICAL_DESIGN.md`，涵盖系统架构、数据库 Schema、API 规范、安全设计、开发路线图等所有细节。实现时应以该文档为权威参考。
+完整技术方案（2,457 行）见 `docs/FINAL_TECHNICAL_DESIGN.md`，涵盖系统架构、数据库 Schema、API 规范、安全设计、开发路线图等所有细节。
+
+## 开发命令
+
+### 后端 (.NET 8)
+
+```bash
+# 构建项目
+dotnet build EquipAI.slnx
+
+# 运行后端（监听 http://localhost:8080）
+dotnet run --project src/EquipAI.WebAPI
+
+# 运行单元测试
+dotnet test tests/EquipAI.Tests.Unit
+
+# 运行集成测试
+dotnet test tests/EquipAI.Tests.Integration
+
+# 运行单个测试类
+dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~AlertServiceTests"
+
+# 清理构建产物
+dotnet clean
+```
+
+### 前端 (React 19 + TypeScript)
+
+```bash
+cd frontend
+
+# 安装依赖
+npm install
+
+# 开发模式（监听 http://localhost:5173）
+npm run dev
+
+# 类型检查
+npx tsc -p tsconfig.json --noEmit
+
+# Lint 检查
+npm run lint
+
+# 运行单元测试 (Vitest)
+npm run test
+
+# 构建生产版本
+npm run build
+
+# 预览生产构建
+npm run preview
+```
+
+### E2E 测试 (Playwright)
+
+```bash
+cd frontend
+
+# 安装 Playwright 浏览器
+npx playwright install
+
+# 运行 E2E 测试
+npx playwright test
+
+# 运行特定测试文件
+npx playwright test tests/e2e/device-management.spec.ts
+
+# 调试模式
+npx playwright test --debug
+
+# 查看测试报告
+npx playwright show-report
+```
+
+### 模拟器（发送测试遥测数据）
+
+```bash
+# 向指定租户的 3 个设备每 5 秒发送遥测数据（5% 概率触发异常）
+dotnet run --project tools/EquipAI.Simulator -- \
+  --tenant 11111111-1111-1111-1111-111111111111 \
+  --devices 3 \
+  --interval 5
+```
+
+### Docker 环境
+
+```bash
+# 开发环境基础设施（PostgreSQL + TimescaleDB + Redis + Mosquitto）
+docker compose -f docker/docker-compose.dev.yml up -d
+
+# 生产环境全套服务（前端 + 后端 + 数据库 + Redis + Mosquitto）
+docker compose -f docker/docker-compose.yml up -d --build
+
+# 停止服务
+docker compose -f docker/docker-compose.yml down
+
+# 查看日志
+docker compose -f docker/docker-compose.yml logs -f backend
+```
+
+**环境变量配置：**
+首次启动前需创建 `docker/.env` 文件（参考 `docker/.env.example`），设置：
+- `PG_PASSWORD`（PostgreSQL 密码，必填）
+- `JWT_SECRET`（JWT 签名密钥，≥32 字符，必填）
+- `LLM_API_KEY`（可选，未配置时 AI 分析降级为规则匹配）
 
 ## 技术栈
 
-- **后端**：C# / .NET 8 WebAPI（模块化单体），EF Core 8 + Npgsql
-- **前端**：React 19 + TypeScript (strict) + Vite + shadcn/ui + TailwindCSS
-- **状态管理**：Zustand；数据请求：TanStack Query
-- **数据库**：PostgreSQL 16 + TimescaleDB（业务+时序一体化）
-- **缓存**：Redis 7
-- **实时通信**：SignalR（按租户分组隔离）
-- **工业协议**：OPC UA（OPC Foundation SDK）、Modbus（FluentModbus）、MQTT（MQTTnet + Mosquitto）
-- **AI/ML**：LLM（GLM-5 / Qwen via DashScope）+ ML.NET（Phase 3 异常检测）
-- **图表**：ECharts；表单：React Hook Form + Zod
-- **测试**：xUnit + Vitest + Playwright
-- **日志**：Serilog + Seq
-- **容器**：Docker Compose（Phase 1），后续迁移 K8s
-- **CI/CD**：GitHub Actions
+| 层级 | 技术 |
+|------|------|
+| 后端 | .NET 8 WebAPI（模块化单体），EF Core 8 + Npgsql |
+| 前端 | React 19 + TypeScript (strict) + Vite + shadcn/ui + TailwindCSS |
+| 状态管理 | Zustand + TanStack Query |
+| 数据库 | PostgreSQL 16 + TimescaleDB（业务 + 时序一体化） |
+| 缓存 | Redis 7 |
+| 实时通信 | SignalR（按租户分组隔离） |
+| 工业协议 | MQTT（MQTTnet + Mosquitto） |
+| AI/ML | LLM（通义千问 / GLM via DashScope） |
+| 图表 | ECharts |
+| 表单 | React Hook Form + Zod |
+| 测试 | xUnit + Vitest + Playwright |
+| 日志 | Serilog + Seq |
+| 容器 | Docker Compose |
+| CI/CD | GitHub Actions |
+
+## 项目结构
+
+```
+EquipSense/
+├── src/                           # 后端源码
+│   ├── EquipAI.WebAPI/           # ASP.NET Core 入口（Controllers、Hub、中间件）
+│   ├── EquipAI.Core/             # 领域层（实体、接口、事件、枚举）
+│   ├── EquipAI.Application/      # 应用层（业务逻辑，按模块分文件夹）
+│   ├── EquipAI.Infrastructure/   # 基础设施层（EF Core、Redis、MQTT、JWT）
+│   ├── EquipAI.EdgeGateway/      # 边缘网关（独立部署）
+│   └── EquipAI.Simulator/        # MQTT 遥测数据模拟器
+├── frontend/                      # 前端源码
+│   └── src/
+│       ├── pages/                # 页面组件
+│       ├── components/           # 通用组件（ui/、charts/、alert/ 等）
+│       ├── hooks/                # TanStack Query hooks
+│       ├── stores/               # Zustand stores
+│       ├── lib/                  # API 客户端、SignalR 连接
+│       ├── i18n/                 # 国际化（中英文）
+│       └── types/                # TypeScript 类型定义
+├── tests/                         # 测试项目
+│   ├── EquipAI.Tests.Unit/       # xUnit 单元测试
+│   ├── EquipAI.Tests.Integration/ # Testcontainers 集成测试
+│   ├── e2e/                      # Playwright E2E 测试
+│   └── stress/                   # 压力测试脚本
+├── docker/                        # Docker 配置
+│   ├── Dockerfile.backend        # 后端多阶段构建
+│   ├── Dockerfile.frontend       # 前端 Nginx 构建
+│   ├── nginx.conf                # Nginx 反向代理配置
+│   ├── docker-compose.yml        # 生产环境
+│   └ docker-compose.dev.yml      # 开发环境基础设施
+│   └ .env.example                # 环境变量模板
+├── docs/                          # 文档
+│   └ FINAL_TECHNICAL_DESIGN.md   # 完整技术设计文档
+└── .github/workflows/ci.yml      # CI/CD 流水线
+```
 
 ## 架构要点
 
@@ -33,27 +177,7 @@ EquipSense（内部代号 EquipAI）是一个工业设备智能监控与预测�
 后端 SignalR Hub → React 19 PWA 前端
 ```
 
-### 后端项目结构（规划）
-
-```
-EquipAI.sln
-├── src/
-│   ├── EquipAI.WebAPI/                    -- ASP.NET Core 入口 + 中间件 + Controllers
-│   ├── EquipAI.Core/                      -- 领域层（实体 + 接口 + 事件 + 枚举）
-│   ├── EquipAI.Application/               -- 应用层（业务逻辑，按模块分文件夹）
-│   │   ├── Devices/ Alerts/ WorkOrders/ Analysis/ Knowledge/ Telemetry/
-│   │   └── Common/                        -- EventBus, ITenantContext 等
-│   ├── EquipAI.Infrastructure/            -- 基础设施层（EF Core + Redis + MQTT + AI + JWT）
-│   └── EquipAI.EdgeGateway/               -- 边缘网关（独立部署）
-├── tests/
-│   ├── EquipAI.Tests.Unit/                -- xUnit 单元测试
-│   ├── EquipAI.Tests.Integration/         -- Testcontainers 集成测试
-│   └── EquipAI.Tests.E2E/                -- API 端到端测试
-└── docker/
-    ├── Dockerfile.backend / Dockerfile.frontend
-    ├── docker-compose.yml                 -- 生产
-    └── docker-compose.dev.yml             -- 开发
-```
+### 后端分层架构
 
 **命名规范：**
 - 命名空间：`EquipAI.{Layer}.{Module}`（如 `EquipAI.Application.Alerts`）
@@ -69,52 +193,39 @@ EquipAI.sln
 ### 后端模块划分
 
 - **设备管理**：设备 CRUD、类型模板、批量导入
-- **告警引擎**：四级告警（阈值→组合→基线→ML），含聚合防风暴机制
-- **工单管理**：三种可插拔模式（独立系统/中台中台/纯触发器）
-- **AI 分析**：四级自动降级（预测→统计→规则→LLM），数据质量联动置信度
-- **知识库**：双表设计（knowledge_rules + pending_rules），AI 生成候选规则需专家验证
+- **告警引擎**：三级告警（阈值 / 组合 / 基线），含聚合防风暴机制
+- **工单管理**：完整生命周期管理，可插拔集成（钉钉/飞书/Maximo/Webhook）
+- **AI 分析**：三级自动降级（统计分析 → 规则匹配 → LLM 诊断），数据质量联动置信度
+- **知识库**：规则管理，AI 生成候选规则需专家验证
 - **共享层**：JWT 认证、RBAC 权限、SignalR、事件总线、多租户、数据质量
 
 ### 关键设计约束
 
-- **Day 1 多租户**：所有业务表从第一天就有 `tenant_id`，EF Core 全局查询过滤器，所有查询方法必须传入 tenant_id
+- **Day 1 多租户**：所有业务表都有 `tenant_id`，EF Core 全局查询过滤器，所有查询方法必须传入 tenant_id
 - **时序窄表**：`device_telemetry` 一行一个指标，新增指标不改 schema
 - **UUID 主键**：适合分布式场景
 - **JSONB 灵活字段**：设备参数、规则条件等用 JSONB
 - **告警聚合**：30 分钟窗口内，同设备同指标第 1 次立即告警、2-3 次更新已有、超过 3 次静默
 - **AI 自动降级**：数据质量评分影响分析级别和置信度乘数
 - **知识沉淀安全边界**：AI 生成的规则写入 `pending_rules`，专家批准后才移入 `knowledge_rules`
-- **工单可插拔**：`IWorkOrderIntegration` 接口适配钉钉/飞书/Maximo/Webhook
 - **SignalR 租户隔离**：连接时自动加入 `tenant:{id}` 组
 
 ### 边缘网关
 
-- 项目命名空间：`IndustrialAI.EdgeGateway`
+- 项目命名空间：`EquipAI.EdgeGateway`
 - 协议适配器接口：`IProtocolAdapter`（ConnectAsync / ReadAsync / IsConnected / ProtocolType）
 - 数据管线：采集 → 标准化 → 内存环形队列(10000) → SQLite(7天断网缓存) → MQTT/HTTPS 上传
-
-### 前端结构（规划）
-
-```
-frontend/src/
-├── components/    -- ui/ (shadcn) | charts/ (ECharts) | device/ | alert/ | workorder/ | layout/
-├── pages/         -- Dashboard / DeviceList / DeviceDetail / AlertCenter / WorkOrder* / Analytics / Knowledge / Settings
-├── hooks/         -- useDevices / useAlerts / useWorkOrders / useSignalR / useDataQuality
-├── stores/        -- authStore (Zustand) / notificationStore
-├── lib/           -- api.ts / signalr.ts / queryClient.ts
-├── types/         -- TypeScript 类型定义
-└── i18n/          -- 国际化（中英文，i18next）
-```
 
 ### API 规范
 
 - 前缀：`/api/v1/`
 - 分页：`?page=1&pageSize=20&sort=created_at&order=desc`
 - 统一错误响应：`{ code, message, details }`
-- 认证：JWT（Header: Authorization: Bearer {token}）
+- 认证：JWT（Header: `Authorization: Bearer {token}`）
 - 多租户：JWT 中含 tenant_id，支持 Header `X-Tenant-Id` 和子域名
+- 健康检查：`/health` 返回 PostgreSQL + Redis 连通性
 
-## 数据库关键表
+### 数据库关键表
 
 完整 Schema（含索引、约束、种子数据）见 `docs/FINAL_TECHNICAL_DESIGN.md` 第三章。核心表：
 
@@ -122,44 +233,93 @@ frontend/src/
 - `devices` / `device_type_templates` — 设备管理（模板化设计，行业预置模板归属系统租户）
 - `alert_rules` / `alerts` — 告警规则与告警实例
 - `work_orders` / `work_order_logs` — 工单与流转日志
-- `knowledge_rules` / `pending_rules` / `fault_cases` — 知识库（规则+案例双表）
+- `knowledge_rules` / `pending_rules` — 知识库（规则双表设计）
 - `device_telemetry`（TimescaleDB 超级表）— 时序窄表，7 天自动压缩，90 天保留
 - `telemetry_hourly`（连续聚合）— 小时级统计
-- `metric_baselines` — 告警引擎基线数据
 - `notifications` / `audit_logs` / `system_configs` — 通知、审计、配置
 
 **设备类型模板的租户策略：** 行业预置模板归属系统租户（`tenant_id = '00000000-0000-0000-0000-000000000000'`），查询时 `WHERE tenant_id = @current_tenant OR tenant_id = @system_tenant`。
 
-## 部署
-
-Phase 1 使用 Docker Compose：frontend + backend + postgres(timescaledb) + redis + mosquitto。
-敏感配置通过环境变量注入（`PG_PASSWORD`、`JWT_SECRET`、`LLM_API_KEY`、`GATEWAY_AUTH_KEY`）。
-
-**Phase 1 不引入：** RabbitMQ（进程内事件）、MinIO（文件存本地）、K8s（Compose 够用）、YARP（单体不需要）。
-
 ## 实现阶段核心设计原则
 
 1. **单体优先** — Phase 1 模块化单体 + Docker Compose，不拆微服务
-2. **Day 1 多租户** — 所有业务表从第一条建表语句就有 `tenant_id`，EF Core 全局查询过滤器，所有查询方法必须传入 tenant_id
+2. **Day 1 多租户** — 所有业务表从第一条建表语句就有 `tenant_id`，EF Core 全局查询过滤器
 3. **时序窄表** — `device_telemetry` 一行一个指标，新增指标不改 schema
-4. **AI 自动降级** — 数据质量评分影响分析级别和置信度乘数（预测→统计→规则→LLM）
+4. **AI 自动降级** — 数据质量评分影响分析级别和置信度乘数（统计→规则→LLM）
 5. **知识沉淀安全边界** — AI 生成的规则写入 `pending_rules`，专家批准后才移入 `knowledge_rules`
 6. **告警聚合防风暴** — 30 分钟窗口内，同设备同指标：第 1 次立即告警、2-3 次更新已有、超过 3 次静默
 7. **工单可插拔** — `IWorkOrderIntegration` 接口适配钉钉/飞书/Maximo/Webhook
 
 ## 开发路线图
 
-- **Phase 1（8-10 周）**：核心闭环 — 项目骨架、设备 CRUD、MQTT 接入、告警引擎、AI 根因（L1-L3）、工单独立模式、前端完整页面、Docker 部署
-- **Phase 2（4-6 周）**：真实接入 — OPC UA/Modbus 适配器、断网保护、知识沉淀闭环
-- **Phase 3（6-8 周）**：产品化 — 工单完整工作流、钉钉/飞书集成、PWA、知识库管理、多租户 SaaS
-- **Phase 4（4-6 周）**：智能化 — ML.NET 异常检测（L4）、安全加固、压力测试、v1.0 发布
+- **Phase 1（当前）**：核心闭环 — 设备 CRUD、MQTT 遥测、告警引擎、AI 根因、工单、前端完整页面、Docker 部署
+- **Phase 2**：真实接入 — OPC UA / Modbus 适配器、边缘网关断网保护、知识沉淀闭环
+- **Phase 3**：产品化 — 工单完整工作流、钉钉/飞书集成、PWA、多租户 SaaS 完善
+- **Phase 4**：智能化 — ML.NET 异常检测、安全加固、压力测试、v1.0 发布
 
 ## RBAC 权限矩阵
 
-| 角色 | 设备 | 告警 | 工单 | 知识库 | 报表 | AI |
-|------|------|------|------|--------|------|-----|
-| system_admin | CRUD | CRUD | CRUD | CRUD | R | CRUD |
-| maintenance_lead | RW | RW+配置 | RW+派工验收 | RW+验证 | R | R |
-| technician | R | R+确认 | R+执行 | R | - | R+查询 |
-| operator | R | R+确认 | R | - | R | R+查询 |
-| viewer | R | R | R | R | R | - |
+| 角色 | 设备 | 告警 | 工单 | 知识库 | AI |
+|------|------|------|------|--------|-----|
+| 系统管理员 | CRUD | CRUD | CRUD | CRUD | CRUD |
+| 维保主管 | RW | RW+配置 | RW+派工验收 | RW+验证 | R |
+| 技术员 | R | R+确认 | R+执行 | R | R |
+| 操作员 | R | R+确认 | R | - | R |
+| 观察者 | R | R | R | R | - |
+
+## 常用开发场景
+
+### 添加新的业务模块
+
+1. 在 `src/EquipAI.Core` 中定义实体、接口、事件
+2. 在 `src/EquipAI.Application/{Module}` 中实现业务逻辑和事件处理器
+3. 在 `src/EquipAI.Infrastructure` 中实现仓储和外部服务
+4. 在 `src/EquipAI.WebAPI/Controllers` 中添加 API 端点
+5. 在 `tests/EquipAI.Tests.Unit` 中添加单元测试
+6. 在 `frontend/src/hooks` 中添加 TanStack Query hook
+7. 在 `frontend/src/pages` 中添加页面组件
+
+### 运行数据库迁移
+
+后端首次启动时自动执行迁移和种子数据初始化。如需手动迁移：
+
+```bash
+cd src/EquipAI.Infrastructure
+dotnet ef migrations add <MigrationName> --startup-project ../EquipAI.WebAPI
+dotnet ef database update --startup-project ../EquipAI.WebAPI
+```
+
+### 查看 API 文档
+
+启动后端后访问 Swagger UI：http://localhost:8080/swagger
+
+### 调试 SignalR 实时推送
+
+前端 SignalR 连接配置在 `frontend/src/lib/signalr.ts`。后端 Hub 位于 `src/EquipAI.WebAPI/Hubs/IndustrialHub.cs`。
+
+连接时自动加入租户分组：`tenant:{tenant_id}`，确保多租户隔离。
+
+### 测试告警触发
+
+使用模拟器发送异常数据：
+
+```bash
+dotnet run --project tools/EquipAI.Simulator -- \
+  --tenant <your-tenant-id> \
+  --devices 1 \
+  --interval 2 \
+  --anomaly-rate 20  # 20% 概率生成异常值
+```
+
+前端告警中心页面会通过 SignalR 实时接收告警推送。
+
+## CI/CD 流水线
+
+GitHub Actions 流水线（`.github/workflows/ci.yml`）包含：
+
+1. **后端测试**：单元测试 + 集成测试
+2. **前端测试**：类型检查 + Lint + Vitest 单元测试 + 构建
+3. **Docker 构建**：构建并推送前后端镜像（仅 main 分支）
+4. **E2E 测试**：Playwright 端到端测试（仅 main 分支）
+
+所有 Pull Request 到 main 分支会触发前两项测试，推送到 main 分支会执行完整流水线。

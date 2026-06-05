@@ -195,8 +195,14 @@ export interface AlertRule {
   threshold?: number;
   /** 组合条件（JSONB，组合规则使用） */
   conditions?: string;
+  /** 逻辑运算符（AND / OR，组合规则使用） */
+  logicOperator?: string;
   /** 基线标准差倍数（基线规则使用） */
   baselineStddevMultiplier?: number;
+  /** 基线时间窗口（小时，基线规则使用） */
+  baselineWindow?: number;
+  /** 基线敏感度（标准差倍数，基线规则使用） */
+  baselineSensitivity?: number;
   /** 告警严重级别（Critical / High / Normal / Low） */
   severity: string;
   /** 冷却时间（秒），防止短时间内重复告警 */
@@ -225,10 +231,16 @@ export interface CreateAlertRuleRequest {
   operator?: string;
   /** 阈值（阈值规则使用） */
   threshold?: number;
-  /** 组合条件（JSONB，组合规则使用） */
-  conditions?: string;
+  /** 组合条件（数组形式，提交时会转为 JSON 字符串） */
+  conditions?: { metric: string; operator: string; threshold: number }[];
+  /** 逻辑运算符（AND / OR，组合规则使用） */
+  logicOperator?: string;
   /** 基线标准差倍数（基线规则使用） */
   baselineStddevMultiplier?: number;
+  /** 基线时间窗口（小时，基线规则使用） */
+  baselineWindow?: number;
+  /** 基线敏感度（标准差倍数，基线规则使用） */
+  baselineSensitivity?: number;
   /** 告警严重级别（Critical / High / Normal / Low） */
   severity: string;
   /** 冷却时间（秒），防止短时间内重复告警 */

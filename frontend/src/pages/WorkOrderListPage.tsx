@@ -12,6 +12,7 @@ import { PriorityBadge } from '../components/workorder/PriorityBadge';
 import { WorkOrderForm } from '../components/workorder/WorkOrderForm';
 import { useWorkOrders, useCreateWorkOrder } from '../hooks/useWorkOrders';
 import { useDevices } from '../hooks/useDevices';
+import { usePermission } from '../hooks/usePermission';
 import { getWorkOrderStatusLabels } from '../utils/workorder';
 import type { CreateWorkOrderRequest } from '../types';
 
@@ -25,6 +26,7 @@ import type { CreateWorkOrderRequest } from '../types';
 export default function WorkOrderListPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const perm = usePermission('workOrder');
 
   /** 工单状态对应的中文标签（使用共享工具函数，匹配后端 PascalCase 枚举序列化） */
   const statusLabels = getWorkOrderStatusLabels(t);
@@ -50,7 +52,7 @@ export default function WorkOrderListPage() {
       {/* 页面头部 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('workorder.title')}</h1>
-        <Button onClick={() => setDialogOpen(true)}>
+        <Button onClick={() => setDialogOpen(true)} disabled={!perm.canCreate}>
           <Plus className="mr-2 h-4 w-4" />{t('common.create')}
         </Button>
       </div>
