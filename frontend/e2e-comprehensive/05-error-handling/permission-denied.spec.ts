@@ -473,17 +473,18 @@ test.describe('RBAC 权限拒绝', () => {
   // 15. 跨租户数据隔离验证
   // ==========================================================================
 
-  test.skip('跨租户数据隔离验证', async ({ page }) => {
+  test('跨租户数据隔离验证', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 用管理员获取 Token 并创建设备
+    // 用默认租户的管理员创建设备
     const adminToken = await getTokenForRole(page, 'admin');
+    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const dev = await createDeviceViaAPI(page, adminToken, {
-      deviceCode: 'TENANT-ISOLATION-TEST',
+      deviceCode: `TENANT-ISO-${suffix}`,
       name: '租户隔离测试设备',
     });
 
-    // 管理员能看到自己租户的设备
+    // 默认租户的管理员能看到自己租户的设备
     const adminResp = await page.request.get(`${BASE_URL}/api/v1/devices`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     });
@@ -491,17 +492,36 @@ test.describe('RBAC 权限拒绝', () => {
     const adminDeviceNames = (adminData.items ?? []).map((d: { name: string }) => d.name);
     expect(adminDeviceNames).toContain('租户隔离测试设备');
 
-    // 使用另一个租户的 Token（如果有的话）验证隔离
-    // 在当前测试环境中，所有角色可能属于同一租户
-    // 因此这里验证 API 返回中包含 tenant_id 字段以确认多租户隔离机制存在
+    // 使用第二租户的 admin 登录，验证看不到默认租户的设备
+    const tenant2TokenResp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
+      data: { username: 'tenant2admin', password: 'Tenant2@123' },
+    });
+    expect(tenant2TokenResp.ok()).toBeTruthy();
+    const tenant2Body = await tenant2TokenResp.json();
+    const tenant2Token = tenant2Body.accessToken || tenant2Body.token;
+
+    // 第二租户查询设备列表，不应包含默认租户的设备
+    const tenant2Resp = await page.request.get(`${BASE_URL}/api/v1/devices`, {
+      headers: { Authorization: `Bearer ${tenant2Token}` },
+    });
+    expect(tenant2Resp.ok()).toBeTruthy();
+    const tenant2Data = await tenant2Resp.json();
+    const tenant2DeviceNames = (tenant2Data.items ?? []).map((d: { name: string }) => d.name);
+    expect(tenant2DeviceNames).not.toContain('租户隔离测试设备');
+
+    // 第二租户直接访问默认租户的设备，应返回 404（全局查询过滤器隔离）
+    const directAccessResp = await page.request.get(`${BASE_URL}/api/v1/devices/${dev.id}`, {
+      headers: { Authorization: `Bearer ${tenant2Token}` },
+    });
+    expect(directAccessResp.status()).toBe(404);
+
+    // 同租户的 viewer 也能看到设备（只读权限验证）
     const viewerToken = await getTokenForRole(page, 'viewer');
     const viewerResp = await page.request.get(`${BASE_URL}/api/v1/devices`, {
       headers: { Authorization: `Bearer ${viewerToken}` },
     });
-
     if (viewerResp.ok()) {
       const viewerData = await viewerResp.json();
-      // 同租户的 viewer 也应该能看到设备（只读权限）
       const viewerDeviceNames = (viewerData.items ?? []).map((d: { name: string }) => d.name);
       expect(viewerDeviceNames).toContain('租户隔离测试设备');
     }

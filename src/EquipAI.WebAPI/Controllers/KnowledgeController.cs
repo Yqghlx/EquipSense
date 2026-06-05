@@ -369,6 +369,54 @@ public class KnowledgeController : ControllerBase
     }
 
     /// <summary>
+    /// 手动创建候选规则（E2E 测试用）
+    /// </summary>
+    [HttpPost("pending-rules")]
+    [RequirePermission("knowledge:create")]
+    [ProducesResponseType(typeof(PendingRuleResponse), StatusCodes.Status201Created)]
+    public async Task<ActionResult<PendingRuleResponse>> CreatePendingRule(
+        [FromBody] CreatePendingRuleRequest request)
+    {
+        var rule = new Core.Entities.PendingRule
+        {
+            TenantId = _tenantContext.TenantId,
+            Name = request.Name,
+            Conditions = request.Conditions != null
+                ? System.Text.Json.JsonSerializer.Serialize(request.Conditions)
+                : "{}",
+            Conclusion = string.IsNullOrEmpty(request.Recommendation)
+                ? "{}"
+                : System.Text.Json.JsonSerializer.Serialize(new { recommendation = request.Recommendation }),
+            RecommendedActions = request.Recommendation,
+            Confidence = request.Confidence,
+            ReviewStatus = ReviewStatus.Pending,
+        };
+
+        _dbContext.PendingRules.Add(rule);
+        await _dbContext.SaveChangesAsync();
+
+        return CreatedAtAction(nameof(GetPendingRules), new { id = rule.Id }, MapToPendingRuleResponse(rule));
+    }
+
+    /// <summary>
+    /// 删除候选规则
+    /// </summary>
+    [HttpDelete("pending-rules/{id:guid}")]
+    [RequirePermission("knowledge:update")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeletePendingRule(Guid id)
+    {
+        var rule = await _dbContext.PendingRules.FindAsync([id]);
+        if (rule is null)
+            return NotFound(new { code = 404, message = "候选规则不存在" });
+
+        _dbContext.PendingRules.Remove(rule);
+        await _dbContext.SaveChangesAsync();
+        return NoContent();
+    }
+
+    /// <summary>
     /// 批准候选规则，将其转化为正式知识规则
     /// </summary>
     /// <param name="id">候选规则 ID</param>
@@ -546,6 +594,27 @@ public class KnowledgeController : ControllerBase
     {
         /// <summary>审核意见</summary>
         public string? Comment { get; set; }
+    }
+
+    /// <summary>
+    /// 创建候选规则请求
+    /// </summary>
+    public class CreatePendingRuleRequest
+    {
+        /// <summary>规则名称</summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>触发条件</summary>
+        public object? Conditions { get; set; }
+
+        /// <summary>推荐处理措施</summary>
+        public string? Recommendation { get; set; }
+
+        /// <summary>置信度（0-1）</summary>
+        public decimal? Confidence { get; set; }
+
+        /// <summary>来源</summary>
+        public string? Source { get; set; }
     }
 
     /// <summary>

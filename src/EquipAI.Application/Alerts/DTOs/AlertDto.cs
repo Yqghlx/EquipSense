@@ -18,6 +18,8 @@ public class AlertDto
     public DateTime OccurredAt { get; set; }
     public bool Acknowledged { get; set; }
     public bool Resolved { get; set; }
+    public int TriggerCount { get; set; }
+    public DateTime? WindowStartAt { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 

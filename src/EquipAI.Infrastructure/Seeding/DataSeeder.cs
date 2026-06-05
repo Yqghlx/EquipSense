@@ -116,6 +116,36 @@ public class DataSeeder
             _logger.LogInformation("已创建默认租户（ID: {TenantId}）", defaultTenantId);
         }
 
+        // 第二租户（用于 E2E 跨租户隔离测试）
+        var secondTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var secondTenantExists = await _dbContext.Tenants
+            .IgnoreQueryFilters()
+            .AnyAsync(t => t.Id == secondTenantId);
+
+        if (!secondTenantExists)
+        {
+            var secondTenant = new Core.Entities.Tenant
+            {
+                Id = secondTenantId,
+                Name = "测试租户B",
+                Slug = "tenant-b",
+                Plan = TenantPlan.Trial,
+                IsolationMode = TenantIsolationMode.Shared,
+                MaxDevices = 50,
+                MaxUsers = 20,
+                DataRetentionDays = 90,
+                IsActive = true,
+                Status = TenantStatus.Active,
+                TrialEndsAt = null,
+                SubscriptionEndsAt = DateTime.UtcNow.AddYears(1),
+                CurrentDeviceCount = 0,
+                CurrentUserCount = 0
+            };
+
+            _dbContext.Tenants.Add(secondTenant);
+            _logger.LogInformation("已创建测试租户B（ID: {TenantId}）", secondTenantId);
+        }
+
         await _dbContext.SaveChangesAsync();
     }
 
@@ -163,6 +193,32 @@ public class DataSeeder
                 _dbContext.Users.Add(user);
                 _logger.LogInformation("已创建用户账户：{Username}（角色：{Role}）", seedUser.Username, seedUser.Role);
             }
+        }
+
+        await _dbContext.SaveChangesAsync();
+
+        // 第二租户的 admin 用户（用于 E2E 跨租户隔离测试）
+        var secondTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var tenant2AdminExists = await _dbContext.Users
+            .IgnoreQueryFilters()
+            .AnyAsync(u => u.Username == "tenant2admin");
+
+        if (!tenant2AdminExists)
+        {
+            var tenant2Admin = new User
+            {
+                TenantId = secondTenantId,
+                Username = "tenant2admin",
+                PasswordHash = PasswordHasher.HashPassword("Tenant2@123"),
+                DisplayName = "租户B管理员",
+                Role = UserRole.SystemAdmin,
+                IsActive = true,
+                MustChangePassword = false,
+                Language = "zh-CN"
+            };
+
+            _dbContext.Users.Add(tenant2Admin);
+            _logger.LogInformation("已创建第二租户管理员账户：tenant2admin");
         }
 
         await _dbContext.SaveChangesAsync();

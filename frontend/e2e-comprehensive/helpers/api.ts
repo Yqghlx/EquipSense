@@ -526,7 +526,7 @@ export async function createPendingRule(
   const token = await getToken(page);
   const suffix = Date.now().toString(36);
 
-  const resp = await page.request.post(`${BASE_URL}/api/v1/pending-rules`, {
+  const resp = await page.request.post(`${BASE_URL}/api/v1/knowledge/pending-rules`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: {
       name: options.name || `E2E-PENDING-${suffix}`,
@@ -555,7 +555,7 @@ export async function approvePendingRule(
   id: string,
 ): Promise<void> {
   const token = await getToken(page);
-  const resp = await page.request.put(`${BASE_URL}/api/v1/pending-rules/${id}/approve`, {
+  const resp = await page.request.put(`${BASE_URL}/api/v1/knowledge/pending-rules/${id}/approve`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: {},
   });
@@ -575,7 +575,7 @@ export async function rejectPendingRule(
   reason: string,
 ): Promise<void> {
   const token = await getToken(page);
-  const resp = await page.request.put(`${BASE_URL}/api/v1/pending-rules/${id}/reject`, {
+  const resp = await page.request.put(`${BASE_URL}/api/v1/knowledge/pending-rules/${id}/reject`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     data: { reason },
   });

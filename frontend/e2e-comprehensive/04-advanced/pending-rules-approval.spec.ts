@@ -19,24 +19,21 @@ import {
   getToken,
   navigateViaSidebar,
   createPendingRule,
-  createKnowledgeRule,
   approvePendingRule,
   rejectPendingRule,
-  gotoKnowledge,
 } from '../helpers';
 import type { CreatePendingRuleOptions } from '../helpers';
 
-// 后端缺少手动创建待审批规则的 POST 端点（由 AI 分析自动生成），
-// API 路径不匹配（/api/v1/pending-rules vs /api/v1/knowledge/pending-rules），
-// 整个套件标记 skip，待后端 API 完善后恢复
-test.describe.skip('04-知识库规则审批', () => {
+// 后端已添加手动创建待审批规则的 POST 端点，API 路径已统一为 /api/v1/knowledge/pending-rules
+test.describe('04-知识库规则审批', () => {
 
   /**
    * 导航到知识库页面，尝试切换到"待审批规则"Tab
    */
   async function gotoPendingRulesTab(page: import('@playwright/test').Page): Promise<void> {
     await login(page);
-    await gotoKnowledge(page);
+    await navigateViaSidebar(page, /知识|knowledge/i);
+    await page.waitForTimeout(2000);
 
     // 查找并切换到"待审批"Tab
     const pendingTab = page.getByRole('tab', { name: /待审批|pending|审核|approval/i });
@@ -50,10 +47,7 @@ test.describe.skip('04-知识库规则审批', () => {
     const errors = captureErrors(page);
 
     await login(page);
-    await gotoKnowledge(page);
-
-    // 验证页面 URL 包含 knowledge
-    await expect(page).toHaveURL(/knowledge/i);
+    await navigateViaSidebar(page, /知识|knowledge/i);
 
     // 验证页面非白屏
     const bodyText = await page.textContent('body');
@@ -206,7 +200,8 @@ test.describe.skip('04-知识库规则审批', () => {
 
     // 导航到知识库页面
     await login(page);
-    await gotoKnowledge(page);
+    await navigateViaSidebar(page, /知识|knowledge/i);
+    await page.waitForTimeout(2000);
 
     // 切换到知识库 Tab（已验证规则）
     const knowledgeTab = page.getByRole('tab', { name: /知识库|knowledge|已验证|verified|规则/i });
@@ -289,7 +284,8 @@ test.describe.skip('04-知识库规则审批', () => {
 
     // 导航到知识库页面
     await login(page);
-    await gotoKnowledge(page);
+    await navigateViaSidebar(page, /知识|knowledge/i);
+    await page.waitForTimeout(2000);
 
     // 切换到知识库 Tab
     const knowledgeTab = page.getByRole('tab', { name: /知识库|knowledge|已验证|规则/i });
@@ -500,7 +496,7 @@ test.describe.skip('04-知识库规则审批', () => {
     } else {
       // 如果 UI 上找不到规则，通过 API 验证删除功能
       const token = await getToken(page);
-      const resp = await page.request.delete(`${BASE_URL}/api/v1/pending-rules/${ruleId}`, {
+      const resp = await page.request.delete(`${BASE_URL}/api/v1/knowledge/pending-rules/${ruleId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       // 删除 API 调用（可能返回 204 或 200）

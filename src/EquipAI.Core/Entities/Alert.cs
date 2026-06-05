@@ -69,6 +69,16 @@ public class Alert : BaseEntity
     public Guid[]? AggregatedFrom { get; set; }
 
     /// <summary>
+    /// 聚合窗口内触发次数（防风暴机制计数）
+    /// </summary>
+    public int TriggerCount { get; set; } = 1;
+
+    /// <summary>
+    /// 聚合窗口开始时间（首次触发时间）
+    /// </summary>
+    public DateTime? WindowStartAt { get; set; }
+
+    /// <summary>
     /// 告警发生时间
     /// </summary>
     public DateTime OccurredAt { get; set; }

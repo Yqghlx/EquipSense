@@ -8,6 +8,7 @@ using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -84,7 +85,14 @@ public class WorkOrdersController : ControllerBase
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> AssignWorkOrder(Guid id, [FromBody] AssignWorkOrderRequest request)
     {
-        return Ok(await _workOrderService.AssignAsync(_tenantContext.TenantId, id, request, _tenantContext.UserId));
+        try
+        {
+            return Ok(await _workOrderService.AssignAsync(_tenantContext.TenantId, id, request, _tenantContext.UserId));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { code = 409, message = "工单数据已被其他操作修改，请刷新后重试" });
+        }
     }
 
     /// <summary>
@@ -95,7 +103,14 @@ public class WorkOrdersController : ControllerBase
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> StartWorkOrder(Guid id)
     {
-        return Ok(await _workOrderService.StartAsync(_tenantContext.TenantId, id, _tenantContext.UserId));
+        try
+        {
+            return Ok(await _workOrderService.StartAsync(_tenantContext.TenantId, id, _tenantContext.UserId));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { code = 409, message = "工单数据已被其他操作修改，请刷新后重试" });
+        }
     }
 
     /// <summary>

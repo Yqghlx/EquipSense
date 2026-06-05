@@ -38,9 +38,15 @@ public class AlertsController : ControllerBase
     public async Task<ActionResult<PagedResult<AlertDto>>> GetAlerts(
         [FromQuery] PagedQuery query,
         [FromQuery] string? status = null,
-        [FromQuery] string? severity = null)
+        [FromQuery] string? severity = null,
+        [FromQuery] Guid? deviceId = null)
     {
         var alerts = _dbContext.Alerts.AsQueryable();
+
+        if (deviceId.HasValue)
+        {
+            alerts = alerts.Where(a => a.DeviceId == deviceId.Value);
+        }
 
         if (!string.IsNullOrWhiteSpace(status) &&
             Enum.TryParse<AlertStatus>(status, ignoreCase: true, out var alertStatus))

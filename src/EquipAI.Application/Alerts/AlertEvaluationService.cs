@@ -144,7 +144,9 @@ public class AlertEvaluationService : IAlertEvaluationService
             Threshold = rule.Threshold,
             Message = GenerateMessage(metric, value, rule),
             DataSnapshot = System.Text.Json.JsonSerializer.Serialize(context.Metrics),
-            OccurredAt = DateTime.UtcNow
+            OccurredAt = DateTime.UtcNow,
+            TriggerCount = 1,
+            WindowStartAt = DateTime.UtcNow
         };
 
         dbContext.Alerts.Add(alert);
@@ -171,6 +173,7 @@ public class AlertEvaluationService : IAlertEvaluationService
 
         existingAlert.Value = (decimal)value;
         existingAlert.OccurredAt = DateTime.UtcNow;
+        existingAlert.TriggerCount += 1;
 
         await dbContext.SaveChangesAsync();
 

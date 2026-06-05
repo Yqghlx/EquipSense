@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using EquipAI.Core.Enums;
 
 namespace EquipAI.Core.Entities;
@@ -107,4 +108,10 @@ public class WorkOrder : BaseEntity
     /// 创建者 ID
     /// </summary>
     public Guid? CreatedBy { get; set; }
+
+    /// <summary>
+    /// 乐观并发控制版本号（EF Core 自动管理）
+    /// </summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
 }
