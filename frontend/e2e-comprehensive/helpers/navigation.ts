@@ -23,15 +23,9 @@ export async function navigateViaSidebar(page: Page, pattern: RegExp): Promise<v
 
 /**
  * 直接跳转到告警规则页面
- *
- * 告警规则页面不在侧边栏导航中，需要直接访问 URL。
- *
- * @param page - Playwright Page 实例
  */
 export async function gotoAlertRules(page: Page): Promise<void> {
-  await page.goto(`${BASE_URL}/alert-rules`);
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(1000);
+  await navigateViaSidebar(page, /告警规则|alert.*rules/i);
 }
 
 /**

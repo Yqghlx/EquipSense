@@ -12,6 +12,12 @@ public class MqttOptions
     public string ClientIdPrefix { get; set; } = "equipai-backend";
     public string TopicPattern { get; set; } = "factory/+/telemetry/+";
     public int ReconnectDelaySeconds { get; set; } = 30;
+
+    /// <summary>MQTT 认证用户名（可选，Mosquitto 未开启认证时可为空）</summary>
+    public string? Username { get; set; }
+
+    /// <summary>MQTT 认证密码（可选）</summary>
+    public string? Password { get; set; }
 }
 
 /// <summary>
@@ -43,11 +49,24 @@ public class MqttClientService
         var factory = new MqttFactory();
         _client = factory.CreateMqttClient();
 
-        _clientOptions = new MqttClientOptionsBuilder()
+        // 构建 MQTT 客户端选项，包含认证（如果配置了用户名密码）
+        var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(_options.Host, _options.Port)
             .WithClientId($"{_options.ClientIdPrefix}-{Environment.MachineName}-{Guid.NewGuid():N}")
-            .WithCleanStart(true)
-            .Build();
+            .WithCleanStart(true);
+
+        // 如果配置了认证凭证，则添加用户名密码
+        if (!string.IsNullOrEmpty(_options.Username))
+        {
+            builder.WithCredentials(_options.Username, _options.Password ?? string.Empty);
+            _logger.LogInformation("MQTT 使用认证连接: 用户名={Username}", _options.Username);
+        }
+        else
+        {
+            _logger.LogWarning("MQTT 未配置认证凭证，使用匿名连接");
+        }
+
+        _clientOptions = builder.Build();
 
         _client.DisconnectedAsync += HandleDisconnectedAsync;
         _client.ApplicationMessageReceivedAsync += HandleMessageAsync;

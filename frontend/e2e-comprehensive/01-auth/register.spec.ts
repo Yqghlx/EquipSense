@@ -89,12 +89,12 @@ test.describe('01-注册功能', () => {
 
     // 输入过短的用户名（仅 2 个字符）
     await usernameInput.fill('ab');
-    // 触发失焦以激活校验
-    await page.getByPlaceholder(/密码|password/i).click();
+    // 触发失焦以激活校验（使用 first 避免 strict mode）
+    await page.getByPlaceholder(/密码|password/i).first().click();
     await page.waitForTimeout(500);
 
-    // 验证出现长度校验提示
-    const validationMsg = page.getByText(/至少.*3|3.*字符|minimum|字符/i);
+    // 验证出现长度校验提示（匹配 "用户名至少 3 个字符" 或英文消息）
+    const validationMsg = page.getByText(/用户名至少|至少.*3|username.*3|characters/i);
     await expect(validationMsg).toBeVisible({ timeout: 3000 });
 
     expect(errors).toEqual([]);
@@ -119,8 +119,8 @@ test.describe('01-注册功能', () => {
       await page.getByPlaceholder(/密码|password/i).first().click();
       await page.waitForTimeout(800);
 
-      // 验证出现邮箱格式校验提示
-      const emailError = page.getByText(/有效.*邮箱|email.*format|invalid.*email|邮箱.*格式/i);
+      // 验证出现邮箱格式校验提示（匹配 "邮箱格式不正确" 或英文消息）
+      const emailError = page.getByText(/邮箱.*格式|格式.*正确|email.*format|invalid.*email/i);
       await expect(emailError).toBeVisible({ timeout: 3000 });
     }
 
@@ -145,8 +145,8 @@ test.describe('01-注册功能', () => {
       await page.getByPlaceholder(/确认|confirm/i).click();
       await page.waitForTimeout(800);
 
-      // 验证出现密码长度校验提示
-      const passwordError = page.getByText(/至少.*6|6.*字符|minimum|字符/i);
+      // 验证出现密码长度校验提示（匹配 "密码至少 6 个字符" 或英文消息）
+      const passwordError = page.getByText(/密码至少|至少.*6|password.*6|characters/i);
       await expect(passwordError).toBeVisible({ timeout: 3000 });
     }
 
@@ -206,8 +206,8 @@ test.describe('01-注册功能', () => {
       }
       await page.waitForTimeout(1000);
 
-      // 验证出现密码不一致提示
-      const mismatchError = page.getByText(/密码.*不.*一致|password.*match|mismatch|不一致/i);
+      // 验证出现密码不一致提示（匹配 "两次输入的密码不一致" 或英文消息）
+      const mismatchError = page.getByText(/两次输入.*密码.*不一致|密码.*不.*匹配|password.*match|do not match/i);
       await expect(mismatchError).toBeVisible({ timeout: 3000 });
     }
 

@@ -313,7 +313,18 @@ test.describe('表单验证汇总', () => {
       await descInput.fill(longDesc);
     }
 
-    await dialog.getByRole('button', { name: /保存|确认|submit/i }).click();
+    // 点击保存按钮前先滚动到可见位置
+    const submitBtn = dialog.getByRole('button', { name: /保存|确认|submit/i });
+
+    // 超长描述可能导致对话框高度超出 viewport，使用 force 点击绕过 visibility 检查
+    try {
+      await submitBtn.scrollIntoViewIfNeeded({ timeout: 5000 });
+      await submitBtn.click({ timeout: 5000 });
+    } catch {
+      // 如果常规点击失败，使用 force 选项强制点击
+      await submitBtn.click({ force: true, timeout: 5000 });
+    }
+
     await page.waitForTimeout(3000);
 
     // 验证页面不崩溃

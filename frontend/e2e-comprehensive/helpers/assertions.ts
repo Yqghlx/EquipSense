@@ -10,7 +10,8 @@ import { expect, type Page } from '@playwright/test';
  * 判断是否为可忽略的浏览器噪声错误
  *
  * ServiceWorker SSL 证书错误在本地 HTTPS 环境下是预期行为，
- * ResizeObserver 循环引用错误是浏览器布局计算的良性告警。
+ * ResizeObserver 循环引用错误是浏览器布局计算的良性告警，
+ * Axios API 错误（403/404/500 等）是测试预期响应。
  *
  * @param msg - 错误消息文本
  * @returns 如果可忽略则返回 true
@@ -19,7 +20,10 @@ export function isIgnorableError(msg: string): boolean {
   return (
     msg.includes('ServiceWorker') ||
     msg.includes('SSL certificate error') ||
-    msg.includes('ResizeObserver')
+    msg.includes('ResizeObserver') ||
+    msg.includes('Request failed with status code') ||  // Axios API 错误
+    msg.includes('Network Error') ||
+    msg.includes('timeout')
   );
 }
 

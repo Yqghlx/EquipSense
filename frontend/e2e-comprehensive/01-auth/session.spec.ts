@@ -97,12 +97,29 @@ test.describe('01-会话管理', () => {
     const page2 = await context.newPage();
     const errors2 = captureErrors(page2);
 
+    // 第二个标签页导航到登录页
     await page2.goto(`${BASE_URL}/login`);
-    await page2.waitForLoadState('networkidle');
-    await page2.getByPlaceholder(/用户名|username/i).fill('admin');
-    await page2.getByPlaceholder(/密码|password/i).fill('Admin@123');
-    await page2.getByRole('button', { name: /登录|login/i }).click();
-    await page2.waitForURL(/dashboard/, { timeout: 10000 });
+    await page2.waitForLoadState('domcontentloaded');
+    await page2.waitForTimeout(2000);
+
+    // 检查第二个标签页是否自动继承登录状态（context 共享 cookies/localStorage）
+    const currentUrl2 = page2.url();
+    const alreadyLoggedIn2 = /dashboard/.test(currentUrl2);
+
+    if (!alreadyLoggedIn2) {
+      // 如果未自动登录，手动登录
+      const usernameInput2 = page2.locator('input[type="text"], input:not([type="password"], [type="checkbox"])').first();
+      await usernameInput2.waitFor({ state: 'visible', timeout: 10000 });
+      await usernameInput2.fill('admin');
+
+      const passwordInput2 = page2.locator('input[type="password"]').first();
+      await passwordInput2.waitFor({ state: 'visible', timeout: 5000 });
+      await passwordInput2.fill('Admin@123');
+
+      await page2.getByRole('button', { name: /登录|login/i }).click();
+      await page2.waitForURL(/dashboard/, { timeout: 15000 });
+    }
+
     await page2.waitForLoadState('networkidle');
     await page2.waitForTimeout(1500);
 

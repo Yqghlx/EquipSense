@@ -68,6 +68,7 @@ export default function RegisterPage() {
 
   const accountForm = useForm<AccountFormData>({
     resolver: zodResolver(accountSchema),
+    mode: 'onBlur', // 启用失焦验证（输入框失去焦点时触发校验）
     defaultValues: {
       username: '',
       password: '',

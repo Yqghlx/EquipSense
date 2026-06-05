@@ -42,21 +42,29 @@ test.describe('RBAC 权限拒绝', () => {
     const isVisible = await createBtn.isVisible().catch(() => false);
 
     if (isVisible) {
-      // 如果按钮可见，尝试点击创建，应被后端拒绝
-      await createBtn.click();
-      await page.waitForTimeout(1000);
+      // 检查按钮是否被禁用（技术员权限不足导致按钮被前端禁用）
+      const isDisabled = await createBtn.isDisabled().catch(() => false);
 
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible().catch(() => false)) {
-        await dialog.locator('input').first().fill('TECH-DEVICE');
-        await dialog.locator('input').nth(1).fill('技术员测试设备');
-        await dialog.getByRole('button', { name: /保存|确认|submit/i }).click();
-        await page.waitForTimeout(2000);
+      if (isDisabled) {
+        // 按钮被禁用，权限控制正确
+        expect(isDisabled).toBeTruthy();
+      } else {
+        // 如果按钮可见且可点击，尝试点击创建，应被后端拒绝
+        await createBtn.click();
+        await page.waitForTimeout(1000);
 
-        // 应出现权限错误提示，或对话框仍然打开
-        const hasError = await page.getByText(/权限|forbidden|无权/i).first().isVisible().catch(() => false);
-        const dialogStillOpen = await dialog.isVisible().catch(() => false);
-        expect(hasError || dialogStillOpen).toBeTruthy();
+        const dialog = page.getByRole('dialog');
+        if (await dialog.isVisible().catch(() => false)) {
+          await dialog.locator('input').first().fill('TECH-DEVICE');
+          await dialog.locator('input').nth(1).fill('技术员测试设备');
+          await dialog.getByRole('button', { name: /保存|确认|submit/i }).click();
+          await page.waitForTimeout(2000);
+
+          // 应出现权限错误提示，或对话框仍然打开
+          const hasError = await page.getByText(/权限|forbidden|无权/i).first().isVisible().catch(() => false);
+          const dialogStillOpen = await dialog.isVisible().catch(() => false);
+          expect(hasError || dialogStillOpen).toBeTruthy();
+        }
       }
     } else {
       // 按钮不可见，权限控制正确

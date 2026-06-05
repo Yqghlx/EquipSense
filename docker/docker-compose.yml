@@ -82,6 +82,8 @@ services:
       Mqtt__Port: 1883
       Mqtt__ClientIdPrefix: "equipai-backend"
       Mqtt__TopicPattern: "factory/+/telemetry/+"
+      Mqtt__Username: "${MQTT_USERNAME:-device}"
+      Mqtt__Password: "${MQTT_PASSWORD:-device123}"
       Llm__ApiKey: "${LLM_API_KEY:-}"
       Llm__ModelId: "${LLM_MODEL:-qwen-plus}"
       Llm__Endpoint: "${LLM_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1}"

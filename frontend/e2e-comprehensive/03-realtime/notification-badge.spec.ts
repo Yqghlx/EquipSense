@@ -212,15 +212,18 @@ test.describe('03-通知角标', () => {
     // 登录
     await login(page);
 
-    // 直接导航到告警中心
-    await gotoAlertCenter(page);
+    // 使用侧边栏导航到告警中心（而非直接 goto）
+    const alertLink = page.getByRole('link', { name: /告警中心|alert.*center|alerts/i });
+    await alertLink.click();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
 
-    // 验证已跳转到告警中心页面
+    // 验证已跳转到告警中心页面（URL 应包含 alert）
     await expect(page).toHaveURL(/alert/i);
 
-    // 验证告警中心页面正常加载
-    const bodyText = await page.textContent('body');
-    expect(bodyText!.trim().length).toBeGreaterThan(10);
+    // 验证告警中心页面正常加载（应有标题）
+    const pageTitle = page.getByRole('heading', { name: /告警|alert/i, level: 1 });
+    await expect(pageTitle).toBeVisible({ timeout: 5000 });
 
     expect(errors).toEqual([]);
   });
