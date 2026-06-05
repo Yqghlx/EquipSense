@@ -419,8 +419,8 @@ test.describe('API 错误响应处理', () => {
       headers,
       data: {},
     });
-    // 可能返回 400 或 422
-    expect([400, 422]).toContain(resp400.status);
+    // 可能返回 400 或 422（注意 status() 是方法调用）
+    expect([400, 422]).toContain(resp400.status());
     const body400 = await resp400.json();
     // 验证统一格式
     expect(body400.code || body400.message || body400.errors || body400).toBeTruthy();

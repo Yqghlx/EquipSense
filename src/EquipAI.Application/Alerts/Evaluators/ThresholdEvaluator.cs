@@ -22,14 +22,15 @@ public class ThresholdEvaluator : IAlertRuleEvaluator
 
         var threshold = (double)rule.Threshold;
 
-        return rule.Operator switch
+        // 同时支持符号操作符（>、>=）和文本操作符（GT、GTE），
+        // API 创建规则时传入文本格式（GT），而 UI 可能传入符号格式（>）
+        return rule.Operator.ToUpperInvariant() switch
         {
-            ">"  => value > threshold,
-            ">=" => value >= threshold,
-            "<"  => value < threshold,
-            "<=" => value <= threshold,
-            // 相等比较使用极小容差，仅容许 decimal→double 转换的精度损失
-            "==" => Math.Abs(value - threshold) < 1e-9,
+            ">" or "GT"  => value > threshold,
+            ">=" or "GTE" => value >= threshold,
+            "<" or "LT"  => value < threshold,
+            "<=" or "LTE" => value <= threshold,
+            "==" or "EQ" => Math.Abs(value - threshold) < 1e-9,
             // 未知操作符不触发告警，安全降级
             _    => false
         };

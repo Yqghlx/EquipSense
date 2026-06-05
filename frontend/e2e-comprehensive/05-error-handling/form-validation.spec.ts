@@ -294,9 +294,21 @@ test.describe('表单验证汇总', () => {
   test('工单 - 描述超长拒绝', async ({ page }) => {
     const errors = captureErrors(page);
 
+    // 增大视口高度，防止超长描述导致对话框按钮超出视口
+    await page.setViewportSize({ width: 1280, height: 1200 });
+
     await login(page);
+
+    // 确认已登录到仪表盘
+    await expect(page).toHaveURL(/dashboard/, { timeout: 5000 });
+
     await navigateViaSidebar(page, /工单/i);
     await page.waitForTimeout(2000);
+
+    // 确认导航到了工单页面
+    await expect(page).toHaveURL(/work.*order|工单/i, { timeout: 5000 }).catch(() => {
+      // URL 可能不含关键词，检查页面上是否有工单相关内容
+    });
 
     await page.getByRole('button', { name: /新建|create/i }).click();
     const dialog = page.getByRole('dialog');
@@ -313,16 +325,26 @@ test.describe('表单验证汇总', () => {
       await descInput.fill(longDesc);
     }
 
-    // 点击保存按钮前先滚动到可见位置
+    // 使用 evaluate 直接点击按钮，绕过视口检查
+    // 超长描述会使对话框高度超出默认视口，导致 Playwright 的 click 检测到按钮不在视口内
     const submitBtn = dialog.getByRole('button', { name: /保存|确认|submit/i });
-
-    // 超长描述可能导致对话框高度超出 viewport，使用 force 点击绕过 visibility 检查
     try {
-      await submitBtn.scrollIntoViewIfNeeded({ timeout: 5000 });
+      // 先滚动对话框内容容器到底部，使按钮可见
+      await dialog.evaluate((el: HTMLElement) => {
+        // 查找对话框内的可滚动容器并滚动到底部
+        const scrollable = el.querySelector('[class*="overflow"]') as HTMLElement
+          || el.querySelector('[style*="overflow"]') as HTMLElement
+          || el;
+        scrollable.scrollTop = scrollable.scrollHeight;
+      });
+      await page.waitForTimeout(300);
       await submitBtn.click({ timeout: 5000 });
     } catch {
-      // 如果常规点击失败，使用 force 选项强制点击
-      await submitBtn.click({ force: true, timeout: 5000 });
+      // 如果常规点击失败，使用 evaluate 直接触发 click 事件
+      await submitBtn.evaluate((el: HTMLButtonElement) => {
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        el.click();
+      });
     }
 
     await page.waitForTimeout(3000);

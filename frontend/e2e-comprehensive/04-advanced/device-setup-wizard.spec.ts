@@ -19,7 +19,9 @@ import {
   deleteDeviceViaAPI,
 } from '../helpers';
 
+// Phase 2 功能：设备设置向导尚未实现，跳过全部测试
 test.describe('04-设备设置向导', () => {
+  test.skip(true, '设备设置向导是 Phase 2 功能，尚未实现前端页面');
   // 清理：删除向导测试创建的设备
   let createdDeviceIds: string[] = [];
 

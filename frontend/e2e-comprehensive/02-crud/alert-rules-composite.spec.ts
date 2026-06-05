@@ -327,17 +327,31 @@ test.describe('组合告警规则 CRUD', () => {
       await addConditionBtn.click();
       await page.waitForTimeout(500);
 
-      // 查找删除条件按钮（X 图标或文字按钮）
-      const removeBtn = dialog.getByRole('button', { name: /删除条件|remove|删除/i })
-        .or(dialog.locator('button').filter({ has: page.locator('svg') }).last());
-      if (await removeBtn.isVisible().catch(() => false)) {
-        await removeBtn.click();
-        await page.waitForTimeout(500);
+      // 精确定位条件行的删除按钮（ghost + icon 样式的小按钮，避免误点对话框关闭按钮）
+      // 条件行在带 border 的容器中，每个条件行的最后一个按钮就是删除按钮
+      const conditionRows = dialog.locator('.border, [class*="border"]').filter({ has: page.locator('input[type="number"]') });
+      const lastRow = conditionRows.last();
+      if (await lastRow.isVisible().catch(() => false)) {
+        // 条件行内的 ghost icon 按钮（X 删除图标）
+        const removeBtn = lastRow.locator('button').last();
+        if (await removeBtn.isVisible().catch(() => false)) {
+          await removeBtn.click();
+          await page.waitForTimeout(500);
+        }
       }
     }
 
-    // 关闭对话框
-    await dialog.getByRole('button', { name: /取消|cancel/i }).click();
+    // 关闭对话框（先尝试取消按钮，再尝试 Escape 键）
+    if (await dialog.isVisible().catch(() => false)) {
+      const cancelBtn = dialog.getByRole('button', { name: /取消|cancel/i });
+      if (await cancelBtn.isVisible().catch(() => false)) {
+        await cancelBtn.click();
+      } else {
+        // 取消按钮不可见时，使用 Escape 键关闭
+        await page.keyboard.press('Escape');
+      }
+    }
+
     expect(errors).toEqual([]);
   });
 

@@ -230,18 +230,17 @@ test.describe('并发操作', () => {
   });
 
   // ==========================================================================
-  // 5. 同时触发多个 AI 分析
+  // 5. 同时触发多个 AI 分析（降级模式）
   // ==========================================================================
 
-  // AI 分析需要 LLM API Key 配置，E2E 环境可能未配置
-  test.skip('同时触发多个 AI 分析', async ({ page }) => {
+  // LLM 未配置时 AI 分析降级为规则匹配模式，并发请求不应导致服务崩溃
+  test('同时触发多个 AI 分析（降级模式）', async ({ page }) => {
     const errors = captureErrors(page);
     const token = await getToken(page);
 
-    // 创建设备
+    // 创建设备（使用唯一编码避免冲突）
     const dev = await createDeviceViaAPI(page, token, {
-      deviceCode: 'AI-ANALYSIS-TEST',
-      name: 'AI分析测试设备',
+      name: 'AI并发测试设备',
     });
 
     // 同时发送多个 AI 分析请求
@@ -260,9 +259,13 @@ test.describe('并发操作', () => {
 
     const results = await Promise.allSettled(analysisPromises);
 
-    // 验证至少有响应（不论成功或失败）
+    // 验证所有请求都有响应（不论 200、400 还是 500，关键是服务不崩溃）
     const hasResults = results.every((r) => r.status === 'fulfilled' || r.status === 'rejected');
     expect(hasResults).toBeTruthy();
+
+    // 通过 API 验证后端仍正常响应（避免 UI 登录步骤导致超时）
+    const healthResp = await page.request.get(`${BASE_URL}/health`);
+    expect(healthResp.ok()).toBeTruthy();
 
     // 清理
     await deleteDeviceViaAPI(page, token, dev.id as string);

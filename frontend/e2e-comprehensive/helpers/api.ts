@@ -29,7 +29,8 @@ export async function createTestDevice(
   type = 'motor',
 ): Promise<Record<string, unknown>> {
   const token = await getToken(page);
-  const suffix = Date.now().toString(36);
+  // 时间戳 + 随机字符串，避免并行测试中设备编码冲突
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
   const resp = await page.request.post(`${BASE_URL}/api/v1/devices`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -56,7 +57,8 @@ export async function createDeviceViaAPI(
   token: string,
   overrides: Record<string, string> = {},
 ): Promise<Record<string, unknown>> {
-  const suffix = Date.now().toString(36);
+  // 时间戳 + 随机字符串，避免并行测试中设备编码冲突
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const resp = await page.request.post(`${BASE_URL}/api/v1/devices`, {
     headers: { Authorization: `Bearer ${token}` },
     data: {
@@ -101,7 +103,7 @@ export async function createThresholdRule(
   enabled = true,
 ): Promise<Record<string, unknown>> {
   const token = await getToken(page);
-  const suffix = Date.now().toString(36);
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const ruleName = name || `E2E-RULE-THRESHOLD-${suffix}`;
 
   const resp = await page.request.post(`${BASE_URL}/api/v1/alert-rules`, {
@@ -135,7 +137,7 @@ export async function createCompositeRule(
   name?: string,
 ): Promise<Record<string, unknown>> {
   const token = await getToken(page);
-  const suffix = Date.now().toString(36);
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const ruleName = name || `E2E-RULE-COMPOSITE-${suffix}`;
 
   const resp = await page.request.post(`${BASE_URL}/api/v1/alert-rules`, {
