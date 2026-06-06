@@ -138,6 +138,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.Notification> Notifications => Set<Core.Entities.Notification>();
 
+    /// <summary>
+    /// 工单附件表
+    /// </summary>
+    public DbSet<Core.Entities.WorkOrderAttachment> WorkOrderAttachments => Set<Core.Entities.WorkOrderAttachment>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

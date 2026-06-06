@@ -82,6 +82,9 @@ public static class ServiceCollectionExtensions
         // 通用仓储注册，Scoped 生命周期，随请求创建和释放
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
+        // 文件存储服务（本地文件系统实现，后续可替换为 S3/MinIO）
+        services.AddScoped<Core.Interfaces.IFileStorageService, Infrastructure.Services.LocalFileStorageService>();
+
         // MQTT 配置选项
         services.Configure<MqttOptions>(configuration.GetSection("Mqtt"));
 

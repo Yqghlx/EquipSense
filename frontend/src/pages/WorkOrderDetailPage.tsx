@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
 import { ApprovalProgressPanel } from '../components/workorder/ApprovalProgressPanel';
 import { OfflineSyncPanel } from '../components/workorder/OfflineSyncPanel';
+import AttachmentUpload from '../components/workorder/AttachmentUpload';
 import { OfflineStatusBadge } from '../components/workorder/OfflineStatusBadge';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import {
@@ -197,6 +198,14 @@ export default function WorkOrderDetailPage() {
             />
           </CardContent>
         </Card>
+      )}
+
+      {/* 工单附件 */}
+      {id && (
+        <AttachmentUpload
+          workOrderId={id}
+          canEdit={workOrder?.status !== 'Closed' && workOrder?.status !== 'Cancelled'}
+        />
       )}
 
       {/* 离线同步面板 */}
