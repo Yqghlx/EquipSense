@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard,
@@ -18,6 +18,7 @@ import {
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../stores/authStore';
+import { useUnreadCount } from '../../hooks/useNotifications';
 
 /** 侧边栏导航项配置 */
 const baseNavItems = [
@@ -46,8 +47,10 @@ const adminNavItems = [
  */
 export function Sidebar() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const user = useAuthStore((s) => s.user);
+  const { data: unreadCount } = useUnreadCount();
 
   /** 根据角色动态构建导航项列表 */
   const navItems = user?.role === 'SystemAdmin'
@@ -94,6 +97,28 @@ export function Sidebar() {
           </NavLink>
         ))}
       </nav>
+
+      {/* 通知铃铛 */}
+      <div className="border-t border-border p-2">
+        <button
+          onClick={() => navigate('/notifications')}
+          className={cn(
+            'relative flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+            collapsed && 'justify-center px-2',
+          )}
+        >
+          <Bell className="h-4 w-4 shrink-0" />
+          {!collapsed && <span>通知</span>}
+          {unreadCount != null && unreadCount > 0 && (
+            <span className={cn(
+              'flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-medium text-white',
+              collapsed && 'absolute -right-0.5 -top-0.5',
+            )}>
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </button>
+      </div>
     </aside>
   );
 }

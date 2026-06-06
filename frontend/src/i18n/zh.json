@@ -58,6 +58,7 @@
     "alertRules": "告警规则",
     "workOrders": "工单管理",
     "pendingApprovals": "待审批",
+    "notifications": "通知中心",
     "dispatch": "派工看板",
     "analyses": "AI 分析",
     "knowledge": "知识库",

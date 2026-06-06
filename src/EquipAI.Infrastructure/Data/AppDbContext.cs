@@ -133,6 +133,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
+    /// <summary>
+    /// 通知记录表
+    /// </summary>
+    public DbSet<Core.Entities.Notification> Notifications => Set<Core.Entities.Notification>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
