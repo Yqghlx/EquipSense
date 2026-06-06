@@ -144,7 +144,7 @@ export default function DeviceDetailPage() {
                       <TableCell>{alert.value}</TableCell>
                       <TableCell><SeverityBadge severity={alert.severity} /></TableCell>
                       <TableCell><Badge variant="outline">{alert.status}</Badge></TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>
                     </TableRow>
                   ))
                 )}

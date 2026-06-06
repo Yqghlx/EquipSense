@@ -137,7 +137,7 @@ export default function DashboardPage() {
                     <SeverityBadge severity={alert.severity} />
                     <div>
                       <p className="text-sm font-medium">{alert.deviceId.slice(0,8)}… — {alert.metric}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</p>
                     </div>
                   </div>
                   <span className="text-sm text-muted-foreground">{alert.value}</span>

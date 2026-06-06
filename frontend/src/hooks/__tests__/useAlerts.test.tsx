@@ -41,9 +41,8 @@ const mockAlert: Alert = {
   threshold: 85,
   message: '一号水泵温度超过阈值',
   status: 'Active',
-  triggeredAt: '2026-01-01T08:30:00Z',
-  acknowledgedAt: undefined,
-  resolvedAt: undefined,
+  occurredAt: '2026-01-01T08:30:00Z',
+  triggerCount: 1,
   acknowledged: false,
   resolved: false,
   createdAt: '2026-01-01T08:30:00Z',
@@ -102,14 +101,14 @@ describe('useAlerts', () => {
 
     const { result } = renderHook(
       () =>
-        useAlerts({ page: 1, pageSize: 20, sort: 'triggeredAt', order: 'desc' }),
+        useAlerts({ page: 1, pageSize: 20, sort: 'occurredAt', order: 'desc' }),
       { wrapper: createWrapper() },
     );
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const calledUrl = mockedApi.get.mock.calls[0][0] as string;
-    expect(calledUrl).toContain('sort=triggeredAt');
+    expect(calledUrl).toContain('sort=occurredAt');
     expect(calledUrl).toContain('order=desc');
   });
 

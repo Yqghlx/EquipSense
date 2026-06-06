@@ -99,7 +99,7 @@ export default function AlertCenterPage() {
                         {t(`alert.${alert.status}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}
                       </Button>
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.triggeredAt).toLocaleString()}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>
                     <TableCell>
                       {/* 操作按钮：阻止行点击事件冒泡 */}
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>

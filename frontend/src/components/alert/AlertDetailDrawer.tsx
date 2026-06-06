@@ -61,18 +61,18 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
             </div>
             <div>
               <p className="text-muted-foreground">{t('alert.triggeredAt')}</p>
-              <p className="font-medium">{new Date(alert.triggeredAt).toLocaleString()}</p>
+              <p className="font-medium">{new Date(alert.occurredAt).toLocaleString()}</p>
             </div>
-            {alert.acknowledgedAt && (
+            {alert.acknowledged && (
               <div>
-                <p className="text-muted-foreground">{t('alert.acknowledgedAt')}</p>
-                <p className="font-medium">{new Date(alert.acknowledgedAt).toLocaleString()}</p>
+                <p className="text-muted-foreground">{t('alert.triggeredAt')}</p>
+                <p className="font-medium">{new Date(alert.occurredAt).toLocaleString()}</p>
               </div>
             )}
-            {alert.resolvedAt && (
+            {alert.resolved && (
               <div>
-                <p className="text-muted-foreground">{t('alert.resolvedAt')}</p>
-                <p className="font-medium">{new Date(alert.resolvedAt).toLocaleString()}</p>
+                <p className="text-muted-foreground">{t('alert.resolved')}</p>
+                <p className="font-medium">{new Date(alert.occurredAt).toLocaleString()}</p>
               </div>
             )}
           </div>

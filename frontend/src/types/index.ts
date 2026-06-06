@@ -161,12 +161,12 @@ export interface Alert {
   message?: string;
   /** 告警状态（Active / Acknowledged / Resolved） */
   status: string;
-  /** 触发时间（ISO 8601） */
-  triggeredAt: string;
-  /** 确认时间（ISO 8601） */
-  acknowledgedAt?: string;
-  /** 解决时间（ISO 8601） */
-  resolvedAt?: string;
+  /** 告警发生时间（ISO 8601），对应后端 occurredAt */
+  occurredAt: string;
+  /** 触发次数（30 分钟窗口内聚合） */
+  triggerCount: number;
+  /** 聚合窗口起始时间 */
+  windowStartAt?: string;
   /** 是否已确认 */
   acknowledged: boolean;
   /** 是否已解决 */
