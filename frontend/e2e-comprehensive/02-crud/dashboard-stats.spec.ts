@@ -151,21 +151,20 @@ test.describe('02-仪表盘统计', () => {
   test('8. 仪表盘统计 API 应返回数据', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 直接调用 API 验证统计接口
+    // 直接调用 API 验证统计接口（最多重试 3 次，应对 OutputCache 缓存了错误响应）
     const token = await getToken(page);
-    const resp = await page.request.get(`${BASE_URL}/api/v1/dashboard/stats`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    // 记录实际状态码方便调试
-    if (!resp.ok()) {
-      const status = resp.status();
-      const body = await resp.text().catch(() => '');
-      // 如果 API 尚未实现或返回 404，跳过而非失败
-      console.log(`Dashboard stats API 返回 ${status}: ${body}`);
+    let resp;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      resp = await page.request.get(`${BASE_URL}/api/v1/dashboard/stats`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resp.ok()) break;
+      console.log(`Dashboard stats API 第 ${attempt} 次尝试返回 ${resp.status()}`);
+      if (attempt < 3) await page.waitForTimeout(2000);
     }
-    expect(resp.ok()).toBeTruthy();
-    const data = await resp.json();
+
+    expect(resp!.ok()).toBeTruthy();
+    const data = await resp!.json();
 
     // 验证返回结构
     expect(data).toHaveProperty('totalDevices');

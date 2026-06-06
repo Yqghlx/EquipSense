@@ -65,11 +65,15 @@ public class DashboardStatsService
     /// </summary>
     private async Task<(int ActiveCount, Dictionary<string, int> BySeverity)> GetAlertStatsAsync(Guid tenantId, CancellationToken ct)
     {
-        var bySeverity = await _db.Alerts
+        // 先查询原始数据再在内存中分组，避免 EF Core 翻译枚举 ToString() 失败
+        var alerts = await _db.Alerts
             .Where(a => a.Status == AlertStatus.Active)
+            .Select(a => new { a.Severity })
+            .ToListAsync(ct);
+
+        var bySeverity = alerts
             .GroupBy(a => a.Severity.ToString())
-            .Select(g => new { Severity = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(g => g.Severity, g => g.Count, ct);
+            .ToDictionary(g => g.Key, g => g.Count());
 
         var activeCount = bySeverity.Values.Sum();
         return (activeCount, bySeverity);
@@ -80,10 +84,14 @@ public class DashboardStatsService
     /// </summary>
     private async Task<(int PendingCount, Dictionary<string, int> ByStatus)> GetWorkOrderStatsAsync(Guid tenantId, CancellationToken ct)
     {
-        var byStatus = await _db.WorkOrders
+        // 先查询原始数据再在内存中分组，兼容 InMemory 数据库和避免枚举翻译问题
+        var workOrders = await _db.WorkOrders
+            .Select(w => new { w.Status })
+            .ToListAsync(ct);
+
+        var byStatus = workOrders
             .GroupBy(w => w.Status.ToString())
-            .Select(g => new { Status = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(g => g.Status, g => g.Count, ct);
+            .ToDictionary(g => g.Key, g => g.Count());
 
         byStatus.TryGetValue("PendingDispatch", out var pending);
         return (pending, byStatus);
