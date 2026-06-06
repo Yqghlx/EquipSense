@@ -43,6 +43,47 @@ public class GatewayConfigController : ControllerBase
     }
 
     /// <summary>
+    /// 代理获取边缘网关实时状态 — 请求网关 /status 端点并转发响应
+    /// </summary>
+    /// <returns>网关运行状态 JSON</returns>
+    [HttpGet("status")]
+    [Authorize]
+    [RequirePermission("device:read")]
+    public async Task<ActionResult> GetGatewayStatus()
+    {
+        // 从配置获取网关健康端点地址
+        var gatewayHealthPort = _configuration["Gateway:HealthPort"] ?? "8081";
+        var gatewayHost = _configuration["Gateway:Host"] ?? "localhost";
+
+        try
+        {
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var response = await httpClient.GetAsync($"http://{gatewayHost}:{gatewayHealthPort}/status");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                return Content(content, "application/json");
+            }
+
+            return Ok(new
+            {
+                status = "unreachable",
+                message = $"网关状态端点返回 {(int)response.StatusCode}",
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "无法连接网关状态端点: {Host}:{Port}", gatewayHost, gatewayHealthPort);
+            return Ok(new
+            {
+                status = "offline",
+                message = "网关离线或未启动",
+            });
+        }
+    }
+
+    /// <summary>
     /// EdgeGateway 拉取配置 — 根据网关标识获取该网关下所有启用的设备配置
     /// 使用 X-Gateway-Auth-Key 请求头认证，无需 JWT
     /// </summary>
@@ -226,6 +267,35 @@ public class GatewayConfigController : ControllerBase
                 Message = "连接配置 JSON 格式无效"
             });
         }
+    }
+
+    /// <summary>
+    /// 更新网关设备配置
+    /// </summary>
+    /// <param name="id">网关设备配置 ID</param>
+    /// <param name="request">更新请求（仅非空字段会被更新）</param>
+    /// <returns>更新后的网关设备配置</returns>
+    [HttpPut("devices/{id:guid}")]
+    [Authorize]
+    [RequirePermission("device:update")]
+    [ProducesResponseType(typeof(GatewayDeviceDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<GatewayDeviceDto>> UpdateDevice(Guid id, [FromBody] UpdateGatewayDeviceRequest request)
+    {
+        var entity = await _dbContext.GatewayDevices.FindAsync(id);
+        if (entity == null)
+            return NotFound(new { code = 404, message = "网关设备配置不存在" });
+
+        if (request.DeviceName is not null) entity.DeviceName = request.DeviceName;
+        if (request.ConnectionConfig is not null) entity.ConnectionConfig = request.ConnectionConfig;
+        if (request.DataPoints is not null) entity.DataPoints = request.DataPoints;
+        if (request.PollIntervalMs.HasValue) entity.PollIntervalMs = request.PollIntervalMs.Value;
+        if (request.Enabled.HasValue) entity.Enabled = request.Enabled.Value;
+
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("网关设备 {DeviceId} 配置已更新", id);
+        return Ok(MapToDto(entity));
     }
 
     /// <summary>

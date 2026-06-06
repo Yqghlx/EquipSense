@@ -54,6 +54,7 @@
   "nav": {
     "dashboard": "仪表盘",
     "devices": "设备管理",
+    "gateway": "网关设备",
     "alerts": "告警中心",
     "alertRules": "告警规则",
     "workOrders": "工单管理",

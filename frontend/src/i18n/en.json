@@ -54,6 +54,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "devices": "Devices",
+    "gateway": "Gateway Devices",
     "alerts": "Alerts",
     "alertRules": "Alert Rules",
     "workOrders": "Work Orders",

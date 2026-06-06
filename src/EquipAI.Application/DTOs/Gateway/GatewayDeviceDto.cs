@@ -93,6 +93,37 @@ public class CreateGatewayDeviceRequest
 }
 
 /// <summary>
+/// 更新网关设备配置请求
+/// </summary>
+public class UpdateGatewayDeviceRequest
+{
+    /// <summary>
+    /// 设备显示名称
+    /// </summary>
+    public string? DeviceName { get; set; }
+
+    /// <summary>
+    /// 连接参数（JSONB）
+    /// </summary>
+    public string? ConnectionConfig { get; set; }
+
+    /// <summary>
+    /// 采集点位映射（JSONB）
+    /// </summary>
+    public string? DataPoints { get; set; }
+
+    /// <summary>
+    /// 轮询间隔（毫秒）
+    /// </summary>
+    public int? PollIntervalMs { get; set; }
+
+    /// <summary>
+    /// 是否启用
+    /// </summary>
+    public bool? Enabled { get; set; }
+}
+
+/// <summary>
 /// 测试连接请求
 /// </summary>
 public class TestConnectionRequest

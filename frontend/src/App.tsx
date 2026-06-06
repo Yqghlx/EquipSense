@@ -20,6 +20,8 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DeviceListPage = lazy(() => import('./pages/DeviceListPage'));
 const DeviceDetailPage = lazy(() => import('./pages/DeviceDetailPage'));
 const DeviceSetupPage = lazy(() => import('./pages/DeviceSetupPage'));
+const GatewayDevicesPage = lazy(() => import('./pages/GatewayDevicesPage'));
+const GatewayMonitorPage = lazy(() => import('./pages/GatewayMonitorPage'));
 const AlertCenterPage = lazy(() => import('./pages/AlertCenterPage'));
 const AlertRulesPage = lazy(() => import('./pages/AlertRulesPage'));
 const WorkOrderListPage = lazy(() => import('./pages/WorkOrderListPage'));
@@ -75,6 +77,8 @@ function AppRoutes() {
           <Route path="/devices" element={<Suspense fallback={<PageFallback />}><DeviceListPage /></Suspense>} />
           <Route path="/devices/:id" element={<Suspense fallback={<PageFallback />}><DeviceDetailPage /></Suspense>} />
           <Route path="/device-setup" element={<Suspense fallback={<PageFallback />}><DeviceSetupPage /></Suspense>} />
+          <Route path="/gateway" element={<Suspense fallback={<PageFallback />}><GatewayDevicesPage /></Suspense>} />
+          <Route path="/gateway/monitor" element={<Suspense fallback={<PageFallback />}><GatewayMonitorPage /></Suspense>} />
           <Route path="/alerts" element={<Suspense fallback={<PageFallback />}><AlertCenterPage /></Suspense>} />
           <Route path="/alert-rules" element={<Suspense fallback={<PageFallback />}><AlertRulesPage /></Suspense>} />
           <Route path="/work-orders" element={<Suspense fallback={<PageFallback />}><WorkOrderListPage /></Suspense>} />

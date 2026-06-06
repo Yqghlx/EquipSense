@@ -89,6 +89,9 @@ public class HealthEndpoints : BackgroundService
                 case "/health":
                     await WriteHealthAsync(response, ct);
                     break;
+                case "/status":
+                    await WriteStatusAsync(response, ct);
+                    break;
                 case "/metrics":
                     await WriteMetricsAsync(response, ct);
                     break;
@@ -121,6 +124,43 @@ public class HealthEndpoints : BackgroundService
         };
 
         var json = JsonSerializer.Serialize(health);
+        response.StatusCode = 200;
+        response.ContentType = "application/json";
+        var buffer = System.Text.Encoding.UTF8.GetBytes(json);
+        response.ContentLength64 = buffer.Length;
+        await response.OutputStream.WriteAsync(buffer, ct);
+        response.Close();
+    }
+
+    /// <summary>
+    /// 写入网关详细状态 JSON 响应（供后端代理调用）
+    /// </summary>
+    private async Task WriteStatusAsync(HttpListenerResponse response, CancellationToken ct)
+    {
+        var uptime = DateTime.UtcNow - _metrics.StartTime;
+        var status = new
+        {
+            status = "healthy",
+            gatewayId = _options.Id,
+            tenantId = _options.TenantId,
+            backendUrl = _options.BackendUrl,
+            mqttBroker = _options.MqttBroker,
+            securityMode = _options.OpcUaSecurityMode,
+            uptime = uptime.ToString(@"dd\.hh\:mm\:ss"),
+            uptimeSeconds = (int)uptime.TotalSeconds,
+            startedAt = _metrics.StartTime,
+            metrics = new
+            {
+                collections = _metrics.GetCounter(Pipeline.GatewayMetrics.Names.CollectionsTotal),
+                errors = _metrics.GetCounter(Pipeline.GatewayMetrics.Names.CollectionErrorsTotal),
+                uploads = _metrics.GetCounter(Pipeline.GatewayMetrics.Names.UploadSuccessTotal),
+                uploadFailures = _metrics.GetCounter(Pipeline.GatewayMetrics.Names.UploadFailTotal),
+                replays = _metrics.GetCounter(Pipeline.GatewayMetrics.Names.ReplayMessagesTotal),
+                bufferQueueDepth = _metrics.GetGauge(Pipeline.GatewayMetrics.Names.BufferQueueDepth),
+            }
+        };
+
+        var json = JsonSerializer.Serialize(status);
         response.StatusCode = 200;
         response.ContentType = "application/json";
         var buffer = System.Text.Encoding.UTF8.GetBytes(json);

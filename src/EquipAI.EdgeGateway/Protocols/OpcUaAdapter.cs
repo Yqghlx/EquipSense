@@ -1,4 +1,6 @@
+using EquipAI.EdgeGateway.Security;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -7,22 +9,41 @@ namespace EquipAI.EdgeGateway.Protocols;
 /// <summary>
 /// OPC UA 协议适配器 — 通过 OPC Foundation SDK (1.5.x) 连接 OPC UA 服务器并读取点位数据。
 /// <para>生命周期：ConnectAsync → ReadAsync(可多次) → DisposeAsync</para>
+/// <para>支持三种安全模式：None（开发）、Sign（签名验证）、SignAndEncrypt（签名+加密）。</para>
 /// </summary>
 public class OpcUaAdapter : IProtocolAdapter
 {
     private readonly ILogger<OpcUaAdapter>? _logger;
+    private readonly CertificateManager? _certManager;
+    private readonly GatewayOptions? _gatewayOptions;
     private readonly DefaultSessionFactory _sessionFactory;
     private ISession? _session;
     private bool _disposed;
 
     /// <summary>
-    /// 创建 OPC UA 适配器实例。
+    /// 创建 OPC UA 适配器实例（无安全配置，使用默认开发模式）。
     /// </summary>
     /// <param name="logger">可选的日志记录器。</param>
     public OpcUaAdapter(ILogger<OpcUaAdapter>? logger = null)
     {
         _logger = logger;
 #pragma warning disable CS0618 // DefaultSessionFactory 无参构造函数已过时，SDK 1.5.x 推荐传 ITelemetryContext
+        _sessionFactory = new DefaultSessionFactory();
+#pragma warning restore CS0618
+    }
+
+    /// <summary>
+    /// 创建 OPC UA 适配器实例（带安全配置，用于生产环境）。
+    /// </summary>
+    /// <param name="certManager">证书管理器</param>
+    /// <param name="options">网关配置选项</param>
+    /// <param name="logger">日志记录器</param>
+    public OpcUaAdapter(CertificateManager certManager, IOptions<GatewayOptions> options, ILogger<OpcUaAdapter> logger)
+    {
+        _certManager = certManager;
+        _gatewayOptions = options.Value;
+        _logger = logger;
+#pragma warning disable CS0618
         _sessionFactory = new DefaultSessionFactory();
 #pragma warning restore CS0618
     }
@@ -52,11 +73,12 @@ public class OpcUaAdapter : IProtocolAdapter
             // 1. 创建应用配置（边缘网关作为 OPC UA 客户端）
             var appConfig = await CreateApplicationConfigurationAsync();
 
-            // 2. 发现服务器端点（使用不安全连接以简化开发阶段，生产环境应启用安全）
+            // 2. 根据安全模式决定是否使用加密端点
+            var useSecurity = _certManager?.GetSecurityMode() != OpcUaSecurityMode.None;
             var endpointDescription = await CoreClientUtils.SelectEndpointAsync(
                 application: appConfig,
                 discoveryUrl: config.ConnectionString,
-                useSecurity: false,
+                useSecurity: useSecurity,
                 telemetry: null!,
                 ct);
             var endpointConfig = EndpointConfiguration.Create();
@@ -171,10 +193,27 @@ public class OpcUaAdapter : IProtocolAdapter
     /// </summary>
     /// <remarks>
     /// 边缘网关作为客户端，配置应用名称、证书存储路径等基础信息。
-    /// 生产环境中应配置安全证书和加密策略，关闭 AutoAcceptUntrustedCertificates。
+    /// 安全模式下会加载客户端 PFX 证书，并关闭 AutoAcceptUntrustedCertificates。
     /// </remarks>
-    private static async Task<ApplicationConfiguration> CreateApplicationConfigurationAsync()
+    private async Task<ApplicationConfiguration> CreateApplicationConfigurationAsync()
     {
+        // 安全模式：None 时自动接受不受信任证书，Sign/SignAndEncrypt 时严格验证
+        var autoAccept = _certManager?.ShouldAutoAcceptUntrustedCertificates() ?? true;
+        var trustedPath = _certManager?.GetTrustedStorePath() ?? "certificates/trusted";
+
+        var certIdentifier = new CertificateIdentifier
+        {
+            StoreType = CertificateStoreType.Directory,
+            StorePath = "certificates/client"
+        };
+
+        // 如果配置了 PFX 客户端证书，加载并替换默认证书标识
+        var clientCert = _certManager?.LoadClientCertificate();
+        if (clientCert != null)
+        {
+            certIdentifier.Certificate = clientCert;
+        }
+
         var config = new ApplicationConfiguration
         {
             ApplicationName = "EquipAI EdgeGateway",
@@ -182,22 +221,18 @@ public class OpcUaAdapter : IProtocolAdapter
             ApplicationType = ApplicationType.Client,
             SecurityConfiguration = new SecurityConfiguration
             {
-                ApplicationCertificate = new CertificateIdentifier
-                {
-                    StoreType = CertificateStoreType.Directory,
-                    StorePath = "certificates/client"
-                },
+                ApplicationCertificate = certIdentifier,
                 TrustedPeerCertificates = new CertificateTrustList
                 {
                     StoreType = CertificateStoreType.Directory,
-                    StorePath = "certificates/trusted"
+                    StorePath = trustedPath
                 },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = CertificateStoreType.Directory,
                     StorePath = "certificates/rejected"
                 },
-                AutoAcceptUntrustedCertificates = true // 开发阶段自动接受，生产应关闭
+                AutoAcceptUntrustedCertificates = autoAccept
             },
             TransportQuotas = new TransportQuotas
             {
@@ -206,6 +241,13 @@ public class OpcUaAdapter : IProtocolAdapter
         };
 
         await config.ValidateAsync(ApplicationType.Client);
+
+        _logger?.LogInformation(
+            "OPC UA 安全配置: 模式={Mode}, 自动接受不受信任证书={AutoAccept}, 受信任证书路径={TrustedPath}",
+            _certManager?.GetSecurityMode() ?? OpcUaSecurityMode.None,
+            autoAccept,
+            trustedPath);
+
         return config;
     }
 

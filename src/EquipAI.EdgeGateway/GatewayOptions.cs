@@ -54,4 +54,27 @@ public class GatewayOptions
     /// 网关认证密钥（与后端 GATEWAY_AUTH_KEY 对应）。
     /// </summary>
     public string AuthKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// OPC UA 安全模式：None（无加密）、Sign（仅签名）、SignAndEncrypt（签名+加密）。
+    /// 默认 None 用于开发环境，生产环境建议 SignAndEncrypt。
+    /// </summary>
+    public string OpcUaSecurityMode { get; set; } = "None";
+
+    /// <summary>
+    /// OPC UA 客户端证书路径（PFX 格式），用于 Sign/SignAndEncrypt 模式下的客户端认证。
+    /// 为空时使用 SDK 自动生成的自签名证书。
+    /// </summary>
+    public string? OpcUaClientCertificatePath { get; set; }
+
+    /// <summary>
+    /// OPC UA 客户端证书密码（可选，PFX 文件加密密码）。
+    /// </summary>
+    public string? OpcUaClientCertificatePassword { get; set; }
+
+    /// <summary>
+    /// 受信任的服务器证书目录路径。目录中存放的 .der 证书会被自动加载到信任列表。
+    /// 为空时使用默认路径 certificates/trusted。
+    /// </summary>
+    public string? OpcUaTrustedCertificatesPath { get; set; }
 }

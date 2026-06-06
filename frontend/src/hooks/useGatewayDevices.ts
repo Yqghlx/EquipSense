@@ -37,6 +37,10 @@ export interface CreateGatewayDeviceParams {
 export interface GatewayDevice {
   /** 设备唯一标识 */
   id: string;
+  /** 网关标识 */
+  gatewayId: string;
+  /** 关联设备 ID */
+  deviceId?: string;
   /** 设备名称 */
   deviceName: string;
   /** 协议类型 */
@@ -47,8 +51,8 @@ export interface GatewayDevice {
   dataPoints: string;
   /** 采集间隔（毫秒） */
   pollIntervalMs: number;
-  /** 设备状态 */
-  status: string;
+  /** 是否启用 */
+  enabled: boolean;
   /** 创建时间 */
   createdAt: string;
 }
@@ -113,6 +117,38 @@ export function useDeleteGatewayDevice() {
   return useMutation({
     mutationFn: async (id: string) => {
       await api.delete(`/gateway/devices/${id}`);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['gateway-devices'] });
+    },
+  });
+}
+
+/** 更新网关设备请求参数 */
+export interface UpdateGatewayDeviceParams {
+  /** 设备名称 */
+  deviceName?: string;
+  /** 连接配置 JSON 字符串 */
+  connectionConfig?: string;
+  /** 数据点配置 JSON 字符串 */
+  dataPoints?: string;
+  /** 采集间隔（毫秒） */
+  pollIntervalMs?: number;
+  /** 是否启用 */
+  enabled?: boolean;
+}
+
+/**
+ * 更新网关设备配置
+ *
+ * 成功后自动使网关设备列表缓存失效。
+ */
+export function useUpdateGatewayDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...params }: UpdateGatewayDeviceParams & { id: string }) => {
+      const { data } = await api.put<GatewayDevice>(`/gateway/devices/${id}`, params);
+      return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['gateway-devices'] });

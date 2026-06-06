@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using EquipAI.EdgeGateway;
 using EquipAI.EdgeGateway.Pipeline;
 using EquipAI.EdgeGateway.Protocols;
+using EquipAI.EdgeGateway.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -24,9 +25,13 @@ try
         sp.GetRequiredService<IOptions<GatewayOptions>>().Value);
 
     // 注册协议适配器工厂
-    var adapterFactory = new Func<string, IProtocolAdapter>(protocol => protocol switch
+    builder.Services.AddSingleton<CertificateManager>();
+    var adapterFactory = new Func<IServiceProvider, string, IProtocolAdapter>((sp, protocol) => protocol switch
     {
-        "opcua" => new OpcUaAdapter(),
+        "opcua" => new OpcUaAdapter(
+            sp.GetRequiredService<CertificateManager>(),
+            sp.GetRequiredService<IOptions<GatewayOptions>>(),
+            sp.GetRequiredService<ILogger<OpcUaAdapter>>()),
         "modbus-tcp" => new ModbusTcpAdapter(),
         "modbus-rtu" => new ModbusRtuAdapter(),
         _ => throw new ArgumentException($"不支持的协议: {protocol}")
@@ -100,7 +105,7 @@ try
         var deviceConfig = device;
         builder.Services.AddSingleton<IHostedService>(sp => new DataCollector(
             sp.GetRequiredService<ILogger<DataCollector>>(),
-            adapterFactory(deviceConfig.Protocol),
+            adapterFactory(sp, deviceConfig.Protocol),
             sp.GetRequiredService<CloudUploader>(),
             deviceConfig,
             deviceConfig.DeviceType ?? "Unknown",
