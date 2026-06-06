@@ -88,4 +88,20 @@ export default defineConfig({
       '/hubs': { target: 'http://localhost:8080', ws: true, changeOrigin: true },
     },
   },
+  build: {
+    // 分包策略：将大型第三方库拆分为独立 chunk 以利用浏览器缓存
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/echarts')) return 'echarts'
+          if (id.includes('node_modules/zrender')) return 'echarts' // echarts 内部依赖
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/') || id.includes('node_modules/react-router')) return 'react-vendor'
+          if (id.includes('node_modules/@microsoft/signalr')) return 'signalr'
+          if (id.includes('node_modules/react-hook-form') || id.includes('node_modules/@hookform') || id.includes('node_modules/zod')) return 'form-vendor'
+        },
+      },
+    },
+    // 单个 chunk 超过 1000KB 时警告（ECharts 无法再拆分）
+    chunkSizeWarningLimit: 1000,
+  },
 })

@@ -69,7 +69,7 @@ jobs:
         run: npx tsc -p tsconfig.json --noEmit
 
       - name: Lint 检查
-        run: npx eslint src/ --max-warnings 0 || true
+        run: npx eslint src/ --max-warnings 1
 
       - name: 运行单元测试
         run: npx vitest run
@@ -85,7 +85,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [backend, frontend]
-    continue-on-error: true
     permissions:
       contents: read
       packages: write
@@ -132,7 +131,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [backend, frontend]
-    continue-on-error: true
 
     services:
       postgres:
