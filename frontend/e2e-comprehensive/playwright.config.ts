@@ -18,7 +18,9 @@ export default defineConfig({
     timeout: 10000,
   },
   use: {
-    baseURL: 'https://localhost:8443',
+    // CI 中使用 PLAYWRIGHT_BASE_URL 环境变量（http://localhost:5173），
+    // 本地 Docker Compose 环境使用默认的 https://localhost:8443
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://localhost:8443',
     ignoreHTTPSErrors: true,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',

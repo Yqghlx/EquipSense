@@ -6,8 +6,8 @@
  */
 import { type Page } from '@playwright/test';
 
-/** E2E 测试基础 URL（HTTPS） */
-export const BASE_URL = 'https://localhost:8443';
+/** E2E 测试基础 URL — CI 中通过 PLAYWRIGHT_BASE_URL 环境变量覆盖 */
+export const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'https://localhost:8443';
 
 /** 角色到登录凭证的映射 */
 const ROLE_CREDENTIALS: Record<string, { username: string; password: string }> = {
