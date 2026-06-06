@@ -1,5 +1,6 @@
 using System.Text.Json;
 using EquipAI.Core.Interfaces;
+using EquipAI.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Infrastructure.Messaging;
@@ -23,6 +24,8 @@ public class MqttMessageHandler
     {
         try
         {
+            BusinessMetrics.MqttMessagesReceived.Inc();
+
             var parts = topic.Split('/');
             if (parts.Length != 4 || parts[0] != "factory" || parts[2] != "telemetry")
             {
@@ -66,6 +69,10 @@ public class MqttMessageHandler
                             tenantId, deviceId,
                             metric.Name, metric.Value.GetDouble(),
                             timestamp, quality, "mqtt");
+
+                        BusinessMetrics.TelemetryReceived
+                            .WithLabels(tenantId.ToString(), deviceId.ToString())
+                            .Inc();
                     }
                 }
             }

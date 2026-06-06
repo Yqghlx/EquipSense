@@ -10,7 +10,9 @@ using Microsoft.EntityFrameworkCore;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
 using EquipAI.WebAPI.Extensions;
+using EquipAI.WebAPI.Metrics;
 using EquipAI.WebAPI.Middleware;
+using Prometheus;
 using Serilog;
 
 Log.Logger = new LoggerConfiguration()
@@ -57,6 +59,9 @@ try
         .AddRedis(builder.Configuration["Redis:ConnectionString"]!, name: "redis", tags: new[] { "liveness", "ready" })
         .AddCheck<MqttHealthCheck>("mqtt", tags: new[] { "ready" })
         .AddCheck<LlmHealthCheck>("llm", tags: new[] { "ready" }, timeout: TimeSpan.FromSeconds(5));
+
+    // 业务指标采集后台服务 — 每 30 秒从数据库采集 Gauge 指标
+    builder.Services.AddHostedService<BusinessMetricsCollector>();
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
     // 从配置中读取允许的域名列表，未配置时使用默认值
@@ -109,6 +114,8 @@ try
     app.UseMiddleware<SecurityHeadersMiddleware>();
     // 1.6 输入净化 — 检查请求体中的 XSS 攻击模式（script 标签、事件处理器等）
     app.UseMiddleware<InputSanitizationMiddleware>();
+    // 1.7 Prometheus HTTP 指标 — 自动记录每个请求的耗时和状态码
+    app.UseHttpMetrics();
     // 2. 请求日志记录 — 记录每个请求的方法、路径、耗时和状态码
     app.UseSerilogRequestLogging();
     // 3. CORS — 跨域处理，在认证之前执行
@@ -137,6 +144,8 @@ try
 
     app.MapControllers();
     app.MapHub<EquipAI.WebAPI.Hubs.IndustrialHub>("/hubs/industrial");
+    // Prometheus 指标端点 — 映射 /metrics 供 Prometheus 抓取
+    app.MapMetrics();
     // 启动探针：仅检查数据库连接（Docker start_period 使用）
     app.MapHealthChecks("/health/startup", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
     {

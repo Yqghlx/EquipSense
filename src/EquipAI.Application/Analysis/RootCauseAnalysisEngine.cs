@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
+using EquipAI.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
 using AnalysisEntity = EquipAI.Core.Entities.Analysis;
 using MetricBaselineEntity = EquipAI.Core.Entities.MetricBaseline;
@@ -115,6 +116,10 @@ public class RootCauseAnalysisEngine : IAnalysisService
         }
 
         var elapsed = Stopwatch.GetElapsedTime(startTime);
+
+        BusinessMetrics.AnalysisRequests.WithLabels(level.ToString()).Inc();
+        BusinessMetrics.AnalysisDuration.WithLabels(level.ToString()).Observe(elapsed.TotalMilliseconds);
+        BusinessMetrics.AnalysisConfidence.Observe(confidence);
 
         return new AnalysisEntity
         {

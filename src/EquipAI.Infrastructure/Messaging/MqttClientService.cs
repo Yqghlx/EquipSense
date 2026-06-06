@@ -1,3 +1,4 @@
+using EquipAI.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
@@ -73,6 +74,7 @@ public class MqttClientService
 
         await _client.ConnectAsync(_clientOptions, cancellationToken);
 
+        BusinessMetrics.MqttConnected.Set(1);
         _logger.LogInformation("MQTT 已连接到 {Host}:{Port}", _options.Host, _options.Port);
 
         var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
@@ -88,6 +90,7 @@ public class MqttClientService
         if (_client?.IsConnected == true)
         {
             await _client.DisconnectAsync(cancellationToken: cancellationToken);
+            BusinessMetrics.MqttConnected.Set(0);
             _logger.LogInformation("MQTT 已断开连接");
         }
     }
@@ -114,6 +117,7 @@ public class MqttClientService
             if (_client != null && _clientOptions != null)
             {
                 await _client.ConnectAsync(_clientOptions);
+                BusinessMetrics.MqttConnected.Set(1);
                 _logger.LogInformation("MQTT 重连成功");
             }
         }

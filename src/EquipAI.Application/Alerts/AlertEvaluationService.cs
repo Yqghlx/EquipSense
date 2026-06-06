@@ -3,6 +3,7 @@ using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Metrics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -83,7 +84,11 @@ public class AlertEvaluationService : IAlertEvaluationService
             if (evaluator == null)
                 continue;
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var triggered = evaluator.Evaluate(value, rule, context);
+            sw.Stop();
+            BusinessMetrics.AlertEvaluationDuration.Observe(sw.Elapsed.TotalMilliseconds);
+
             if (!triggered)
                 continue;
 
@@ -95,8 +100,18 @@ public class AlertEvaluationService : IAlertEvaluationService
 
             if (silenced)
             {
+                BusinessMetrics.AlertsEvaluated.WithLabels("suppressed", rule.Severity.ToString()).Inc();
                 _logger.LogDebug("告警已静默（设备: {DeviceId}, 指标: {Metric}）", deviceId, metric);
                 continue;
+            }
+
+            if (shouldCreate)
+            {
+                BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
+            }
+            else if (shouldUpdate)
+            {
+                BusinessMetrics.AlertsEvaluated.WithLabels("updated", rule.Severity.ToString()).Inc();
             }
 
             if (shouldCreate)

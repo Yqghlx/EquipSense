@@ -7,6 +7,7 @@ using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Metrics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -100,6 +101,8 @@ public class WorkOrderService : IWorkOrderService
 
         _logger.LogInformation("工单已创建: {WorkOrderCode}（设备: {DeviceId}, 优先级: {Priority}）",
             code, request.DeviceId, priority);
+
+        BusinessMetrics.WorkOrdersCreated.WithLabels(type.ToString(), priority.ToString()).Inc();
 
         // 发布工单创建事件，供 SignalR 推送、通知等下游模块消费
         var createdEvent = new WorkOrderCreatedEvent(
@@ -538,6 +541,8 @@ public class WorkOrderService : IWorkOrderService
         Guid tenantId, Guid workOrderId, WorkOrderStatus oldStatus,
         WorkOrderStatus newStatus, Guid operatorId, CancellationToken ct)
     {
+        BusinessMetrics.WorkOrderStatusChanges.WithLabels(oldStatus.ToString(), newStatus.ToString()).Inc();
+
         var evt = new WorkOrderStatusChangedEvent(
             Guid.NewGuid(), DateTime.UtcNow, tenantId,
             workOrderId, oldStatus.ToString(), newStatus.ToString(), operatorId);
