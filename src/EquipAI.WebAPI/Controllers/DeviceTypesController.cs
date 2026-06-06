@@ -36,17 +36,24 @@ public class DeviceTypesController : ControllerBase
     /// 获取设备类型模板列表（包含当前租户自定义模板和系统预置模板）
     /// 使用 IgnoreQueryFilters 跨租户查询，确保系统预置模板对所有租户可见
     /// </summary>
+    /// <param name="industry">可选：按行业筛选模板</param>
     /// <returns>设备类型模板列表</returns>
     [HttpGet]
     [RequirePermission("device:read")]
     [ProducesResponseType(typeof(List<DeviceTypeTemplate>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<DeviceTypeTemplate>>> GetDeviceTypes()
+    public async Task<ActionResult<List<DeviceTypeTemplate>>> GetDeviceTypes([FromQuery] string? industry)
     {
         // 查询当前租户模板 + 系统租户预置模板
-        var templates = await _dbContext.DeviceTypeTemplates
+        var query = _dbContext.DeviceTypeTemplates
             .IgnoreQueryFilters()
             .Where(t => t.TenantId == _tenantContext.TenantId
-                     || t.TenantId == SystemConstants.SystemTenantId)
+                     || t.TenantId == SystemConstants.SystemTenantId);
+
+        // 按行业筛选（可选）
+        if (!string.IsNullOrEmpty(industry))
+            query = query.Where(t => t.Industry == industry);
+
+        var templates = await query
             .OrderByDescending(t => t.TenantId == _tenantContext.TenantId)
             .ThenBy(t => t.Name)
             .ToListAsync();

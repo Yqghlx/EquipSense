@@ -5,14 +5,15 @@ import type { DeviceTypeTemplate, QuickRegisterRequest } from '../types';
 /**
  * 设备类型模板列表查询 Hook
  *
- * 支持按行业筛选模板。industry 为空时返回所有模板。
+ * 调用 GET /api/v1/device-types，返回当前租户模板 + 系统预置模板。
+ * 支持按行业筛选。
  */
 export function useDeviceTemplates(industry?: string) {
   return useQuery({
     queryKey: ['device-templates', industry],
     queryFn: async () => {
       const params = industry ? `?industry=${encodeURIComponent(industry)}` : '';
-      const { data } = await api.get<DeviceTypeTemplate[]>(`/device-config/templates${params}`);
+      const { data } = await api.get<DeviceTypeTemplate[]>(`/device-types${params}`);
       return data;
     },
   });
