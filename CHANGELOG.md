@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] - 2026-06-06
+
+### Added
+
+#### 测试大幅扩充（786 个测试，零失败）
+- 后端单元测试 442 个（+103）：工单生命周期、状态转换矩阵、自动创建/分析/集成处理器、审批链、推送通知
+- 后端集成测试 86 个（+1）：全部控制器覆盖
+- 前端单元测试 258 个（+72）：9 个新 hook 测试 + 4 个组件测试
+- 前端 E2E 测试 344 个用例（30 个 spec 文件）
+
+#### Docker 生产配置
+- `docker/setup.sh` 一键配置脚本（环境变量、SSL 证书、MQTT 认证、文件完整性验证）
+- `docker/generate-cert.sh` TLS 证书生成脚本（支持自定义域名和有效期）
+- `docker/setup-mosquitto.sh` MQTT 密码文件创建脚本
+- Grafana 自动供给配置（Prometheus 数据源 + Dashboard 加载器）
+
+### Fixed
+
+#### CI/CD 加固
+- ESLint 检查不再允许静默失败（移除 `|| true`）
+- Docker 构建和 E2E 测试任务移除 `continue-on-error`
+- 修复 Docker job 缺失的 steps 配置
+
+#### 代码质量
+- 修复 74 个 ESLint 错误（E2E 测试未使用变量、源码 React Compiler 兼容性）
+- 最终状态：0 个错误，1 个已知 warning（React Hook Form watch 兼容性）
+- 修复 DeviceSetupPage 渲染阶段调用 Date.now() 的纯度问题
+- 修复 useOfflineQueue 变量声明顺序问题
+
+### Changed
+
+#### 前端性能优化
+- Vendor 分包策略：主 bundle 从 757KB 降至 266KB
+- ECharts（1.1MB）、React（218KB）、SignalR（54KB）、表单库（93KB）独立 chunk
+- 利用浏览器长期缓存，第三方库变更频率低
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
