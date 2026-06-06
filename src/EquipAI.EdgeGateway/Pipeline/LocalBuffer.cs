@@ -17,11 +17,13 @@ public class LocalBuffer : IAsyncDisposable
     private readonly ConcurrentQueue<BufferEntry> _queue = new();
     private readonly int _capacity;
     private readonly SqliteBufferStore? _offlineStore;
+    private readonly GatewayMetrics? _metrics;
 
-    public LocalBuffer(int capacity = 10000, SqliteBufferStore? offlineStore = null)
+    public LocalBuffer(int capacity = 10000, SqliteBufferStore? offlineStore = null, GatewayMetrics? metrics = null)
     {
         _capacity = capacity;
         _offlineStore = offlineStore;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -41,6 +43,7 @@ public class LocalBuffer : IAsyncDisposable
         }
 
         _queue.Enqueue(new BufferEntry(topic, payload));
+        _metrics?.SetGauge(GatewayMetrics.Names.BufferQueueDepth, _queue.Count);
         return Task.CompletedTask;
     }
 

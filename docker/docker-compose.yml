@@ -112,6 +112,46 @@ services:
           cpus: '2.0'
           memory: 1G
 
+  # ============================================================================
+  # 边缘网关：采集设备数据并通过 MQTT 上传到后端
+  # ============================================================================
+
+  edgegateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.edgegateway
+    container_name: equipai-edgegateway
+    restart: unless-stopped
+    ports:
+      - "${EDGE_PORT:-8081}:8081"
+    environment:
+      Gateway__Id: "${GATEWAY_ID:-gateway-001}"
+      Gateway__TenantId: "${GATEWAY_TENANT_ID:-}"
+      Gateway__MqttBroker: "mosquitto:1883"
+      Gateway__MqttUsername: "${MQTT_USERNAME:-device}"
+      Gateway__MqttPassword: "${MQTT_PASSWORD:-device123}"
+      Gateway__BackendUrl: "http://backend:8080"
+      Gateway__AuthKey: "${GATEWAY_AUTH_KEY:-}"
+      Gateway__UploadIntervalSeconds: "${GATEWAY_UPLOAD_INTERVAL:-5}"
+    volumes:
+      - edgegateway_data:/data
+    depends_on:
+      mosquitto:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
   frontend:
     build:
       context: ..
@@ -205,4 +245,5 @@ volumes:
   mosquitto_data:
   seq_data:
   prometheus_data:
+  edgegateway_data:
   grafana_data:

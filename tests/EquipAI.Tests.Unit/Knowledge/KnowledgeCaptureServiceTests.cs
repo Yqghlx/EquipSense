@@ -513,6 +513,98 @@ public class KnowledgeCaptureServiceTests
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    [Fact]
+    public async Task BatchApproveAsync_应批量批准候选规则()
+    {
+        // Arrange
+        var pending1 = new PendingRule
+        {
+            TenantId = _tenantId, DeviceType = "电机", Name = "批量规则1",
+            Conditions = "[]", Conclusion = "测试", ReviewStatus = ReviewStatus.Pending
+        };
+        var pending2 = new PendingRule
+        {
+            TenantId = _tenantId, DeviceType = "泵", Name = "批量规则2",
+            Conditions = "[]", Conclusion = "测试", ReviewStatus = ReviewStatus.Pending
+        };
+        _db.PendingRules.AddRange(pending1, pending2);
+        await _db.SaveChangesAsync();
+
+        var reviewerId = Guid.NewGuid();
+
+        // Act
+        var result = await _sut.BatchApproveAsync(
+            [pending1.Id, pending2.Id], reviewerId, "批量批准", CancellationToken.None);
+
+        // Assert
+        result.SuccessCount.Should().Be(2);
+        result.FailCount.Should().Be(0);
+
+        var rules = await _db.KnowledgeRules.IgnoreQueryFilters().ToListAsync();
+        rules.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task BatchApproveAsync_部分失败应返回混合结果()
+    {
+        // Arrange
+        var pending = new PendingRule
+        {
+            TenantId = _tenantId, DeviceType = "电机", Name = "存在规则",
+            Conditions = "[]", Conclusion = "测试", ReviewStatus = ReviewStatus.Pending
+        };
+        _db.PendingRules.Add(pending);
+        await _db.SaveChangesAsync();
+
+        var notExistId = Guid.NewGuid();
+
+        // Act
+        var result = await _sut.BatchApproveAsync(
+            [pending.Id, notExistId], Guid.NewGuid(), null, CancellationToken.None);
+
+        // Assert
+        result.SuccessCount.Should().Be(1);
+        result.FailCount.Should().Be(1);
+        result.Errors.Should().HaveCount(1);
+        result.Errors[0].Id.Should().Be(notExistId);
+    }
+
+    [Fact]
+    public async Task BatchRejectAsync_应批量驳回候选规则()
+    {
+        // Arrange
+        var pending1 = new PendingRule
+        {
+            TenantId = _tenantId, DeviceType = "电机", Name = "批量驳回1",
+            Conditions = "[]", Conclusion = "测试", ReviewStatus = ReviewStatus.Pending
+        };
+        var pending2 = new PendingRule
+        {
+            TenantId = _tenantId, DeviceType = "泵", Name = "批量驳回2",
+            Conditions = "[]", Conclusion = "测试", ReviewStatus = ReviewStatus.Pending
+        };
+        _db.PendingRules.AddRange(pending1, pending2);
+        await _db.SaveChangesAsync();
+
+        var reviewerId = Guid.NewGuid();
+
+        // Act
+        var result = await _sut.BatchRejectAsync(
+            [pending1.Id, pending2.Id], reviewerId, "批量驳回", CancellationToken.None);
+
+        // Assert
+        result.SuccessCount.Should().Be(2);
+        result.FailCount.Should().Be(0);
+
+        // 不应创建正式规则
+        var rules = await _db.KnowledgeRules.IgnoreQueryFilters().ToListAsync();
+        rules.Should().BeEmpty();
+
+        // 候选规则状态应为 Rejected
+        var updated = await _db.PendingRules.IgnoreQueryFilters().ToListAsync();
+        updated.Should().OnlyContain(p => p.ReviewStatus == ReviewStatus.Rejected);
+    }
+
     /// <summary>
     /// 测试用租户上下文，使用指定的租户 ID
     /// </summary>

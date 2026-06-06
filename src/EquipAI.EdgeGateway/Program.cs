@@ -35,6 +35,9 @@ try
     // 注册上传器
     builder.Services.AddSingleton<CloudUploader>();
 
+    // 注册指标收集器（全局单例）
+    builder.Services.AddSingleton<GatewayMetrics>();
+
     // 加载设备配置 — 优先从后端 API 拉取，fallback 到本地 appsettings.json
     var devicesSection = builder.Configuration.GetSection("Devices");
     var localDevices = devicesSection.Get<DeviceConfig[]>() ?? [];
@@ -100,10 +103,17 @@ try
             adapterFactory(deviceConfig.Protocol),
             sp.GetRequiredService<CloudUploader>(),
             deviceConfig,
-            deviceConfig.DeviceType ?? "Unknown"));
+            deviceConfig.DeviceType ?? "Unknown",
+            sp.GetRequiredService<GatewayMetrics>()));
     }
 
     builder.Services.AddSerilog();
+
+    // 注册健康检查和 Prometheus 指标端点
+    builder.Services.AddSingleton<IHostedService>(sp => new HealthEndpoints(
+        sp.GetRequiredService<ILogger<HealthEndpoints>>(),
+        sp.GetRequiredService<GatewayOptions>(),
+        sp.GetRequiredService<GatewayMetrics>()));
 
     var host = builder.Build();
     Log.Information("边缘网关启动中...");

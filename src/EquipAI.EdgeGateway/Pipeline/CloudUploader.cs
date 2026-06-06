@@ -19,6 +19,7 @@ public class CloudUploader : IAsyncDisposable
     private readonly GatewayOptions _options;
     private readonly SqliteBufferStore? _offlineStore;
     private readonly LocalBuffer? _localBuffer;
+    private readonly GatewayMetrics? _metrics;
     private readonly MqttFactory _mqttFactory = new();
     private IMqttClient? _mqttClient;
     private bool _disposed;
@@ -39,12 +40,14 @@ public class CloudUploader : IAsyncDisposable
         ILogger<CloudUploader> logger,
         GatewayOptions options,
         SqliteBufferStore? offlineStore = null,
-        LocalBuffer? localBuffer = null)
+        LocalBuffer? localBuffer = null,
+        GatewayMetrics? metrics = null)
     {
         _logger = logger;
         _options = options;
         _offlineStore = offlineStore;
         _localBuffer = localBuffer;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -91,6 +94,7 @@ public class CloudUploader : IAsyncDisposable
             .Build();
 
         await _mqttClient.PublishAsync(mqttMessage, ct);
+        _metrics?.Increment(GatewayMetrics.Names.UploadSuccessTotal);
         _logger.LogDebug("已上传: {DeviceId} → {Topic}, 指标数={Count}",
             message.DeviceId, topic, message.Metrics.Count);
     }
@@ -120,6 +124,7 @@ public class CloudUploader : IAsyncDisposable
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "上传失败，转入离线缓冲: {Topic}", topic);
+                _metrics?.Increment(GatewayMetrics.Names.UploadFailTotal);
                 await BufferOfflineAsync(topic, payload);
             }
         }
@@ -164,6 +169,7 @@ public class CloudUploader : IAsyncDisposable
                     .Build();
                 await _mqttClient!.PublishAsync(mqttMessage, ct);
                 await _offlineStore.MarkAsSentAsync(record.Id);
+                _metrics?.Increment(GatewayMetrics.Names.ReplayMessagesTotal);
             }
             catch (Exception ex)
             {

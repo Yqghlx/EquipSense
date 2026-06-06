@@ -11,6 +11,13 @@ scrape_configs:
       - targets: ['backend:8080']
     scrape_interval: 10s
 
+  # 边缘网关指标
+  - job_name: 'equipai-edgegateway'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['edgegateway:8081']
+    scrape_interval: 10s
+
   # Prometheus 自身指标
   - job_name: 'prometheus'
     static_configs:

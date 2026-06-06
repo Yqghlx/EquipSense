@@ -384,3 +384,105 @@ export function useRollbackRule() {
     },
   });
 }
+
+// ============================================================================
+// 冲突检测
+// ============================================================================
+
+/** 冲突检测结果 */
+export interface ConflictResult {
+  ruleId: string;
+  ruleName: string;
+  overlappingMetrics: string[];
+}
+
+/**
+ * 检测知识规则冲突 Mutation Hook
+ *
+ * 提交设备类型和条件 JSON，返回与已有规则重叠的指标列表。
+ */
+export function useCheckConflicts() {
+  return useMutation({
+    mutationFn: async ({
+      deviceType,
+      conditions,
+      excludeRuleId,
+    }: {
+      deviceType: string;
+      conditions: string;
+      excludeRuleId?: string;
+    }) => {
+      const { data } = await api.post<ConflictResult[]>(
+        '/knowledge/rules/check-conflicts',
+        { deviceType, conditions, excludeRuleId },
+      );
+      return data;
+    },
+  });
+}
+
+// ============================================================================
+// 批量操作
+// ============================================================================
+
+/** 批量审核结果 */
+export interface BatchReviewResult {
+  successCount: number;
+  failCount: number;
+  errors: Array<{ id: string; reason: string }>;
+}
+
+/**
+ * 批量批准候选规则 Mutation Hook
+ *
+ * 批准后同时使候选规则和正式规则列表缓存失效。
+ */
+export function useBatchApprovePendingRules() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      comment,
+    }: {
+      ids: string[];
+      comment?: string;
+    }) => {
+      const { data } = await api.post<BatchReviewResult>(
+        '/knowledge/pending-rules/batch-approve',
+        { ids, comment },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-rules'] });
+      queryClient.invalidateQueries({ queryKey: ['knowledge-rules'] });
+    },
+  });
+}
+
+/**
+ * 批量驳回候选规则 Mutation Hook
+ *
+ * 成功后使候选规则列表缓存失效。
+ */
+export function useBatchRejectPendingRules() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ids,
+      comment,
+    }: {
+      ids: string[];
+      comment?: string;
+    }) => {
+      const { data } = await api.post<BatchReviewResult>(
+        '/knowledge/pending-rules/batch-reject',
+        { ids, comment },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pending-rules'] });
+    },
+  });
+}

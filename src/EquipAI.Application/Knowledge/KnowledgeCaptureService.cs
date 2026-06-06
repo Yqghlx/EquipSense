@@ -267,4 +267,77 @@ public class KnowledgeCaptureService
 
         _logger.LogInformation("候选规则已驳回: {PendingRuleId}", pendingRuleId);
     }
+
+    /// <summary>
+    /// 批量批准候选规则
+    /// 逐条处理，跳过已审核的规则，返回成功/失败统计
+    /// </summary>
+    /// <param name="pendingRuleIds">候选规则 ID 列表</param>
+    /// <param name="reviewerId">审核人 ID</param>
+    /// <param name="comment">审核意见</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>批量审核结果</returns>
+    public async Task<Application.Knowledge.DTOs.BatchReviewResult> BatchApproveAsync(
+        List<Guid> pendingRuleIds, Guid reviewerId, string? comment, CancellationToken ct)
+    {
+        var result = new DTOs.BatchReviewResult();
+
+        foreach (var id in pendingRuleIds)
+        {
+            try
+            {
+                await ApproveRuleAsync(id, reviewerId, comment, ct);
+                result.SuccessCount++;
+            }
+            catch (KeyNotFoundException)
+            {
+                result.FailCount++;
+                result.Errors.Add(new DTOs.BatchReviewError { Id = id, Reason = "候选规则不存在" });
+            }
+            catch (InvalidOperationException ex)
+            {
+                result.FailCount++;
+                result.Errors.Add(new DTOs.BatchReviewError { Id = id, Reason = ex.Message });
+            }
+        }
+
+        _logger.LogInformation("批量批准完成: 成功={Success}, 失败={Fail}",
+            result.SuccessCount, result.FailCount);
+
+        return result;
+    }
+
+    /// <summary>
+    /// 批量驳回候选规则
+    /// 逐条处理，跳过不存在的规则，返回成功/失败统计
+    /// </summary>
+    /// <param name="pendingRuleIds">候选规则 ID 列表</param>
+    /// <param name="reviewerId">审核人 ID</param>
+    /// <param name="comment">驳回原因</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>批量审核结果</returns>
+    public async Task<DTOs.BatchReviewResult> BatchRejectAsync(
+        List<Guid> pendingRuleIds, Guid reviewerId, string? comment, CancellationToken ct)
+    {
+        var result = new DTOs.BatchReviewResult();
+
+        foreach (var id in pendingRuleIds)
+        {
+            try
+            {
+                await RejectRuleAsync(id, reviewerId, comment, ct);
+                result.SuccessCount++;
+            }
+            catch (KeyNotFoundException)
+            {
+                result.FailCount++;
+                result.Errors.Add(new DTOs.BatchReviewError { Id = id, Reason = "候选规则不存在" });
+            }
+        }
+
+        _logger.LogInformation("批量驳回完成: 成功={Success}, 失败={Fail}",
+            result.SuccessCount, result.FailCount);
+
+        return result;
+    }
 }

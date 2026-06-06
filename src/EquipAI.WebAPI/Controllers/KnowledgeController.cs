@@ -24,6 +24,7 @@ public class KnowledgeController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
     private readonly KnowledgeCaptureService _captureService;
+    private readonly KnowledgeConflictService _conflictService;
     private readonly KnowledgeImportService _importService;
     private readonly KnowledgeVersionService _versionService;
     private readonly ITenantContext _tenantContext;
@@ -39,12 +40,14 @@ public class KnowledgeController : ControllerBase
     public KnowledgeController(
         AppDbContext dbContext,
         KnowledgeCaptureService captureService,
+        KnowledgeConflictService conflictService,
         KnowledgeImportService importService,
         KnowledgeVersionService versionService,
         ITenantContext tenantContext)
     {
         _dbContext = dbContext;
         _captureService = captureService;
+        _conflictService = conflictService;
         _importService = importService;
         _versionService = versionService;
         _tenantContext = tenantContext;
@@ -115,6 +118,28 @@ public class KnowledgeController : ControllerBase
         await _dbContext.SaveChangesAsync();
 
         return CreatedAtAction(nameof(GetRules), new { id = rule.Id }, MapToRuleResponse(rule));
+    }
+
+    /// <summary>
+    /// 检测知识规则冲突
+    /// 比较指定设备类型和条件与已有规则的指标重叠情况
+    /// </summary>
+    /// <param name="request">冲突检测请求</param>
+    /// <returns>冲突结果列表</returns>
+    [HttpPost("rules/check-conflicts")]
+    [RequirePermission("knowledge:read")]
+    [ProducesResponseType(typeof(List<KnowledgeConflictResult>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<KnowledgeConflictResult>>> CheckConflicts(
+        [FromBody] ConflictCheckRequest request)
+    {
+        var conflicts = await _conflictService.DetectConflictsAsync(
+            _tenantContext.TenantId,
+            request.DeviceType,
+            request.Conditions,
+            request.ExcludeRuleId,
+            HttpContext.RequestAborted);
+
+        return Ok(conflicts);
     }
 
     /// <summary>
@@ -518,6 +543,50 @@ public class KnowledgeController : ControllerBase
         {
             return NotFound(new { code = 404, message = "候选规则不存在" });
         }
+    }
+
+    /// <summary>
+    /// 批量批准候选规则
+    /// 逐条处理，跳过已审核的规则，返回成功/失败统计
+    /// </summary>
+    /// <param name="request">批量审核请求</param>
+    /// <returns>批量审核结果</returns>
+    [HttpPost("pending-rules/batch-approve")]
+    [RequirePermission("knowledge:create")]
+    [ProducesResponseType(typeof(BatchReviewResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BatchReviewResult>> BatchApprovePendingRules(
+        [FromBody] BatchReviewRequest request)
+    {
+        if (request.Ids == null || request.Ids.Count == 0)
+            return BadRequest(new { code = 400, message = "请选择至少一条候选规则" });
+
+        var result = await _captureService.BatchApproveAsync(
+            request.Ids, _tenantContext.UserId, request.Comment, HttpContext.RequestAborted);
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// 批量驳回候选规则
+    /// 逐条处理，跳过不存在的规则，返回成功/失败统计
+    /// </summary>
+    /// <param name="request">批量审核请求</param>
+    /// <returns>批量审核结果</returns>
+    [HttpPost("pending-rules/batch-reject")]
+    [RequirePermission("knowledge:create")]
+    [ProducesResponseType(typeof(BatchReviewResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<BatchReviewResult>> BatchRejectPendingRules(
+        [FromBody] BatchReviewRequest request)
+    {
+        if (request.Ids == null || request.Ids.Count == 0)
+            return BadRequest(new { code = 400, message = "请选择至少一条候选规则" });
+
+        var result = await _captureService.BatchRejectAsync(
+            request.Ids, _tenantContext.UserId, request.Comment, HttpContext.RequestAborted);
+
+        return Ok(result);
     }
 
     /// <summary>

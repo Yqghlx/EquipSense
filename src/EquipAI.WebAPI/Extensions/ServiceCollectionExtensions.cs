@@ -186,6 +186,9 @@ public static class ServiceCollectionExtensions
         // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
         services.AddScoped<KnowledgeCaptureService>();
 
+        // 知识规则冲突检测服务（Scoped — 需要 DbContext）
+        services.AddScoped<KnowledgeConflictService>();
+
         // 知识规则版本管理服务（Scoped — 需要 DbContext）
         services.AddScoped<KnowledgeVersionService>();
 

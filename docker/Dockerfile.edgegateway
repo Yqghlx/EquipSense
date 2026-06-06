@@ -1,0 +1,38 @@
+# 阶段1：构建
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# 先复制项目文件并还原依赖（利用 Docker 层缓存）
+COPY src/EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj EquipAI.EdgeGateway/
+RUN dotnet restore EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj
+
+# 复制完整源码并构建
+COPY src/EquipAI.EdgeGateway/ EquipAI.EdgeGateway/
+RUN dotnet publish EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj \
+    -c Release -o /app/publish
+
+# 阶段2：运行
+FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+WORKDIR /app
+
+# 安装 ICU 库（中文等 Unicode 排序所需）
+RUN apt-get update && apt-get install -y --no-install-recommends libicu-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建非 root 用户运行应用
+RUN groupadd -r equipai && useradd -r -g equipai equipai
+
+COPY --from=build /app/publish .
+
+# 创建 SQLite 数据目录
+RUN mkdir -p /data && chown -R equipai:equipai /app /data
+
+ENV DOTNET_System_Globalization_Invariant=false
+
+# 切换到非 root 用户
+USER equipai
+
+# 健康检查和 Prometheus 指标端口
+EXPOSE 8081
+
+ENTRYPOINT ["dotnet", "EquipAI.EdgeGateway.dll"]

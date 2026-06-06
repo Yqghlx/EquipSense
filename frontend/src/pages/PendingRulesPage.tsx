@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CheckCircle2,
@@ -7,6 +7,8 @@ import {
   Filter,
   MessageSquare,
   Pencil,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -19,6 +21,8 @@ import {
   useApprovePendingRule,
   useRejectPendingRule,
   useApproveWithEdit,
+  useBatchApprovePendingRules,
+  useBatchRejectPendingRules,
 } from '../hooks/useKnowledge';
 import type { PendingRule } from '../types';
 
@@ -29,17 +33,76 @@ import type { PendingRule } from '../types';
  * - 显示待审核的 AI 生成规则列表
  * - 支持按审核状态过滤
  * - 每个规则卡片提供批准和驳回按钮
+ * - 支持批量选择和批量批准/驳回
  * - 显示置信度、条件、结论和推荐措施
  */
 export default function PendingRulesPage() {
   const { t } = useTranslation();
   const [statusFilter, setStatusFilter] = useState<string>('Pending');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBatchComment, setShowBatchComment] = useState(false);
+  const [batchComment, setBatchComment] = useState('');
+
+  const batchApprove = useBatchApprovePendingRules();
+  const batchReject = useBatchRejectPendingRules();
 
   const { data, isLoading } = usePendingRules({
     page: 1,
     pageSize: 50,
     reviewStatus: statusFilter || undefined,
   });
+
+  const pendingItems = data?.items.filter((r) => r.reviewStatus === 'Pending') ?? [];
+  const allSelected = pendingItems.length > 0 && pendingItems.every((r) => selectedIds.has(r.id));
+
+  /** 全选/取消全选 */
+  const toggleSelectAll = useCallback(() => {
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(pendingItems.map((r) => r.id)));
+    }
+  }, [allSelected, pendingItems]);
+
+  /** 切换单个选择 */
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** 批量批准 */
+  const handleBatchApprove = () => {
+    if (selectedIds.size === 0) return;
+    batchApprove.mutate(
+      { ids: Array.from(selectedIds), comment: batchComment || undefined },
+      {
+        onSuccess: () => {
+          setSelectedIds(new Set());
+          setShowBatchComment(false);
+          setBatchComment('');
+        },
+      },
+    );
+  };
+
+  /** 批量驳回 */
+  const handleBatchReject = () => {
+    if (selectedIds.size === 0) return;
+    batchReject.mutate(
+      { ids: Array.from(selectedIds), comment: batchComment || undefined },
+      {
+        onSuccess: () => {
+          setSelectedIds(new Set());
+          setShowBatchComment(false);
+          setBatchComment('');
+        },
+      },
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -48,8 +111,8 @@ export default function PendingRulesPage() {
         <h1 className="text-2xl font-bold">{t('pendingRules.title')}</h1>
       </div>
 
-      {/* 过滤栏 */}
-      <div className="flex items-center gap-3">
+      {/* 过滤栏 + 批量操作 */}
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? '')}>
@@ -64,7 +127,69 @@ export default function PendingRulesPage() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* 批量操作按钮 */}
+        {statusFilter === 'Pending' && pendingItems.length > 0 && (
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={toggleSelectAll}
+              className="gap-1.5"
+            >
+              {allSelected ? (
+                <CheckSquare className="h-4 w-4" />
+              ) : (
+                <Square className="h-4 w-4" />
+              )}
+              {allSelected ? t('common.deselectAll', { defaultValue: '取消全选' }) : t('common.selectAll', { defaultValue: '全选' })}
+            </Button>
+
+            {selectedIds.size > 0 && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={handleBatchApprove}
+                  disabled={batchApprove.isPending}
+                >
+                  <CheckCircle2 className="mr-1.5 h-4 w-4" />
+                  {t('pendingRules.batchApprove', { defaultValue: `批量批准 (${selectedIds.size})` })}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleBatchReject}
+                  disabled={batchReject.isPending}
+                >
+                  <XCircle className="mr-1.5 h-4 w-4" />
+                  {t('pendingRules.batchReject', { defaultValue: `批量驳回 (${selectedIds.size})` })}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowBatchComment(!showBatchComment)}
+                >
+                  <MessageSquare className="mr-1.5 h-4 w-4" />
+                  {showBatchComment ? t('common.cancel') : t('pendingRules.addComment', { defaultValue: '添加备注' })}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* 批量备注输入 */}
+      {showBatchComment && selectedIds.size > 0 && (
+        <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-md">
+          <Textarea
+            value={batchComment}
+            onChange={(e) => setBatchComment(e.target.value)}
+            placeholder={t('pendingRules.batchCommentPlaceholder', { defaultValue: '批量审核备注（可选）' })}
+            rows={2}
+            className="flex-1"
+          />
+        </div>
+      )}
 
       {/* 规则列表 */}
       {isLoading ? (
@@ -78,7 +203,12 @@ export default function PendingRulesPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {data.items.map((rule) => (
-            <PendingRuleCard key={rule.id} rule={rule} />
+            <PendingRuleCard
+              key={rule.id}
+              rule={rule}
+              selected={selectedIds.has(rule.id)}
+              onSelect={() => toggleSelect(rule.id)}
+            />
           ))}
         </div>
       )}
@@ -93,6 +223,8 @@ export default function PendingRulesPage() {
 /** 候选规则卡片属性 */
 interface PendingRuleCardProps {
   rule: PendingRule;
+  selected?: boolean;
+  onSelect?: () => void;
 }
 
 /**
@@ -101,7 +233,7 @@ interface PendingRuleCardProps {
  * 展示规则的详细信息，并提供批准/驳回操作按钮。
  * 驳回时支持填写审核意见。
  */
-function PendingRuleCard({ rule }: PendingRuleCardProps) {
+function PendingRuleCard({ rule, selected, onSelect }: PendingRuleCardProps) {
   const { t } = useTranslation();
   const approveRule = useApprovePendingRule();
   const rejectRule = useRejectPendingRule();
@@ -171,7 +303,24 @@ function PendingRuleCard({ rule }: PendingRuleCardProps) {
     <Card className="flex flex-col">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base leading-snug">{rule.name}</CardTitle>
+          <div className="flex items-start gap-2 flex-1">
+            {/* 批量选择复选框（仅待审核状态） */}
+            {rule.reviewStatus === 'Pending' && onSelect && (
+              <button
+                type="button"
+                onClick={onSelect}
+                className="mt-1 shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label={selected ? t('common.deselect') : t('common.select')}
+              >
+                {selected ? (
+                  <CheckSquare className="h-4 w-4 text-primary" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+              </button>
+            )}
+            <CardTitle className="text-base leading-snug">{rule.name}</CardTitle>
+          </div>
           <Badge variant={statusBadge.variant} className={statusBadge.className + ' shrink-0'}>
             {statusBadge.label}
           </Badge>

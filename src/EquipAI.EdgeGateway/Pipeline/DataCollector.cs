@@ -15,6 +15,7 @@ public class DataCollector : BackgroundService
     private readonly CloudUploader _uploader;
     private readonly DeviceConfig _config;
     private readonly string _deviceType;
+    private readonly GatewayMetrics? _metrics;
 
     /// <summary>
     /// 初始化数据采集调度器
@@ -24,18 +25,21 @@ public class DataCollector : BackgroundService
     /// <param name="uploader">云端上传器</param>
     /// <param name="config">设备连接配置</param>
     /// <param name="deviceType">设备类型（可选，默认 "Unknown"）</param>
+    /// <param name="metrics">可选的指标收集器</param>
     public DataCollector(
         ILogger<DataCollector> logger,
         IProtocolAdapter adapter,
         CloudUploader uploader,
         DeviceConfig config,
-        string deviceType = "Unknown")
+        string deviceType = "Unknown",
+        GatewayMetrics? metrics = null)
     {
         _logger = logger;
         _adapter = adapter;
         _uploader = uploader;
         _config = config;
         _deviceType = deviceType;
+        _metrics = metrics;
     }
 
     /// <summary>
@@ -53,6 +57,7 @@ public class DataCollector : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "设备 {DeviceId} 连接失败", _config.DeviceId);
+            _metrics?.Increment(GatewayMetrics.Names.CollectionErrorsTotal);
             return;
         }
 
@@ -65,6 +70,7 @@ public class DataCollector : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "设备 {DeviceId} 采集失败", _config.DeviceId);
+                _metrics?.Increment(GatewayMetrics.Names.CollectionErrorsTotal);
             }
 
             await Task.Delay(_config.PollIntervalMs, stoppingToken);
@@ -92,5 +98,6 @@ public class DataCollector : BackgroundService
         if (message.Metrics.Count == 0) return;
 
         await _uploader.UploadAsync(message, _deviceType, ct);
+        _metrics?.Increment(GatewayMetrics.Names.CollectionsTotal);
     }
 }
