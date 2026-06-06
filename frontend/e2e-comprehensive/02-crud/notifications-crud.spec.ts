@@ -32,10 +32,11 @@ test.describe('02-通知中心', () => {
 
     await page.goto(`${BASE_URL}/notifications`);
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500);
+    // 懒加载组件需要额外等待
+    await page.waitForTimeout(3000);
 
     // 验证页面标题
-    await expect(page.getByText('通知中心')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('通知中心')).toBeVisible({ timeout: 10000 });
 
     // 验证筛选按钮存在
     await expect(page.getByRole('button', { name: '全部' })).toBeVisible();

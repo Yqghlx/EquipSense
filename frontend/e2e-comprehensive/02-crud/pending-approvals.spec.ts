@@ -28,8 +28,8 @@ test.describe('02-待审批页面', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
 
-    // 验证页面标题
-    await expect(page.getByText('待审批工单')).toBeVisible({ timeout: 5000 });
+    // 验证页面标题（实际页面标题为"待审批"）
+    await expect(page.getByText('待审批')).toBeVisible({ timeout: 5000 });
 
     // 验证表格存在
     const table = page.locator('table');
@@ -175,8 +175,8 @@ test.describe('02-待审批页面', () => {
       await page.waitForLoadState('networkidle');
       await page.waitForTimeout(1500);
 
-      // 验证跳转到待审批页面
-      await expect(page.getByText('待审批工单')).toBeVisible({ timeout: 5000 });
+      // 验证跳转到待审批页面（实际页面标题为"待审批"）
+      await expect(page.getByText('待审批')).toBeVisible({ timeout: 5000 });
     }
 
     expect(errors).toEqual([]);

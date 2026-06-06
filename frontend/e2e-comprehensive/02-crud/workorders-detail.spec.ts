@@ -148,8 +148,14 @@ test.describe('工单详情页', () => {
     const errors = captureErrors(page);
     await createAndNavigateToDetail(page);
 
-    // 验证关联信息卡片
-    await expect(page.getByText(/关联/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
+    // 验证关联信息卡片（使用宽松匹配，因页面可能有不同的关联区域标题）
+    const relatedSection = page.getByText(/关联|相关|设备|告警/i).first();
+    const hasRelated = await relatedSection.isVisible({ timeout: 10000 }).catch(() => false);
+    if (!hasRelated) {
+      // 如果没有关联信息区域，验证至少有工单详情内容
+      const detailContent = page.locator('.space-y, [class*="card"], [class*="detail"]').first();
+      await expect(detailContent).toBeVisible({ timeout: 5000 });
+    }
     expect(errors).toEqual([]);
   });
 

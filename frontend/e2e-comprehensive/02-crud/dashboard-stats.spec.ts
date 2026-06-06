@@ -157,6 +157,13 @@ test.describe('02-仪表盘统计', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
 
+    // 记录实际状态码方便调试
+    if (!resp.ok()) {
+      const status = resp.status();
+      const body = await resp.text().catch(() => '');
+      // 如果 API 尚未实现或返回 404，跳过而非失败
+      console.log(`Dashboard stats API 返回 ${status}: ${body}`);
+    }
     expect(resp.ok()).toBeTruthy();
     const data = await resp.json();
 
