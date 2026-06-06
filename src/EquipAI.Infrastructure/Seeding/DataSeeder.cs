@@ -40,7 +40,15 @@ public class DataSeeder
     {
         _logger.LogInformation("开始执行数据库种子数据初始化...");
 
-        // 确保数据库和表结构已创建（开发环境使用 EnsureCreated，生产环境应使用 Migrations）
+        // 先应用待处理的迁移（适用于已有数据库的增量更新）
+        var pendingMigrations = await _dbContext.Database.GetPendingMigrationsAsync();
+        if (pendingMigrations.Any())
+        {
+            _logger.LogInformation("检测到 {Count} 个待处理迁移，开始应用...", pendingMigrations.Count());
+            await _dbContext.Database.MigrateAsync();
+        }
+
+        // 兜底：确保数据库已创建（新数据库场景，无迁移历史时直接创建）
         await _dbContext.Database.EnsureCreatedAsync();
 
         await SeedTenantsAsync();
