@@ -30,4 +30,12 @@ export default defineConfig([
       'react-hooks/set-state-in-effect': 'off',
     },
   },
+  {
+    // React Compiler 对第三方库（如 React Hook Form）的兼容性提示，
+    // 属于信息性警告而非代码质量问题，在 CI 中不阻塞构建
+    files: ['**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/incompatible-library': 'off',
+    },
+  },
 ])

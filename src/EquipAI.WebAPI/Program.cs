@@ -121,7 +121,11 @@ try
     // 3. CORS — 跨域处理，在认证之前执行
     app.UseCors();
     // 3.5 IP 限流 — 固定窗口策略，每 IP 每分钟 60 次请求，在 CORS 之后、认证之前执行
-    app.UseRateLimiter();
+    // 测试环境禁用限流，避免高频测试请求被拦截
+    if (!app.Environment.IsEnvironment("Testing"))
+    {
+        app.UseRateLimiter();
+    }
     // 3.6 输出缓存 — 对 GET 请求的响应进行短期缓存
     app.UseOutputCache();
     // 4. JWT 认证 — 解析并验证 Bearer Token，填充 context.User
