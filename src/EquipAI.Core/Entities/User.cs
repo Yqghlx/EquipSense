@@ -78,6 +78,17 @@ public class User : BaseEntity
     public bool IsActive { get; set; } = true;
 
     /// <summary>
+    /// 登录连续失败次数，成功后重置为 0
+    /// </summary>
+    public int AccessFailedCount { get; set; }
+
+    /// <summary>
+    /// 账户锁定截止时间（UTC），null 表示未锁定。
+    /// 连续失败 5 次后自动锁定 15 分钟
+    /// </summary>
+    public DateTime? LockoutEnd { get; set; }
+
+    /// <summary>
     /// 最后登录时间（UTC）
     /// </summary>
     public DateTime? LastLoginAt { get; set; }

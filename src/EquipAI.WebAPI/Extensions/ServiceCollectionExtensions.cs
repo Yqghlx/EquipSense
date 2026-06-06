@@ -116,6 +116,13 @@ public static class ServiceCollectionExtensions
                 opt.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
                 opt.QueueLimit = 0;
             });
+            // 登录端点专用限流：每 IP 每分钟最多 10 次，防御暴力破解
+            options.AddFixedWindowLimiter("auth", opt =>
+            {
+                opt.PermitLimit = 10;
+                opt.Window = TimeSpan.FromMinutes(1);
+                opt.QueueLimit = 0;
+            });
         });
     }
 

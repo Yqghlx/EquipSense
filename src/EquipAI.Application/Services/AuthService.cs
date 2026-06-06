@@ -4,6 +4,7 @@ using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
@@ -24,6 +25,17 @@ public class AuthService : IAuthService
     private readonly RedisService _redisService;
     private readonly IMapper _mapper;
     private readonly ILogger<AuthService> _logger;
+    private readonly IAuditLogService _auditLogService;
+
+    /// <summary>
+    /// 连续登录失败达到此数值时自动锁定账户
+    /// </summary>
+    private const int MaxAccessAttempts = 5;
+
+    /// <summary>
+    /// 账户锁定时长（分钟）
+    /// </summary>
+    private const int LockoutDurationMinutes = 15;
 
     /// <summary>
     /// 各套餐对应的配额限制（最大设备数、最大用户数、数据保留天数）
@@ -54,39 +66,91 @@ public class AuthService : IAuthService
         JwtTokenService jwtTokenService,
         RedisService redisService,
         IMapper mapper,
-        ILogger<AuthService> logger)
+        ILogger<AuthService> logger,
+        IAuditLogService auditLogService)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
         _redisService = redisService;
         _mapper = mapper;
         _logger = logger;
+        _auditLogService = auditLogService;
     }
 
     /// <summary>
-    /// 用户登录，验证凭据并返回 JWT 令牌
-    /// 使用 IgnoreQueryFilters 跨租户查找用户，因为登录时尚未建立租户上下文
+    /// 用户登录，验证凭据并返回 JWT 令牌。
+    /// 包含账户锁定和登录失败计数机制：连续失败 5 次后自动锁定 15 分钟。
+    /// 使用 IgnoreQueryFilters 跨租户查找用户，因为登录时尚未建立租户上下文。
     /// </summary>
     /// <param name="request">登录请求（用户名 + 密码）</param>
     /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
-    /// <exception cref="UnauthorizedAccessException">用户名或密码错误</exception>
+    /// <exception cref="UnauthorizedAccessException">用户名或密码错误，或账户已被停用/锁定</exception>
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
         // 跨租户查找用户：登录请求没有租户上下文，需要忽略全局租户过滤器
         var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
             .FirstOrDefaultAsync(u => u.Username == request.Username);
 
-        if (user == null || !PasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
+        // 用户不存在时仍返回统一错误信息，避免枚举用户名
+        if (user == null)
         {
-            _logger.LogWarning("登录失败：用户名 {Username} 凭据无效", request.Username);
+            _logger.LogWarning("登录失败：用户名 {Username} 不存在", request.Username);
+            throw new UnauthorizedAccessException("用户名或密码错误");
+        }
+
+        // 检查账户是否被锁定
+        if (user.LockoutEnd.HasValue && user.LockoutEnd.Value > DateTime.UtcNow)
+        {
+            _logger.LogWarning("登录失败：用户 {Username} 账户已锁定至 {LockoutEnd}", user.Username, user.LockoutEnd.Value);
+            await _auditLogService.LogAsync(user.TenantId, "AuthLoginLocked", "User", user.Id.ToString(),
+                "账户已锁定，尝试登录被拒绝", default);
+            throw new UnauthorizedAccessException("账户已被锁定，请稍后再试");
+        }
+
+        // 锁定已过期则自动解锁
+        if (user.LockoutEnd.HasValue && user.LockoutEnd.Value <= DateTime.UtcNow)
+        {
+            user.LockoutEnd = null;
+            user.AccessFailedCount = 0;
+        }
+
+        // 验证密码
+        if (!PasswordHasher.VerifyPassword(request.Password, user.PasswordHash))
+        {
+            user.AccessFailedCount++;
+
+            // 连续失败达到上限时锁定账户
+            if (user.AccessFailedCount >= MaxAccessAttempts)
+            {
+                user.LockoutEnd = DateTime.UtcNow.AddMinutes(LockoutDurationMinutes);
+                _logger.LogWarning("用户 {Username} 连续登录失败 {Count} 次，账户锁定 {Minutes} 分钟",
+                    user.Username, user.AccessFailedCount, LockoutDurationMinutes);
+                await _dbContext.SaveChangesAsync();
+                await _auditLogService.LogAsync(user.TenantId, "AuthAccountLocked", "User", user.Id.ToString(),
+                    $"连续登录失败 {user.AccessFailedCount} 次，账户锁定 {LockoutDurationMinutes} 分钟", default);
+            }
+            else
+            {
+                _logger.LogWarning("用户 {Username} 登录失败，已累计失败 {Count} 次", user.Username, user.AccessFailedCount);
+                await _dbContext.SaveChangesAsync();
+                await _auditLogService.LogAsync(user.TenantId, "AuthLoginFailed", "User", user.Id.ToString(),
+                    $"登录失败（密码错误），累计失败 {user.AccessFailedCount} 次", default);
+            }
+
             throw new UnauthorizedAccessException("用户名或密码错误");
         }
 
         if (!user.IsActive)
         {
-            _logger.LogWarning("登录失败：用户 {Username} 已被停用", request.Username);
+            _logger.LogWarning("登录失败：用户 {Username} 已被停用", user.Username);
+            await _auditLogService.LogAsync(user.TenantId, "AuthLoginFailed", "User", user.Id.ToString(),
+                "登录失败：账户已被停用", default);
             throw new UnauthorizedAccessException("该账户已被停用");
         }
+
+        // 登录成功：重置失败计数和锁定状态
+        user.AccessFailedCount = 0;
+        user.LockoutEnd = null;
 
         // 生成访问令牌和刷新令牌
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
@@ -100,6 +164,8 @@ public class AuthService : IAuthService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("用户 {Username} 登录成功（租户：{TenantId}）", user.Username, user.TenantId);
+        await _auditLogService.LogAsync(user.TenantId, "AuthLoginSuccess", "User", user.Id.ToString(),
+            $"用户 {user.Username} 登录成功", default);
 
         return new AuthResponse
         {

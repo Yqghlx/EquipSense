@@ -5,6 +5,7 @@ using EquipAI.Application.Interfaces;
 using EquipAI.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -36,6 +37,7 @@ public class AuthController : ControllerBase
     /// <param name="request">登录请求（用户名 + 密码）</param>
     /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request)
@@ -50,6 +52,7 @@ public class AuthController : ControllerBase
     /// <param name="request">注册请求（含企业信息和管理员信息）</param>
     /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
     [HttpPost("register")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AuthResponse>> Register([FromBody] RegisterRequest request)

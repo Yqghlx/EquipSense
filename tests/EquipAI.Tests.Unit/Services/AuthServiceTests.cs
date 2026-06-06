@@ -5,6 +5,7 @@ using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
@@ -62,6 +63,7 @@ public class AuthServiceTests : IAsyncDisposable
         // 注册 AuthService 的依赖项
         services.AddSingleton(_jwtService);
         services.AddSingleton<RedisService>(_stubRedis);  // 注册为基类 RedisService 类型
+        services.AddScoped<IAuditLogService, StubAuditLogService>();
         services.AddScoped<AuthService>();
 
         _sp = services.BuildServiceProvider();
@@ -173,6 +175,103 @@ public class AuthServiceTests : IAsyncDisposable
         var updatedUser = await db.Users.FindAsync(user.Id);
         updatedUser!.LastLoginAt.Should().NotBeNull();
         updatedUser.LastLoginAt.Should().BeOnOrAfter(before);
+    }
+
+    // ==================== 账户锁定 ====================
+
+    [Fact]
+    public async Task LoginAsync_连续失败5次_应锁定账户()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var password = "password123";
+        var user = CreateTestUser("lockoutuser", _tenantId, password);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var wrongRequest = new LoginRequest { Username = "lockoutuser", Password = "wrongpassword" };
+
+        // 连续失败 4 次不应锁定
+        for (var i = 0; i < 4; i++)
+        {
+            await service.Invoking(s => s.LoginAsync(wrongRequest)).Should().ThrowAsync<UnauthorizedAccessException>();
+        }
+        var userAfter4 = await db.Users.FindAsync(user.Id);
+        userAfter4!.AccessFailedCount.Should().Be(4);
+        userAfter4.LockoutEnd.Should().BeNull();
+
+        // 第 5 次失败应触发锁定
+        await service.Invoking(s => s.LoginAsync(wrongRequest)).Should().ThrowAsync<UnauthorizedAccessException>();
+        var userAfter5 = await db.Users.FindAsync(user.Id);
+        userAfter5!.LockoutEnd.Should().NotBeNull();
+        userAfter5.LockoutEnd!.Value.Should().BeAfter(DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task LoginAsync_账户锁定期间_正确密码也应被拒绝()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var password = "password123";
+        var user = CreateTestUser("lockeduser", _tenantId, password);
+        user.LockoutEnd = DateTime.UtcNow.AddMinutes(15);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // 即使密码正确也应被拒绝
+        var request = new LoginRequest { Username = "lockeduser", Password = password };
+        var act = () => service.LoginAsync(request);
+        await act.Should().ThrowAsync<UnauthorizedAccessException>()
+            .WithMessage("*锁定*");
+    }
+
+    [Fact]
+    public async Task LoginAsync_锁定过期后_应自动解锁并允许登录()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var password = "password123";
+        var user = CreateTestUser("expiredlockuser", _tenantId, password);
+        // 锁定时间已过
+        user.LockoutEnd = DateTime.UtcNow.AddMinutes(-1);
+        user.AccessFailedCount = 5;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var request = new LoginRequest { Username = "expiredlockuser", Password = password };
+        var result = await service.LoginAsync(request);
+
+        result.Should().NotBeNull();
+        var updatedUser = await db.Users.FindAsync(user.Id);
+        updatedUser!.AccessFailedCount.Should().Be(0);
+        updatedUser.LockoutEnd.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LoginAsync_登录成功_应重置失败计数()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var password = "password123";
+        var user = CreateTestUser("resetcountuser", _tenantId, password);
+        user.AccessFailedCount = 3;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var request = new LoginRequest { Username = "resetcountuser", Password = password };
+        await service.LoginAsync(request);
+
+        var updatedUser = await db.Users.FindAsync(user.Id);
+        updatedUser!.AccessFailedCount.Should().Be(0);
+        updatedUser.LockoutEnd.Should().BeNull();
     }
 
     [Fact]
@@ -656,6 +755,21 @@ public class AuthServiceTests : IAsyncDisposable
             _store.Remove(userId);
             return Task.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// 审计日志服务 Stub，用于测试中避免依赖真实的审计日志持久化
+    /// </summary>
+    private class StubAuditLogService : IAuditLogService
+    {
+        public Task LogAsync(Guid tenantId, string action, string resourceType, string? resourceId = null, string? description = null, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task LogFromContextAsync(string action, string resourceType, string? resourceId = null, string? description = null, CancellationToken ct = default)
+            => Task.CompletedTask;
+
+        public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20, CancellationToken ct = default)
+            => Task.FromResult(new PagedResult<AuditLogDto> { Items = [], Total = 0, Page = page, PageSize = pageSize });
     }
 
     public async ValueTask DisposeAsync() => await _sp.DisposeAsync();

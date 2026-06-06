@@ -40,6 +40,20 @@ public class SecurityHeadersMiddleware
         context.Response.Headers.Append("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()");
         // 禁止跨域策略文件
         context.Response.Headers.Append("X-Permitted-Cross-Domain-Policies", "none");
+        // 内容安全策略：限制资源加载来源，防御 XSS 和数据注入攻击
+        // unsafe-inline/eval：前端使用 TailwindCSS 内联样式和 ECharts 动态脚本，后续可逐步收紧
+        context.Response.Headers.Append("Content-Security-Policy",
+            "default-src 'self'; " +
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+            "style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: blob:; " +
+            "font-src 'self' data:; " +
+            "connect-src 'self' wss: https:; " +
+            "frame-ancestors 'none'; " +
+            "base-uri 'self'; " +
+            "form-action 'self'");
+        // HTTP 严格传输安全：强制浏览器在 1 年内只使用 HTTPS 访问（含子域名）
+        context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 
         await _next(context);
     }
