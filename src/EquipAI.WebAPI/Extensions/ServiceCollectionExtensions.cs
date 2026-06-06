@@ -188,6 +188,9 @@ public static class ServiceCollectionExtensions
         // 工单服务
         services.AddScoped<IWorkOrderService, WorkOrderService>();
 
+        // 工单统计服务 — 聚合工单多维度统计（分布、趋势、SLA）
+        services.AddScoped<WorkOrderStatisticsService>();
+
         // 审批链服务 — 管理审批链模板和工单多级审批流程
         services.AddScoped<IApprovalChainService, ApprovalChainService>();
 

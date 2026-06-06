@@ -23,14 +23,17 @@ public class WorkOrdersController : ControllerBase
 {
     private readonly IWorkOrderService _workOrderService;
     private readonly IApprovalChainService _approvalChainService;
+    private readonly WorkOrderStatisticsService _statisticsService;
     private readonly ITenantContext _tenantContext;
 
     public WorkOrdersController(
         IWorkOrderService workOrderService,
         IApprovalChainService approvalChainService,
+        WorkOrderStatisticsService statisticsService,
         ITenantContext tenantContext)
     {
         _workOrderService = workOrderService;
+        _statisticsService = statisticsService;
         _approvalChainService = approvalChainService;
         _tenantContext = tenantContext;
     }
@@ -47,6 +50,22 @@ public class WorkOrdersController : ControllerBase
     {
         var result = await _workOrderService.ListAsync(_tenantContext.TenantId, page, pageSize, status, deviceId);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// 获取工单统计数据（按状态/类型/优先级分布 + 时间趋势 + SLA 达成率）
+    /// </summary>
+    [HttpGet("statistics")]
+    [RequirePermission("workorder:read")]
+    [ProducesResponseType(typeof(WorkOrderStatistics), StatusCodes.Status200OK)]
+    public async Task<ActionResult<WorkOrderStatistics>> GetStatistics(
+        [FromQuery] int period = 30)
+    {
+        // 限定合法的统计周期：7/30/90 天
+        var periodDays = period is 7 or 30 or 90 ? period : 30;
+        var stats = await _statisticsService.GetStatisticsAsync(
+            _tenantContext.TenantId, periodDays, HttpContext.RequestAborted);
+        return Ok(stats);
     }
 
     /// <summary>
