@@ -1,3 +1,4 @@
+using EquipAI.Application.Notifications;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -16,11 +17,13 @@ public class NotificationsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly ITenantContext _tenantContext;
+    private readonly NotificationPreferenceService _prefService;
 
-    public NotificationsController(AppDbContext db, ITenantContext tenantContext)
+    public NotificationsController(AppDbContext db, ITenantContext tenantContext, NotificationPreferenceService prefService)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _prefService = prefService;
     }
 
     /// <summary>
@@ -123,5 +126,26 @@ public class NotificationsController : ControllerBase
         _db.Notifications.Remove(notification);
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>
+    /// 获取当前用户的通知偏好设置
+    /// </summary>
+    [HttpGet("preferences")]
+    public async Task<ActionResult<NotificationPreferences>> GetPreferences(CancellationToken ct)
+    {
+        var prefs = await _prefService.GetAsync(_tenantContext.UserId, ct);
+        return Ok(prefs);
+    }
+
+    /// <summary>
+    /// 更新当前用户的通知偏好设置
+    /// </summary>
+    [HttpPut("preferences")]
+    public async Task<ActionResult<NotificationPreferences>> UpdatePreferences(
+        [FromBody] NotificationPreferences prefs, CancellationToken ct)
+    {
+        var updated = await _prefService.UpdateAsync(_tenantContext.UserId, prefs, ct);
+        return Ok(updated);
     }
 }

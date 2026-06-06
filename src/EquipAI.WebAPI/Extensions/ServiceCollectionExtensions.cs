@@ -88,6 +88,9 @@ public static class ServiceCollectionExtensions
         // MQTT 配置选项
         services.Configure<MqttOptions>(configuration.GetSection("Mqtt"));
 
+        // SMTP 邮件通知配置
+        services.Configure<SmtpOptions>(configuration.GetSection("Smtp"));
+
         // MQTT 客户端服务（Singleton — 共享连接）
         services.AddSingleton<MqttClientService>();
 
@@ -212,6 +215,12 @@ public static class ServiceCollectionExtensions
         // 订阅管理服务 — 检查租户配额限制（设备数量、用户数量）
         services.AddScoped<ISubscriptionService, SubscriptionService>();
 
+        // 账单服务 — 管理租户订阅账单生成和查询
+        services.AddScoped<BillingService>();
+
+        // 订阅到期检查后台服务 — 每 6 小时检查到期状态，自动降级/冻结
+        services.AddHostedService<SubscriptionExpiryService>();
+
         // 工单外部集成 — 多个 IWorkOrderIntegration 实现，通过 GetServices 解析后按 IntegrationType 匹配
         // 注册命名 HttpClient 工厂，统一超时配置，避免集成类自行 new HttpClient()
         services.AddHttpClient("WorkOrderIntegration", client =>
@@ -244,6 +253,12 @@ public static class ServiceCollectionExtensions
 
         // 推送通知服务
         services.AddScoped<IPushNotificationService, PushNotificationService>();
+
+        // 通知偏好设置服务 — 读写用户 NotificationPrefs JSONB 字段
+        services.AddScoped<NotificationPreferenceService>();
+
+        // SMTP 邮件通知服务 — 通过 SMTP 协议发送告警/工单邮件（需配置 Smtp 节）
+        services.AddScoped<SmtpEmailNotificationService>();
 
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
