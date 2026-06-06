@@ -117,6 +117,33 @@ public class SqliteBufferStoreTests : IAsyncDisposable
         remaining[1].Topic.Should().Be("topic/3");
     }
 
+    [Fact]
+    public async Task CleanupOldAsync_不应清理未发送的新记录()
+    {
+        await _store.StoreAsync("test/topic", """{"seq":1}"""u8.ToArray());
+
+        await _store.CleanupOldAsync();
+
+        var pending = await _store.GetPendingAsync(10);
+        pending.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task GetPendingAsync_无记录应返回空列表()
+    {
+        var pending = await _store.GetPendingAsync(10);
+        pending.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task InitializeAsync_重复调用不应抛异常()
+    {
+        var store = new SqliteBufferStore(":memory:");
+        await store.InitializeAsync();
+        await store.InitializeAsync();
+        await store.DisposeAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _store.DisposeAsync();

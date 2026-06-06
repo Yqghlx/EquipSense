@@ -95,6 +95,76 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    [Fact]
+    public async Task RecordAsync_连续不准确记录SuccessCount应为0()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var ruleId = Guid.NewGuid();
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "连续不准确",
+            DeviceType = "电机", Conditions = "[]", Conclusion = "测试", SuccessCount = 0
+        });
+        await db.SaveChangesAsync();
+
+        var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
+        await tracker.RecordAsync(ruleId, wasAccurate: false);
+        await tracker.RecordAsync(ruleId, wasAccurate: false);
+        await tracker.RecordAsync(ruleId, wasAccurate: false);
+
+        var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
+        rule.SuccessCount.Should().Be(0);
+        rule.AccuracyRate.Should().Be(0.0m);
+    }
+
+    [Fact]
+    public async Task RecordAsync_从已有历史反推应累加TotalMatches()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var ruleId = Guid.NewGuid();
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "累加测试",
+            DeviceType = "电机", Conditions = "[]", Conclusion = "测试",
+            SuccessCount = 3, AccuracyRate = 0.75m
+        });
+        await db.SaveChangesAsync();
+
+        var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
+        await tracker.RecordAsync(ruleId, wasAccurate: true);
+
+        var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
+        // 原有 3次准确/0.75准确率 = 4次总计，再加1次准确 = 4次准确/5次总计 = 0.8
+        rule.SuccessCount.Should().Be(4);
+        rule.AccuracyRate.Should().Be(0.8m);
+    }
+
+    [Fact]
+    public async Task RecordAsync_全部准确时AccuracyRate应为1()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var ruleId = Guid.NewGuid();
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "全准确",
+            DeviceType = "电机", Conditions = "[]", Conclusion = "测试", SuccessCount = 0
+        });
+        await db.SaveChangesAsync();
+
+        var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
+        await tracker.RecordAsync(ruleId, wasAccurate: true);
+        await tracker.RecordAsync(ruleId, wasAccurate: true);
+
+        var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
+        rule.AccuracyRate.Should().Be(1.0m);
+    }
+
     /// <summary>
     /// 测试用租户上下文，使用指定的租户 ID
     /// </summary>

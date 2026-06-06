@@ -356,6 +356,163 @@ public class KnowledgeCaptureServiceTests
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_低置信度不应生成候选规则但创建故障案例()
+    {
+        var device = new Device
+        {
+            TenantId = _tenantId, Type = "电机",
+            DeviceCode = "DEV-LC", Name = "低置信度电机"
+        };
+        _db.Devices.Add(device);
+
+        var analysis = new Core.Entities.Analysis
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            AlertId = Guid.NewGuid(), Confidence = 0.5
+        };
+        _db.Analyses.Add(analysis);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            Title = "低置信度工单", ActualHours = 2.0,
+            RootCause = "磨损", ExecutionReport = "更换零件",
+            AnalysisId = analysis.Id
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        var faultCases = await _db.FaultCases.IgnoreQueryFilters().ToListAsync();
+        faultCases.Should().HaveCount(1);
+
+        var pendingRules = await _db.PendingRules.IgnoreQueryFilters().ToListAsync();
+        pendingRules.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_LLM返回无效JSON不应创建候选规则()
+    {
+        var device = new Device
+        {
+            TenantId = _tenantId, Type = "泵",
+            DeviceCode = "DEV-BADJSON", Name = "无效JSON泵"
+        };
+        _db.Devices.Add(device);
+
+        var analysis = new Core.Entities.Analysis
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            AlertId = Guid.NewGuid(), Confidence = 0.9
+        };
+        _db.Analyses.Add(analysis);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            Title = "LLM无效JSON工单", ActualHours = 1.5,
+            RootCause = "原因", ExecutionReport = "报告",
+            AnalysisId = analysis.Id
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        _llmServiceMock
+            .Setup(llm => llm.AnalyzeAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LLMResponse("this is not json", 0.9, true, null));
+
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        var faultCases = await _db.FaultCases.IgnoreQueryFilters().ToListAsync();
+        faultCases.Should().HaveCount(1);
+
+        var pendingRules = await _db.PendingRules.IgnoreQueryFilters().ToListAsync();
+        pendingRules.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_无关联分析只创建故障案例()
+    {
+        var device = new Device
+        {
+            TenantId = _tenantId, Type = "电机",
+            DeviceCode = "DEV-NOA", Name = "无分析电机"
+        };
+        _db.Devices.Add(device);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            Title = "无分析工单", ActualHours = 1.5,
+            RootCause = "原因", ExecutionReport = "报告"
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        var faultCases = await _db.FaultCases.IgnoreQueryFilters().ToListAsync();
+        faultCases.Should().HaveCount(1);
+
+        var pendingRules = await _db.PendingRules.IgnoreQueryFilters().ToListAsync();
+        pendingRules.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_设备不存在时DeviceType应为未知()
+    {
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId, DeviceId = Guid.NewGuid(),
+            Title = "无设备工单", ActualHours = 2.0,
+            RootCause = "原因", ExecutionReport = "报告"
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        var faultCases = await _db.FaultCases.IgnoreQueryFilters().ToListAsync();
+        faultCases.Should().HaveCount(1);
+        faultCases[0].DeviceType.Should().Be("未知");
+    }
+
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_RootCause为空应使用默认值未记录()
+    {
+        var device = new Device
+        {
+            TenantId = _tenantId, Type = "电机",
+            DeviceCode = "DEV-NRC", Name = "无根因电机"
+        };
+        _db.Devices.Add(device);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            Title = "无根因工单", ActualHours = 1.5,
+            RootCause = null, ExecutionReport = null
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        var faultCases = await _db.FaultCases.IgnoreQueryFilters().ToListAsync();
+        faultCases.Should().HaveCount(1);
+        faultCases[0].RootCause.Should().Be("未记录");
+        faultCases[0].Solution.Should().Be("未记录");
+    }
+
+    [Fact]
+    public async Task RejectRuleAsync_不存在的候选规则应抛出异常()
+    {
+        var act = () => _sut.RejectRuleAsync(Guid.NewGuid(), Guid.NewGuid(), "不存在", CancellationToken.None);
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
     /// <summary>
     /// 测试用租户上下文，使用指定的租户 ID
     /// </summary>

@@ -72,4 +72,74 @@ public class DataNormalizerTests
         result.Metrics.Should().HaveCount(3);
         result.DeviceId.Should().Be("inj-001");
     }
+
+    [Fact]
+    public void Normalize_空数据点列表应返回空指标()
+    {
+        var config = new DeviceConfig("dev-001", "opcua", "opc.tcp://localhost:4840",
+            new Dictionary<string, string> { ["temp"] = "ns=2;s=Temp" });
+
+        var result = DataNormalizer.Normalize("dev-001", [], config);
+
+        result.Metrics.Should().BeEmpty();
+        result.DeviceId.Should().Be("dev-001");
+    }
+
+    [Fact]
+    public void Normalize_应取最新数据点的时间戳()
+    {
+        var t1 = new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
+        var t2 = new DateTime(2026, 6, 1, 12, 0, 5, DateTimeKind.Utc);
+        var dataPoints = new List<DataPoint>
+        {
+            new("addr1", "temp", 85.3, "good", t1),
+            new("addr2", "pressure", 6.2, "good", t2),
+        };
+
+        var config = new DeviceConfig("dev-001", "opcua", "",
+            new Dictionary<string, string>
+            {
+                ["temp"] = "addr1", ["pressure"] = "addr2"
+            });
+
+        var result = DataNormalizer.Normalize("dev-001", dataPoints, config);
+        result.Timestamp.Should().Be(t2);
+    }
+
+    [Fact]
+    public void Normalize_无匹配指标时Timestamp应为UtcNow()
+    {
+        var before = DateTime.UtcNow;
+        var dataPoints = new List<DataPoint>
+        {
+            new("unknown_addr", "x", 1.0, "good", DateTime.UtcNow),
+        };
+
+        var config = new DeviceConfig("dev-001", "opcua", "",
+            new Dictionary<string, string>());
+
+        var result = DataNormalizer.Normalize("dev-001", dataPoints, config);
+        var after = DateTime.UtcNow;
+
+        result.Timestamp.Should().BeOnOrAfter(before);
+        result.Timestamp.Should().BeOnOrBefore(after);
+    }
+
+    [Fact]
+    public void Normalize_部分匹配部分不匹配应只映射匹配的()
+    {
+        var dataPoints = new List<DataPoint>
+        {
+            new("addr1", "temp", 85.3, "good", DateTime.UtcNow),
+            new("addr2", "unknown", 99.0, "good", DateTime.UtcNow),
+        };
+
+        var config = new DeviceConfig("dev-001", "opcua", "",
+            new Dictionary<string, string> { ["temp"] = "addr1" });
+
+        var result = DataNormalizer.Normalize("dev-001", dataPoints, config);
+
+        result.Metrics.Should().HaveCount(1);
+        result.Metrics.Should().ContainKey("temp");
+    }
 }

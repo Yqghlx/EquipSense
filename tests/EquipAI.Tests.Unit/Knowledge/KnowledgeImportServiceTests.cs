@@ -406,6 +406,70 @@ public class KnowledgeImportServiceTests
         result.Skipped.Should().Be(1);
     }
 
+    [Fact]
+    public void PreviewImport_JSON空数组应返回错误提示()
+    {
+        var result = _sut.PreviewImport("[]", "rules.json");
+        result.TotalRows.Should().Be(0);
+        result.ValidCount.Should().Be(0);
+        result.ErrorCount.Should().Be(1);
+        result.Errors[0].Message.Should().Contain("空");
+    }
+
+    [Fact]
+    public void PreviewImport_confidenceWeight为负数应返回错误()
+    {
+        var csv = """
+                  device_type,name,conditions,conclusion,confidence_weight
+                  电机,负数权重,[],结论,-0.5
+                  """;
+        var result = _sut.PreviewImport(csv, "rules.csv");
+        result.ErrorCount.Should().Be(1);
+        result.Errors[0].Message.Should().Contain("confidence_weight");
+    }
+
+    [Fact]
+    public async Task ExportAsCsvAsync_按设备类型过滤应只返回匹配规则()
+    {
+        _db.KnowledgeRules.AddRange(
+            new KnowledgeRule
+            {
+                TenantId = _tenantId, DeviceType = "电机", Name = "电机规则",
+                Conditions = "[]", Conclusion = "电机结论"
+            },
+            new KnowledgeRule
+            {
+                TenantId = _tenantId, DeviceType = "泵", Name = "泵规则",
+                Conditions = "[]", Conclusion = "泵结论"
+            });
+        await _db.SaveChangesAsync();
+
+        var csv = await _sut.ExportAsCsvAsync(_tenantId, "电机", CancellationToken.None);
+        csv.Should().Contain("电机规则");
+        csv.Should().NotContain("泵规则");
+    }
+
+    [Fact]
+    public async Task ExportAsJsonAsync_按设备类型过滤应只返回匹配规则()
+    {
+        _db.KnowledgeRules.AddRange(
+            new KnowledgeRule
+            {
+                TenantId = _tenantId, DeviceType = "CNC", Name = "CNC规则",
+                Conditions = "[]", Conclusion = "CNC结论"
+            },
+            new KnowledgeRule
+            {
+                TenantId = _tenantId, DeviceType = "泵", Name = "泵规则",
+                Conditions = "[]", Conclusion = "泵结论"
+            });
+        await _db.SaveChangesAsync();
+
+        var json = await _sut.ExportAsJsonAsync(_tenantId, "CNC", CancellationToken.None);
+        json.Should().Contain("CNC规则");
+        json.Should().NotContain("泵规则");
+    }
+
     /// <summary>
     /// 测试用租户上下文，使用指定的租户 ID
     /// </summary>

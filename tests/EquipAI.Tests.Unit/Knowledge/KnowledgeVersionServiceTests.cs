@@ -296,6 +296,35 @@ public class KnowledgeVersionServiceTests
         preRollbackJson.RootElement.GetProperty("Conclusion").GetString().Should().Be("当前结论");
     }
 
+    [Fact]
+    public async Task RollbackToVersionAsync_规则不存在应抛出KeyNotFoundException()
+    {
+        var act = () => _sut.RollbackToVersionAsync(Guid.NewGuid(), 1, null, CancellationToken.None);
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task CreateVersionSnapshotAsync_生成的Snapshot应为合法JSON()
+    {
+        var rule = new KnowledgeRule
+        {
+            TenantId = _tenantId, DeviceType = "电机", Name = "JSON校验",
+            Conditions = "[]", Conclusion = "结论", Version = 1
+        };
+
+        var snapshot = await _sut.CreateVersionSnapshotAsync(rule, Guid.NewGuid(), "JSON验证", CancellationToken.None);
+
+        var act = () => JsonDocument.Parse(snapshot.Snapshot);
+        act.Should().NotThrow("Snapshot 应为合法 JSON");
+    }
+
+    [Fact]
+    public async Task GetVersionHistoryAsync_无版本历史应返回空列表()
+    {
+        var result = await _sut.GetVersionHistoryAsync(Guid.NewGuid(), CancellationToken.None);
+        result.Should().BeEmpty();
+    }
+
     /// <summary>
     /// 测试用租户上下文，使用指定的租户 ID
     /// </summary>

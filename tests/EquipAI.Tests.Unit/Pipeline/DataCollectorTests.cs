@@ -86,4 +86,46 @@ public class DataCollectorTests
             a => a.ReadAsync(It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    [Fact]
+    public async Task CollectOnceAsync_ReadAsync返回空列表不应抛异常()
+    {
+        var (collector, adapterMock) = CreateSut();
+        adapterMock
+            .Setup(a => a.ReadAsync(It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        var act = () => collector.CollectOnceAsync(CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task CollectOnceAsync_空配置点位列表应调用ReadAsync传空数组()
+    {
+        var config = new DeviceConfig("empty-dev", "opcua", "opc.tcp://localhost:4840",
+            new Dictionary<string, string>(), PollIntervalMs: 1000);
+
+        var (collector, adapterMock) = CreateSut(config);
+        adapterMock
+            .Setup(a => a.ReadAsync(It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        await collector.CollectOnceAsync(CancellationToken.None);
+
+        adapterMock.Verify(
+            a => a.ReadAsync(It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CollectOnceAsync_ReadAsync异常应向上传播()
+    {
+        var (collector, adapterMock) = CreateSut();
+        adapterMock
+            .Setup(a => a.ReadAsync(It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Exception("适配器读取失败"));
+
+        var act = () => collector.CollectOnceAsync(CancellationToken.None);
+        await act.Should().ThrowAsync<Exception>().WithMessage("*适配器读取失败*");
+    }
 }
