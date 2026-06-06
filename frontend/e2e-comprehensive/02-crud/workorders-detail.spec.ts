@@ -105,7 +105,7 @@ test.describe('工单详情页', () => {
 
   test('应显示工单编码', async ({ page }) => {
     const errors = captureErrors(page);
-    await createAndNavigateToDetail(page);
+    const wo = await createAndNavigateToDetail(page);
 
     // 验证工单编码显示
     if (wo.workOrderCode) {

@@ -91,6 +91,16 @@ public class MappingProfile : Profile
             .ForMember(dest => dest.Plan, opt => opt.MapFrom(src => src.Plan.ToString()))
             .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()));
 
+        // Tenant 实体 -> TenantDetailDto（继承 TenantDto 映射，额外包含统计字段）
+        CreateMap<Tenant, TenantDetailDto>()
+            .ForMember(dest => dest.Plan, opt => opt.MapFrom(src => src.Plan.ToString()))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+            .ForMember(dest => dest.ActiveAlertCount, opt => opt.Ignore())
+            .ForMember(dest => dest.PendingWorkOrderCount, opt => opt.Ignore())
+            .ForMember(dest => dest.MonthlyAnalysisCount, opt => opt.Ignore())
+            .ForMember(dest => dest.AdminUsername, opt => opt.Ignore())
+            .ForMember(dest => dest.AdminEmail, opt => opt.Ignore());
+
         // CreateTenantRequest -> Tenant 实体
         CreateMap<CreateTenantRequest, Tenant>()
             .ForMember(dest => dest.Plan, opt => opt.MapFrom<TenantPlanResolver>())
