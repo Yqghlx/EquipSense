@@ -121,8 +121,10 @@ try
     // 3. CORS — 跨域处理，在认证之前执行
     app.UseCors();
     // 3.5 IP 限流 — 固定窗口策略，每 IP 每分钟 60 次请求，在 CORS 之后、认证之前执行
-    // 测试环境禁用限流，避免高频测试请求被拦截
-    if (!app.Environment.IsEnvironment("Testing"))
+    // 测试环境和 CI E2E 测试禁用限流，避免高频测试请求被拦截
+    var disableRateLimiting = app.Environment.IsEnvironment("Testing")
+        || Environment.GetEnvironmentVariable("DISABLE_RATE_LIMITING") == "true";
+    if (!disableRateLimiting)
     {
         app.UseRateLimiter();
     }

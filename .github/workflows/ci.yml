@@ -194,15 +194,16 @@ jobs:
           ConnectionStrings__Default: "Host=localhost;Port=5432;Database=equipai_test;Username=postgres;Password=test_pw"
           Redis__ConnectionString: "localhost:6379"
           Jwt__Secret: "e2e-test-secret-key-that-is-at-least-32-characters-long!!"
+          DISABLE_RATE_LIMITING: "true"
         run: |
           dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
-          # 等待后端健康检查通过（最多 60 秒）
-          for i in $(seq 1 30); do
+          # 等待后端健康检查通过（最多 90 秒）
+          for i in $(seq 1 45); do
             if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
               echo "后端服务已启动"
               break
             fi
-            echo "等待后端启动... ($i/30)"
+            echo "等待后端启动... ($i/45)"
             sleep 2
           done
 

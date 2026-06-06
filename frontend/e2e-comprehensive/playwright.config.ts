@@ -15,7 +15,8 @@ export default defineConfig({
   reporter: [['html', { outputFolder: 'test-results/html' }], ['list']],
   timeout: 60000,
   expect: {
-    timeout: 10000,
+    // CI 环境较慢（共享 CPU + 冷启动），适当增加断言超时
+    timeout: 15000,
   },
   use: {
     // CI 中使用 PLAYWRIGHT_BASE_URL 环境变量（http://localhost:5173），
