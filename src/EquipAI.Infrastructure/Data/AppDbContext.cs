@@ -143,6 +143,11 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.WorkOrderAttachment> WorkOrderAttachments => Set<Core.Entities.WorkOrderAttachment>();
 
+    /// <summary>
+    /// 账单记录
+    /// </summary>
+    public DbSet<Core.Entities.BillingRecord> BillingRecords => Set<Core.Entities.BillingRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

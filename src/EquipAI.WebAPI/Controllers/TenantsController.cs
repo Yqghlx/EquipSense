@@ -1,6 +1,7 @@
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Tenants;
 using EquipAI.Application.Interfaces;
+using EquipAI.Application.Services;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
@@ -20,16 +21,22 @@ public class TenantsController : ControllerBase
 {
     private readonly ITenantService _tenantService;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly BillingService _billingService;
 
     /// <summary>
     /// 初始化租户管理控制器
     /// </summary>
     /// <param name="tenantService">租户管理服务</param>
     /// <param name="subscriptionService">订阅管理服务</param>
-    public TenantsController(ITenantService tenantService, ISubscriptionService subscriptionService)
+    /// <param name="billingService">账单服务</param>
+    public TenantsController(
+        ITenantService tenantService,
+        ISubscriptionService subscriptionService,
+        BillingService billingService)
     {
         _tenantService = tenantService;
         _subscriptionService = subscriptionService;
+        _billingService = billingService;
     }
 
     /// <summary>
@@ -193,5 +200,19 @@ public class TenantsController : ControllerBase
     {
         var stats = await _tenantService.GetGlobalStatsAsync();
         return Ok(stats);
+    }
+
+    /// <summary>
+    /// 获取租户账单历史
+    /// </summary>
+    /// <param name="id">租户 ID</param>
+    /// <param name="page">页码</param>
+    /// <param name="pageSize">每页条数</param>
+    [HttpGet("{id:guid}/billing")]
+    [RequirePermission("tenant:read")]
+    public async Task<ActionResult> GetBillingHistory(Guid id, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var (items, total) = await _billingService.GetBillingHistoryAsync(id, page, pageSize);
+        return Ok(new { items, total, page, pageSize });
     }
 }

@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { useTenantDetail, useFreezeTenant, useUnfreezeTenant } from '../../hooks/useTenantsAdmin';
 import { useChangePlan } from '../../hooks/useSubscription';
+import { useBillingHistory } from '../../hooks/useBilling';
 import {
   ArrowLeft,
   Building2,
@@ -13,7 +14,9 @@ import {
   AlertTriangle,
   ClipboardList,
   Brain,
+  FileText,
 } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 
 /**
  * 租户详情页
@@ -32,6 +35,7 @@ export default function TenantDetailPage() {
   const freezeMutation = useFreezeTenant();
   const unfreezeMutation = useUnfreezeTenant();
   const changePlanMutation = useChangePlan();
+  const { data: billingData } = useBillingHistory(id);
 
   if (isLoading) {
     return (
@@ -206,6 +210,56 @@ export default function TenantDetailPage() {
           >
             {t('subscription.changePlan')}
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* 账单历史 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            账单历史
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!billingData?.items?.length ? (
+            <p className="text-center py-4 text-sm text-muted-foreground">暂无账单记录</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>套餐</TableHead>
+                  <TableHead>金额</TableHead>
+                  <TableHead>计费周期</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>备注</TableHead>
+                  <TableHead>创建时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {billingData.items.map((bill) => (
+                  <TableRow key={bill.id}>
+                    <TableCell><Badge variant="outline">{bill.plan}</Badge></TableCell>
+                    <TableCell className="font-medium">
+                      {bill.amount === 0 ? '免费' : `¥${bill.amount.toFixed(2)}`}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {new Date(bill.periodStart).toLocaleDateString()} ~ {new Date(bill.periodEnd).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={bill.status === 'Paid' ? 'default' : 'outline'}>
+                        {bill.status === 'Paid' ? '已支付' : bill.status === 'Cancelled' ? '已取消' : '待支付'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{bill.remark ?? '-'}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(bill.createdAt).toLocaleDateString()}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
     </div>
