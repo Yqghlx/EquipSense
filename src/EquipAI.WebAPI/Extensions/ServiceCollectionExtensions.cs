@@ -1,6 +1,7 @@
 using System.Text;
 using EquipAI.Application.Notifications;
 using EquipAI.Application.Alerts;
+using EquipAI.Application.Dashboard;
 using EquipAI.Application.Alerts.Evaluators;
 using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Analysis;
@@ -234,6 +235,7 @@ public static class ServiceCollectionExtensions
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
         services.AddScoped<AlertEventHandler>();
+        services.AddScoped<DashboardStatsService>();
     }
 
     /// <summary>

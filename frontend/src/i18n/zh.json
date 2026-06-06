@@ -81,6 +81,9 @@
     "deviceAvailability": "设备可用率",
     "deviceStatusDistribution": "设备状态分布",
     "alertTrends": "告警趋势（最近 7 天）",
+    "alertSeverityDistribution": "告警级别分布",
+    "workOrderTrend": "工单趋势（最近 7 天）",
+    "workOrderStatusDistribution": "工单状态分布",
     "recentAlerts": "最近告警"
   },
   "device": {

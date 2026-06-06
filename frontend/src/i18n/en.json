@@ -81,6 +81,9 @@
     "deviceAvailability": "Device Availability",
     "deviceStatusDistribution": "Device Status Distribution",
     "alertTrends": "Alert Trends (Last 7 Days)",
+    "alertSeverityDistribution": "Alert Severity Distribution",
+    "workOrderTrend": "Work Order Trend (Last 7 Days)",
+    "workOrderStatusDistribution": "Work Order Status Distribution",
     "recentAlerts": "Recent Alerts"
   },
   "device": {
