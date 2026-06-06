@@ -53,7 +53,7 @@ describe('useDeviceTemplates', () => {
 
     expect(result.current.data).toEqual(mockTemplates);
     // industry 为空时不应拼接查询参数
-    expect(mockedApi.get).toHaveBeenCalledWith('/device-config/templates');
+    expect(mockedApi.get).toHaveBeenCalledWith('/device-types');
   });
 
   it('industry 为空时应禁用 industry 相关查询参数', async () => {
@@ -67,7 +67,7 @@ describe('useDeviceTemplates', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     // 空字符串属于 falsy，不应拼接到 URL
-    expect(mockedApi.get).toHaveBeenCalledWith('/device-config/templates');
+    expect(mockedApi.get).toHaveBeenCalledWith('/device-types');
   });
 
   it('应传递 industry 参数', async () => {
@@ -82,7 +82,7 @@ describe('useDeviceTemplates', () => {
 
     // industry 有值时应作为查询参数传递
     expect(mockedApi.get).toHaveBeenCalledWith(
-      '/device-config/templates?industry=manufacturing',
+      '/device-types?industry=manufacturing',
     );
   });
 });
