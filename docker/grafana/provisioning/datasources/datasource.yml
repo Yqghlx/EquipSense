@@ -1,0 +1,23 @@
+# =============================================================================
+# Grafana 数据源自动供给配置 — Prometheus
+# =============================================================================
+# Grafana 启动时自动配置 Prometheus 数据源，无需手动添加。
+# 数据源地址使用 Docker 内部网络服务名 "prometheus"。
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # 查询超时时间（秒）
+      timeInterval: "15s"
+      # 自定义查询参数
+      customQueryParameters: ""
+    # 数据源版本号，用于自动更新检测
+    version: 1
