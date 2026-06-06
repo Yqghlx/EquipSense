@@ -57,6 +57,7 @@
     "alerts": "Alerts",
     "alertRules": "Alert Rules",
     "workOrders": "Work Orders",
+    "pendingApprovals": "Pending Approvals",
     "dispatch": "Dispatch Board",
     "analyses": "AI Analysis",
     "knowledge": "Knowledge Base",

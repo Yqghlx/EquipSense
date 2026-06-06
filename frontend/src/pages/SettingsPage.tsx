@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
-import { Plus, Trash2, ChevronDown, ChevronRight, Search, UserCog } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronRight, Search, UserCog, Pencil } from 'lucide-react';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -27,6 +27,7 @@ import { useSubscription, useChangePlan } from '../hooks/useSubscription';
 import {
   useApprovalChains,
   useCreateApprovalChain,
+  useUpdateApprovalChain,
   useDeleteApprovalChain,
 } from '../hooks/useApprovals';
 import {
@@ -188,16 +189,20 @@ function ApprovalChainSettings() {
   const { t } = useTranslation();
   const { data: chains, isLoading } = useApprovalChains();
   const createMutation = useCreateApprovalChain();
+  const updateMutation = useUpdateApprovalChain();
   const deleteMutation = useDeleteApprovalChain();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  // 新建模板表单状态
-  const [newName, setNewName] = useState('');
-  const [newWorkOrderType, setNewWorkOrderType] = useState('');
-  const [newPriority, setNewPriority] = useState('');
-  const [newIsDefault, setNewIsDefault] = useState(false);
-  const [newSteps, setNewSteps] = useState([
+  // 编辑状态：非 null 表示编辑模式
+  const [editingChainId, setEditingChainId] = useState<string | null>(null);
+
+  // 表单状态
+  const [formName, setFormName] = useState('');
+  const [formWorkOrderType, setFormWorkOrderType] = useState('');
+  const [formPriority, setFormPriority] = useState('');
+  const [formIsDefault, setFormIsDefault] = useState(false);
+  const [formSteps, setFormSteps] = useState([
     { stepOrder: 1, role: 'maintenance_lead', specificApproverId: '', isRequired: true },
   ]);
 
@@ -227,43 +232,72 @@ function ApprovalChainSettings() {
     viewer: '查看者',
   };
 
-  /** 重置新建表单 */
+  /** 重置表单 */
   const resetForm = () => {
-    setNewName('');
-    setNewWorkOrderType('');
-    setNewPriority('');
-    setNewIsDefault(false);
-    setNewSteps([{ stepOrder: 1, role: 'maintenance_lead', specificApproverId: '', isRequired: true }]);
+    setFormName('');
+    setFormWorkOrderType('');
+    setFormPriority('');
+    setFormIsDefault(false);
+    setFormSteps([{ stepOrder: 1, role: 'maintenance_lead', specificApproverId: '', isRequired: true }]);
+    setEditingChainId(null);
   };
 
-  /** 提交创建审批链模板 */
-  const handleCreate = () => {
-    if (!newName.trim()) return;
-    createMutation.mutate(
-      {
-        name: newName,
-        workOrderType: newWorkOrderType || undefined,
-        priority: newPriority || undefined,
-        isDefault: newIsDefault,
-        steps: newSteps.map((s, i) => ({
-          stepOrder: i + 1,
-          role: s.role,
-          specificApproverId: s.specificApproverId || undefined,
-          isRequired: s.isRequired,
-        })),
-      },
-      {
-        onSuccess: () => {
-          setCreateDialogOpen(false);
-          resetForm();
-        },
-      },
+  /** 打开新建对话框 */
+  const openCreate = () => {
+    resetForm();
+    setDialogOpen(true);
+  };
+
+  /** 打开编辑对话框 */
+  const openEdit = (chain: ApprovalChainTemplate) => {
+    setEditingChainId(chain.id);
+    setFormName(chain.name);
+    setFormWorkOrderType(chain.workOrderType ?? '');
+    setFormPriority(chain.priority ?? '');
+    setFormIsDefault(chain.isDefault);
+    setFormSteps(
+      chain.steps.length > 0
+        ? chain.steps.map((s) => ({
+            stepOrder: s.stepOrder,
+            role: s.role,
+            specificApproverId: s.specificApproverId ?? '',
+            isRequired: s.isRequired,
+          }))
+        : [{ stepOrder: 1, role: 'maintenance_lead', specificApproverId: '', isRequired: true }],
     );
+    setDialogOpen(true);
+  };
+
+  /** 提交表单（创建或更新） */
+  const handleSubmit = () => {
+    if (!formName.trim()) return;
+    const payload = {
+      name: formName,
+      workOrderType: formWorkOrderType || undefined,
+      priority: formPriority || undefined,
+      isDefault: formIsDefault,
+      steps: formSteps.map((s, i) => ({
+        stepOrder: i + 1,
+        role: s.role,
+        specificApproverId: s.specificApproverId || undefined,
+        isRequired: s.isRequired,
+      })),
+    };
+
+    if (editingChainId) {
+      updateMutation.mutate({ id: editingChainId, ...payload }, {
+        onSuccess: () => { setDialogOpen(false); resetForm(); },
+      });
+    } else {
+      createMutation.mutate(payload, {
+        onSuccess: () => { setDialogOpen(false); resetForm(); },
+      });
+    }
   };
 
   /** 新增审批步骤 */
   const addStep = () => {
-    setNewSteps((prev) => [
+    setFormSteps((prev) => [
       ...prev,
       { stepOrder: prev.length + 1, role: 'maintenance_lead', specificApproverId: '', isRequired: true },
     ]);
@@ -271,12 +305,12 @@ function ApprovalChainSettings() {
 
   /** 删除审批步骤 */
   const removeStep = (index: number) => {
-    setNewSteps((prev) => prev.filter((_, i) => i !== index).map((s, i) => ({ ...s, stepOrder: i + 1 })));
+    setFormSteps((prev) => prev.filter((_, i) => i !== index).map((s, i) => ({ ...s, stepOrder: i + 1 })));
   };
 
   /** 更新审批步骤 */
   const updateStep = (index: number, field: string, value: string | boolean) => {
-    setNewSteps((prev) =>
+    setFormSteps((prev) =>
       prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)),
     );
   };
@@ -293,7 +327,7 @@ function ApprovalChainSettings() {
             <CardTitle>审批链配置</CardTitle>
             <CardDescription>配置不同工单类型和优先级的审批流程步骤</CardDescription>
           </div>
-          <Button size="sm" onClick={() => setCreateDialogOpen(true)}>
+          <Button size="sm" onClick={openCreate}>
             <Plus className="mr-1 h-4 w-4" />
             新增模板
           </Button>
@@ -329,7 +363,15 @@ function ApprovalChainSettings() {
                   <Button
                     size="icon"
                     variant="ghost"
-                    className="ml-auto h-8 w-8 text-destructive hover:text-destructive"
+                    className="ml-auto h-8 w-8"
+                    onClick={(e) => { e.stopPropagation(); openEdit(chain); }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-destructive hover:text-destructive"
                     onClick={(e) => {
                       e.stopPropagation();
                       deleteMutation.mutate(chain.id);
@@ -378,18 +420,18 @@ function ApprovalChainSettings() {
         )}
       </CardContent>
 
-      {/* 新建审批链模板对话框 */}
-      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+      {/* 新建/编辑审批链模板对话框 */}
+      <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) { setDialogOpen(false); resetForm(); } else { setDialogOpen(true); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>新增审批链模板</DialogTitle>
+            <DialogTitle>{editingChainId ? '编辑审批链模板' : '新增审批链模板'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>模板名称 *</Label>
               <Input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
                 placeholder="例如：高优先级工单审批流程"
               />
             </div>
@@ -397,24 +439,24 @@ function ApprovalChainSettings() {
               <div className="space-y-2">
                 <Label>适用工单类型</Label>
                 <Input
-                  value={newWorkOrderType}
-                  onChange={(e) => setNewWorkOrderType(e.target.value)}
+                  value={formWorkOrderType}
+                  onChange={(e) => setFormWorkOrderType(e.target.value)}
                   placeholder="留空表示通用"
                 />
               </div>
               <div className="space-y-2">
                 <Label>适用优先级</Label>
                 <Input
-                  value={newPriority}
-                  onChange={(e) => setNewPriority(e.target.value)}
+                  value={formPriority}
+                  onChange={(e) => setFormPriority(e.target.value)}
                   placeholder="留空表示通用"
                 />
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Switch
-                checked={newIsDefault}
-                onCheckedChange={setNewIsDefault}
+                checked={formIsDefault}
+                onCheckedChange={setFormIsDefault}
               />
               <Label>设为默认模板</Label>
             </div>
@@ -430,7 +472,7 @@ function ApprovalChainSettings() {
                   添加步骤
                 </Button>
               </div>
-              {newSteps.map((step, index) => (
+              {formSteps.map((step, index) => (
                 <div key={index} className="flex items-center gap-2 rounded-md border p-2">
                   <span className="w-6 text-center text-sm font-medium text-muted-foreground">
                     {index + 1}
@@ -452,7 +494,7 @@ function ApprovalChainSettings() {
                     variant="ghost"
                     className="h-8 w-8 text-destructive"
                     onClick={() => removeStep(index)}
-                    disabled={newSteps.length <= 1}
+                    disabled={formSteps.length <= 1}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -461,11 +503,14 @@ function ApprovalChainSettings() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => { setCreateDialogOpen(false); resetForm(); }}>
+              <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
                 取消
               </Button>
-              <Button onClick={handleCreate} disabled={!newName.trim() || createMutation.isPending}>
-                创建
+              <Button
+                onClick={handleSubmit}
+                disabled={!formName.trim() || createMutation.isPending || updateMutation.isPending}
+              >
+                {(createMutation.isPending || updateMutation.isPending) ? '保存中...' : (editingChainId ? '保存修改' : '创建')}
               </Button>
             </div>
           </div>
