@@ -30,9 +30,6 @@ test.describe('API 错误响应处理', () => {
     const errors = captureErrors(page);
 
     await login(page);
-    const token = await getToken(page);
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-
     // 拦截设备创建 API，返回 400 错误
     await page.route('**/api/v1/devices', async (route) => {
       if (route.request().method() === 'POST') {

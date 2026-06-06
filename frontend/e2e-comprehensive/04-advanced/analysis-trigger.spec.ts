@@ -12,7 +12,6 @@
  */
 import { test, expect } from '@playwright/test';
 import {
-  BASE_URL,
   login,
   captureErrors,
   getToken,

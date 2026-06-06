@@ -21,13 +21,7 @@ import {
 
 // 设备设置向导测试 — 验证设备创建流程的基本交互
 test.describe('04-设备设置向导', () => {
-  // 清理：删除向导测试创建的设备
-  let createdDeviceIds: string[] = [];
-
-  test.afterAll(async ({}, testInfo) => {
-    // 使用独立的 page 来清理（afterAll 没有自动注入 page）
-    // 清理逻辑在各自测试中处理
-  });
+  // 清理逻辑在各自测试中处理（afterAll 没有自动注入 page）
 
   /**
    * 进入设备设置向导的入口
@@ -274,7 +268,7 @@ test.describe('04-设备设置向导', () => {
     // 验证基本配置字段可见（使用更宽松的选择器适配不同 UI 实现）
     const codeField = page.getByLabel(/设备编码|device.*code|编码/i);
     const nameField = page.getByLabel(/设备名称|device.*name|名称/i);
-    const typeField = page.getByLabel(/设备类型|device.*type|类型/i);
+    page.getByLabel(/设备类型|device.*type|类型/i);
 
     // 对话框中至少有输入框（不限于标签匹配）
     const hasCode = await codeField.isVisible().catch(() => false);

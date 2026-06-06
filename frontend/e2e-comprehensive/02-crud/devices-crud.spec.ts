@@ -9,9 +9,8 @@
  * - 搜索过滤
  * - 状态筛选
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
-  BASE_URL,
   login,
   captureErrors,
   getToken,

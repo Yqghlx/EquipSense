@@ -9,8 +9,8 @@
  * - 多标签页登录状态同步
  * - 登出流程与状态清理
  */
-import { test, expect, type Page } from '@playwright/test';
-import { BASE_URL, login, captureErrors, getToken } from '../helpers';
+import { test, expect } from '@playwright/test';
+import { BASE_URL, login, captureErrors } from '../helpers';
 
 test.describe('01-登录功能', () => {
   test('1. 登录页面加载无错误 — 检查 placeholder 和 button 可见', async ({ page }) => {

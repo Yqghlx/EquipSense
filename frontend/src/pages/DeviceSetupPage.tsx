@@ -93,7 +93,7 @@ export default function DeviceSetupPage() {
   const [deviceName, setDeviceName] = useState('');
   const [pollIntervalMs, setPollIntervalMs] = useState(1000);
   const [dataPoints, setDataPoints] = useState<DataPointRow[]>([
-    { id: Date.now(), address: '', metric: '', dataType: 'float' },
+    { id: 1, address: '', metric: '', dataType: 'float' },
   ]);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -202,7 +202,7 @@ export default function DeviceSetupPage() {
   const addDataPoint = () => {
     setDataPoints((prev) => [
       ...prev,
-      { id: Date.now(), address: '', metric: '', dataType: 'float' },
+      { id: 1, address: '', metric: '', dataType: 'float' },
     ]);
   };
 

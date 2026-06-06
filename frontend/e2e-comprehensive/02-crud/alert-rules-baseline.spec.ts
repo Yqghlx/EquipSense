@@ -15,7 +15,7 @@
  * - 重新计算基线
  * - 删除规则
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   BASE_URL,
   login,
@@ -59,7 +59,7 @@ test.describe('基线告警规则 CRUD', () => {
     }
 
     // 验证标准差倍数输入框出现
-    const stddevInput = dialog.getByLabel(/标准差|stddev|multiplier/i)
+    dialog.getByLabel(/标准差|stddev|multiplier/i)
       .or(dialog.locator('input[type="number"]').filter({ hasText: '' }).first());
     // 至少应该有一个 number 类型的输入框
     expect(await dialog.locator('input[type="number"]').count()).toBeGreaterThanOrEqual(1);

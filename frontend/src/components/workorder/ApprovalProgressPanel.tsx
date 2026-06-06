@@ -110,7 +110,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
   };
 
   /** 处理审批驳回 */
-  const handleReject = (_stepOrder: number) => {
+  const handleReject = () => {
     rejectMutation.mutate(
       { id: workOrderId, comment: rejectComment || undefined },
       {
@@ -229,7 +229,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                         <Button
                           size="sm"
                           variant="destructive"
-                          onClick={() => handleReject(approval.stepOrder)}
+                          onClick={() => handleReject()}
                           disabled={rejectMutation.isPending}
                         >
                           确认驳回

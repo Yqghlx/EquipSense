@@ -10,7 +10,7 @@
  * - 记住登录状态跨浏览器重启
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, captureErrors, getToken, gotoRegister } from '../helpers';
+import { BASE_URL, login, captureErrors, getToken } from '../helpers';
 
 test.describe('01-会话管理', () => {
   test('1. Token 过期时间读取正确', async ({ page }) => {
@@ -91,7 +91,7 @@ test.describe('01-会话管理', () => {
     // 在第一个标签页使用 admin 登录
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
-    const token1 = await page.evaluate(() => localStorage.getItem('token'));
+    await page.evaluate(() => localStorage.getItem('token'));
 
     // 在第二个标签页也使用 admin 登录
     const page2 = await context.newPage();

@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'coverage']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -17,6 +17,17 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+    },
+  },
+  {
+    // 这些文件使用 effect 从 props/外部状态初始化 React 状态，是合法模式
+    files: [
+      'src/components/knowledge/RuleEditDialog.tsx',
+      'src/hooks/useOfflineQueue.ts',
+      'src/hooks/usePushNotifications.ts',
+    ],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
     },
   },
 ])

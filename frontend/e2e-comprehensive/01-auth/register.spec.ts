@@ -26,7 +26,6 @@ test.describe('01-注册功能', () => {
     await gotoRegister(page);
 
     // 步骤 1：选择套餐 — 点击第一个可用套餐
-    const planButtons = page.locator('button[type="button"]').filter({ hasText: /免费|free|starter|basic|pro|enterprise/i });
     const planCards = page.locator('.rounded-lg.border-2');
 
     // 优先点击套餐卡片，其次点击通用按钮
@@ -284,7 +283,7 @@ test.describe('01-注册功能', () => {
         await page.waitForTimeout(2000);
 
         // 验证出现注册失败提示
-        const errorText = page.getByText(/注册.*失败|failed|已存在|already exists|error/i);
+        page.getByText(/注册.*失败|failed|已存在|already exists|error/i);
         // 如果后端不校验邮箱重复，则仅验证页面仍停留在注册页（URL 未跳转到仪表盘）
         const currentUrl = page.url();
         expect(currentUrl).toContain('register');

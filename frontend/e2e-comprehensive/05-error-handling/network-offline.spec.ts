@@ -108,7 +108,7 @@ test.describe('网络异常降级', () => {
     await page.waitForTimeout(2000);
 
     // 记录当前设备数量
-    const rowsBefore = await page.locator('table tbody tr').count();
+    await page.locator('table tbody tr').count();
 
     // 设置离线
     await context.setOffline(true);
@@ -326,7 +326,7 @@ test.describe('网络异常降级', () => {
     const reconnectingText = page.getByText(
       /重连|reconnect|连接.*断|disconnected/i,
     );
-    const hasReconnecting = await reconnectingText.first().isVisible({ timeout: 3000 }).catch(() => false);
+    await reconnectingText.first().isVisible({ timeout: 3000 }).catch(() => false);
 
     // 等待自动重连
     await page.waitForTimeout(5000);

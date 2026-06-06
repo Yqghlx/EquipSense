@@ -21,7 +21,6 @@ import {
   createThresholdRule,
   deleteAlertRuleViaAPI,
   triggerAlertViaAPI,
-  getAlertsViaAPI,
   createTestWorkOrder,
 } from '../helpers';
 
@@ -238,7 +237,7 @@ test.describe('03-通知角标', () => {
     const initialBadge = await getBadgeNumber(page, /工单|work.?order/i);
 
     // 通过 API 创建工单
-    const workOrder = await createTestWorkOrder(page, 'E2E-BADGE-WO');
+    await createTestWorkOrder(page, 'E2E-BADGE-WO');
 
     // 等待前端更新（增加等待时间适应 SignalR 延迟）
     await page.waitForTimeout(5000);

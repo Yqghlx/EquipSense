@@ -14,7 +14,7 @@
  * - 不同状态的操作按钮
  * - 返回按钮
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   login,
   captureErrors,
@@ -34,7 +34,7 @@ test.describe('工单详情页', () => {
    * 辅助函数：创建工单并导航到详情页
    * @returns 工单数据
    */
-  async function createAndNavigateToDetail(page: Page, title?: string) {
+  async function createAndNavigateToDetail(page: import('@playwright/test').Page, title?: string) {
     const wo = await createTestWorkOrder(page, title || 'E2E详情测试');
     await gotoWorkOrderDetail(page, wo.id as string);
     await page.waitForTimeout(1500);
@@ -47,7 +47,7 @@ test.describe('工单详情页', () => {
 
   test('应正确加载工单详情页', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证页面标题可见
     await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 5000 });
@@ -62,7 +62,7 @@ test.describe('工单详情页', () => {
 
   test('应显示工单信息卡片', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证工单编码可见
     await expect(page.getByText(/WO|E2E/i)).toBeVisible({ timeout: 5000 }).catch(() => {});
@@ -77,7 +77,7 @@ test.describe('工单详情页', () => {
 
   test('高优先级应显示醒目颜色徽章', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证优先级徽章可见
     const priorityBadge = page.getByText(/高|紧急/i).first();
@@ -91,7 +91,7 @@ test.describe('工单详情页', () => {
 
   test('应显示工单当前状态徽章', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证状态徽章可见（待派工）
     const statusBadge = page.getByText(/待派工|Pending/i).first();
@@ -105,7 +105,7 @@ test.describe('工单详情页', () => {
 
   test('应显示工单编码', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证工单编码显示
     if (wo.workOrderCode) {
@@ -120,7 +120,7 @@ test.describe('工单详情页', () => {
 
   test('应显示工单创建时间', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证创建时间标签
     await expect(page.getByText(/创建时间/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
@@ -133,7 +133,7 @@ test.describe('工单详情页', () => {
 
   test('未指派时应显示占位符', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证指派人标签存在
     await expect(page.getByText(/指派/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
@@ -146,7 +146,7 @@ test.describe('工单详情页', () => {
 
   test('应显示关联信息卡片', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证关联信息卡片
     await expect(page.getByText(/关联/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
@@ -159,7 +159,7 @@ test.describe('工单详情页', () => {
 
   test('应显示操作记录/流转日志区域', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 验证操作记录区域
     const logSection = page.getByText(/操作记录|流转/i);
@@ -173,7 +173,7 @@ test.describe('工单详情页', () => {
 
   test('无关联告警时应显示空状态', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 查找根因描述区域
     await expect(page.getByText(/根因|暂无/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
@@ -211,7 +211,7 @@ test.describe('工单详情页', () => {
 
   test('待派工状态应显示派工按钮', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 查找派工按钮
     const dispatchBtn = page.getByRole('button', { name: /派工/i });
@@ -225,7 +225,7 @@ test.describe('工单详情页', () => {
 
   test('点击派工按钮应打开派工对话框', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     const dispatchBtn = page.getByRole('button', { name: /派工/i });
     if (await dispatchBtn.isVisible().catch(() => false)) {
@@ -322,7 +322,7 @@ test.describe('工单详情页', () => {
 
   test('点击取消按钮应打开取消原因对话框', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 查找取消按钮
     const cancelBtn = page.getByRole('button', { name: /取消工单|取消/i });
@@ -347,7 +347,7 @@ test.describe('工单详情页', () => {
 
   test('点击返回按钮应回到工单列表', async ({ page }) => {
     const errors = captureErrors(page);
-    const wo = await createAndNavigateToDetail(page);
+    await createAndNavigateToDetail(page);
 
     // 查找返回按钮
     const backBtn = page.getByRole('button').filter({ has: page.locator('svg') }).first();

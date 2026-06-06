@@ -20,7 +20,6 @@ import {
   triggerAlertViaAPI,
   createThresholdRule,
   deleteAlertRuleViaAPI,
-  getAlertsViaAPI,
 } from '../helpers';
 
 test.describe('03-告警触发', () => {

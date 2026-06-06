@@ -356,10 +356,10 @@ test.describe('04-工单完整生命周期', () => {
 
       // 查找日志中的状态变更记录
       const createdLog = logArea.getByText(/创建|created|新建/i);
-      const assignedLog = logArea.getByText(/派工|assigned|指派/i);
-      const startedLog = logArea.getByText(/开始|started|执行/i);
-      const completedLog = logArea.getByText(/完成|completed/i);
-      const closedLog = logArea.getByText(/关闭|closed/i);
+      logArea.getByText(/派工|assigned|指派/i);
+      logArea.getByText(/开始|started|执行/i);
+      logArea.getByText(/完成|completed/i);
+      logArea.getByText(/关闭|closed/i);
 
       // 至少应该有创建日志
       await expect(createdLog.first()).toBeVisible({ timeout: 3000 }).catch(() => {

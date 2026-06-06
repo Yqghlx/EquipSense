@@ -9,7 +9,7 @@ export function useOfflineStatus() {
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true,
   );
-  const [lastChangedAt, setLastChangedAt] = useState<number>(Date.now());
+  const [lastChangedAt, setLastChangedAt] = useState<number>(0);
 
   const handleOnline = useCallback(() => {
     setIsOnline(true);

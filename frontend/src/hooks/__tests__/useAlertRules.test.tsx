@@ -146,6 +146,7 @@ describe('useCreateAlertRule', () => {
       { wrapper: createWrapper() },
     );
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 测试中 AlertRule 和 CreateAlertRuleRequest 的 conditions 类型不同
     result.current.mutate(newRule as any);
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));

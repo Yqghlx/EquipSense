@@ -163,7 +163,7 @@ test.describe('阈值告警规则 CRUD', () => {
     const operatorSelects = dialog.locator('button[role="combobox"]');
     // 运算符下拉通常在规则类型下拉之后
     for (let i = 0; i < await operatorSelects.count(); i++) {
-      const _text = await operatorSelects.nth(i).textContent() ?? '';
+      await operatorSelects.nth(i).textContent();
       // 点击第二个 combobox（运算符下拉）
       if (i === 1) {
         await operatorSelects.nth(i).click();

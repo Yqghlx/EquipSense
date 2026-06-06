@@ -12,7 +12,7 @@
  * - 编辑规则
  * - 删除规则
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   BASE_URL,
   login,

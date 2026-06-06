@@ -21,6 +21,28 @@ export function useOfflineQueue() {
     setPendingCount(count);
   }, []);
 
+  /**
+   * 立即同步所有待处理操作
+   */
+  const syncNow = useCallback(async (): Promise<SyncResult> => {
+    setIsSyncing(true);
+    try {
+      const result = await offlineQueue.sync();
+      setLastSyncResult(result);
+      await refreshCount();
+
+      if (result.succeeded.length > 0) {
+        queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+        queryClient.invalidateQueries({ queryKey: ['devices'] });
+        queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      }
+
+      return result;
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [queryClient, refreshCount]);
+
   useEffect(() => {
     refreshCount();
   }, [refreshCount, isOnline]);
@@ -44,31 +66,8 @@ export function useOfflineQueue() {
         await offlineQueue.registerBackgroundSync();
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isOnline, refreshCount],
+    [isOnline, refreshCount, syncNow],
   );
-
-  /**
-   * 立即同步所有待处理操作
-   */
-  const syncNow = useCallback(async (): Promise<SyncResult> => {
-    setIsSyncing(true);
-    try {
-      const result = await offlineQueue.sync();
-      setLastSyncResult(result);
-      await refreshCount();
-
-      if (result.succeeded.length > 0) {
-        queryClient.invalidateQueries({ queryKey: ['work-orders'] });
-        queryClient.invalidateQueries({ queryKey: ['devices'] });
-        queryClient.invalidateQueries({ queryKey: ['alerts'] });
-      }
-
-      return result;
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [queryClient, refreshCount]);
 
   /** 获取所有待处理操作 */
   const getPending = useCallback(async (): Promise<PendingOperation[]> => {

@@ -6,7 +6,7 @@
  * 所有请求自动获取 Token 并携带认证头。
  */
 import { expect, type Page } from '@playwright/test';
-import { getToken, getTokenForRole } from './auth';
+import { getToken } from './auth';
 import { BASE_URL } from './auth';
 
 // ---------------------------------------------------------------------------

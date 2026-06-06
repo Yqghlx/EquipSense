@@ -13,12 +13,10 @@
  * - 搜索过滤
  * - 故障案例 Tab
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
-  BASE_URL,
   login,
   captureErrors,
-  getToken,
   navigateViaSidebar,
 } from '../helpers';
 

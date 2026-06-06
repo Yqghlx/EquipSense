@@ -325,7 +325,7 @@ test.describe('Unicode 和特殊字符', () => {
     });
 
     if (resp.ok()) {
-      const wo = await resp.json();
+      await resp.json();
 
       // beforeEach 已登录，直接导航到工单页面
       await navigateViaSidebar(page, /工单/i);

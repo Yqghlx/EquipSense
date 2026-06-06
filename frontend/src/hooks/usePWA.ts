@@ -16,12 +16,12 @@ interface BeforeInstallPromptEvent extends Event {
 export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstallable, setIsInstallable] = useState(false);
-  const [isInstalled, setIsInstalled] = useState(false);
+  // 使用初始化函数避免在渲染阶段调用 matchMedia（副作用）
+  const [isInstalled, setIsInstalled] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(display-mode: standalone)').matches : false,
+  );
 
   useEffect(() => {
-    // 检查是否已经以 standalone 模式运行（即已安装）
-    setIsInstalled(window.matchMedia('(display-mode: standalone)').matches);
-
     // 拦截浏览器默认安装提示，延迟到用户主动触发
     const handler = (e: Event) => {
       e.preventDefault();

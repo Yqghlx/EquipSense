@@ -92,7 +92,7 @@ test.describe('04-知识库规则审批', () => {
       },
     };
     const rule = await createPendingRule(page, options);
-    const ruleId = rule.id as string;
+    void rule;
 
     // 导航到待审批 Tab
     await gotoPendingRulesTab(page);
@@ -110,7 +110,7 @@ test.describe('04-知识库规则审批', () => {
     const errors = captureErrors(page);
 
     // 创建待审批规则
-    const rule = await createPendingRule(page, {
+    await createPendingRule(page, {
       name: 'E2E-详情-测试',
       recommendation: '建议降低设备运行负荷',
     });
@@ -146,7 +146,7 @@ test.describe('04-知识库规则审批', () => {
     const errors = captureErrors(page);
 
     // 创建待审批规则
-    const rule = await createPendingRule(page, {
+    await createPendingRule(page, {
       name: 'E2E-审批通过-测试',
       recommendation: '建议更换磨损零件',
     });
@@ -227,7 +227,7 @@ test.describe('04-知识库规则审批', () => {
     const errors = captureErrors(page);
 
     // 创建待审批规则
-    const rule = await createPendingRule(page, {
+    await createPendingRule(page, {
       name: 'E2E-审批拒绝-测试',
       recommendation: '建议增加巡检频率',
     });
@@ -306,7 +306,7 @@ test.describe('04-知识库规则审批', () => {
     const errors = captureErrors(page);
 
     // 创建待审批规则
-    const rule = await createPendingRule(page, {
+    await createPendingRule(page, {
       name: 'E2E-编辑测试',
       recommendation: '建议调整参数',
       conditions: {

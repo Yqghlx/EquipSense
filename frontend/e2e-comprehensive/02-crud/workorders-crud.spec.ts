@@ -13,9 +13,8 @@
  * - 分页功能
  * - 排序功能
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
-  BASE_URL,
   login,
   captureErrors,
   getToken,
@@ -393,7 +392,7 @@ test.describe('工单 CRUD', () => {
   test('搜索关键字应正确过滤工单列表', async ({ page }) => {
     const errors = captureErrors(page);
     const token = await getToken(page);
-    const wo = await createWorkOrderViaAPI(page, token, {
+    await createWorkOrderViaAPI(page, token, {
       title: 'E2E搜索测试工单CRUD',
       type: 'Corrective',
       priority: 'High',
@@ -528,7 +527,7 @@ test.describe('工单 CRUD', () => {
   test('点击工单行应跳转到详情页', async ({ page }) => {
     const errors = captureErrors(page);
     const token = await getToken(page);
-    const wo = await createWorkOrderViaAPI(page, token, {
+    await createWorkOrderViaAPI(page, token, {
       title: 'E2E行点击跳转测试',
       type: 'Corrective',
       priority: 'High',
