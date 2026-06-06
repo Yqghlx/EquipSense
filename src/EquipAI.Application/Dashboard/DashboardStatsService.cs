@@ -21,21 +21,18 @@ public class DashboardStatsService
 
     /// <summary>
     /// 获取当前租户的仪表盘统计数据
+    ///
+    /// 注意：EF Core DbContext 不是线程安全的，不能并行执行多个查询。
+    /// 此处改为顺序执行，每次查询间隔极短（微秒级网络往返已足够快）。
     /// </summary>
     public async Task<DashboardStats> GetStatsAsync(Guid tenantId, CancellationToken ct = default)
     {
-        // 并行发起所有统计查询以减少总延迟
-        var devicesTask = GetDeviceStatsAsync(tenantId, ct);
-        var alertStatsTask = GetAlertStatsAsync(tenantId, ct);
-        var workOrderStatsTask = GetWorkOrderStatsAsync(tenantId, ct);
-        var alertTrendTask = GetAlertTrendAsync(tenantId, ct);
-        var workOrderTrendTask = GetWorkOrderTrendAsync(tenantId, ct);
-
-        await Task.WhenAll(devicesTask, alertStatsTask, workOrderStatsTask, alertTrendTask, workOrderTrendTask);
-
-        var deviceStats = await devicesTask;
-        var alertStats = await alertStatsTask;
-        var workOrderStats = await workOrderStatsTask;
+        // 顺序执行所有统计查询（EF Core DbContext 不支持并发操作）
+        var deviceStats = await GetDeviceStatsAsync(tenantId, ct);
+        var alertStats = await GetAlertStatsAsync(tenantId, ct);
+        var workOrderStats = await GetWorkOrderStatsAsync(tenantId, ct);
+        var alertTrend = await GetAlertTrendAsync(tenantId, ct);
+        var workOrderTrend = await GetWorkOrderTrendAsync(tenantId, ct);
 
         return new DashboardStats
         {
@@ -48,8 +45,8 @@ public class DashboardStatsService
                 : 0,
             AlertsBySeverity = alertStats.BySeverity,
             WorkOrdersByStatus = workOrderStats.ByStatus,
-            AlertTrend = await alertTrendTask,
-            WorkOrderTrend = await workOrderTrendTask,
+            AlertTrend = alertTrend,
+            WorkOrderTrend = workOrderTrend,
         };
     }
 

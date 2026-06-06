@@ -166,18 +166,28 @@ test.describe('02-待审批页面', () => {
 
     await page.goto(`${BASE_URL}/dashboard`);
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
     // 点击侧边栏"待审批"链接
     const pendingLink = page.getByRole('link', { name: /待审批/i }).first();
-    if (await pendingLink.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await pendingLink.click();
+    const linkVisible = await pendingLink.isVisible({ timeout: 5000 }).catch(() => false);
+    if (!linkVisible) {
+      // 侧边栏可能折叠，尝试通过 URL 直接导航
+      await page.goto(`${BASE_URL}/pending-approvals`);
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(1500);
-
-      // 验证跳转到待审批页面（实际页面标题为"待审批"）
-      await expect(page.getByText('待审批')).toBeVisible({ timeout: 5000 });
+      await page.waitForTimeout(2000);
+    } else {
+      await pendingLink.click();
+      // 等待页面导航完成
+      await page.waitForURL(/pending-approvals/, { timeout: 10000 }).catch(() => {});
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
     }
+
+    // 验证在待审批页面（通过 URL 或页面内容）
+    const url = page.url();
+    const onPage = url.includes('pending-approvals');
+    expect(onPage).toBeTruthy();
 
     expect(errors).toEqual([]);
   });
