@@ -8,16 +8,14 @@ public interface IMlAnomalyDetectionService
 {
     /// <summary>
     /// 检测指定设备指标是否存在异常
-    /// 从数据库获取最近 7 天的历史数据作为训练样本，将当前值附加到序列末尾进行检测
     /// </summary>
-    /// <param name="tenantId">租户 ID</param>
-    /// <param name="deviceId">设备 ID</param>
-    /// <param name="metric">指标名称</param>
-    /// <param name="currentValue">当前指标值</param>
-    /// <param name="ct">取消令牌</param>
-    /// <returns>异常检测结果；样本不足或检测失败时返回 null</returns>
     Task<MlAnomalyResult?> DetectAsync(
         Guid tenantId, Guid deviceId, string metric, double currentValue, CancellationToken ct = default);
+
+    /// <summary>
+    /// 获取指定设备指标的基线统计信息（均值、标准差、样本数）
+    /// </summary>
+    Task<BaselineStats?> GetBaselineStatsAsync(Guid deviceId, string metric, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -36,3 +34,22 @@ public record MlAnomalyResult(
     string Description,
     int SampleCount = 0,
     int WindowSize = 0);
+
+/// <summary>
+/// 基线统计信息 — 设备指标的历史统计摘要
+/// </summary>
+/// <param name="Metric">指标名称</param>
+/// <param name="Mean">历史均值</param>
+/// <param name="StdDev">历史标准差</param>
+/// <param name="Min">最小值</param>
+/// <param name="Max">最大值</param>
+/// <param name="SampleCount">样本数量</param>
+/// <param name="LastTrainingTime">最后训练时间</param>
+public record BaselineStats(
+    string Metric,
+    double Mean,
+    double StdDev,
+    double Min,
+    double Max,
+    int SampleCount,
+    DateTime LastTrainingTime);

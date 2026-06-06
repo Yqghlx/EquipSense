@@ -243,6 +243,24 @@ try
     }
 
     Log.Information("EquipAI 后端服务启动成功");
+
+    // 配置缺失警告 — 生产环境应配置以下项
+    var smtpHost = builder.Configuration["Smtp:Host"];
+    if (string.IsNullOrEmpty(smtpHost))
+        Log.Warning("SMTP 未配置，邮件通知功能不可用。请在 appsettings 或环境变量中设置 Smtp 节");
+
+    var vapidSubject = builder.Configuration["Vapid:Subject"];
+    if (string.IsNullOrEmpty(vapidSubject))
+        Log.Warning("VAPID 未配置，浏览器推送通知功能不可用。请设置 Vapid:Subject / PublicKey / PrivateKey");
+
+    var mqttBroker = builder.Configuration["Mqtt:Broker"];
+    if (string.IsNullOrEmpty(mqttBroker))
+        Log.Warning("MQTT Broker 未配置，遥测数据接收功能不可用。请设置 Mqtt:Broker");
+
+    var llmKey = builder.Configuration["LLM:ApiKey"];
+    if (string.IsNullOrEmpty(llmKey))
+        Log.Warning("LLM API Key 未配置，AI 分析将降级为规则匹配模式。设置 LLM:ApiKey 以启用完整 AI 诊断");
+
     app.Run();
 }
 catch (Exception ex)

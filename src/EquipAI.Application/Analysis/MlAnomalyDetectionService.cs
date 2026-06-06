@@ -142,4 +142,33 @@ public class MlAnomalyDetectionService : IMlAnomalyDetectionService
     {
         public float[] Prediction { get; set; } = [];
     }
+
+    /// <inheritdoc />
+    public async Task<BaselineStats?> GetBaselineStatsAsync(Guid deviceId, string metric, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var cutoff = DateTime.UtcNow.AddDays(-TrainingWindowDays);
+        var values = await db.DeviceTelemetry
+            .Where(t => t.DeviceId == deviceId && t.Metric == metric && t.Time >= cutoff)
+            .Where(t => t.Value != null)
+            .Select(t => t.Value!.Value)
+            .ToListAsync(ct);
+
+        if (values.Count < MinSampleCount)
+            return null;
+
+        var mean = values.Average();
+        var stdDev = Math.Sqrt(values.Sum(v => Math.Pow(v - mean, 2)) / values.Count);
+
+        return new BaselineStats(
+            Metric: metric,
+            Mean: mean,
+            StdDev: stdDev,
+            Min: values.Min(),
+            Max: values.Max(),
+            SampleCount: values.Count,
+            LastTrainingTime: DateTime.UtcNow);
+    }
 }
