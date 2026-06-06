@@ -337,12 +337,18 @@ export async function createTestWorkOrder(
   if (deviceId) data.deviceId = deviceId;
   if (description) data.description = description;
 
-  const resp = await page.request.post(`${BASE_URL}/api/v1/work-orders`, {
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    data,
-  });
-  expect(resp.ok()).toBeTruthy();
-  return resp.json();
+  /** 并行测试时 API 可能瞬时失败，最多重试 3 次 */
+  let resp: import('@playwright/test').APIResponse | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    resp = await page.request.post(`${BASE_URL}/api/v1/work-orders`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data,
+    });
+    if (resp.ok()) break;
+    if (attempt < 2) await page.waitForTimeout(500);
+  }
+  expect(resp!.ok()).toBeTruthy();
+  return resp!.json();
 }
 
 /**
