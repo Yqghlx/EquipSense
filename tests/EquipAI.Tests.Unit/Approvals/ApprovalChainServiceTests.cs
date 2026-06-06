@@ -384,6 +384,96 @@ public class ApprovalChainServiceTests : IAsyncDisposable
     /// 可变的测试用租户上下文 — 允许在测试方法中动态设置 TenantId
     /// 注册为 Singleton，确保所有 scope（包括 Service 内部通过 IServiceScopeFactory 创建的）共享同一个实例
     /// </summary>
+    [Fact]
+    public async Task CreateApprovalRecordsAsync_无匹配模板不应创建审批记录()
+    {
+        _tenantContext.SetTenantId(Guid.NewGuid());
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+
+        var woId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = woId, TenantId = _tenantContext.TenantId,
+            Title = "无模板工单", Status = WorkOrderStatus.InProgress
+        });
+        await db.SaveChangesAsync();
+
+        await service.CreateApprovalRecordsAsync(
+            _tenantContext.TenantId, woId, WorkOrderType.Corrective, WorkOrderPriority.Medium);
+
+        var approvals = await db.WorkOrderApprovals.IgnoreQueryFilters().ToListAsync();
+        approvals.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListTemplatesAsync_应返回当前租户模板()
+    {
+        _tenantContext.SetTenantId(Guid.NewGuid());
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+
+        db.ApprovalChainTemplates.Add(new ApprovalChainTemplate
+        {
+            TenantId = _tenantContext.TenantId, Name = "租户模板",
+            Enabled = true, IsDefault = true
+        });
+        await db.SaveChangesAsync();
+
+        var templates = await service.ListTemplatesAsync(_tenantContext.TenantId);
+        templates.Should().ContainSingle(t => t.Name == "租户模板");
+    }
+
+    [Fact]
+    public async Task GetApprovalsAsync_应返回工单的审批记录()
+    {
+        _tenantContext.SetTenantId(Guid.NewGuid());
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+
+        var woId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = woId, TenantId = _tenantContext.TenantId,
+            Title = "审批测试", Status = WorkOrderStatus.InProgress
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = _tenantContext.TenantId, WorkOrderId = woId,
+            StepOrder = 1, ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending, ApproverId = Guid.NewGuid()
+        });
+        await db.SaveChangesAsync();
+
+        var approvals = await service.GetApprovalsAsync(_tenantContext.TenantId, woId);
+        approvals.Should().HaveCount(1);
+        approvals[0].ExpectedRole.Should().Be("maintenance_lead");
+    }
+
+    [Fact]
+    public async Task GetPendingApprovalsAsync_应返回待审批记录()
+    {
+        _tenantContext.SetTenantId(Guid.NewGuid());
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+
+        var approverId = Guid.NewGuid();
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = _tenantContext.TenantId, WorkOrderId = Guid.NewGuid(),
+            StepOrder = 1, ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending, ApproverId = approverId
+        });
+        await db.SaveChangesAsync();
+
+        var pending = await service.GetPendingApprovalsAsync(approverId, null);
+        pending.Should().HaveCount(1);
+    }
+
     private class MutableTenantContext : ITenantContext
     {
         public Guid TenantId { get; private set; }

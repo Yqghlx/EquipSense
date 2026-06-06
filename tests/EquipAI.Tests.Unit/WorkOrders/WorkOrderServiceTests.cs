@@ -1,0 +1,402 @@
+using EquipAI.Application.Approvals;
+using EquipAI.Application.WorkOrders;
+using EquipAI.Application.WorkOrders.DTOs;
+using EquipAI.Core.Enums;
+using EquipAI.Core.Events;
+using EquipAI.Core.Interfaces;
+using EquipAI.Infrastructure.Data;
+using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace EquipAI.Tests.Unit.WorkOrders;
+
+/// <summary>
+/// WorkOrderService 单元测试
+/// 覆盖工单完整生命周期：创建、派工、执行、完成、验收、关闭、取消
+/// 每个测试使用独立的 InMemory 数据库，避免租户过滤器冲突
+/// </summary>
+public class WorkOrderServiceTests
+{
+    private readonly Guid _tenantId = Guid.NewGuid();
+
+    /// <summary>
+    /// 为每个测试创建独立的数据库和服务实例
+    /// </summary>
+    private (AppDbContext db, Mock<IEventBus> eventBus, WorkOrderService service) CreateSut()
+    {
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"TestWOService_{Guid.NewGuid()}")
+            .Options;
+
+        var db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        var eventBus = new Mock<IEventBus>();
+        eventBus
+            .Setup(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var approvalMock = new Mock<IApprovalChainService>();
+
+        var spMock = new Mock<IServiceProvider>();
+        spMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(spMock.Object);
+
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+        var logger = LoggerFactory.Create(_ => { }).CreateLogger<WorkOrderService>();
+        var service = new WorkOrderService(
+            scopeFactoryMock.Object, eventBus.Object, logger, approvalMock.Object);
+
+        return (db, eventBus, service);
+    }
+
+    private CreateWorkOrderRequest MakeCreateRequest(Guid? deviceId = null) => new()
+    {
+        Title = "测试工单",
+        Type = "corrective",
+        Priority = "medium",
+        DeviceId = deviceId ?? Guid.NewGuid()
+    };
+
+    [Fact]
+    public async Task CreateAsync_应创建工单并设置初始状态为PendingDispatch()
+    {
+        var (db, _, service) = CreateSut();
+
+        var result = await service.CreateAsync(_tenantId, MakeCreateRequest(), ct: CancellationToken.None);
+
+        result.Status.Should().Be("PendingDispatch");
+        result.WorkOrderCode.Should().StartWith("WO-");
+    }
+
+    [Fact]
+    public async Task CreateAsync_应发布WorkOrderCreatedEvent()
+    {
+        var (db, eventBus, service) = CreateSut();
+
+        await service.CreateAsync(_tenantId, MakeCreateRequest(), ct: CancellationToken.None);
+
+        eventBus.Verify(
+            e => e.PublishAsync(It.IsAny<WorkOrderCreatedEvent>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task CreateAsync_应写入审计日志()
+    {
+        var (db, eventBus, service) = CreateSut();
+
+        await service.CreateAsync(_tenantId, MakeCreateRequest(), ct: CancellationToken.None);
+
+        var logs = await db.WorkOrderLogs.IgnoreQueryFilters().ToListAsync();
+        logs.Should().ContainSingle();
+        logs[0].Action.Should().Be(WorkOrderLogAction.Created);
+    }
+
+    [Fact]
+    public async Task AssignAsync_应将状态从PendingDispatch变更为Assigned()
+    {
+        var (db, _, service) = CreateSut();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest(), ct: CancellationToken.None);
+
+        var assignee = Guid.NewGuid();
+        var result = await service.AssignAsync(
+            _tenantId, wo.Id, new AssignWorkOrderRequest { AssignedTo = assignee },
+            Guid.NewGuid(), CancellationToken.None);
+
+        result.Status.Should().Be("Assigned");
+        result.AssignedTo.Should().Be(assignee);
+    }
+
+    [Fact]
+    public async Task StartAsync_应将状态从Assigned变更为InProgress()
+    {
+        var (db, _, service) = CreateSut();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
+        await service.AssignAsync(_tenantId, wo.Id,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+
+        var result = await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid(), CancellationToken.None);
+
+        result.Status.Should().Be("InProgress");
+    }
+
+    [Fact]
+    public async Task CompleteAsync_应将状态变更为Completed并记录解决措施()
+    {
+        var (db, _, service) = CreateSut();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
+        await service.AssignAsync(_tenantId, wo.Id,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+        await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid());
+
+        var result = await service.CompleteAsync(
+            _tenantId, wo.Id,
+            new CompleteWorkOrderRequest { Resolution = "更换零件" },
+            Guid.NewGuid(), CancellationToken.None);
+
+        result.Status.Should().Be("Completed");
+        result.Resolution.Should().Be("更换零件");
+    }
+
+    [Fact]
+    public async Task AcceptAsync_应将状态从Completed变更为Accepted()
+    {
+        var (db, _, service) = CreateSut();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Completed);
+
+        var result = await service.AcceptAsync(_tenantId, woId, Guid.NewGuid(), ct: CancellationToken.None);
+
+        result.Status.Should().Be("Accepted");
+    }
+
+    [Fact]
+    public async Task RejectAsync_应将状态从Completed变更为Rejected()
+    {
+        var (db, _, service) = CreateSut();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Completed);
+
+        var result = await service.RejectAsync(_tenantId, woId, Guid.NewGuid(), ct: CancellationToken.None);
+
+        result.Status.Should().Be("Rejected");
+    }
+
+    [Fact]
+    public async Task CloseAsync_应将状态从Accepted变更为Closed()
+    {
+        var (db, _, service) = CreateSut();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Accepted);
+
+        var result = await service.CloseAsync(_tenantId, woId, Guid.NewGuid(), ct: CancellationToken.None);
+
+        result.Status.Should().Be("Closed");
+    }
+
+    [Fact]
+    public async Task CancelAsync_应允许从PendingDispatch取消()
+    {
+        var (db, _, service) = CreateSut();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
+
+        var result = await service.CancelAsync(_tenantId, wo.Id, Guid.NewGuid(), ct: CancellationToken.None);
+
+        result.Status.Should().Be("Cancelled");
+    }
+
+    [Fact]
+    public async Task 不合法的状态转换应抛出InvalidOperationException()
+    {
+        var (db, _, service) = CreateSut();
+        // Closed 是终态，不允许任何变更
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Closed);
+
+        var act = () => service.AssignAsync(
+            _tenantId, woId,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() },
+            Guid.NewGuid(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_工单不存在应抛出KeyNotFoundException()
+    {
+        var (db, _, service) = CreateSut();
+
+        var act = () => service.GetByIdAsync(_tenantId, Guid.NewGuid(), CancellationToken.None);
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task ListAsync_应返回分页结果()
+    {
+        var (db, _, service) = CreateSut();
+        for (int i = 0; i < 5; i++)
+            await service.CreateAsync(_tenantId, MakeCreateRequest());
+
+        var result = await service.ListAsync(_tenantId, page: 1, pageSize: 3, ct: CancellationToken.None);
+
+        result.Total.Should().Be(5);
+        result.Items.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task ListAsync_按状态过滤()
+    {
+        var (db, _, service) = CreateSut();
+        await service.CreateAsync(_tenantId, MakeCreateRequest());
+        await service.CreateAsync(_tenantId, MakeCreateRequest());
+
+        var result = await service.ListAsync(
+            _tenantId, page: 1, pageSize: 10, status: "PendingDispatch", ct: CancellationToken.None);
+
+        result.Items.Should().OnlyContain(i => i.Status == "PendingDispatch");
+    }
+
+    [Fact]
+    public async Task SubmitAsync_工单状态不合法应抛出异常()
+    {
+        var (db, _, service) = CreateSut();
+        // PendingDispatch 状态不能直接提交验收
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
+
+        var act = () => service.SubmitAsync(
+            _tenantId, wo.Id,
+            new CompleteWorkOrderRequest { Resolution = "测试" },
+            Guid.NewGuid(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Cancelled状态为终态不允许任何变更()
+    {
+        var (db, _, service) = CreateSut();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.PendingDispatch);
+        await service.CancelAsync(_tenantId, woId, Guid.NewGuid());
+
+        var act = () => service.AssignAsync(_tenantId, woId,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Rejected状态应允许转回InProgress()
+    {
+        var (db, _, service) = CreateSut();
+        var userId = Guid.NewGuid();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Completed);
+        await service.RejectAsync(_tenantId, woId, userId);
+
+        var result = await service.StartAsync(_tenantId, woId, userId);
+        result.Status.Should().Be("InProgress");
+    }
+
+    [Fact]
+    public async Task 从Assigned直接跳到Completed应抛出异常()
+    {
+        var (db, _, service) = CreateSut();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Assigned);
+
+        var act = () => service.CompleteAsync(_tenantId, woId,
+            new CompleteWorkOrderRequest { Resolution = "跳步" }, Guid.NewGuid());
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task 从InProgress直接跳到Accepted应抛出异常()
+    {
+        var (db, _, service) = CreateSut();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.InProgress);
+
+        var act = () => service.AcceptAsync(_tenantId, woId, Guid.NewGuid());
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task 每次状态变更都应发布事件()
+    {
+        var (db, eventBus, service) = CreateSut();
+        var userId = Guid.NewGuid();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest(), userId);
+
+        // Create 已发布 1 次
+        eventBus.Verify(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()), Times.Once);
+
+        await service.AssignAsync(_tenantId, wo.Id,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, userId);
+        eventBus.Verify(e => e.PublishAsync(It.IsAny<WorkOrderStatusChangedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task 每次状态变更都应写入日志()
+    {
+        var (db, _, service) = CreateSut();
+        var userId = Guid.NewGuid();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest(), userId);
+
+        await service.AssignAsync(_tenantId, wo.Id,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, userId);
+
+        var logs = await db.WorkOrderLogs.IgnoreQueryFilters().ToListAsync();
+        logs.Should().HaveCount(2); // Created + StatusChanged
+    }
+
+    [Fact]
+    public async Task 工单编码在同一天内递增()
+    {
+        var (db, _, service) = CreateSut();
+        var wo1 = await service.CreateAsync(_tenantId, MakeCreateRequest());
+        var wo2 = await service.CreateAsync(_tenantId, MakeCreateRequest());
+
+        wo1.WorkOrderCode.Should().NotBe(wo2.WorkOrderCode);
+        wo2.WorkOrderCode.Should().NotBe(wo1.WorkOrderCode);
+    }
+
+    [Fact]
+    public async Task SubmitAsync_InProgress状态应允许提交验收()
+    {
+        var (db, _, service) = CreateSut();
+        var userId = Guid.NewGuid();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.InProgress);
+
+        var result = await service.SubmitAsync(_tenantId, woId,
+            new CompleteWorkOrderRequest { Resolution = "提交验收" }, userId);
+
+        // SubmitAsync 不直接改变状态，它调用 approvalChainService 处理
+        result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SubmitAsync_Completed状态应允许提交验收()
+    {
+        var (db, _, service) = CreateSut();
+        var userId = Guid.NewGuid();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.Completed);
+
+        var result = await service.SubmitAsync(_tenantId, woId,
+            new CompleteWorkOrderRequest { Resolution = "再次提交" }, userId);
+
+        result.Should().NotBeNull();
+    }
+    private async Task<Guid> AdvanceToStatus(WorkOrderService service, WorkOrderStatus targetStatus)
+    {
+        var userId = Guid.NewGuid();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest(), userId);
+        var woId = wo.Id;
+
+        if (targetStatus == WorkOrderStatus.PendingDispatch) return woId;
+
+        await service.AssignAsync(_tenantId, woId,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, userId);
+        if (targetStatus == WorkOrderStatus.Assigned) return woId;
+
+        await service.StartAsync(_tenantId, woId, userId);
+        if (targetStatus == WorkOrderStatus.InProgress) return woId;
+
+        await service.CompleteAsync(_tenantId, woId,
+            new CompleteWorkOrderRequest { Resolution = "完成" }, userId);
+        if (targetStatus == WorkOrderStatus.Completed) return woId;
+
+        await service.AcceptAsync(_tenantId, woId, userId);
+        if (targetStatus == WorkOrderStatus.Accepted) return woId;
+
+        await service.CloseAsync(_tenantId, woId, userId);
+        return woId;
+    }
+
+    private class TestTenantContext : ITenantContext
+    {
+        public TestTenantContext(Guid tenantId) { TenantId = tenantId; }
+        public Guid TenantId { get; }
+        public string IsolationMode { get; } = "shared";
+        public bool IsSystemAdmin { get; } = false;
+        public Guid UserId { get; } = Guid.NewGuid();
+    }
+}

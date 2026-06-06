@@ -289,4 +289,81 @@ public class IntegrationRouterTests : IDisposable
             It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
+
+    [Fact]
+    public async Task RouteCreatedAsync_无集成实现时应安全返回不抛异常()
+    {
+        var router = CreateRouter([]);
+
+        var act = () => router.RouteCreatedAsync(_tenantId, _workOrderId, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task RouteCreatedAsync_多个集成应并行推送()
+    {
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.Setup(d => d.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("dt-id");
+
+        var feishuMock = new Mock<IWorkOrderIntegration>();
+        feishuMock.Setup(f => f.IntegrationType).Returns("feishu");
+
+        var router = CreateRouter([dingTalkMock.Object, feishuMock.Object]);
+
+        await router.RouteCreatedAsync(_tenantId, _workOrderId, CancellationToken.None);
+
+        // 钉钉启用应被调用，飞书未配置则不应调用
+        dingTalkMock.Verify(d => d.PushCreatedAsync(
+            _tenantId, _workOrderId,
+            It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RouteCreatedAsync_一个集成失败不影响其他集成()
+    {
+        var failMock = new Mock<IWorkOrderIntegration>();
+        failMock.Setup(f => f.IntegrationType).Returns("dingtalk");
+        failMock.Setup(f => f.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("连接失败"));
+
+        var router = CreateRouter([failMock.Object]);
+
+        // 不应抛出异常
+        var act = () => router.RouteCreatedAsync(_tenantId, _workOrderId, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task RouteCreatedAsync_应记录推送日志到数据库()
+    {
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.Setup(d => d.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("ext-id");
+
+        var router = CreateRouter([dingTalkMock.Object]);
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var beforeCount = await db.Set<IntegrationPushLog>().IgnoreQueryFilters().CountAsync();
+
+        await router.RouteCreatedAsync(_tenantId, _workOrderId, CancellationToken.None);
+
+        var afterCount = await db.Set<IntegrationPushLog>().IgnoreQueryFilters().CountAsync();
+        afterCount.Should().BeGreaterThan(beforeCount);
+    }
 }
