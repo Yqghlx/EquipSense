@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
 import { Plus, Trash2, ChevronDown, ChevronRight, Search, UserCog } from 'lucide-react';
+import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -469,6 +471,69 @@ function ApprovalChainSettings() {
           </div>
         </DialogContent>
       </Dialog>
+    </Card>
+  );
+}
+
+/**
+ * 系统信息卡片
+ *
+ * 调用 GET /api/v1/system/info 展示后端版本、运行环境和启动时间。
+ */
+function SystemInfoCard() {
+  const { t } = useTranslation();
+  const { data, isLoading } = useQuery({
+    queryKey: ['system', 'info'],
+    queryFn: async () => {
+      const { data } = await api.get('/system/info');
+      return data as { version: string; environment: string; uptime: string };
+    },
+    staleTime: 60_000,
+  });
+
+  /** 将 ISO 8601 duration 或 TimeSpan 字符串格式化为可读文本 */
+  const formatUptime = (raw: string): string => {
+    // 后端返回 TimeSpan 格式如 "01:23:45.6789" 或 "1.02:03:04"
+    if (/^\d/.test(raw)) {
+      const parts = raw.split(':');
+      if (parts.length >= 3) {
+        const days = raw.includes('.') ? raw.split('.')[0] : null;
+        const timePart = days ? raw.split('.')[1] : raw;
+        const [h, m] = timePart.split(':');
+        if (days) return `${days}天 ${h}小时 ${m}分钟`;
+        return `${h}小时 ${m}分钟 ${Math.floor(parseFloat(parts[2]))}秒`;
+      }
+    }
+    return raw;
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{t('settings.systemInfo')}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+        ) : data ? (
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground">{t('settings.version')}</p>
+              <p className="font-medium">{data.version}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">{t('settings.environment')}</p>
+              <p className="font-medium">{data.environment}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">{t('settings.uptime')}</p>
+              <p className="font-medium">{formatUptime(data.uptime)}</p>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">—</p>
+        )}
+      </CardContent>
     </Card>
   );
 }
@@ -1255,6 +1320,9 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* 系统信息（对应 GET /api/v1/system/info） */}
+          <SystemInfoCard />
         </TabsContent>
 
         {/* 外部集成 */}

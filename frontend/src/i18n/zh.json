@@ -331,7 +331,11 @@
     "dataRetentionDays": "数据保留天数",
     "integration": "外部集成",
     "integrationDesc": "配置工单与外部系统的集成",
-    "subscription": "订阅管理"
+    "subscription": "订阅管理",
+    "systemInfo": "系统信息",
+    "version": "版本",
+    "environment": "运行环境",
+    "uptime": "运行时间"
   },
   "integration": {
     "dingtalk": "钉钉机器人",

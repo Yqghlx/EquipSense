@@ -325,7 +325,11 @@
     "dataRetentionDays": "Data Retention Days",
     "integration": "External Integrations",
     "integrationDesc": "Configure work order integrations with external systems",
-    "subscription": "Subscription"
+    "subscription": "Subscription",
+    "systemInfo": "System Information",
+    "version": "Version",
+    "environment": "Environment",
+    "uptime": "Uptime"
   },
   "integration": {
     "dingtalk": "DingTalk Robot",
