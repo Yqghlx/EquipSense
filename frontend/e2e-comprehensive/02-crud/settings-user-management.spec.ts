@@ -42,7 +42,7 @@ test.describe('02-用户管理', () => {
     const errors = captureErrors(page);
     await gotoUserManagement(page);
 
-    const table = page.getByRole('table');
+    const table = page.getByRole('tabpanel').getByRole('table').first();
     await expect(table).toBeVisible({ timeout: 5000 });
 
     const rows = table.getByRole('row');
@@ -148,7 +148,7 @@ test.describe('02-用户管理', () => {
     const errors = captureErrors(page);
     await gotoUserManagement(page);
 
-    const table = page.getByRole('table');
+    const table = page.getByRole('tabpanel').getByRole('table').first();
     await expect(table).toBeVisible({ timeout: 5000 });
 
     // 找到第一行的编辑按钮（带有 title="编辑" 的按钮）
@@ -181,7 +181,7 @@ test.describe('02-用户管理', () => {
       await searchInput.press('Enter');
       await page.waitForTimeout(1500);
 
-      const table = page.getByRole('table');
+      const table = page.getByRole('tabpanel').getByRole('table').first();
       await expect(table).toBeVisible({ timeout: 5000 });
     }
 
