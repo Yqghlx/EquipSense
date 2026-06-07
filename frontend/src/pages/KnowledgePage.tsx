@@ -76,11 +76,11 @@ export default function KnowledgePage() {
         />
       </div>
 
-      {/* Tab 切换：诊断规则 / 待审核 / 故障案例 */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="rules">{t('knowledge.rules')}</TabsTrigger>
-          <TabsTrigger value="pending">
+      {/* 左侧导航 + 右侧内容的 Tab 布局，items-start 防止导航被内容高度拉伸 */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex gap-6 items-start">
+        <TabsList className="flex flex-col w-44 shrink-0 bg-muted/50 p-1 gap-0.5">
+          <TabsTrigger value="rules" className="w-full justify-start px-3">{t('knowledge.rules')}</TabsTrigger>
+          <TabsTrigger value="pending" className="w-full justify-start px-3">
             {t('knowledge.pending')}
             {pendingCount > 0 && (
               <Badge variant="secondary" className="ml-2">
@@ -88,23 +88,25 @@ export default function KnowledgePage() {
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="cases">{t('knowledge.cases')}</TabsTrigger>
+          <TabsTrigger value="cases" className="w-full justify-start px-3">{t('knowledge.cases')}</TabsTrigger>
         </TabsList>
 
-        {/* 诊断规则 Tab */}
-        <TabsContent value="rules" className="mt-4">
-          <RulesList keyword={keyword} perm={perm} />
-        </TabsContent>
+        <div className="flex-1 min-w-0 space-y-4">
+          {/* 诊断规则 Tab */}
+          <TabsContent value="rules">
+            <RulesList keyword={keyword} perm={perm} />
+          </TabsContent>
 
-        {/* 待审核规则 Tab */}
-        <TabsContent value="pending" className="mt-4">
-          <PendingRulesList keyword={keyword} perm={perm} />
-        </TabsContent>
+          {/* 待审核规则 Tab */}
+          <TabsContent value="pending">
+            <PendingRulesList keyword={keyword} perm={perm} />
+          </TabsContent>
 
-        {/* 故障案例 Tab */}
-        <TabsContent value="cases" className="mt-4">
-          <CasesList keyword={keyword} />
-        </TabsContent>
+          {/* 故障案例 Tab */}
+          <TabsContent value="cases">
+            <CasesList keyword={keyword} />
+          </TabsContent>
+        </div>
       </Tabs>
     </div>
   );

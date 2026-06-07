@@ -1400,16 +1400,19 @@ export default function SettingsPage() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">{t('settings.title')}</h1>
 
-      <Tabs defaultValue="users">
-        <TabsList>
-          <TabsTrigger value="users">{t('settings.users')}</TabsTrigger>
-          <TabsTrigger value="roles">{t('settings.roles')}</TabsTrigger>
-          <TabsTrigger value="llm">{t('settings.llm')}</TabsTrigger>
-          <TabsTrigger value="system">{t('settings.system')}</TabsTrigger>
-          <TabsTrigger value="integration">{t('settings.integration')}</TabsTrigger>
-          <TabsTrigger value="approval-chains">审批链配置</TabsTrigger>
-          <TabsTrigger value="subscription">{t('settings.subscription')}</TabsTrigger>
+      <Tabs defaultValue="users" className="flex gap-6 items-start">
+        <TabsList className="flex flex-col w-44 shrink-0 bg-muted/50 p-1 gap-0.5">
+          <TabsTrigger value="users" className="w-full justify-start px-3">{t('settings.users')}</TabsTrigger>
+          <TabsTrigger value="roles" className="w-full justify-start px-3">{t('settings.roles')}</TabsTrigger>
+          <TabsTrigger value="llm" className="w-full justify-start px-3">{t('settings.llm')}</TabsTrigger>
+          <TabsTrigger value="system" className="w-full justify-start px-3">{t('settings.system')}</TabsTrigger>
+          <TabsTrigger value="integration" className="w-full justify-start px-3">{t('settings.integration')}</TabsTrigger>
+          <TabsTrigger value="approval-chains" className="w-full justify-start px-3">审批链配置</TabsTrigger>
+          <TabsTrigger value="subscription" className="w-full justify-start px-3">{t('settings.subscription')}</TabsTrigger>
+          <TabsTrigger value="notifications" className="w-full justify-start px-3">通知偏好</TabsTrigger>
         </TabsList>
+
+        <div className="flex-1 min-w-0 space-y-4">
 
         {/* 用户管理 */}
         <TabsContent value="users">
@@ -1542,16 +1545,19 @@ export default function SettingsPage() {
         <TabsContent value="subscription">
           <SubscriptionPanel />
         </TabsContent>
-      </Tabs>
 
-      {/* 通知偏好设置 */}
-      <NotificationPreferenceCard
-        pushSupported={pushSupported}
-        isSubscribed={isSubscribed}
-        permission={permission}
-        onSubscribe={subscribe}
-        onUnsubscribe={unsubscribe}
-      />
+        {/* 通知偏好设置 */}
+        <TabsContent value="notifications">
+          <NotificationPreferenceCard
+            pushSupported={pushSupported}
+            isSubscribed={isSubscribed}
+            permission={permission}
+            onSubscribe={subscribe}
+            onUnsubscribe={unsubscribe}
+          />
+        </TabsContent>
+        </div>
+      </Tabs>
     </div>
   );
 }
