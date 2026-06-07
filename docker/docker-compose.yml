@@ -91,6 +91,7 @@ services:
       Vapid__PublicKey: "${VAPID__PUBLICKEY:-}"
       Vapid__PrivateKey: "${VAPID__PRIVATEKEY:-}"
       BEHIND_PROXY: "${BEHIND_PROXY:-true}"
+      Gateway__Host: "edgegateway"
       Serilog__WriteTo__1__Name: "Seq"
       Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
     depends_on:

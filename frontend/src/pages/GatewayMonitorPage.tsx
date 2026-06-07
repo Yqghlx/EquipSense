@@ -109,7 +109,7 @@ export default function GatewayMonitorPage() {
             <RefreshCw className="mr-1 h-4 w-4" />
             刷新
           </Button>
-          <Button variant="outline" size="sm" onClick={() => navigate('/gateway')}>
+          <Button variant="outline" size="sm" onClick={() => navigate('/devices')}>
             <Network className="mr-1 h-4 w-4" />
             设备管理
           </Button>
