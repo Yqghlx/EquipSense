@@ -2,10 +2,12 @@
 name: CI/CD
 
 on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
+  # 暂时禁用自动触发，等稳定后取消注释即可恢复
+  # push:
+  #   branches: [main, develop]
+  # pull_request:
+  #   branches: [main]
+  workflow_dispatch:  # 保留手动触发能力
 
 env:
   DOTNET_VERSION: '8.0.x'
