@@ -321,7 +321,14 @@ public class DataSeeder
                         new { name = "air_flow", displayName = "排气量", unit = "m³/min", range = new { min = 0.0, max = 40.0 } }
                     }
                 }),
-                DefaultAlarmRules = "[]",
+                DefaultAlarmRules = JsonSerializer.Serialize(new object[]
+                {
+                    new { name = "油温过高", metric = "oil_temperature", ruleType = "threshold", @operator = "gt", threshold = 90.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "振动超标", metric = "vibration", ruleType = "threshold", @operator = "gt", threshold = 7.0, severity = "Critical", cooldownSeconds = 600, enabled = true, autoCreateWorkorder = true },
+                    new { name = "排气压力过高", metric = "discharge_pressure", ruleType = "threshold", @operator = "gt", threshold = 1.1, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "排气压力过低", metric = "discharge_pressure", ruleType = "threshold", @operator = "lt", threshold = 0.5, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "电机电流过高", metric = "motor_current", ruleType = "threshold", @operator = "gt", threshold = 180.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false }
+                }),
                 DefaultDiagnosisRules = "[]"
             }
         ];
