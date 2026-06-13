@@ -1,7 +1,7 @@
 namespace EquipAI.Simulator.Faults;
 
 /// <summary>
-/// 排气堵塞故障 — 排气压力 3 分钟内急升 +0.4（0.7→1.1），触发 GT 1.1 告警
+/// 排气堵塞故障 — 排气压力 3 分钟内急升 +0.5（0.7→1.2），稳定越过 GT 1.1 告警阈值
 /// </summary>
 public sealed class DischargeBlockageFault : IFaultPattern
 {
@@ -17,7 +17,7 @@ public sealed class DischargeBlockageFault : IFaultPattern
         var progress = Math.Min(elapsed.TotalSeconds / RampDuration.TotalSeconds, 1.0);
         return metric switch
         {
-            "discharge_pressure" => 0.4 * progress,
+            "discharge_pressure" => 0.5 * progress,
             "air_flow" => -6.0 * progress,
             "oil_temperature" => 20.0 * progress,
             _ => 0

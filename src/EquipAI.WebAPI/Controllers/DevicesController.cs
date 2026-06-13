@@ -1,4 +1,5 @@
 using System.Text;
+using EquipAI.Application.Analysis;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.Interfaces;
@@ -7,6 +8,7 @@ using EquipAI.Application.Services;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
+using EquipAI.WebAPI.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
@@ -26,6 +28,7 @@ public class DevicesController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly IMlAnomalyDetectionService _mlService;
     private readonly DeviceImportService _importService;
+    private readonly DeviceHealthService _healthService;
 
     /// <summary>
     /// 初始化设备管理控制器
@@ -34,16 +37,19 @@ public class DevicesController : ControllerBase
     /// <param name="tenantContext">租户上下文，用于获取当前请求的租户 ID</param>
     /// <param name="mlService">ML 异常检测服务</param>
     /// <param name="importService">设备批量导入服务</param>
+    /// <param name="healthService">设备健康度计算服务</param>
     public DevicesController(
         IDeviceService deviceService,
         ITenantContext tenantContext,
         IMlAnomalyDetectionService mlService,
-        DeviceImportService importService)
+        DeviceImportService importService,
+        DeviceHealthService healthService)
     {
         _deviceService = deviceService;
         _tenantContext = tenantContext;
         _mlService = mlService;
         _importService = importService;
+        _healthService = healthService;
     }
 
     /// <summary>
@@ -83,6 +89,39 @@ public class DevicesController : ControllerBase
             return NotFound(new { code = 404, message = "设备不存在" });
         }
         return Ok(device);
+    }
+
+    /// <summary>
+    /// 刷新单个设备的健康度评分（基于告警历史、状态、遥测质量重新计算）
+    /// </summary>
+    /// <param name="id">设备 ID</param>
+    /// <param name="ct">取消令牌</param>
+    /// <returns>更新后的健康度评分</returns>
+    [HttpPost("{id:guid}/health-score")]
+    [RequirePermission("device:read")]
+    [Audit("RecalculateHealth", "Device")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RefreshHealthScore(Guid id, CancellationToken ct)
+    {
+        var score = await _healthService.UpdateHealthScoreAsync(id, ct);
+        if (score is null)
+            return NotFound(new { code = 404, message = "设备不存在" });
+
+        return Ok(new { deviceId = id, healthScore = score, level = DeviceHealthService.GetHealthLevel(score.Value) });
+    }
+
+    /// <summary>
+    /// 批量刷新当前租户所有设备的健康度评分
+    /// </summary>
+    [HttpPost("health-score/refresh-all")]
+    [RequirePermission("device:read")]
+    [Audit("RecalculateHealthAll", "Device")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<IActionResult> RefreshAllHealthScores(CancellationToken ct)
+    {
+        var updated = await _healthService.UpdateAllHealthScoresAsync(_tenantContext.TenantId, ct);
+        return Ok(new { updatedCount = updated });
     }
 
     /// <summary>

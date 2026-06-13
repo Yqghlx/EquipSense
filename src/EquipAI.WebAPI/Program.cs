@@ -38,7 +38,11 @@ try
     builder.Services.AddApplication();
     builder.Services.AddJwtAuthentication(builder.Configuration);
     builder.Services.AddSwagger();
-    builder.Services.AddControllers();
+    builder.Services.AddControllers(options =>
+    {
+        // 全局审计日志 Filter：自动记录所有非 GET 写操作（设备/工单/告警/用户/规则的增删改）
+        options.Filters.Add<EquipAI.WebAPI.Middleware.AuditActionFilter>();
+    });
     // API 响应输出缓存（减少重复查询对数据库的压力）
     builder.Services.AddOutputCache(options =>
     {

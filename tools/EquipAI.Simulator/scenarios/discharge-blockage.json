@@ -1,0 +1,1 @@
+{"name": "discharge-blockage-scenario", "deviceCode": "AC-001", "description": "模拟排气系统堵塞故障，排气压力在约 3 分钟内急升 0.5（0.7→1.2）稳定越过 GT 1.1 告警阈值，排气量骤降、油温快速上升", "timeScale": 1, "timeline": [{"at": "00:00:30", "action": "start", "faultType": "discharge_blockage"}, {"at": "00:10:00", "action": "stop", "faultType": "discharge_blockage"}]}

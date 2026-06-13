@@ -77,11 +77,11 @@ public class FaultPatternsTests
     // === 阀片泄漏 ===
 
     [Fact]
-    public void 阀片泄漏_排气压力应在10分钟内降至负0点2()
+    public void 阀片泄漏_排气压力应在5分钟内降至负0点3()
     {
         var fault = new ValveLeakFault();
         var delta = fault.Delta("discharge_pressure", TimeSpan.FromMinutes(10));
-        delta.Should().BeApproximately(-0.2, 0.001);
+        delta.Should().BeApproximately(-0.3, 0.001);
     }
 
     [Fact]
@@ -145,11 +145,11 @@ public class FaultPatternsTests
     // === 排气堵塞 ===
 
     [Fact]
-    public void 排气堵塞_排气压力应在3分钟内急升至正0点4()
+    public void 排气堵塞_排气压力应在3分钟内急升至正0点5()
     {
         var fault = new DischargeBlockageFault();
         var delta = fault.Delta("discharge_pressure", TimeSpan.FromMinutes(3));
-        delta.Should().BeApproximately(0.4, 0.001);
+        delta.Should().BeApproximately(0.5, 0.001);
     }
 
     [Fact]

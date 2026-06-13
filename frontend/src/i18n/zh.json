@@ -65,7 +65,8 @@
     "analyses": "AI 分析",
     "knowledge": "知识库",
     "settings": "系统设置",
-    "tenantManagement": "租户管理"
+    "tenantManagement": "租户管理",
+    "evaluation": "诊断评估"
   },
   "sidebar": {
     "expand": "展开侧边栏",
@@ -87,7 +88,18 @@
     "alertSeverityDistribution": "告警级别分布",
     "workOrderTrend": "工单趋势（最近 7 天）",
     "workOrderStatusDistribution": "工单状态分布",
-    "recentAlerts": "最近告警"
+    "recentAlerts": "最近告警",
+    "oee": {
+      "title": "设备综合效率 (OEE)",
+      "formula": "OEE = 可用率 × 性能 × 质量",
+      "overall": "综合 OEE",
+      "availability": "可用率",
+      "availabilityHint": "{{online}}/{{total}} 在线",
+      "performance": "性能",
+      "performanceHint": "产能达标率",
+      "quality": "质量",
+      "qualityHint": "无严重故障占比"
+    }
   },
   "device": {
     "title": "设备管理",
@@ -671,5 +683,24 @@
       "totalDevices": "总设备",
       "totalUsers": "总用户"
     }
+  },
+  "evaluation": {
+    "title": "AI 诊断评估",
+    "description": "对比模拟器故障注入的标准答案与 AI 实际诊断结果，量化诊断准确率",
+    "noData": "暂无评估数据。运行模拟器并带上 --api-url 参数上报标准答案后，此处会显示诊断命中率。",
+    "hitRate": "命中率",
+    "matched": "诊断命中",
+    "mismatched": "诊断有误",
+    "missed": "漏报",
+    "byFaultType": "按故障类型分类",
+    "details": "诊断详情对比",
+    "faultType": "故障类型",
+    "expectedRootCause": "预期诊断",
+    "aiRootCause": "AI 诊断",
+    "confidence": "置信度",
+    "result": "结果",
+    "match": "命中",
+    "mismatch": "误诊",
+    "miss": "漏报"
   }
 }

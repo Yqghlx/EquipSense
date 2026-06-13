@@ -65,7 +65,8 @@
     "analyses": "AI Analysis",
     "knowledge": "Knowledge Base",
     "settings": "Settings",
-    "tenantManagement": "Tenant Management"
+    "tenantManagement": "Tenant Management",
+    "evaluation": "Diagnosis Evaluation"
   },
   "sidebar": {
     "expand": "Expand Sidebar",
@@ -87,7 +88,18 @@
     "alertSeverityDistribution": "Alert Severity Distribution",
     "workOrderTrend": "Work Order Trend (Last 7 Days)",
     "workOrderStatusDistribution": "Work Order Status Distribution",
-    "recentAlerts": "Recent Alerts"
+    "recentAlerts": "Recent Alerts",
+    "oee": {
+      "title": "Overall Equipment Effectiveness (OEE)",
+      "formula": "OEE = Availability × Performance × Quality",
+      "overall": "Overall OEE",
+      "availability": "Availability",
+      "availabilityHint": "{{online}}/{{total}} online",
+      "performance": "Performance",
+      "performanceHint": "Output ratio",
+      "quality": "Quality",
+      "qualityHint": "No-critical-fault ratio"
+    }
   },
   "device": {
     "title": "Device Management",
@@ -664,5 +676,24 @@
       "totalDevices": "Total Devices",
       "totalUsers": "Total Users"
     }
+  },
+  "evaluation": {
+    "title": "AI Diagnosis Evaluation",
+    "description": "Compare ground truth from simulator fault injection with actual AI diagnosis to quantify accuracy",
+    "noData": "No evaluation data yet. Run the simulator with the --api-url flag to report ground truth, and the diagnosis hit rate will appear here.",
+    "hitRate": "Hit Rate",
+    "matched": "Matched",
+    "mismatched": "Mismatched",
+    "missed": "Missed",
+    "byFaultType": "By Fault Type",
+    "details": "Diagnosis Detail Comparison",
+    "faultType": "Fault Type",
+    "expectedRootCause": "Expected",
+    "aiRootCause": "AI Diagnosis",
+    "confidence": "Confidence",
+    "result": "Result",
+    "match": "Match",
+    "mismatch": "Mismatch",
+    "miss": "Miss"
   }
 }

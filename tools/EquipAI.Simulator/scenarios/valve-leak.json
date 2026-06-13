@@ -1,0 +1,1 @@
+{"name": "valve-leak-scenario", "deviceCode": "AC-001", "description": "模拟气阀泄漏故障，排气压力在约 5 分钟内缓降 0.3（0.7→0.4）稳定越过 LT 0.5 告警阈值，排气量随之下降、油温缓升", "timeScale": 1, "timeline": [{"at": "00:00:30", "action": "start", "faultType": "valve_leak"}, {"at": "00:10:00", "action": "stop", "faultType": "valve_leak"}]}

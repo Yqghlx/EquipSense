@@ -1,12 +1,14 @@
 using AutoMapper;
 using EquipAI.Application.Alerts.DTOs;
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
+using EquipAI.WebAPI.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,12 +26,14 @@ public class AlertsController : ControllerBase
     private readonly AppDbContext _dbContext;
     private readonly IMapper _mapper;
     private readonly ITenantContext _tenantContext;
+    private readonly DataExportService _exportService;
 
-    public AlertsController(AppDbContext dbContext, IMapper mapper, ITenantContext tenantContext)
+    public AlertsController(AppDbContext dbContext, IMapper mapper, ITenantContext tenantContext, DataExportService exportService)
     {
         _dbContext = dbContext;
         _mapper = mapper;
         _tenantContext = tenantContext;
+        _exportService = exportService;
     }
 
     [HttpGet]
@@ -71,6 +75,26 @@ public class AlertsController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// 导出告警为 CSV（支持与列表相同的筛选条件，最多 10000 条）
+    /// </summary>
+    [HttpGet("export")]
+    [RequirePermission("alert:read")]
+    [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportAlerts(
+        [FromQuery] string? status = null,
+        [FromQuery] string? severity = null,
+        [FromQuery] Guid? deviceId = null,
+        CancellationToken ct = default)
+    {
+        AlertStatus? statusEnum = !string.IsNullOrWhiteSpace(status) && Enum.TryParse<AlertStatus>(status, true, out var s) ? s : null;
+        AlertSeverity? sevEnum = !string.IsNullOrWhiteSpace(severity) && Enum.TryParse<AlertSeverity>(severity, true, out var sv) ? sv : null;
+
+        var bytes = await _exportService.ExportAlertsAsync(_tenantContext.TenantId, statusEnum, sevEnum, deviceId, ct);
+        var fileName = $"alerts_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
+        return File(bytes, "text/csv; charset=utf-8", fileName);
+    }
+
     [HttpGet("{id:guid}")]
     [RequirePermission("alert:read")]
     [ProducesResponseType(typeof(AlertDto), StatusCodes.Status200OK)]
@@ -86,6 +110,7 @@ public class AlertsController : ControllerBase
 
     [HttpPut("{id:guid}/acknowledge")]
     [RequirePermission("alert:acknowledge")]
+    [Audit("Acknowledge", "Alert")]
     [ProducesResponseType(typeof(AlertDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AlertDto>> AcknowledgeAlert(Guid id, [FromBody] AcknowledgeAlertRequest? request)
@@ -107,6 +132,7 @@ public class AlertsController : ControllerBase
     }
 
     [HttpPut("{id:guid}/resolve")]
+    [Audit("Resolve", "Alert")]
     [RequirePermission("alert:update")]
     [ProducesResponseType(typeof(AlertDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

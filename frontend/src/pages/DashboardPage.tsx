@@ -5,7 +5,7 @@ import { Badge } from '../components/ui/badge';
 import { TrendChart } from '../components/charts/TrendChart';
 import { PieChart } from '../components/charts/PieChart';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
-import { useDashboardStats } from '../hooks/useDashboard';
+import { useDashboardStats, useOee } from '../hooks/useDashboard';
 import { useAlerts } from '../hooks/useAlerts';
 import { useGlobalStats } from '../hooks/useTenantsAdmin';
 import { useAuthStore } from '../stores/authStore';
@@ -60,6 +60,7 @@ export default function DashboardPage() {
   const isSystemAdmin = user?.role === 'SystemAdmin';
 
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
+  const { data: oee } = useOee();
   const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
   const { data: globalStats } = useGlobalStats();
 
@@ -141,6 +142,47 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* OEE 设备综合效率看板 */}
+      {oee && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-semibold">{t('dashboard.oee.title', '设备综合效率 (OEE)')}</h3>
+              <p className="text-xs text-muted-foreground">
+                {t('dashboard.oee.formula', 'OEE = 可用率 × 性能 × 质量')}
+              </p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-4">
+              {/* 综合 OEE */}
+              <div className="flex flex-col items-center justify-center rounded-lg border bg-primary/5 p-4">
+                <p className="text-sm text-muted-foreground mb-1">{t('dashboard.oee.overall', '综合 OEE')}</p>
+                <p className={`text-3xl font-bold ${oee.oee >= 85 ? 'text-green-600' : oee.oee >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {oee.oee}%
+                </p>
+              </div>
+              {/* 可用率 */}
+              <OeeDimension
+                label={t('dashboard.oee.availability', '可用率')}
+                value={oee.availability}
+                hint={t('dashboard.oee.availabilityHint', '{{online}}/{{total}} 在线', { online: oee.onlineDevices, total: oee.totalDevices })}
+              />
+              {/* 性能 */}
+              <OeeDimension
+                label={t('dashboard.oee.performance', '性能')}
+                value={oee.performance}
+                hint={t('dashboard.oee.performanceHint', '产能达标率')}
+              />
+              {/* 质量 */}
+              <OeeDimension
+                label={t('dashboard.oee.quality', '质量')}
+                value={oee.quality}
+                hint={t('dashboard.oee.qualityHint', '无严重故障占比')}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 图表区域：设备状态 + 告警级别分布 */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -231,6 +273,21 @@ function GlobalStatItem({ icon, label, value }: { icon: React.ReactNode; label: 
         <p className="text-lg font-bold">{value}</p>
         <p className="text-xs text-muted-foreground">{label}</p>
       </div>
+    </div>
+  );
+}
+
+/** OEE 单维度展示（数值 + 进度条），复用项目内联进度条风格 */
+function OeeDimension({ label, value, hint }: { label: string; value: number; hint: string }) {
+  const color = value >= 85 ? 'bg-green-500' : value >= 60 ? 'bg-yellow-500' : 'bg-red-500';
+  return (
+    <div className="rounded-lg border p-4">
+      <p className="text-sm font-medium mb-1">{label}</p>
+      <p className="text-2xl font-bold mb-2">{value}%</p>
+      <div className="h-2 w-full rounded-full bg-muted overflow-hidden mb-1">
+        <div className={`h-full transition-all ${color}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+      </div>
+      <p className="text-xs text-muted-foreground">{hint}</p>
     </div>
   );
 }

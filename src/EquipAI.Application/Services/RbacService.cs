@@ -36,7 +36,9 @@ public class RbacService : IRbacService
             "report:read",
             // AI 分析（全部 CRUD）
             "ai:read", "ai:query", "ai:configure",
-            "analysis:read", "analysis:trigger", "analysis:configure"
+            "analysis:read", "analysis:trigger", "analysis:configure",
+            // 审计日志（全部读 + 导出）
+            "audit:read"
         ],
 
         // 维保主管：设备读写、告警配置、工单派工验收、知识库验证、报表和 AI 只读
@@ -56,7 +58,9 @@ public class RbacService : IRbacService
             // 报表（只读）
             "report:read",
             // AI 分析（只读）
-            "ai:read"
+            "ai:read",
+            // 审计日志（只读追溯）
+            "audit:read"
         ],
 
         // 维保技师：设备只读、告警确认、工单执行、知识库只读、AI 查询

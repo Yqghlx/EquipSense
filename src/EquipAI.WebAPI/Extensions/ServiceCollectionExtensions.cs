@@ -228,6 +228,11 @@ public static class ServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(15);
         });
+        // 告警多渠道通知 — 钉钉/飞书机器人推送复用同一 HttpClient 工厂模式
+        services.AddHttpClient("AlertIntegration", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
         services.AddScoped<IWorkOrderIntegration, WebhookIntegration>();
         services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();
         services.AddScoped<IWorkOrderIntegration, FeishuIntegration>();
@@ -265,7 +270,15 @@ public static class ServiceCollectionExtensions
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
         services.AddScoped<AlertEventHandler>();
+        // 告警多渠道通知 — 站内通知持久化 + 钉钉/飞书机器人推送（Critical/High）
+        services.AddScoped<EquipAI.Application.Alerts.AlertNotificationService>();
+        // 数据导出 — 告警/审计日志 CSV 导出
+        services.AddScoped<EquipAI.Application.Services.DataExportService>();
         services.AddScoped<DashboardStatsService>();
+        // 设备健康度计算（告警 40% + 状态 30% + 遥测质量 30%）
+        services.AddScoped<EquipAI.Application.Analysis.DeviceHealthService>();
+        // OEE 综合效率（可用率 × 性能 × 质量）
+        services.AddScoped<EquipAI.Application.Analysis.OeeService>();
         // AI 诊断评估服务 — 对比 ground truth 与 analyses 表计算命中率
         services.AddScoped<EquipAI.Application.Evaluation.EvaluationService>();
     }

@@ -1,0 +1,1 @@
+{"name": "sensor-drift-scenario", "deviceCode": "AC-001", "description": "模拟传感器漂移故障，仅 discharge_pressure 每分钟偏移 +0.005，约 80 分钟（模拟时间）达阈值 1.1。timeScale=10 使 80 分钟模拟时间压缩为 8 分钟真实时间", "timeScale": 10, "timeline": [{"at": "00:00:30", "action": "start", "faultType": "sensor_drift"}, {"at": "01:30:00", "action": "stop", "faultType": "sensor_drift"}]}

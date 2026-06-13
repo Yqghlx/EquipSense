@@ -6,6 +6,7 @@ using EquipAI.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using EquipAI.WebAPI.Middleware;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -38,6 +39,7 @@ public class AuthController : ControllerBase
     /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
     [HttpPost("login")]
     [EnableRateLimiting("auth")]
+    [Audit("Login", "User")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request)
@@ -52,7 +54,7 @@ public class AuthController : ControllerBase
     /// <param name="request">注册请求（含企业信息和管理员信息）</param>
     /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
     [HttpPost("register")]
-    [EnableRateLimiting("auth")]
+    [Audit("Register", "Tenant")]    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<AuthResponse>> Register([FromBody] RegisterRequest request)
@@ -86,7 +88,7 @@ public class AuthController : ControllerBase
     /// <param name="request">刷新令牌请求</param>
     /// <returns>新的认证响应</returns>
     [HttpPost("refresh")]
-    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [SkipAudit] // 刷新令牌高频，不审计（登录已记录）    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponse>> Refresh([FromBody] RefreshTokenRequest request)
     {
@@ -98,7 +100,7 @@ public class AuthController : ControllerBase
     /// 用户登出，使当前 Token 失效
     /// </summary>
     [HttpPost("logout")]
-    [Authorize]
+    [Audit("Logout", "User")]    [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> Logout()
     {
@@ -119,7 +121,7 @@ public class AuthController : ControllerBase
     /// </summary>
     /// <param name="request">修改密码请求（当前密码 + 新密码）</param>
     [HttpPost("change-password")]
-    [Authorize]
+    [Audit("ChangePassword", "User")]    [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)

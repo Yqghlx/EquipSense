@@ -6,6 +6,7 @@ using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
+using EquipAI.WebAPI.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -100,6 +101,7 @@ public class WorkOrdersController : ControllerBase
     /// 派工：将工单指派给指定技术人员
     /// </summary>
     [HttpPut("{id:guid}/assign")]
+    [Audit("Dispatch", "WorkOrder")]
     [RequirePermission("workorder:dispatch")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> AssignWorkOrder(Guid id, [FromBody] AssignWorkOrderRequest request)
@@ -118,6 +120,7 @@ public class WorkOrdersController : ControllerBase
     /// 开始执行工单
     /// </summary>
     [HttpPut("{id:guid}/start")]
+    [Audit("StartWork", "WorkOrder")]
     [RequirePermission("workorder:execute")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> StartWorkOrder(Guid id)
@@ -136,6 +139,7 @@ public class WorkOrdersController : ControllerBase
     /// 完成工单：提交处理结果
     /// </summary>
     [HttpPut("{id:guid}/complete")]
+    [Audit("CompleteWork", "WorkOrder")]
     [RequirePermission("workorder:execute")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> CompleteWorkOrder(Guid id, [FromBody] CompleteWorkOrderRequest request)
@@ -147,6 +151,7 @@ public class WorkOrdersController : ControllerBase
     /// 验收通过工单
     /// </summary>
     [HttpPut("{id:guid}/accept")]
+    [Audit("Accept", "WorkOrder")]
     [RequirePermission("workorder:accept")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> AcceptWorkOrder(Guid id, [FromBody] NoteRequest? note = null)
@@ -158,6 +163,7 @@ public class WorkOrdersController : ControllerBase
     /// 验收驳回工单
     /// </summary>
     [HttpPut("{id:guid}/reject")]
+    [Audit("RejectWork", "WorkOrder")]
     [RequirePermission("workorder:accept")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> RejectWorkOrder(Guid id, [FromBody] NoteRequest? note = null)
@@ -169,6 +175,7 @@ public class WorkOrdersController : ControllerBase
     /// 关闭工单
     /// </summary>
     [HttpPut("{id:guid}/close")]
+    [Audit("CloseWork", "WorkOrder")]
     [RequirePermission("workorder:close")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> CloseWorkOrder(Guid id, [FromBody] NoteRequest? note = null)
@@ -180,6 +187,7 @@ public class WorkOrdersController : ControllerBase
     /// 取消工单
     /// </summary>
     [HttpPut("{id:guid}/cancel")]
+    [Audit("CancelWork", "WorkOrder")]
     [RequirePermission("workorder:cancel")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> CancelWorkOrder(Guid id, [FromBody] NoteRequest? note = null)
@@ -193,6 +201,7 @@ public class WorkOrdersController : ControllerBase
     /// 若无匹配的审批链模板，则直接走原来的 Complete 流程
     /// </summary>
     [HttpPost("{id:guid}/submit")]
+    [Audit("SubmitApproval", "WorkOrder")]
     [RequirePermission("workorder:execute")]
     [ProducesResponseType(typeof(WorkOrderDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<WorkOrderDto>> SubmitWorkOrder(Guid id, [FromBody] CompleteWorkOrderRequest request)
@@ -206,6 +215,7 @@ public class WorkOrdersController : ControllerBase
     /// 所有步骤通过后，工单状态自动变为 Accepted
     /// </summary>
     [HttpPost("{id:guid}/approve")]
+    [Audit("Approve", "WorkOrder")]
     [RequirePermission("workorder:accept")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<ActionResult> ApproveWorkOrder(Guid id, [FromBody] ApprovalActionRequest? request = null)
@@ -219,6 +229,7 @@ public class WorkOrdersController : ControllerBase
     /// 审批驳回 — 当前审批步骤驳回，工单回到 InProgress
     /// </summary>
     [HttpPost("{id:guid}/reject-approval")]
+    [Audit("RejectApproval", "WorkOrder")]
     [RequirePermission("workorder:accept")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<ActionResult> RejectApproval(Guid id, [FromBody] ApprovalActionRequest? request = null)
