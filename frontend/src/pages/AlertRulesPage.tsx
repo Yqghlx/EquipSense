@@ -13,7 +13,7 @@ import { Badge } from '../components/ui/badge';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useAlertRules, useCreateAlertRule, useUpdateAlertRule, useDeleteAlertRule } from '../hooks/useAlertRules';
+import { useAlertRules, useCreateAlertRule, useUpdateAlertRule, useDeleteAlertRule, useToggleAlertRule } from '../hooks/useAlertRules';
 import { usePermission } from '../hooks/usePermission';
 import type { CreateAlertRuleRequest, AlertRule } from '../types';
 
@@ -58,6 +58,7 @@ export default function AlertRulesPage() {
   const createRule = useCreateAlertRule();
   const updateRule = useUpdateAlertRule();
   const deleteRule = useDeleteAlertRule();
+  const toggleRule = useToggleAlertRule();
 
   return (
     <div className="space-y-4">
@@ -108,7 +109,11 @@ export default function AlertRulesPage() {
                   <TableCell><SeverityBadge severity={rule.severity} /></TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <Switch checked={rule.enabled} disabled />
+                      <Switch
+                        checked={rule.enabled}
+                        disabled={!perm.canEdit || toggleRule.isPending}
+                        onCheckedChange={() => toggleRule.mutate(rule.id)}
+                      />
                       <span className="text-sm">{rule.enabled ? t('common.enabled') : t('common.disabled')}</span>
                     </div>
                   </TableCell>

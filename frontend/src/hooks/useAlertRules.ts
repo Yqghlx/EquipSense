@@ -91,3 +91,22 @@ export function useDeleteAlertRule() {
     },
   });
 }
+
+/**
+ * 启用/停用告警规则
+ *
+ * 调用 PUT /api/v1/alert-rules/{id}/toggle
+ * 运维场景：临时停用规则避免误报，改完再启用，无需删除重建。
+ */
+export function useToggleAlertRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await api.put(`/alert-rules/${id}/toggle`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['alert-rules'] });
+    },
+  });
+}

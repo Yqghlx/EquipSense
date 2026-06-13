@@ -6,6 +6,7 @@ using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
+using EquipAI.WebAPI.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -110,5 +111,27 @@ public class AlertRulesController : ControllerBase
         await _dbContext.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// 启用/停用告警规则（运维场景：临时停用规则避免误报，改完再启用，无需删除重建）
+    /// </summary>
+    /// <param name="id">规则 ID</param>
+    /// <returns>更新后的规则（含新启用状态）</returns>
+    [HttpPut("{id:guid}/toggle")]
+    [RequirePermission("alert:update")]
+    [Audit("ToggleAlertRule", "AlertRule")]
+    [ProducesResponseType(typeof(AlertRuleDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AlertRuleDto>> ToggleAlertRule(Guid id)
+    {
+        var rule = await _dbContext.AlertRules.FindAsync(id);
+        if (rule is null)
+            return NotFound(new { code = 404, message = "告警规则不存在" });
+
+        rule.Enabled = !rule.Enabled;
+        await _dbContext.SaveChangesAsync();
+
+        return Ok(_mapper.Map<AlertRuleDto>(rule));
     }
 }
