@@ -558,6 +558,20 @@
     "reviewDeviceName": "Device Name",
     "submitCreate": "Confirm & Create"
   },
+  "gateway": {
+    "listTitle": "Gateway Management",
+    "listDescription": "View and manage all registered edge gateways",
+    "noGateways": "No gateways registered",
+    "noGatewaysHint": "Gateways will automatically register when started",
+    "deviceCount": "Devices",
+    "version": "Version",
+    "address": "Address",
+    "lastHeartbeat": "Last Heartbeat",
+    "monitor": "Monitor",
+    "statusOnline": "Online",
+    "statusOffline": "Offline",
+    "statusDisabled": "Disabled"
+  },
   "dispatch": {
     "title": "Smart Dispatch Board",
     "pendingOrders": "Pending Dispatch",

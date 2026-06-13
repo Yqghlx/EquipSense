@@ -3,7 +3,7 @@
  *
  * 展示网关实时运行状态、采集指标概览和设备配置列表。
  */
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
@@ -87,7 +87,8 @@ function formatUptime(seconds?: number): string {
 
 export default function GatewayMonitorPage() {
   const navigate = useNavigate();
-  const { data: status, isLoading: statusLoading, refetch } = useGatewayStatus();
+  const { gatewayId } = useParams<{ gatewayId: string }>();
+  const { data: status, isLoading: statusLoading, refetch } = useGatewayStatus(gatewayId);
   const { data: devices, isLoading: devicesLoading } = useGatewayDevices();
 
   const isLoading = statusLoading || devicesLoading;
@@ -99,9 +100,14 @@ export default function GatewayMonitorPage() {
       {/* 标题栏 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">网关监控</h1>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/gateways')}>
+              ←
+            </Button>
+            <h1 className="text-2xl font-bold">网关监控</h1>
+          </div>
           <p className="text-sm text-muted-foreground">
-            实时监控边缘网关运行状态和采集指标
+            {gatewayId ? `网关：${gatewayId}` : '实时监控边缘网关运行状态和采集指标'}
           </p>
         </div>
         <div className="flex gap-2">

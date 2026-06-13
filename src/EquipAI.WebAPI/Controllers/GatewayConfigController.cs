@@ -172,13 +172,15 @@ public class GatewayConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Protocol))
             return BadRequest(new { code = 400, message = "协议类型不能为空" });
 
-        // 获取默认网关 ID
-        var defaultGatewayId = _configuration["Gateway:DefaultGatewayId"] ?? "gateway-001";
+        // 优先使用请求中指定的网关 ID，否则使用默认值
+        var gatewayId = !string.IsNullOrWhiteSpace(request.GatewayId)
+            ? request.GatewayId
+            : _configuration["Gateway:DefaultGatewayId"] ?? "gateway-001";
 
         var entity = new GatewayDevice
         {
             TenantId = _tenantContext.TenantId,
-            GatewayId = defaultGatewayId,
+            GatewayId = gatewayId,
             DeviceId = request.DeviceId,
             DeviceName = request.DeviceName,
             Protocol = request.Protocol.ToLowerInvariant(),

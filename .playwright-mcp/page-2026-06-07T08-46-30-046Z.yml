@@ -1,0 +1,20 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - heading "EquipSense" [level=1] [ref=e6]
+    - paragraph [ref=e7]: 工业设备智能监控平台
+  - generic [ref=e8]:
+    - generic [ref=e9]:
+      - generic [ref=e10]: 登录
+      - generic [ref=e11]: 登录到工业设备智能监控平台
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]: 用户名
+        - textbox "用户名" [ref=e16]
+      - generic [ref=e17]:
+        - generic [ref=e18]: 密码
+        - textbox "密码" [ref=e19]
+      - button "登录" [ref=e20]
+      - paragraph [ref=e21]:
+        - text: 没有账户？
+        - link "注册新租户" [ref=e22] [cursor=pointer]:
+          - /url: /register

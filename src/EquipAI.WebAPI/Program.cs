@@ -62,6 +62,8 @@ try
 
     // 业务指标采集后台服务 — 每 30 秒从数据库采集 Gauge 指标
     builder.Services.AddHostedService<BusinessMetricsCollector>();
+    // 网关心跳监控 — 每 30 秒检查超时网关并标记 offline
+    builder.Services.AddHostedService<EquipAI.WebAPI.Services.GatewayHeartbeatMonitor>();
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
     // 从配置中读取允许的域名列表，未配置时使用默认值

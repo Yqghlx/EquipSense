@@ -28,6 +28,7 @@ import {
   useCreateGatewayDevice,
 } from '../hooks/useGatewayDevices';
 import { formatDate } from '../lib/utils';
+import { useGateways } from '../hooks/useGateways';
 import type { Device } from '../types';
 
 /** 协议显示映射 */
@@ -505,11 +506,13 @@ const defaultDataPoints = JSON.stringify({ temperature: '400001', pressure: '400
  */
 function CreateConnectionPanel({ deviceId, deviceName, createMutation, testConnMutation }: CreateConnectionPanelProps) {
   const { t } = useTranslation();
+  const { data: gateways } = useGateways();
   const [form, setForm] = useState({
     protocol: 'opcua',
     connectionConfig: defaultConfigs.opcua,
     dataPoints: defaultDataPoints,
     pollIntervalMs: 3000,
+    gatewayId: '',
   });
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
@@ -531,6 +534,7 @@ function CreateConnectionPanel({ deviceId, deviceName, createMutation, testConnM
       dataPoints: form.dataPoints,
       pollIntervalMs: form.pollIntervalMs,
       deviceId,
+      gatewayId: form.gatewayId || undefined,
     });
   };
 
@@ -574,6 +578,27 @@ function CreateConnectionPanel({ deviceId, deviceName, createMutation, testConnM
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* 网关选择 */}
+          <div className="space-y-2">
+            <Label>{t('device.connection.gatewayId')}</Label>
+            <Select value={form.gatewayId || undefined} onValueChange={(v) => setForm({ ...form, gatewayId: v ?? '' })}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择网关（可选）" />
+              </SelectTrigger>
+              <SelectContent>
+                {gateways?.filter((g) => g.status === 'online').map((g) => (
+                  <SelectItem key={g.gatewayId} value={g.gatewayId}>
+                    {g.name}（{g.gatewayId}）
+                  </SelectItem>
+                ))}
+                {(!gateways || gateways.filter((g) => g.status === 'online').length === 0) && (
+                  <SelectItem value="_none" disabled>暂无在线网关</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">选择负责采集该设备数据的边缘网关，不选则使用默认网关</p>
           </div>
 
           {/* 采集间隔 */}

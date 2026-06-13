@@ -109,6 +109,11 @@ public class AppDbContext : DbContext
     public DbSet<Core.Entities.GatewayDevice> GatewayDevices => Set<Core.Entities.GatewayDevice>();
 
     /// <summary>
+    /// 网关注册表 — 已注册的边缘网关信息
+    /// </summary>
+    public DbSet<Core.Entities.Gateway> Gateways => Set<Core.Entities.Gateway>();
+
+    /// <summary>
     /// 审批链模板表
     /// </summary>
     public DbSet<Core.Entities.ApprovalChainTemplate> ApprovalChainTemplates => Set<Core.Entities.ApprovalChainTemplate>();

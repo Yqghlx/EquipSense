@@ -1,0 +1,134 @@
+- generic [ref=e23]:
+  - complementary [ref=e24]:
+    - generic [ref=e25]:
+      - generic [ref=e26]: EquipSense
+      - button "收起侧边栏" [ref=e27]:
+        - img [ref=e28]
+    - navigation [ref=e30]:
+      - link "仪表盘" [ref=e31] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e32]
+        - generic [ref=e37]: 仪表盘
+      - link "设备管理" [ref=e38] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e39]
+        - generic [ref=e41]: 设备管理
+      - link "网关状态" [ref=e42] [cursor=pointer]:
+        - /url: /gateways
+        - img [ref=e43]
+        - generic [ref=e48]: 网关状态
+      - link "告警中心" [ref=e49] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e50]
+        - generic [ref=e52]: 告警中心
+      - link "告警规则" [ref=e53] [cursor=pointer]:
+        - /url: /alert-rules
+        - img [ref=e54]
+        - generic [ref=e57]: 告警规则
+      - link "工单管理" [ref=e58] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e59]
+        - generic [ref=e62]: 工单管理
+      - link "待审批" [ref=e63] [cursor=pointer]:
+        - /url: /pending-approvals
+        - img [ref=e64]
+        - generic [ref=e68]: 待审批
+      - link "派工看板" [ref=e69] [cursor=pointer]:
+        - /url: /dispatch
+        - img [ref=e70]
+        - generic [ref=e75]: 派工看板
+      - link "AI 分析" [ref=e76] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e77]
+        - generic [ref=e85]: AI 分析
+      - link "知识库" [ref=e86] [cursor=pointer]:
+        - /url: /knowledge
+        - img [ref=e87]
+        - generic [ref=e89]: 知识库
+      - link "系统设置" [ref=e90] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e91]
+        - generic [ref=e94]: 系统设置
+      - link "租户管理" [ref=e95] [cursor=pointer]:
+        - /url: /admin/tenants
+        - img [ref=e96]
+        - generic [ref=e100]: 租户管理
+    - button "通知" [ref=e102]:
+      - img [ref=e103]
+      - generic [ref=e106]: 通知
+  - generic [ref=e107]:
+    - banner [ref=e108]:
+      - generic [ref=e109]: EquipSense
+      - generic [ref=e110]:
+        - button [ref=e111]:
+          - img [ref=e112]
+        - button "切换主题" [ref=e115]:
+          - img
+        - button "切换语言" [ref=e116]:
+          - img
+        - button [ref=e117]:
+          - img [ref=e118]
+    - main [ref=e121]:
+      - generic [ref=e122]:
+        - heading "仪表盘" [level=1] [ref=e123]
+        - generic [ref=e125]:
+          - heading "全局统计" [level=3] [ref=e126]
+          - generic [ref=e127]:
+            - generic [ref=e128]:
+              - img [ref=e129]
+              - generic [ref=e133]:
+                - paragraph [ref=e134]: "2"
+                - paragraph [ref=e135]: 总租户
+            - generic [ref=e136]:
+              - img [ref=e137]
+              - generic [ref=e141]:
+                - paragraph [ref=e142]: "2"
+                - paragraph [ref=e143]: 活跃租户
+            - generic [ref=e144]:
+              - img [ref=e145]
+              - generic [ref=e149]:
+                - paragraph [ref=e150]: "0"
+                - paragraph [ref=e151]: 试用租户
+            - generic [ref=e152]:
+              - img [ref=e153]
+              - generic [ref=e166]:
+                - paragraph [ref=e167]: "0"
+                - paragraph [ref=e168]: 冻结租户
+            - generic [ref=e169]:
+              - img [ref=e170]
+              - generic [ref=e172]:
+                - paragraph [ref=e173]: "1"
+                - paragraph [ref=e174]: 总设备
+            - generic [ref=e175]:
+              - img [ref=e176]
+              - generic [ref=e181]:
+                - paragraph [ref=e182]: "6"
+                - paragraph [ref=e183]: 总用户
+        - generic [ref=e184]:
+          - generic [ref=e186] [cursor=pointer]:
+            - img [ref=e188]
+            - generic [ref=e190]:
+              - paragraph [ref=e191]: "0"
+              - paragraph [ref=e192]: 在线
+          - generic [ref=e194] [cursor=pointer]:
+            - img [ref=e196]
+            - generic [ref=e198]:
+              - paragraph [ref=e199]: "0"
+              - paragraph [ref=e200]: 活跃
+          - generic [ref=e202] [cursor=pointer]:
+            - img [ref=e204]
+            - generic [ref=e207]:
+              - paragraph [ref=e208]: "0"
+              - paragraph [ref=e209]: 待处理工单
+          - generic [ref=e211] [cursor=pointer]:
+            - img [ref=e213]
+            - generic [ref=e215]:
+              - paragraph [ref=e216]: 0%
+              - paragraph [ref=e217]: 设备可用率
+        - generic [ref=e240]:
+          - generic [ref=e242]:
+            - heading "工单状态分布" [level=3] [ref=e243]
+            - paragraph [ref=e244]: 暂无数据
+          - generic [ref=e246]:
+            - heading "最近告警" [level=3] [ref=e247]
+            - paragraph [ref=e249]: 暂无数据

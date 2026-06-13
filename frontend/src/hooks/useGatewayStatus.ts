@@ -1,7 +1,7 @@
 /**
  * 网关状态 hook
  *
- * 提供获取网关实时运行状态的 TanStack Query 操作。
+ * 提供获取指定网关实时运行状态的 TanStack Query 操作。
  */
 import { useQuery } from '@tanstack/react-query';
 import api from '../lib/api';
@@ -48,14 +48,23 @@ export interface GatewayStatus {
   message?: string;
 }
 
-/** 查询网关实时运行状态 */
-export function useGatewayStatus() {
+/**
+ * 查询指定网关的实时运行状态
+ *
+ * @param gatewayId 网关业务标识，传入后调用 /gateways/{gatewayId}/status
+ */
+export function useGatewayStatus(gatewayId?: string) {
   return useQuery({
-    queryKey: ['gateway-status'],
+    queryKey: ['gateway-status', gatewayId],
     queryFn: async () => {
+      if (gatewayId) {
+        const { data } = await api.get<GatewayStatus>(`/gateways/${encodeURIComponent(gatewayId)}/status`);
+        return data;
+      }
+      // 兼容旧调用：无 gatewayId 时用旧端点
       const { data } = await api.get<GatewayStatus>('/gateway/status');
       return data;
     },
-    refetchInterval: 15000, // 每 15 秒刷新
+    refetchInterval: 15000,
   });
 }

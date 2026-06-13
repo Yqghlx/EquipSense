@@ -25,7 +25,7 @@ import { useUnreadCount } from '../../hooks/useNotifications';
 const baseNavItems = [
   { path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { path: '/devices', icon: Wrench, labelKey: 'nav.devices' },
-  { path: '/gateway/monitor', icon: Network, labelKey: 'nav.gateway' },
+  { path: '/gateways', icon: Network, labelKey: 'nav.gateway' },
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },
   { path: '/alert-rules', icon: Bell, labelKey: 'nav.alertRules' },
   { path: '/work-orders', icon: ClipboardList, labelKey: 'nav.workOrders' },

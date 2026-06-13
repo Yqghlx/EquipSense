@@ -1,0 +1,102 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: EquipSense
+      - button "收起侧边栏" [ref=e7]:
+        - img [ref=e8]
+    - navigation [ref=e10]:
+      - link "仪表盘" [ref=e11] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e12]
+        - generic [ref=e17]: 仪表盘
+      - link "设备管理" [ref=e18] [cursor=pointer]:
+        - /url: /devices
+        - img [ref=e19]
+        - generic [ref=e21]: 设备管理
+      - link "网关状态" [active] [ref=e22] [cursor=pointer]:
+        - /url: /gateways
+        - img [ref=e23]
+        - generic [ref=e28]: 网关状态
+      - link "告警中心" [ref=e29] [cursor=pointer]:
+        - /url: /alerts
+        - img [ref=e30]
+        - generic [ref=e32]: 告警中心
+      - link "告警规则" [ref=e33] [cursor=pointer]:
+        - /url: /alert-rules
+        - img [ref=e34]
+        - generic [ref=e37]: 告警规则
+      - link "工单管理" [ref=e38] [cursor=pointer]:
+        - /url: /work-orders
+        - img [ref=e39]
+        - generic [ref=e42]: 工单管理
+      - link "待审批" [ref=e43] [cursor=pointer]:
+        - /url: /pending-approvals
+        - img [ref=e44]
+        - generic [ref=e48]: 待审批
+      - link "派工看板" [ref=e49] [cursor=pointer]:
+        - /url: /dispatch
+        - img [ref=e50]
+        - generic [ref=e55]: 派工看板
+      - link "AI 分析" [ref=e56] [cursor=pointer]:
+        - /url: /analyses
+        - img [ref=e57]
+        - generic [ref=e65]: AI 分析
+      - link "知识库" [ref=e66] [cursor=pointer]:
+        - /url: /knowledge
+        - img [ref=e67]
+        - generic [ref=e69]: 知识库
+      - link "系统设置" [ref=e70] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e71]
+        - generic [ref=e74]: 系统设置
+      - link "租户管理" [ref=e75] [cursor=pointer]:
+        - /url: /admin/tenants
+        - img [ref=e76]
+        - generic [ref=e80]: 租户管理
+    - button "通知" [ref=e82]:
+      - img [ref=e83]
+      - generic [ref=e86]: 通知
+  - generic [ref=e87]:
+    - banner [ref=e88]:
+      - generic [ref=e89]: EquipSense
+      - generic [ref=e90]:
+        - button [ref=e91]:
+          - img [ref=e92]
+        - button "切换主题" [ref=e95]:
+          - img
+        - button "切换语言" [ref=e96]:
+          - img
+        - button [ref=e97]:
+          - img [ref=e98]
+    - main [ref=e101]:
+      - generic [ref=e232]:
+        - generic [ref=e233]:
+          - generic [ref=e234]:
+            - heading "网关管理" [level=1] [ref=e235]
+            - paragraph [ref=e236]: 查看和管理所有已注册的边缘网关
+          - button "刷新" [ref=e237]
+        - generic [ref=e239]:
+          - generic [ref=e240]:
+            - generic [ref=e241]:
+              - generic [ref=e242]: 测试网关A
+              - generic [ref=e243]: 在线
+            - generic [ref=e244]:
+              - img [ref=e245]
+              - generic [ref=e250]: gw-test-001
+          - generic [ref=e251]:
+            - generic [ref=e252]:
+              - generic [ref=e253]:
+                - paragraph [ref=e254]: 设备数
+                - paragraph [ref=e255]: "0"
+              - generic [ref=e256]:
+                - paragraph [ref=e257]: 版本
+                - paragraph [ref=e258]: 1.0.0
+              - generic [ref=e259]:
+                - paragraph [ref=e260]: 地址
+                - paragraph [ref=e261]: localhost:8081
+              - generic [ref=e262]:
+                - paragraph [ref=e263]: 最后心跳
+                - paragraph [ref=e264]: 2026/6/7 16:45:58
+            - button "查看监控" [ref=e266]:
+              - img
+              - text: 查看监控

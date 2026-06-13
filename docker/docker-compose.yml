@@ -91,7 +91,6 @@ services:
       Vapid__PublicKey: "${VAPID__PUBLICKEY:-}"
       Vapid__PrivateKey: "${VAPID__PRIVATEKEY:-}"
       BEHIND_PROXY: "${BEHIND_PROXY:-true}"
-      Gateway__Host: "edgegateway"
       Serilog__WriteTo__1__Name: "Seq"
       Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
     depends_on:
@@ -134,6 +133,9 @@ services:
       Gateway__BackendUrl: "http://backend:8080"
       Gateway__AuthKey: "${GATEWAY_AUTH_KEY:-}"
       Gateway__UploadIntervalSeconds: "${GATEWAY_UPLOAD_INTERVAL:-5}"
+      Gateway__Host: "edgegateway"
+      Gateway__HealthPort: "8081"
+      Gateway__Version: "1.0.0"
     volumes:
       - edgegateway_data:/data
     depends_on:

@@ -1,0 +1,6 @@
+- generic [ref=e2]:
+  - generic [ref=e3]: 🔌
+  - heading "当前处于离线状态" [level=1] [ref=e4]
+  - paragraph [ref=e5]: EquipSense 无法连接到服务器。请检查网络连接后重试。
+  - paragraph [ref=e6]: 您正在进行中的操作已安全保存，网络恢复后将自动同步。
+  - button "重试连接" [ref=e7] [cursor=pointer]

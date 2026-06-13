@@ -565,6 +565,20 @@
     "reviewDeviceName": "设备名称",
     "submitCreate": "确认创建"
   },
+  "gateway": {
+    "listTitle": "网关管理",
+    "listDescription": "查看和管理所有已注册的边缘网关",
+    "noGateways": "暂无已注册的网关",
+    "noGatewaysHint": "启动边缘网关后，它会自动注册到系统中",
+    "deviceCount": "设备数",
+    "version": "版本",
+    "address": "地址",
+    "lastHeartbeat": "最后心跳",
+    "monitor": "查看监控",
+    "statusOnline": "在线",
+    "statusOffline": "离线",
+    "statusDisabled": "已禁用"
+  },
   "dispatch": {
     "title": "智能派工看板",
     "pendingOrders": "待派工工单",

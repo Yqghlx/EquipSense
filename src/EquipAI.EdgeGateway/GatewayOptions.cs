@@ -77,4 +77,24 @@ public class GatewayOptions
     /// 为空时使用默认路径 certificates/trusted。
     /// </summary>
     public string? OpcUaTrustedCertificatesPath { get; set; }
+
+    /// <summary>
+    /// 网关对外可访问的地址（后端用于代理健康请求），Docker 部署时为容器名或 IP
+    /// </summary>
+    public string Host { get; set; } = "localhost";
+
+    /// <summary>
+    /// 健康端点端口（默认 8081）
+    /// </summary>
+    public int HealthPort { get; set; } = 8081;
+
+    /// <summary>
+    /// 网关软件版本
+    /// </summary>
+    public string Version { get; set; } = "1.0.0";
+
+    /// <summary>
+    /// 心跳间隔（秒），默认 30 秒
+    /// </summary>
+    public int HeartbeatIntervalSeconds { get; set; } = 30;
 }

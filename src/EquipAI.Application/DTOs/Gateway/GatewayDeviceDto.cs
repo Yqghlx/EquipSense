@@ -90,6 +90,11 @@ public class CreateGatewayDeviceRequest
     /// 关联的设备 ID（可选，创建后关联）
     /// </summary>
     public Guid? DeviceId { get; set; }
+
+    /// <summary>
+    /// 归属网关 ID（可选，未指定则使用系统默认网关）
+    /// </summary>
+    public string? GatewayId { get; set; }
 }
 
 /// <summary>

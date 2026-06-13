@@ -31,6 +31,8 @@ export interface CreateGatewayDeviceParams {
   pollIntervalMs?: number;
   /** 关联已有设备 ID（可选） */
   deviceId?: string;
+  /** 指定网关标识（可选，不填使用默认网关） */
+  gatewayId?: string;
 }
 
 /** 网关设备信息 */

@@ -114,6 +114,15 @@ try
 
     builder.Services.AddSerilog();
 
+    // 注册 HTTP 客户端工厂（供心跳服务使用）
+    builder.Services.AddHttpClient("Backend");
+
+    // 注册心跳服务 — 定期向后端发送心跳以保持在线状态
+    builder.Services.AddSingleton<IHostedService>(sp => new HeartbeatService(
+        sp.GetRequiredService<ILogger<HeartbeatService>>(),
+        sp.GetRequiredService<GatewayOptions>(),
+        sp.GetRequiredService<IHttpClientFactory>()));
+
     // 注册健康检查和 Prometheus 指标端点
     builder.Services.AddSingleton<IHostedService>(sp => new HealthEndpoints(
         sp.GetRequiredService<ILogger<HealthEndpoints>>(),
