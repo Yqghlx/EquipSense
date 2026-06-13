@@ -6,7 +6,7 @@ namespace EquipAI.Simulator.Faults;
 public sealed class FaultRegistry
 {
     private readonly Dictionary<string, IFaultPattern> _faults;
-    private readonly Random _random = new();
+    private Random _random = new();
 
     public FaultRegistry()
     {
@@ -38,4 +38,7 @@ public sealed class FaultRegistry
         var values = _faults.Values.ToList();
         return values[_random.Next(values.Count)];
     }
+
+    /// <summary>注入外部 Random 实例，使随机选取可被调用方控制（测试可重复）</summary>
+    public void UseRandom(Random random) => _random = random;
 }

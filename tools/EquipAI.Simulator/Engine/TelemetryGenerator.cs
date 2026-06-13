@@ -38,9 +38,9 @@ public sealed class TelemetryGenerator
             // 1. 基线
             var value = spec.Baseline;
 
-            // 2. 趋势（布朗运动 — 小步长随机游走，保证时序相关性）
+            // 2. 趋势（布朗运动 + 均值回归 — 小步长随机游走但每步衰减 2%，防止长期漂移导致无故障误告警）
             var trendStep = (_random.NextDouble() - 0.5) * 2 * spec.TrendStep;
-            _trendState[metric] += trendStep;
+            _trendState[metric] = _trendState[metric] * 0.98 + trendStep;
             value += _trendState[metric];
 
             // 3. 周期（24 小时昼夜正弦波）

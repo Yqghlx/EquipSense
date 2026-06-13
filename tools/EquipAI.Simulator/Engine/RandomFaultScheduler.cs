@@ -23,10 +23,13 @@ public sealed class RandomFaultScheduler
 
     public RandomFaultScheduler(FaultRegistry registry, double faultRate, int maxDurationMinutes, int? seed = null)
     {
+        if (faultRate < 0 || faultRate > 1)
+            throw new ArgumentOutOfRangeException(nameof(faultRate), "faultRate 必须在 [0, 1] 范围内");
         _registry = registry;
         _faultRate = faultRate;
         _maxDurationMinutes = maxDurationMinutes;
         _random = seed.HasValue ? new Random(seed.Value) : new Random();
+        _registry.UseRandom(_random);
     }
 
     public void Tick(TimeSpan currentSimulatedTime)
