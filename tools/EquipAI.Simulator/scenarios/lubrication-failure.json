@@ -1,0 +1,1 @@
+{"name": "lubrication-failure-scenario", "deviceCode": "AC-001", "description": "模拟润滑失效故障，油温在 2 分钟内阶跃至 90°C 触发 Critical 告警", "timeScale": 1, "timeline": [{"at": "00:00:30", "action": "start", "faultType": "lubrication_failure"}, {"at": "00:30:00", "action": "stop", "faultType": "lubrication_failure"}]}

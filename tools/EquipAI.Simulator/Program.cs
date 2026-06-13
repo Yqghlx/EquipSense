@@ -1,5 +1,9 @@
 using System.Text;
 using System.Text.Json;
+using EquipAI.Simulator.Engine;
+using EquipAI.Simulator.Faults;
+using EquipAI.Simulator.Models;
+using EquipAI.Simulator.Profiles;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
@@ -7,480 +11,243 @@ using MQTTnet.Protocol;
 namespace EquipAI.Simulator;
 
 /// <summary>
-/// 工业设备遥测数据模拟器
-/// 模拟多个工业设备通过 MQTT 发送温度、压力、振动、湿度、转速等遥测数据
+/// 工业设备遥测数据模拟器（升级版）
+/// 支持剧本模式（--scenario）和随机模式（--mode random）
+/// 生成的数据具有真实工业时序特征：趋势 + 周期 + 故障演化
 /// </summary>
 class Program
 {
-    /// <summary>
-    /// 默认租户 ID（与数据库种子数据一致）
-    /// </summary>
-    private const string DefaultTenantId = "11111111-1111-1111-1111-111111111111";
-
-    /// <summary>
-    /// 异常值出现概率（5%）
-    /// </summary>
-    private const double AnomalyProbability = 0.05;
-
-    /// <summary>
-    /// 程序入口
-    /// </summary>
     static async Task<int> Main(string[] args)
     {
-        // 解析命令行参数
         var options = ParseArguments(args);
+        if (options.ShowHelp) { PrintUsage(); return 0; }
 
-        if (options.ShowHelp)
-        {
-            PrintUsage();
-            return 0;
-        }
-
-        // 打印启动横幅
         PrintBanner(options);
 
-        // 创建取消令牌，支持 Ctrl+C 优雅退出
         using var cts = options.DurationSeconds.HasValue
             ? new CancellationTokenSource(TimeSpan.FromSeconds(options.DurationSeconds.Value))
             : new CancellationTokenSource();
 
-        Console.CancelKeyPress += (_, e) =>
-        {
-            e.Cancel = true;
-            cts.Cancel();
-            Console.WriteLine("\n[信息] 正在停止模拟器...");
-        };
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
         try
         {
             await RunSimulatorAsync(options, cts.Token);
         }
-        catch (OperationCanceledException)
-        {
-            Console.WriteLine("[信息] 模拟器已停止。");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[错误] 模拟器运行异常: {ex.Message}");
-            return 1;
-        }
+        catch (OperationCanceledException) { Console.WriteLine("\n[信息] 模拟器已停止"); }
+        catch (Exception ex) { Console.WriteLine($"[错误] {ex.Message}"); return 1; }
 
         return 0;
     }
 
-    /// <summary>
-    /// 运行模拟器主循环
-    /// </summary>
-    private static async Task RunSimulatorAsync(SimulatorOptions options, CancellationToken cancellationToken)
+    private static async Task RunSimulatorAsync(SimulatorOptions options, CancellationToken ct)
     {
-        // 创建 MQTT 客户端工厂
-        var factory = new MqttFactory();
+        // 装配设备画像和数据生成器
+        var profile = new AirCompressorProfile();
+        var generator = new TelemetryGenerator(profile);
 
-        // 使用 using 确保客户端正确释放
-        using var mqttClient = factory.CreateMqttClient();
+        // 装配故障调度器（剧本模式或随机模式）
+        ScenarioEngine? scenarioEngine = null;
+        RandomFaultScheduler? randomScheduler = null;
+        FaultScenario? scenario = null;
 
-        // 构建 MQTT 连接选项
+        if (!string.IsNullOrEmpty(options.ScenarioFile))
+        {
+            var json = await File.ReadAllTextAsync(options.ScenarioFile, ct);
+            scenario = JsonSerializer.Deserialize<FaultScenario>(json)
+                       ?? throw new InvalidOperationException("剧本文件解析失败");
+            scenarioEngine = new ScenarioEngine(scenario);
+            Console.WriteLine($"[信息] 已加载剧本: {scenario.Name}（timeScale={scenario.TimeScale}）");
+        }
+        else
+        {
+            randomScheduler = new RandomFaultScheduler(options.FaultRate, maxDurationMinutes: 30);
+            Console.WriteLine($"[信息] 随机模式：faultRate={options.FaultRate}");
+        }
+
+        // 装配标准答案记录器
+        var scenarioName = scenario?.Name ?? "random";
+        var truthLogger = new GroundTruthLogger(options.DeviceCode, scenarioName);
+        var lastFaultTypes = new HashSet<string>();
+        var registry = new FaultRegistry();
+
+        // 连接 MQTT
+        using var mqttClient = new MqttFactory().CreateMqttClient();
         var connectOptions = new MqttClientOptionsBuilder()
             .WithTcpServer(options.BrokerHost, options.Port)
-            .WithClientId($"EquipAI-Simulator-{Guid.NewGuid():N}"[..50])
+            .WithClientId($"EquipAI-Sim-{Guid.NewGuid():N}")
             .WithCleanSession(true)
             .Build();
 
-        // 连接到 MQTT 代理
-        Console.WriteLine($"[信息] 正在连接到 MQTT 代理 {options.BrokerHost}:{options.Port}...");
-        var connectResult = await mqttClient.ConnectAsync(connectOptions, cancellationToken);
-        Console.WriteLine($"[信息] 连接成功！结果代码: {connectResult.ResultCode}");
+        Console.WriteLine($"[信息] 连接 MQTT {options.BrokerHost}:{options.Port}...");
+        await mqttClient.ConnectAsync(connectOptions, ct);
+        Console.WriteLine("[信息] 连接成功，开始发送遥测数据...\n");
 
-        // 生成模拟设备列表
-        var devices = GenerateDevices(options.DeviceCount);
-        Console.WriteLine($"[信息] 已生成 {devices.Count} 个模拟设备:");
+        var deviceId = Guid.NewGuid();
+        var timeScale = scenario?.TimeScale ?? 1;
 
-        foreach (var device in devices)
-        {
-            Console.WriteLine($"  - {device.Name} ({device.Id})");
-        }
-
-        Console.WriteLine();
-        Console.WriteLine("[信息] 开始发送遥测数据... 按 Ctrl+C 停止");
-        Console.WriteLine(new string('=', 70));
-
-        // 发送统计
-        var totalSent = 0L;
-        var deviceStats = devices.ToDictionary(d => d.Id, _ => new DeviceSendStats());
-
-        // 面板占位行（为后续刷新留出空间）
-        for (var i = 0; i < devices.Count + 4; i++)
-        {
-            Console.WriteLine();
-        }
-
-        // 定时器：按指定间隔发送数据
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.IntervalSeconds));
+        var tickCount = 0;
 
-        while (await timer.WaitForNextTickAsync(cancellationToken))
+        while (await timer.WaitForNextTickAsync(ct))
         {
-            // 为每个设备生成并发送遥测数据
-            foreach (var device in devices)
+            // 推进模拟时间
+            var simTime = TimeSpan.FromSeconds(tickCount * options.IntervalSeconds * timeScale);
+            tickCount++;
+
+            // 调度故障
+            if (scenarioEngine != null)
             {
-                var telemetry = GenerateTelemetry(device);
-                var topic = $"factory/{options.TenantId}/telemetry/{device.Id}";
-                var payload = JsonSerializer.Serialize(telemetry);
-
-                var message = new MqttApplicationMessageBuilder()
-                    .WithTopic(topic)
-                    .WithPayload(Encoding.UTF8.GetBytes(payload))
-                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-                    .WithRetainFlag(false)
-                    .Build();
-
-                try
-                {
-                    await mqttClient.PublishAsync(message, cancellationToken);
-                    Interlocked.Increment(ref totalSent);
-
-                    // 更新设备统计信息
-                    var stats = deviceStats[device.Id];
-                    stats.SendCount++;
-                    stats.LastMetrics = telemetry.Metrics;
-                    stats.LastTimestamp = telemetry.Timestamp;
-                    stats.IsAnomaly = telemetry.Quality == "anomaly";
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[错误] 设备 {device.Name} 发送失败: {ex.Message}");
-                }
+                scenarioEngine.Tick(simTime);
+                LogFaultChanges(scenarioEngine.ActiveFaults, lastFaultTypes, truthLogger, registry);
+            }
+            else if (randomScheduler != null)
+            {
+                randomScheduler.Tick(simTime);
+                LogFaultChanges(randomScheduler.ActiveFaults, lastFaultTypes, truthLogger, registry);
             }
 
-            // 更新控制台面板显示
-            RenderDashboard(devices, deviceStats, totalSent, options);
-        }
-    }
+            IReadOnlyList<ActiveFault> activeFaults = scenarioEngine?.ActiveFaults
+                ?? randomScheduler?.ActiveFaults
+                ?? Array.Empty<ActiveFault>();
 
-    /// <summary>
-    /// 为指定设备生成一条遥测数据
-    /// 正常数据在合理范围内随机波动，5% 概率生成异常值
-    /// </summary>
-    private static TelemetryMessage GenerateTelemetry(SimulatedDevice device)
-    {
-        // 5% 概率生成异常数据
-        var isAnomaly = Random.Shared.NextDouble() < AnomalyProbability;
-
-        // 在正常值基础上添加高斯噪声，使数据更真实
-        var metrics = new Dictionary<string, double>
-        {
-            ["temperature"] = isAnomaly
-                ? GenerateAnomalousValue(100.0, 130.0)   // 异常温度: 100-130°C
-                : GenerateNormalValue(device.BaseTemperature, 3.0), // 正常: 约 60-80°C
-
-            ["vibration"] = isAnomaly
-                ? GenerateAnomalousValue(5.0, 12.0)      // 异常振动: 5-12 mm/s
-                : Math.Max(0, GenerateNormalValue(device.BaseVibration, 0.3)), // 正常: 0-5 mm/s
-
-            ["pressure"] = isAnomaly
-                ? GenerateAnomalousValue(110.0, 140.0)   // 异常压力: 110-140 bar
-                : GenerateNormalValue(device.BasePressure, 2.0), // 正常: 约 90-110 bar
-
-            ["humidity"] = Math.Clamp(
-                GenerateNormalValue(device.BaseHumidity, 3.0),
-                10.0, 95.0), // 湿度限制在 10%-95%
-
-            ["rpm"] = isAnomaly
-                ? GenerateAnomalousValue(2000.0, 3000.0) // 异常转速: 2000-3000
-                : Math.Max(0, GenerateNormalValue(device.BaseRpm, 50.0)) // 正常: 约 1450-1550
-        };
-
-        return new TelemetryMessage
-        {
-            Timestamp = DateTime.UtcNow.ToString("o"),
-            Quality = isAnomaly ? "anomaly" : "good",
-            Metrics = metrics
-        };
-    }
-
-    /// <summary>
-    /// 生成服从正态分布的随机值（Box-Muller 变换）
-    /// </summary>
-    /// <param name="mean">均值</param>
-    /// <param name="stdDev">标准差</param>
-    private static double GenerateNormalValue(double mean, double stdDev)
-    {
-        // Box-Muller 变换生成标准正态分布
-        var u1 = 1.0 - Random.Shared.NextDouble(); // 避免取 0
-        var u2 = 1.0 - Random.Shared.NextDouble();
-        var normal = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
-
-        return Math.Round(mean + stdDev * normal, 2);
-    }
-
-    /// <summary>
-    /// 生成异常值：在 [min, max) 区间内均匀分布
-    /// </summary>
-    private static double GenerateAnomalousValue(double anomalyMin, double anomalyMax)
-    {
-        var value = anomalyMin + Random.Shared.NextDouble() * (anomalyMax - anomalyMin);
-        return Math.Round(value, 2);
-    }
-
-    /// <summary>
-    /// 生成指定数量的模拟设备
-    /// 每个设备有独立的基础参数值，模拟不同类型/状态的工业设备
-    /// </summary>
-    private static List<SimulatedDevice> GenerateDevices(int count)
-    {
-        // 预定义的设备名称，使模拟更真实
-        var deviceNames = new[]
-        {
-            "CNC加工中心-01", "CNC加工中心-02", "注塑机-A1", "注塑机-A2",
-            "空压机-01", "空压机-02", "冲压机床-B1", "冲压机床-B2",
-            "焊接机器人-R1", "焊接机器人-R2", "传送带-S1", "传送带-S2",
-            "冷却塔-T1", "冷却塔-T2", "液压站-H1", "液压站-H2",
-            "数控车床-L1", "数控车床-L2", "铣床-M1", "铣床-M2"
-        };
-
-        var devices = new List<SimulatedDevice>();
-
-        for (var i = 0; i < count; i++)
-        {
-            var name = i < deviceNames.Length
-                ? deviceNames[i]
-                : $"设备-{i + 1:D3}";
-
-            devices.Add(new SimulatedDevice
+            // 生成数据
+            var metrics = generator.Generate(simTime, activeFaults.ToList());
+            var payload = new
             {
-                Id = Guid.NewGuid(),
-                Name = name,
-                // 每台设备的基础参数略有不同，模拟设备差异
-                BaseTemperature = 60.0 + Random.Shared.NextDouble() * 20.0,  // 60-80°C
-                BaseVibration = Random.Shared.NextDouble() * 2.0,             // 0-2 mm/s
-                BasePressure = 90.0 + Random.Shared.NextDouble() * 20.0,     // 90-110 bar
-                BaseHumidity = 40.0 + Random.Shared.NextDouble() * 20.0,     // 40-60%
-                BaseRpm = 1400.0 + Random.Shared.NextDouble() * 200.0        // 1400-1600 RPM
-            });
+                timestamp = DateTime.UtcNow.ToString("o"),
+                quality = activeFaults.Count > 0 ? "warning" : "good",
+                metrics,
+            };
+
+            var topic = $"factory/{options.TenantId}/telemetry/{deviceId}";
+            var message = new MqttApplicationMessageBuilder()
+                .WithTopic(topic)
+                .WithPayload(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload)))
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                .Build();
+
+            try
+            {
+                await mqttClient.PublishAsync(message, ct);
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] sim={simTime:hh\\:mm\\:ss} faults={activeFaults.Count} "
+                                  + $"oil_temp={metrics["oil_temperature"]:F1}°C vib={metrics["vibration"]:F2} "
+                                  + $"press={metrics["discharge_pressure"]:F2} current={metrics["motor_current"]:F0}A");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[错误] 发送失败: {ex.Message}");
+            }
         }
 
-        return devices;
+        // 保存标准答案日志
+        var outputPath = Path.Combine(AppContext.BaseDirectory, "ground-truth");
+        await truthLogger.SaveAsync(outputPath, ct);
+        Console.WriteLine($"\n[信息] 标准答案已保存到: {outputPath}");
     }
 
-    /// <summary>
-    /// 渲染控制台面板，显示各设备的发送统计和最新数据
-    /// </summary>
-    private static void RenderDashboard(
-        List<SimulatedDevice> devices,
-        Dictionary<Guid, DeviceSendStats> stats,
-        long totalSent,
-        SimulatorOptions options)
+    /// <summary>检测活跃故障列表变化，记录注入/移除事件到标准答案日志</summary>
+    private static void LogFaultChanges(
+        IReadOnlyList<ActiveFault> current,
+        HashSet<string> lastTypes,
+        GroundTruthLogger logger,
+        FaultRegistry registry)
     {
-        // 计算面板起始行（面板之前的行数为固定值）
-        var dashboardStartLine = Console.CursorTop - devices.Count - 4;
+        var currentTypes = current.Select(f => f.Pattern.FaultType).ToHashSet();
 
-        // 确保光标位置有效
-        if (dashboardStartLine < 0) dashboardStartLine = 0;
+        // 新注入的故障
+        foreach (var fault in current.Where(f => !lastTypes.Contains(f.Pattern.FaultType)))
+            logger.LogFaultInjected(fault.Pattern, DateTime.UtcNow);
 
-        Console.SetCursorPosition(0, dashboardStartLine);
-
-        var now = DateTime.Now.ToString("HH:mm:ss");
-        Console.WriteLine($"[{now}] 总发送: {totalSent} 条 | "
-                          + $"设备数: {devices.Count} | "
-                          + $"间隔: {options.IntervalSeconds}s | "
-                          + $"代理: {options.BrokerHost}:{options.Port}");
-
-        Console.WriteLine(new string('-', 70));
-        Console.WriteLine($"{"设备名称",-18} {"发送数",8} {"温度°C",8} {"振动mm/s",10} {"压力bar",8} {"质量",6}");
-        Console.WriteLine(new string('-', 70));
-
-        foreach (var device in devices)
+        // 已移除的故障
+        foreach (var removed in lastTypes.Except(currentTypes))
         {
-            var s = stats[device.Id];
-            if (s.LastMetrics == null) continue;
-
-            s.LastMetrics.TryGetValue("temperature", out var temp);
-            s.LastMetrics.TryGetValue("vibration", out var vib);
-            s.LastMetrics.TryGetValue("pressure", out var pres);
-
-            var qualityDisplay = s.IsAnomaly ? "!!异常" : "正常";
-            Console.WriteLine($"{device.Name,-18} {s.SendCount,8} {temp,8:F1} {vib,10:F2} {pres,8:F1} {qualityDisplay,6}");
+            var pattern = registry.Get(removed);
+            logger.LogFaultStopped(pattern, DateTime.UtcNow);
         }
 
-        Console.WriteLine(new string('=', 70));
+        lastTypes.Clear();
+        foreach (var t in currentTypes) lastTypes.Add(t);
     }
 
-    /// <summary>
-    /// 解析命令行参数
-    /// </summary>
     private static SimulatorOptions ParseArguments(string[] args)
     {
-        var options = new SimulatorOptions
-        {
-            BrokerHost = "localhost",
-            Port = 1883,
-            TenantId = DefaultTenantId,
-            DeviceCount = 5,
-            IntervalSeconds = 10
-        };
-
+        var options = new SimulatorOptions();
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
-                case "--host" or "-h" when i + 1 < args.Length && !args[i + 1].StartsWith('-'):
-                    options.BrokerHost = args[++i];
-                    break;
+                case "--host" or "-h" when i + 1 < args.Length:
+                    options.BrokerHost = args[++i]; break;
                 case "--port" or "-p" when i + 1 < args.Length:
-                    if (int.TryParse(args[++i], out var port))
-                        options.Port = port;
+                    if (int.TryParse(args[++i], out var port)) options.Port = port;
                     break;
                 case "--tenant" or "-t" when i + 1 < args.Length:
-                    options.TenantId = args[++i];
-                    break;
-                case "--devices" or "-d" when i + 1 < args.Length:
-                    if (int.TryParse(args[++i], out var devCount))
-                        options.DeviceCount = devCount;
-                    break;
+                    options.TenantId = args[++i]; break;
+                case "--device-code" when i + 1 < args.Length:
+                    options.DeviceCode = args[++i]; break;
                 case "--interval" or "-i" when i + 1 < args.Length:
-                    if (int.TryParse(args[++i], out var interval))
-                        options.IntervalSeconds = interval;
+                    if (int.TryParse(args[++i], out var interval)) options.IntervalSeconds = interval;
+                    break;
+                case "--scenario" or "-s" when i + 1 < args.Length:
+                    options.ScenarioFile = args[++i]; break;
+                case "--mode" when i + 1 < args.Length:
+                    options.Mode = args[++i]; break;
+                case "--fault-rate" when i + 1 < args.Length:
+                    if (double.TryParse(args[++i], out var rate)) options.FaultRate = rate;
                     break;
                 case "--duration" when i + 1 < args.Length:
-                    if (int.TryParse(args[++i], out var duration))
-                        options.DurationSeconds = duration;
+                    if (int.TryParse(args[++i], out var duration)) options.DurationSeconds = duration;
                     break;
-                case "--help":
-                    options.ShowHelp = true;
-                    break;
+                case "--help": options.ShowHelp = true; break;
             }
         }
-
         return options;
     }
 
-    /// <summary>
-    /// 打印使用说明
-    /// </summary>
     private static void PrintUsage()
     {
-        Console.WriteLine("EquipAI 工业设备遥测数据模拟器");
-        Console.WriteLine();
-        Console.WriteLine("用法: EquipAI.Simulator [选项]");
-        Console.WriteLine();
+        Console.WriteLine("EquipAI 工业遥测模拟器（升级版）\n");
+        Console.WriteLine("剧本模式（可重复评估）:");
+        Console.WriteLine("  EquipAI.Simulator --scenario scenarios/bearing-wear.json\n");
+        Console.WriteLine("随机模式（长期运行测试）:");
+        Console.WriteLine("  EquipAI.Simulator --mode random --fault-rate 0.1\n");
         Console.WriteLine("选项:");
-        Console.WriteLine("  --host, -h <host>       MQTT 代理地址 (默认: localhost)");
-        Console.WriteLine("  --port, -p <port>       MQTT 代理端口 (默认: 1883)");
-        Console.WriteLine("  --tenant, -t <guid>     租户 ID (默认: 11111111-1111-1111-1111-111111111111)");
-        Console.WriteLine("  --devices, -d <count>   模拟设备数量 (默认: 5)");
-        Console.WriteLine("  --interval, -i <sec>    发送间隔秒数 (默认: 10)");
-        Console.WriteLine("  --duration <sec>        运行时长秒数 (默认: 无限)");
-        Console.WriteLine("  --help                  显示帮助信息");
-        Console.WriteLine();
-        Console.WriteLine("示例:");
-        Console.WriteLine("  EquipAI.Simulator --host 192.168.1.100 --devices 10 --interval 5");
-        Console.WriteLine("  EquipAI.Simulator -h localhost -p 1883 -d 3 -i 2 --duration 300");
+        Console.WriteLine("  --host, -h <host>        MQTT 代理 (默认 localhost)");
+        Console.WriteLine("  --port, -p <port>        MQTT 端口 (默认 1883)");
+        Console.WriteLine("  --tenant, -t <guid>      租户 ID");
+        Console.WriteLine("  --device-code <code>     设备编码 (默认 AC-001)");
+        Console.WriteLine("  --interval, -i <sec>     采样间隔 (默认 5)");
+        Console.WriteLine("  --scenario, -s <path>    剧本 JSON 文件路径");
+        Console.WriteLine("  --mode random            随机故障模式");
+        Console.WriteLine("  --fault-rate <0-1>       随机模式故障概率 (默认 0.1)");
+        Console.WriteLine("  --duration <sec>         运行时长 (默认无限)");
     }
 
-    /// <summary>
-    /// 打印启动横幅
-    /// </summary>
     private static void PrintBanner(SimulatorOptions options)
     {
         Console.WriteLine();
         Console.WriteLine("  ╔═══════════════════════════════════════════════╗");
-        Console.WriteLine("  ║   EquipAI 工业设备遥测数据模拟器            ║");
-        Console.WriteLine("  ║   Industrial Telemetry Data Simulator        ║");
-        Console.WriteLine("  ╚═══════════════════════════════════════════════╝");
-        Console.WriteLine();
-        Console.WriteLine($"  MQTT 代理:   {options.BrokerHost}:{options.Port}");
-        Console.WriteLine($"  租户 ID:     {options.TenantId}");
-        Console.WriteLine($"  设备数量:    {options.DeviceCount}");
-        Console.WriteLine($"  发送间隔:    {options.IntervalSeconds} 秒");
-        Console.WriteLine($"  运行时长:    {(options.DurationSeconds.HasValue ? $"{options.DurationSeconds} 秒" : "无限")}");
-        Console.WriteLine();
+        Console.WriteLine("  ║   EquipAI 工业遥测模拟器（升级版）           ║");
+        Console.WriteLine("  ╚═══════════════════════════════════════════════╝\n");
+        Console.WriteLine($"  设备类型:    空压机 ({options.DeviceCode})");
+        Console.WriteLine($"  运行模式:    {(string.IsNullOrEmpty(options.ScenarioFile) ? "随机" : "剧本")}");
+        if (!string.IsNullOrEmpty(options.ScenarioFile))
+            Console.WriteLine($"  剧本文件:    {options.ScenarioFile}");
+        Console.WriteLine($"  采样间隔:    {options.IntervalSeconds} 秒\n");
     }
 }
 
-/// <summary>
-/// 模拟器命令行选项
-/// </summary>
 internal class SimulatorOptions
 {
-    /// <summary>MQTT 代理主机地址</summary>
     public string BrokerHost { get; set; } = "localhost";
-
-    /// <summary>MQTT 代理端口</summary>
     public int Port { get; set; } = 1883;
-
-    /// <summary>租户 ID</summary>
     public string TenantId { get; set; } = "11111111-1111-1111-1111-111111111111";
-
-    /// <summary>模拟设备数量</summary>
-    public int DeviceCount { get; set; } = 5;
-
-    /// <summary>数据发送间隔（秒）</summary>
-    public int IntervalSeconds { get; set; } = 10;
-
-    /// <summary>运行时长（秒），null 表示无限运行</summary>
+    public string DeviceCode { get; set; } = "AC-001";
+    public int IntervalSeconds { get; set; } = 5;
+    public string? ScenarioFile { get; set; }
+    public string Mode { get; set; } = "scenario";
+    public double FaultRate { get; set; } = 0.1;
     public int? DurationSeconds { get; set; }
-
-    /// <summary>是否显示帮助信息</summary>
     public bool ShowHelp { get; set; }
-}
-
-/// <summary>
-/// 模拟设备信息
-/// 每台设备有独立的基础参数，模拟不同类型和运行状态的工业设备
-/// </summary>
-internal class SimulatedDevice
-{
-    /// <summary>设备唯一标识</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>设备名称</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>基础温度 (°C)</summary>
-    public double BaseTemperature { get; set; }
-
-    /// <summary>基础振动 (mm/s)</summary>
-    public double BaseVibration { get; set; }
-
-    /// <summary>基础压力 (bar)</summary>
-    public double BasePressure { get; set; }
-
-    /// <summary>基础湿度 (%)</summary>
-    public double BaseHumidity { get; set; }
-
-    /// <summary>基础转速 (RPM)</summary>
-    public double BaseRpm { get; set; }
-}
-
-/// <summary>
-/// 设备发送统计
-/// </summary>
-internal class DeviceSendStats
-{
-    /// <summary>已发送消息数</summary>
-    public int SendCount { get; set; }
-
-    /// <summary>最近一次遥测指标</summary>
-    public Dictionary<string, double>? LastMetrics { get; set; }
-
-    /// <summary>最近一次数据时间戳</summary>
-    public string? LastTimestamp { get; set; }
-
-    /// <summary>最近一次数据是否为异常值</summary>
-    public bool IsAnomaly { get; set; }
-}
-
-/// <summary>
-/// MQTT 遥测消息格式
-/// 与后端 API 预期的 JSON 格式一致
-/// </summary>
-internal class TelemetryMessage
-{
-    /// <summary>数据采集时间戳 (ISO 8601 格式)</summary>
-    public string Timestamp { get; set; } = string.Empty;
-
-    /// <summary>数据质量标识: "good" 表示正常, "anomaly" 表示异常</summary>
-    public string Quality { get; set; } = "good";
-
-    /// <summary>遥测指标集合（温度、振动、压力、湿度、转速）</summary>
-    public Dictionary<string, double> Metrics { get; set; } = new();
 }
