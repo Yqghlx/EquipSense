@@ -376,6 +376,7 @@ public class DataSeeder
                 tenant.CurrentDeviceCount++;
 
             _logger.LogInformation("已创建种子空压机设备（ID: {DeviceId}, DeviceCode: AC-001）", SeedAirCompressorId);
+            await _dbContext.SaveChangesAsync();
         }
 
         // 2. 提取空压机模板的 DefaultAlarmRules 到 alert_rules 表（若尚无空压机规则）
@@ -409,6 +410,7 @@ public class DataSeeder
             }
 
             _logger.LogInformation("已为空压机提取 {Count} 条默认告警规则到 alert_rules 表", doc.RootElement.GetArrayLength());
+            await _dbContext.SaveChangesAsync();
         }
         catch (JsonException ex)
         {
