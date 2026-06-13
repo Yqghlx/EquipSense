@@ -75,7 +75,7 @@ class Program
         using var mqttClient = new MqttFactory().CreateMqttClient();
         var connectOptions = new MqttClientOptionsBuilder()
             .WithTcpServer(options.BrokerHost, options.Port)
-            .WithClientId($"EquipAI-Sim-{Guid.NewGuid():N}"[..50])
+            .WithClientId($"EquipAI-Sim-{Guid.NewGuid():N}")
             .WithCleanSession(true)
             .Build();
 
