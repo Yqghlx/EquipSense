@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 
 namespace EquipAI.Simulator.Models;
@@ -43,7 +44,10 @@ public sealed class ScenarioTimelineEntry
     [JsonPropertyName("faultType")]
     public string FaultType { get; set; } = string.Empty;
 
-    /// <summary>将 At 字符串解析为 TimeSpan</summary>
+    /// <summary>
+    /// 将 At 字符串解析为 TimeSpan，强制按"小时:分:秒"格式解析（小时数不限上限）
+    /// 注意：不能用 TimeSpan.TryParse，它会把 ≥24 的首位数字当作"天"
+    /// </summary>
     public TimeSpan ParseAt() =>
-        TimeSpan.TryParse(At, out var ts) ? ts : TimeSpan.Zero;
+        TimeSpan.TryParseExact(At, @"h\:mm\:ss", CultureInfo.InvariantCulture, out var ts) ? ts : TimeSpan.Zero;
 }
