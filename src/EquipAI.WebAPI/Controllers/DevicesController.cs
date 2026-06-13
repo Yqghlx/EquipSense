@@ -1,6 +1,9 @@
+using System.Text;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.Interfaces;
+using EquipAI.Application.Knowledge.DTOs;
+using EquipAI.Application.Services;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Middleware;
@@ -22,6 +25,7 @@ public class DevicesController : ControllerBase
     private readonly IDeviceService _deviceService;
     private readonly ITenantContext _tenantContext;
     private readonly IMlAnomalyDetectionService _mlService;
+    private readonly DeviceImportService _importService;
 
     /// <summary>
     /// 初始化设备管理控制器
@@ -29,14 +33,17 @@ public class DevicesController : ControllerBase
     /// <param name="deviceService">设备管理服务</param>
     /// <param name="tenantContext">租户上下文，用于获取当前请求的租户 ID</param>
     /// <param name="mlService">ML 异常检测服务</param>
+    /// <param name="importService">设备批量导入服务</param>
     public DevicesController(
         IDeviceService deviceService,
         ITenantContext tenantContext,
-        IMlAnomalyDetectionService mlService)
+        IMlAnomalyDetectionService mlService,
+        DeviceImportService importService)
     {
         _deviceService = deviceService;
         _tenantContext = tenantContext;
         _mlService = mlService;
+        _importService = importService;
     }
 
     /// <summary>
@@ -185,5 +192,68 @@ public class DevicesController : ControllerBase
             return Ok(new { message = "样本数据不足", sampleCount = 0 });
 
         return Ok(stats);
+    }
+
+    /// <summary>
+    /// 批量导入设备（CSV/JSON）— 支持预览和执行两种模式
+    /// preview=true 时仅校验并返回预览报告，不写入数据库
+    /// </summary>
+    [HttpPost("import")]
+    [RequirePermission("device:create")]
+    [RequestSizeLimit(5 * 1024 * 1024)]
+    [ProducesResponseType(typeof(DeviceImportPreviewResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ImportResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ImportDevices(
+        IFormFile file, [FromQuery] bool preview = false, CancellationToken ct = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { code = 400, message = "请选择要导入的文件" });
+
+        // 文件扩展名和 Content-Type 双重校验，防止伪装文件
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext != ".csv" && ext != ".json")
+            return BadRequest(new { code = 400, message = "仅支持 CSV 和 JSON 格式文件" });
+
+        // 使用 UTF-8 编码读取（自动检测 BOM），覆盖中文 Excel 导出场景
+        using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var content = await reader.ReadToEndAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(content))
+            return BadRequest(new { code = 400, message = "文件内容为空" });
+
+        if (preview)
+        {
+            var previewResult = _importService.PreviewImport(content, file.FileName);
+            return Ok(previewResult);
+        }
+
+        var result = await _importService.ExecuteImportAsync(
+            content, file.FileName, _tenantContext.TenantId, _tenantContext.UserId, ct);
+
+        // 导入成功后清除设备列表输出缓存，确保后续查询能立即看到新设备
+        if (result.Imported > 0)
+        {
+            HttpContext.Response.Headers["X-Import-Count"] = result.Imported.ToString();
+        }
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// 下载设备导入 CSV 模板
+    /// </summary>
+    [HttpGet("import/template")]
+    [RequirePermission("device:read")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult DownloadImportTemplate()
+    {
+        var csv = DeviceImportService.GenerateCsvTemplate();
+        var bytes = Encoding.UTF8.GetBytes(csv);
+        // 加 BOM 头，确保中文 Excel 双击打开不会乱码
+        var bom = Encoding.UTF8.GetPreamble();
+        var content = bom.Concat(bytes).ToArray();
+
+        return File(content, "text/csv; charset=utf-8", "device_import_template.csv");
     }
 }

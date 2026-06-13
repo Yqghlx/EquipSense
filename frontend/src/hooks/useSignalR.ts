@@ -49,6 +49,16 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['alerts'] });
       });
 
+      conn.on('OnWorkOrderCreated', () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+      });
+
+      conn.on('OnWorkOrderStatusChanged', () => {
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+      });
+
       conn.on('OnTelemetryUpdate', (deviceId: string) => {
         queryClient.invalidateQueries({ queryKey: ['telemetry', deviceId] });
       });

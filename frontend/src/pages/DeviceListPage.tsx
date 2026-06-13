@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Eye, Upload } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { DeviceStatusBadge } from '../components/device/DeviceStatusBadge';
 import { DeviceForm } from '../components/device/DeviceForm';
+import DeviceImportPreviewDialog from '../components/device/DeviceImportPreviewDialog';
 import { useDevices, useCreateDevice, useUpdateDevice, useDeleteDevice } from '../hooks/useDevices';
 import { usePermission } from '../hooks/usePermission';
 import type { CreateDeviceRequest, Device } from '../types';
@@ -28,6 +29,9 @@ export default function DeviceListPage() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | undefined>();
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading } = useDevices({ page, pageSize: 20, status: status || undefined });
   const createDevice = useCreateDevice();
@@ -59,12 +63,32 @@ export default function DeviceListPage() {
 
   return (
     <div className="space-y-4">
-      {/* 页头：标题 + 新建按钮 */}
+      {/* 页头：标题 + 操作按钮 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('device.title')}</h1>
-        <Button onClick={() => { setEditingDevice(undefined); setDialogOpen(true); }} disabled={!perm.canCreate}>
-          <Plus className="mr-2 h-4 w-4" />{t('common.create')}
-        </Button>
+        <div className="flex items-center gap-2">
+          {perm.canCreate && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { setImportFile(f); setImportOpen(true); }
+                  e.target.value = '';
+                }}
+              />
+              <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="mr-2 h-4 w-4" />{t('device.import', '导入')}
+              </Button>
+            </>
+          )}
+          <Button onClick={() => { setEditingDevice(undefined); setDialogOpen(true); }} disabled={!perm.canCreate}>
+            <Plus className="mr-2 h-4 w-4" />{t('common.create')}
+          </Button>
+        </div>
       </div>
 
       {/* 搜索栏 + 状态过滤 */}
@@ -169,6 +193,13 @@ export default function DeviceListPage() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* 设备批量导入预览对话框 */}
+      <DeviceImportPreviewDialog
+        open={importOpen}
+        onClose={() => { setImportOpen(false); setImportFile(null); }}
+        file={importFile}
+      />
     </div>
   );
 }

@@ -143,6 +143,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IDeviceService, DeviceService>();
+        services.AddScoped<DeviceImportService>();
 
         // RBAC 权限校验服务注册为 Singleton，内部使用静态权限矩阵，无状态
         services.AddSingleton<IRbacService, RbacService>();
@@ -241,6 +242,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<WorkOrderAutoCreateHandler>();
         services.AddScoped<WorkOrderAnalysisHandler>();
         services.AddScoped<KnowledgeCaptureHandler>();
+        services.AddScoped<WorkOrderNotificationHandler>();
 
         // 基线计算后台服务
         services.AddHostedService<BaselineCalculationService>();

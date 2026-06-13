@@ -121,6 +121,48 @@ export interface CreateDeviceRequest {
   model?: string;
 }
 
+/** 设备导入预览项（解析后的有效设备行） */
+export interface DeviceImportPreviewItem {
+  /** 行号 */
+  rowNumber: number;
+  /** 设备编码 */
+  deviceCode: string;
+  /** 设备名称 */
+  name: string;
+  /** 设备类型 */
+  type: string;
+  /** 制造商 */
+  manufacturer?: string;
+  /** 型号 */
+  model?: string;
+  /** 序列号 */
+  serialNumber?: string;
+  /** 安装位置 */
+  location?: string;
+  /** 关键等级 */
+  criticality?: string;
+  /** 网关 ID */
+  gatewayId?: string;
+  /** 安装日期 */
+  installDate?: string;
+  /** 每小时停机成本 */
+  downtimeCostPerHour?: number;
+}
+
+/** 设备导入预览结果 */
+export interface DeviceImportPreviewResult {
+  /** 有效数据列表 */
+  validItems: DeviceImportPreviewItem[];
+  /** 错误列表 */
+  errors: ImportErrorItem[];
+  /** 文件总行数 */
+  totalRows: number;
+  /** 有效行数 */
+  validCount: number;
+  /** 错误行数 */
+  errorCount: number;
+}
+
 /** 设备遥测数据（时序窄表：一行一个指标） */
 export interface DeviceTelemetry {
   /** 设备 ID */

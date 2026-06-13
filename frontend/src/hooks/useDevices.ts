@@ -1,6 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
-import type { Device, PagedResult, PagedQuery, CreateDeviceRequest } from '../types';
+import type {
+  Device, PagedResult, PagedQuery, CreateDeviceRequest,
+  DeviceImportPreviewResult, ImportResult,
+} from '../types';
 
 /**
  * 设备列表查询 Hook
@@ -94,4 +97,67 @@ export function useDeleteDevice() {
       queryClient.invalidateQueries({ queryKey: ['devices'] });
     },
   });
+}
+
+/**
+ * 设备导入预览 Hook
+ *
+ * 上传 CSV/JSON 文件进行预览校验，不写入数据库。
+ * 错误信息通过 mutation.error 返回，由调用方展示。
+ */
+export function useDeviceImportPreview() {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post<DeviceImportPreviewResult>(
+        '/devices/import?preview=true',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return data;
+    },
+  });
+}
+
+/**
+ * 执行设备批量导入 Hook
+ *
+ * 上传文件并执行导入，成功后使设备列表缓存失效。
+ * 同时清除 dashboard 缓存（设备数量变化影响统计）。
+ */
+export function useImportDevices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const { data } = await api.post<ImportResult>(
+        '/devices/import',
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+  });
+}
+
+/**
+ * 下载设备导入 CSV 模板
+ */
+export async function downloadImportTemplate(): Promise<void> {
+  const response = await api.get('/devices/import/template', {
+    responseType: 'blob',
+  });
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'device_import_template.csv';
+  link.click();
+  URL.revokeObjectURL(url);
 }

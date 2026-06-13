@@ -112,4 +112,33 @@ public class SignalRNotificationService : ISignalRNotificationService
 
         await _db.SaveChangesAsync();
     }
+
+    /// <inheritdoc />
+    public async Task SendWorkOrderCreatedAsync(Guid tenantId, Guid workOrderId,
+        Guid deviceId, string title, string priority)
+    {
+        await _hubContext.Clients.Group($"tenant:{tenantId}")
+            .SendAsync("OnWorkOrderCreated", new
+            {
+                workOrderId,
+                deviceId,
+                title,
+                priority,
+                createdAt = DateTime.UtcNow
+            });
+    }
+
+    /// <inheritdoc />
+    public async Task SendWorkOrderStatusChangedAsync(Guid tenantId, Guid workOrderId,
+        string oldStatus, string newStatus)
+    {
+        await _hubContext.Clients.Group($"tenant:{tenantId}")
+            .SendAsync("OnWorkOrderStatusChanged", new
+            {
+                workOrderId,
+                oldStatus,
+                newStatus,
+                changedAt = DateTime.UtcNow
+            });
+    }
 }
