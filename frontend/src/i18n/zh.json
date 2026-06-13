@@ -82,7 +82,8 @@
     "settings": "系统设置",
     "tenantManagement": "租户管理",
     "evaluation": "诊断评估",
-    "auditLogs": "审计日志"
+    "auditLogs": "审计日志",
+    "users": "用户管理"
   },
   "sidebar": {
     "expand": "展开侧边栏",
@@ -730,5 +731,23 @@
     "ip": "IP 地址",
     "method": "方法",
     "time": "时间"
+  },
+  "users": {
+    "title": "用户管理",
+    "description": "管理本租户的用户账户、角色和启用状态",
+    "searchPlaceholder": "搜索用户名/姓名...",
+    "username": "用户名",
+    "displayName": "姓名",
+    "role": "角色",
+    "email": "邮箱",
+    "status": "状态",
+    "active": "启用",
+    "inactive": "停用",
+    "createdAt": "创建时间",
+    "createUser": "创建用户",
+    "password": "初始密码",
+    "changeRole": "变更角色",
+    "deactivate": "停用",
+    "confirmDeactivate": "确定停用该用户？停用后无法登录"
   }
 }

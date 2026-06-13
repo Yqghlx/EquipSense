@@ -17,6 +17,7 @@ import {
   Network,
   Target,
   Shield,
+  UserCog,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
@@ -42,6 +43,7 @@ const baseNavItems = [
 
 /** system_admin 专用导航项 */
 const adminNavItems = [
+  { path: '/users', icon: UserCog, labelKey: 'nav.users' },
   { path: '/admin/tenants', icon: Building2, labelKey: 'nav.tenantManagement' },
 ];
 

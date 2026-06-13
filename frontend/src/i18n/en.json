@@ -82,7 +82,8 @@
     "settings": "Settings",
     "tenantManagement": "Tenant Management",
     "evaluation": "Diagnosis Evaluation",
-    "auditLogs": "Audit Logs"
+    "auditLogs": "Audit Logs",
+    "users": "User Management"
   },
   "sidebar": {
     "expand": "Expand Sidebar",
@@ -723,5 +724,23 @@
     "ip": "IP Address",
     "method": "Method",
     "time": "Time"
+  },
+  "users": {
+    "title": "User Management",
+    "description": "Manage user accounts, roles and status in this tenant",
+    "searchPlaceholder": "Search username/name...",
+    "username": "Username",
+    "displayName": "Name",
+    "role": "Role",
+    "email": "Email",
+    "status": "Status",
+    "active": "Active",
+    "inactive": "Inactive",
+    "createdAt": "Created At",
+    "createUser": "Create User",
+    "password": "Initial Password",
+    "changeRole": "Change Role",
+    "deactivate": "Deactivate",
+    "confirmDeactivate": "Deactivate this user? They will not be able to log in."
   }
 }
