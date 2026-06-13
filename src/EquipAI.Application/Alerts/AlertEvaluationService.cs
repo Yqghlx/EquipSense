@@ -67,6 +67,17 @@ public class AlertEvaluationService : IAlertEvaluationService
         // - 设备 ID 为空（通用规则）或等于当前设备
         // - 设备类型为空（通用规则）或等于当前设备类型
         // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
+
+        // 调用方（TelemetryEventHandler）未提供设备类型时，从数据库查询，否则按 DeviceType 过滤的规则永远匹配不到
+        if (string.IsNullOrEmpty(deviceType))
+        {
+            deviceType = await dbContext.Devices
+                .IgnoreQueryFilters()
+                .Where(d => d.Id == deviceId)
+                .Select(d => d.Type)
+                .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+        }
+
         var rules = await dbContext.AlertRules
             .IgnoreQueryFilters()
             .Where(r => r.TenantId == tenantId && r.Enabled && r.Metric == metric)

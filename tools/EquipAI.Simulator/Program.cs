@@ -83,7 +83,8 @@ class Program
         await mqttClient.ConnectAsync(connectOptions, ct);
         Console.WriteLine("[信息] 连接成功，开始发送遥测数据...\n");
 
-        var deviceId = Guid.NewGuid();
+        // 使用指定的设备 ID（默认为种子空压机设备，确保后端能关联到 devices 表记录并触发告警）
+        var deviceId = options.DeviceId;
         var timeScale = scenario?.TimeScale ?? 1;
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.IntervalSeconds));
@@ -186,6 +187,9 @@ class Program
                     options.TenantId = args[++i]; break;
                 case "--device-code" when i + 1 < args.Length:
                     options.DeviceCode = args[++i]; break;
+                case "--device-id" when i + 1 < args.Length:
+                    if (Guid.TryParse(args[++i], out var devId)) options.DeviceId = devId;
+                    break;
                 case "--interval" or "-i" when i + 1 < args.Length:
                     if (int.TryParse(args[++i], out var interval)) options.IntervalSeconds = interval;
                     break;
@@ -217,6 +221,7 @@ class Program
         Console.WriteLine("  --port, -p <port>        MQTT 端口 (默认 1883)");
         Console.WriteLine("  --tenant, -t <guid>      租户 ID");
         Console.WriteLine("  --device-code <code>     设备编码 (默认 AC-001)");
+        Console.WriteLine("  --device-id <guid>       设备 ID (默认种子空压机 33333333-...)");
         Console.WriteLine("  --interval, -i <sec>     采样间隔 (默认 5)");
         Console.WriteLine("  --scenario, -s <path>    剧本 JSON 文件路径");
         Console.WriteLine("  --mode random            随机故障模式");
@@ -244,6 +249,9 @@ internal class SimulatorOptions
     public int Port { get; set; } = 1883;
     public string TenantId { get; set; } = "11111111-1111-1111-1111-111111111111";
     public string DeviceCode { get; set; } = "AC-001";
+
+    /// <summary>设备 ID（Guid），默认为种子空压机设备，确保后端能关联设备记录并触发告警</summary>
+    public Guid DeviceId { get; set; } = Guid.Parse("33333333-3333-3333-3333-333333333333");
     public int IntervalSeconds { get; set; } = 5;
     public string? ScenarioFile { get; set; }
     public string Mode { get; set; } = "scenario";

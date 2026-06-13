@@ -54,6 +54,7 @@ public class DataSeeder
         await SeedTenantsAsync();
         await SeedAdminUserAsync();
         await SeedDeviceTypeTemplatesAsync();
+        await SeedSampleDeviceAndAlertRulesAsync();
 
         _logger.LogInformation("数据库种子数据初始化完成");
     }
@@ -332,5 +333,121 @@ public class DataSeeder
                 DefaultDiagnosisRules = "[]"
             }
         ];
+    }
+
+    /// <summary>
+    /// 默认租户 ID（与 SeedTenantsAsync 中的默认租户一致）
+    /// </summary>
+    private static readonly Guid DefaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+    /// <summary>
+    /// 种子空压机设备的固定 ID，供模拟器开箱即用（--device-id 参数默认值）
+    /// </summary>
+    private static readonly Guid SeedAirCompressorId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+    /// <summary>
+    /// 创建示例空压机设备并提取模板告警规则到 alert_rules 表
+    /// 模拟器和端到端测试依赖此设备 + 规则才能走通"采集→告警→AI 分析→工单"全链路
+    /// </summary>
+    private async Task SeedSampleDeviceAndAlertRulesAsync()
+    {
+        // 1. 创建种子空压机设备（若不存在）
+        var deviceExists = await _dbContext.Devices
+            .IgnoreQueryFilters()
+            .AnyAsync(d => d.Id == SeedAirCompressorId);
+
+        if (!deviceExists)
+        {
+            _dbContext.Devices.Add(new Device
+            {
+                Id = SeedAirCompressorId,
+                TenantId = DefaultTenantId,
+                DeviceCode = "AC-001",
+                Name = "一号空压机",
+                Type = "空压机",
+                Status = DeviceStatus.Offline,
+                Criticality = DeviceCriticality.High,
+            });
+
+            // 维护租户设备计数
+            var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                .FirstOrDefaultAsync(t => t.Id == DefaultTenantId);
+            if (tenant != null)
+                tenant.CurrentDeviceCount++;
+
+            _logger.LogInformation("已创建种子空压机设备（ID: {DeviceId}, DeviceCode: AC-001）", SeedAirCompressorId);
+        }
+
+        // 2. 提取空压机模板的 DefaultAlarmRules 到 alert_rules 表（若尚无空压机规则）
+        var hasAirCompressorRules = await _dbContext.AlertRules
+            .IgnoreQueryFilters()
+            .AnyAsync(r => r.TenantId == DefaultTenantId && r.DeviceType == "空压机");
+
+        if (hasAirCompressorRules)
+            return;
+
+        // 查询系统租户的空压机模板
+        var template = await _dbContext.DeviceTypeTemplates
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.TenantId == SystemConstants.SystemTenantId && t.Name == "空压机");
+
+        if (template == null || string.IsNullOrWhiteSpace(template.DefaultAlarmRules))
+        {
+            _logger.LogWarning("空压机模板未找到或无 DefaultAlarmRules，跳过告警规则种子");
+            return;
+        }
+
+        // 解析模板 JSON 并创建 AlertRule 记录
+        try
+        {
+            using var doc = JsonDocument.Parse(template.DefaultAlarmRules);
+            foreach (var element in doc.RootElement.EnumerateArray())
+            {
+                var rule = ParseAlarmRuleElement(element);
+                if (rule != null)
+                    _dbContext.AlertRules.Add(rule);
+            }
+
+            _logger.LogInformation("已为空压机提取 {Count} 条默认告警规则到 alert_rules 表", doc.RootElement.GetArrayLength());
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "解析空压机模板 DefaultAlarmRules 失败");
+        }
+    }
+
+    /// <summary>
+    /// 将模板 JSON 元素解析为 AlertRule 实体
+    /// </summary>
+    private AlertRule? ParseAlarmRuleElement(JsonElement element)
+    {
+        var name = element.GetProperty("name").GetString();
+        var metric = element.GetProperty("metric").GetString();
+        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(metric))
+            return null;
+
+        var ruleTypeStr = element.GetProperty("ruleType").GetString() ?? "threshold";
+        var operatorStr = element.TryGetProperty("operator", out var opEl) ? opEl.GetString() : null;
+        var threshold = element.TryGetProperty("threshold", out var thEl) && thEl.TryGetDecimal(out var th) ? th : (decimal?)null;
+        var severityStr = element.TryGetProperty("severity", out var sevEl) ? sevEl.GetString() ?? "Normal" : "Normal";
+        var cooldown = element.TryGetProperty("cooldownSeconds", out var cdEl) && cdEl.TryGetInt32(out var cd) ? cd : 300;
+        var enabled = element.TryGetProperty("enabled", out var enEl) && enEl.ValueKind == JsonValueKind.False ? false : true;
+        var autoWo = element.TryGetProperty("autoCreateWorkorder", out var woEl) && woEl.ValueKind == JsonValueKind.True;
+
+        return new AlertRule
+        {
+            TenantId = DefaultTenantId,
+            Name = name,
+            DeviceType = "空压机",
+            DeviceId = null,
+            Metric = metric,
+            RuleType = Enum.TryParse<RuleType>(ruleTypeStr, ignoreCase: true, out var rt) ? rt : RuleType.Threshold,
+            Operator = operatorStr,
+            Threshold = threshold,
+            Severity = Enum.TryParse<AlertSeverity>(severityStr, ignoreCase: true, out var sev) ? sev : AlertSeverity.Normal,
+            CooldownSeconds = cooldown,
+            Enabled = enabled,
+            AutoCreateWorkorder = autoWo,
+        };
     }
 }
