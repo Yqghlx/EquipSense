@@ -50,7 +50,22 @@
     "confirmPassword": "Confirm New Password",
     "confirmPasswordRequired": "Please confirm your new password",
     "passwordMismatch": "Passwords do not match",
-    "changePasswordError": "Failed to change password. Please check your current password"
+    "changePasswordError": "Failed to change password. Please check your current password",
+    "forgotPassword": "Forgot Password?",
+    "forgotPasswordHint": "Enter your registered email and we will send you a password reset link",
+    "sendResetLink": "Send Reset Link",
+    "resetEmailSent": "If the email is registered, a reset link has been sent. Check your inbox (including spam folder). The link expires in 30 minutes.",
+    "resetPassword": "Reset Password",
+    "resetPasswordHint": "Please enter your new password",
+    "resetFailed": "Reset failed. The link may have expired, please request a new one",
+    "resetTokenMissing": "Invalid reset link, missing required parameter. Please use the link from your email.",
+    "requestResetAgain": "Request reset again",
+    "resetSuccess": "Password reset successful! Redirecting to login...",
+    "backToLogin": "Back to login",
+    "email": "Email",
+    "emailRequired": "Email is required",
+    "emailInvalid": "Invalid email format",
+    "passwordMin": "Password must be at least 8 characters"
   },
   "nav": {
     "dashboard": "Dashboard",

@@ -36,6 +36,22 @@ public interface IAuthService
     Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
 
     /// <summary>
+    /// 申请密码重置 — 按邮箱查找用户并发送重置链接邮件
+    /// </summary>
+    /// <param name="email">用户邮箱</param>
+    /// <param name="resetUrlTemplate">重置链接模板，{token} 会被替换为实际 token</param>
+    /// <param name="ct">取消令牌</param>
+    Task RequestPasswordResetAsync(string email, string resetUrlTemplate, CancellationToken ct = default);
+
+    /// <summary>
+    /// 重置密码 — 验证 token 并设置新密码
+    /// </summary>
+    /// <param name="token">重置 token</param>
+    /// <param name="newPassword">新密码</param>
+    /// <param name="ct">取消令牌</param>
+    Task ResetPasswordAsync(string token, string newPassword, CancellationToken ct = default);
+
+    /// <summary>
     /// 公开注册，创建租户和管理员账户并自动登录
     /// </summary>
     /// <param name="request">注册请求（含企业信息和管理员信息）</param>

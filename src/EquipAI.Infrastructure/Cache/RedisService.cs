@@ -67,6 +67,34 @@ public class RedisService
     }
 
     /// <summary>
+    /// 存储任意字符串值（带过期），用于密码重置 token 等短期凭据
+    /// </summary>
+    /// <param name="key">缓存键（完整键名，调用方负责命名空间）</param>
+    /// <param name="value">字符串值</param>
+    /// <param name="expiry">过期时间</param>
+    public virtual async Task SetStringAsync(string key, string value, TimeSpan expiry)
+    {
+        await _database.StringSetAsync(key, value, expiry);
+    }
+
+    /// <summary>
+    /// 读取任意字符串值，不存在时返回 null
+    /// </summary>
+    public virtual async Task<string?> GetStringAsync(string key)
+    {
+        var value = await _database.StringGetAsync(key);
+        return value.HasValue ? value.ToString() : null;
+    }
+
+    /// <summary>
+    /// 删除指定键
+    /// </summary>
+    public virtual async Task RemoveKeyAsync(string key)
+    {
+        await _database.KeyDeleteAsync(key);
+    }
+
+    /// <summary>
     /// 获取租户配额缓存
     /// 键格式：quota:{tenantId}:{resourceType}
     /// </summary>

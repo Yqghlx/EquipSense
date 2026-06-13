@@ -14,6 +14,8 @@ import { useAuthStore } from './stores/authStore';
 // 认证页面 — 首屏需要，直接导入
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 
 // 业务页面 — 懒加载，减少首屏包体积
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -70,6 +72,8 @@ function AppRoutes() {
       <Route element={<AuthLayout />}>
         <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
         <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
+        <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
+        <Route path="/reset-password" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <ResetPasswordPage />} />
       </Route>
 
       {/* 业务路由（需认证，AuthGuard 保护） */}

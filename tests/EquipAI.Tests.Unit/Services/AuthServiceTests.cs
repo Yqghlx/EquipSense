@@ -64,6 +64,9 @@ public class AuthServiceTests : IAsyncDisposable
         services.AddSingleton(_jwtService);
         services.AddSingleton<RedisService>(_stubRedis);  // 注册为基类 RedisService 类型
         services.AddScoped<IAuditLogService, StubAuditLogService>();
+        // 注册邮件服务（测试中 SendAsync 会因无 SMTP 配置进入 catch，不影响测试逻辑）
+        services.Configure<EquipAI.Application.Notifications.SmtpOptions>(_ => { });
+        services.AddScoped<EquipAI.Application.Notifications.SmtpEmailNotificationService>();
         services.AddScoped<AuthService>();
 
         _sp = services.BuildServiceProvider();
@@ -536,6 +539,107 @@ public class AuthServiceTests : IAsyncDisposable
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    // ==================== RequestPasswordResetAsync / ResetPasswordAsync ====================
+
+    [Fact]
+    public async Task RequestPasswordResetAsync_存在邮箱_应生成重置Token存入Redis()
+    {
+        // Arrange
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("resetuser", _tenantId, "OldPwd123", email: "reset@test.com");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        await service.RequestPasswordResetAsync("reset@test.com", "https://app/reset?token={token}");
+
+        // Assert：Redis 字典应含一个 pwdreset: 前缀的键
+        _stubRedis.HasStringKeyStartingWith("pwdreset:").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RequestPasswordResetAsync_不存在邮箱_应静默返回不抛异常()
+    {
+        // Arrange：不创建任何用户
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+
+        // Act & Assert：不存在邮箱应静默返回（防邮箱枚举）
+        var act = async () => await service.RequestPasswordResetAsync("nobody@test.com", "https://app/reset?token={token}");
+        await act.Should().NotThrowAsync();
+        _stubRedis.HasStringKeyStartingWith("pwdreset:").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_有效Token_应更新密码并使Token失效()
+    {
+        // Arrange
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("pwdresetuser", _tenantId, "OldPassword123", email: "pwd@test.com");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // 先申请重置，生成 token
+        await service.RequestPasswordResetAsync("pwd@test.com", "https://app/reset?token={token}");
+        var fullKey = _stubRedis.GetStringKeyStartingWith("pwdreset:")!;
+        var token = fullKey["pwdreset:".Length..]; // 去掉前缀得到实际 token
+
+        // Act：用 token 重置密码
+        await service.ResetPasswordAsync(token, "NewPassword456");
+
+        // Assert：密码已更新，旧密码失效
+        var updatedUser = await db.Users.FirstAsync(u => u.Id == user.Id);
+        PasswordHasher.VerifyPassword("NewPassword456", updatedUser.PasswordHash).Should().BeTrue();
+        PasswordHasher.VerifyPassword("OldPassword123", updatedUser.PasswordHash).Should().BeFalse();
+        // token 应已被删除（一次性使用）
+        _stubRedis.GetStringKeyStartingWith("pwdreset:").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_无效Token_应抛出UnauthorizedAccessException()
+    {
+        // Arrange
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+
+        // Act & Assert：无效 token 应抛未授权异常
+        var act = () => service.ResetPasswordAsync("invalid-token", "NewPassword456");
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task ResetPasswordAsync_应清除登录失败计数和锁定()
+    {
+        // Arrange
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("lockeduser", _tenantId, "OldPassword123", email: "locked@test.com");
+        user.AccessFailedCount = 5;
+        user.LockoutEnd = DateTime.UtcNow.AddMinutes(10);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        await service.RequestPasswordResetAsync("locked@test.com", "https://app/reset?token={token}");
+        var fullKey = _stubRedis.GetStringKeyStartingWith("pwdreset:")!;
+        var token = fullKey["pwdreset:".Length..];
+
+        // Act
+        await service.ResetPasswordAsync(token, "NewPassword456");
+
+        // Assert：重置后应清除失败计数和锁定
+        var updated = await db.Users.FirstAsync(u => u.Id == user.Id);
+        updated.AccessFailedCount.Should().Be(0);
+        updated.LockoutEnd.Should().BeNull();
+    }
+
     // ==================== RegisterAsync ====================
 
     [Fact]
@@ -667,7 +771,8 @@ public class AuthServiceTests : IAsyncDisposable
         string username,
         Guid tenantId,
         string password,
-        UserRole role = UserRole.SystemAdmin)
+        UserRole role = UserRole.SystemAdmin,
+        string? email = null)
     {
         return new User
         {
@@ -676,6 +781,7 @@ public class AuthServiceTests : IAsyncDisposable
             TenantId = tenantId,
             PasswordHash = PasswordHasher.HashPassword(password),
             DisplayName = username,
+            Email = email,
             Role = role,
             IsActive = true,
             MustChangePassword = false,
@@ -706,6 +812,11 @@ public class AuthServiceTests : IAsyncDisposable
         /// 内存字典，存储用户 ID 到刷新令牌的映射
         /// </summary>
         private readonly Dictionary<Guid, string> _store = new();
+
+        /// <summary>
+        /// 内存字典，存储通用字符串键值（密码重置 token 等）
+        /// </summary>
+        private readonly Dictionary<string, string> _stringStore = new();
 
         /// <summary>
         /// 无参构造函数 — 绕过基类需要 Redis 连接的构造函数
@@ -755,6 +866,32 @@ public class AuthServiceTests : IAsyncDisposable
             _store.Remove(userId);
             return Task.CompletedTask;
         }
+
+        public override Task SetStringAsync(string key, string value, TimeSpan expiry)
+        {
+            _stringStore[key] = value;
+            return Task.CompletedTask;
+        }
+
+        public override Task<string?> GetStringAsync(string key)
+        {
+            _stringStore.TryGetValue(key, out var value);
+            return Task.FromResult(value);
+        }
+
+        public override Task RemoveKeyAsync(string key)
+        {
+            _stringStore.Remove(key);
+            return Task.CompletedTask;
+        }
+
+        /// <summary>是否存在以指定前缀开头的键</summary>
+        public bool HasStringKeyStartingWith(string prefix) =>
+            _stringStore.Keys.Any(k => k.StartsWith(prefix, StringComparison.Ordinal));
+
+        /// <summary>获取以指定前缀开头的第一个键（用于测试提取 token）</summary>
+        public string? GetStringKeyStartingWith(string prefix) =>
+            _stringStore.Keys.FirstOrDefault(k => k.StartsWith(prefix, StringComparison.Ordinal));
     }
 
     /// <summary>

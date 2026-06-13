@@ -140,6 +140,49 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// 忘记密码 — 申请密码重置，发送重置链接到用户邮箱
+    /// 无论邮箱是否存在都返回成功（防止邮箱枚举攻击）
+    /// </summary>
+    /// <param name="request">邮箱</param>
+    /// <param name="ct">取消令牌</param>
+    [HttpPost("forgot-password")]
+    [EnableRateLimiting("auth")]
+    [SkipAudit] // 未认证请求，无用户上下文，且审计在 Service 内已记录
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken ct)
+    {
+        // 重置链接前端路由：/reset-password?token=xxx
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        var resetUrlTemplate = $"{baseUrl}/reset-password?token={{token}}";
+
+        await _authService.RequestPasswordResetAsync(request.Email, resetUrlTemplate, ct);
+        return Ok(new { message = "如果该邮箱已注册，重置链接已发送至您的邮箱" });
+    }
+
+    /// <summary>
+    /// 重置密码 — 使用重置 token 设置新密码
+    /// </summary>
+    /// <param name="request">重置 token + 新密码</param>
+    /// <param name="ct">取消令牌</param>
+    [HttpPost("reset-password")]
+    [EnableRateLimiting("auth")]
+    [Audit("PasswordReset", "User")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken ct)
+    {
+        try
+        {
+            await _authService.ResetPasswordAsync(request.Token, request.NewPassword, ct);
+            return Ok(new { message = "密码重置成功，请使用新密码登录" });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return BadRequest(new { code = 400, message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// 获取当前登录用户信息
     /// </summary>
     /// <returns>当前用户信息</returns>

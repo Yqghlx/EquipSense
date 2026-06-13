@@ -2,6 +2,7 @@ using AutoMapper;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
+using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
@@ -26,6 +27,7 @@ public class AuthService : IAuthService
     private readonly IMapper _mapper;
     private readonly ILogger<AuthService> _logger;
     private readonly IAuditLogService _auditLogService;
+    private readonly SmtpEmailNotificationService _emailService;
 
     /// <summary>
     /// 连续登录失败达到此数值时自动锁定账户
@@ -36,6 +38,16 @@ public class AuthService : IAuthService
     /// 账户锁定时长（分钟）
     /// </summary>
     private const int LockoutDurationMinutes = 15;
+
+    /// <summary>
+    /// 密码重置 token 有效期（分钟）
+    /// </summary>
+    private const int PasswordResetTokenMinutes = 30;
+
+    /// <summary>
+    /// 密码重置 token 在 Redis 中的键前缀
+    /// </summary>
+    private const string PasswordResetKeyPrefix = "pwdreset:";
 
     /// <summary>
     /// 各套餐对应的配额限制（最大设备数、最大用户数、数据保留天数）
@@ -67,7 +79,8 @@ public class AuthService : IAuthService
         RedisService redisService,
         IMapper mapper,
         ILogger<AuthService> logger,
-        IAuditLogService auditLogService)
+        IAuditLogService auditLogService,
+        SmtpEmailNotificationService emailService)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
@@ -75,6 +88,7 @@ public class AuthService : IAuthService
         _mapper = mapper;
         _logger = logger;
         _auditLogService = auditLogService;
+        _emailService = emailService;
     }
 
     /// <summary>
@@ -277,6 +291,113 @@ public class AuthService : IAuthService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("用户 {UserId} 密码修改成功", userId);
+    }
+
+    /// <summary>
+    /// 申请密码重置：按邮箱查找用户，生成一次性重置 token 存入 Redis（30 分钟过期），
+    /// 并发送含重置链接的邮件。即使用户不存在也返回成功（防止邮箱枚举攻击）。
+    /// </summary>
+    /// <param name="email">用户邮箱</param>
+    /// <param name="resetUrlTemplate">重置链接模板，{token} 占位符会被替换为实际 token</param>
+    /// <param name="ct">取消令牌</param>
+    public async Task RequestPasswordResetAsync(string email, string resetUrlTemplate, CancellationToken ct = default)
+    {
+        // 无论用户是否存在都走完流程，最后才决定是否发邮件，防止邮箱枚举
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Email == email, ct);
+
+        if (user is null || string.IsNullOrEmpty(user.Email) || !user.IsActive)
+        {
+            _logger.LogWarning("密码重置请求：邮箱 {Email} 未找到或账户已停用", email);
+            return; // 静默返回，不暴露用户是否存在
+        }
+
+        // 生成密码重置 token（URL 安全的随机字符串）
+        var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+        // 存入 Redis，键含用户 ID，30 分钟过期
+        var key = $"{PasswordResetKeyPrefix}{token}";
+        await _redisService.SetStringAsync(key, user.Id.ToString(), TimeSpan.FromMinutes(PasswordResetTokenMinutes));
+
+        // 发送重置邮件（失败仅记录日志，不中断流程）
+        var resetLink = resetUrlTemplate.Replace("{token}", token);
+        var subject = "【EquipSense】密码重置";
+        var htmlBody = $@"
+<div style='font-family:sans-serif;max-width:480px;margin:0 auto'>
+  <h2 style='color:#1e40af'>密码重置</h2>
+  <p>您好 {user.DisplayName ?? user.Username}，</p>
+  <p>我们收到了您的密码重置请求。请点击下方按钮重置密码：</p>
+  <p style='margin:24px 0'>
+    <a href='{resetLink}' style='display:inline-block;padding:10px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px'>重置密码</a>
+  </p>
+  <p style='color:#6b7280;font-size:13px'>
+    该链接 {PasswordResetTokenMinutes} 分钟后失效。如果这不是您本人的操作，请忽略此邮件。
+  </p>
+  <hr style='border:none;border-top:1px solid #e5e7eb;margin:24px 0'>
+  <p style='color:#9ca3af;font-size:12px'>此邮件由系统自动发送，请勿回复。</p>
+</div>";
+
+        try
+        {
+            await _emailService.SendAsync(user.Email, subject, htmlBody);
+            _logger.LogInformation("密码重置邮件已发送: UserId={UserId}", user.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "密码重置邮件发送失败: UserId={UserId}", user.Id);
+            // 不抛异常，避免暴露 SMTP 配置状态
+        }
+
+        await _auditLogService.LogFromContextAsync(
+            action: "PasswordResetRequested",
+            resourceType: "User",
+            resourceId: user.Id.ToString(),
+            description: $"用户 {user.Username} 请求密码重置",
+            ct: ct);
+    }
+
+    /// <summary>
+    /// 重置密码：验证 token，设置新密码，使旧 JWT 失效，删除重置 token（一次性）
+    /// </summary>
+    /// <param name="token">重置 token</param>
+    /// <param name="newPassword">新密码</param>
+    /// <param name="ct">取消令牌</param>
+    /// <exception cref="UnauthorizedAccessException">token 无效或已过期</exception>
+    public async Task ResetPasswordAsync(string token, string newPassword, CancellationToken ct = default)
+    {
+        var key = $"{PasswordResetKeyPrefix}{token}";
+        var userIdStr = await _redisService.GetStringAsync(key);
+
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+            throw new UnauthorizedAccessException("重置链接无效或已过期，请重新申请");
+
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new UnauthorizedAccessException("用户不存在");
+
+        // 更新密码
+        user.PasswordHash = PasswordHasher.HashPassword(newPassword);
+        user.TokenVersion++;          // 使已颁发的 JWT 失效
+        user.MustChangePassword = false;
+        user.AccessFailedCount = 0;   // 清除登录失败计数
+        user.LockoutEnd = null;       // 解除锁定
+
+        // 删除重置 token（一次性使用）
+        await _redisService.RemoveKeyAsync(key);
+        // 移除刷新令牌，强制重新登录
+        await _redisService.RemoveRefreshTokenAsync(userId);
+
+        await _dbContext.SaveChangesAsync(ct);
+
+        _logger.LogInformation("用户 {UserId} 通过重置 token 修改密码成功", userId);
+
+        await _auditLogService.LogFromContextAsync(
+            action: "PasswordReset",
+            resourceType: "User",
+            resourceId: userId.ToString(),
+            description: $"用户 {user.Username} 通过重置链接修改密码",
+            ct: ct);
     }
 
     /// <summary>
