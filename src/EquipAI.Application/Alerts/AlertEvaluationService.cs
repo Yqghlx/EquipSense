@@ -152,7 +152,10 @@ public class AlertEvaluationService : IAlertEvaluationService
     private async Task<Alert?> CreateAlertAsync(AppDbContext dbContext, Guid tenantId,
         Guid deviceId, AlertRule rule, string metric, double value, DeviceContext context)
     {
-        var device = await dbContext.Devices.FindAsync(deviceId);
+        // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让 FindAsync 返回 null
+        var device = await dbContext.Devices
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(d => d.Id == deviceId);
         var deviceCode = device?.DeviceCode ?? deviceId.ToString("N")[..8];
 
         var alertCode = $"ALT-{deviceCode}-{metric}-{DateTime.UtcNow:yyyyMMddHHmmss}";
@@ -188,7 +191,9 @@ public class AlertEvaluationService : IAlertEvaluationService
     private async Task UpdateExistingAlertAsync(AppDbContext dbContext, Guid tenantId,
         Guid deviceId, string metric, double value)
     {
+        // IgnoreQueryFilters: 同 CreateAlertAsync，后台处理器需绕过全局租户过滤器
         var existingAlert = await dbContext.Alerts
+            .IgnoreQueryFilters()
             .Where(a => a.TenantId == tenantId && a.DeviceId == deviceId
                      && a.Metric == metric && a.Status == AlertStatus.Active)
             .OrderByDescending(a => a.OccurredAt)
