@@ -32,6 +32,7 @@ const AnalysesPage = lazy(() => import('./pages/AnalysesPage'));
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 const PendingRulesPage = lazy(() => import('./pages/PendingRulesPage'));
 const PendingApprovalsPage = lazy(() => import('./pages/PendingApprovalsPage'));
+const EvaluationPage = lazy(() => import('./pages/EvaluationPage'));
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const TenantsPage = lazy(() => import('./pages/admin/TenantsPage'));
@@ -90,6 +91,7 @@ function AppRoutes() {
           <Route path="/dispatch" element={<Suspense fallback={<PageFallback />}><DispatchBoardPage /></Suspense>} />
           <Route path="/analyses" element={<Suspense fallback={<PageFallback />}><AnalysesPage /></Suspense>} />
           <Route path="/knowledge" element={<Suspense fallback={<PageFallback />}><KnowledgePage /></Suspense>} />
+          <Route path="/evaluation" element={<Suspense fallback={<PageFallback />}><EvaluationPage /></Suspense>} />
           <Route path="/pending-rules" element={<Suspense fallback={<PageFallback />}><PendingRulesPage /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
           {/* system_admin 管理路由 */}

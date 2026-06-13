@@ -15,6 +15,7 @@ import {
   Users,
   Building2,
   Network,
+  Target,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
@@ -33,6 +34,7 @@ const baseNavItems = [
   { path: '/dispatch', icon: Users, labelKey: 'nav.dispatch' },
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
   { path: '/knowledge', icon: BookOpen, labelKey: 'nav.knowledge' },
+  { path: '/evaluation', icon: Target, labelKey: 'nav.evaluation' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 

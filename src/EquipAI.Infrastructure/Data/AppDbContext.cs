@@ -124,6 +124,11 @@ public class AppDbContext : DbContext
     public DbSet<Core.Entities.ApprovalStep> ApprovalSteps => Set<Core.Entities.ApprovalStep>();
 
     /// <summary>
+    /// 标准答案记录表 — 模拟器故障注入上报，用于 AI 诊断准确率评估
+    /// </summary>
+    public DbSet<Core.Entities.GroundTruthEntry> GroundTruthEntries => Set<Core.Entities.GroundTruthEntry>();
+
+    /// <summary>
     /// 工单审批记录表
     /// </summary>
     public DbSet<Core.Entities.WorkOrderApproval> WorkOrderApprovals => Set<Core.Entities.WorkOrderApproval>();

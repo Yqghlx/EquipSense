@@ -90,6 +90,8 @@ class Program
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.IntervalSeconds));
         var tickCount = 0;
 
+        try
+        {
         while (await timer.WaitForNextTickAsync(ct))
         {
             // 推进模拟时间
@@ -140,11 +142,73 @@ class Program
                 Console.WriteLine($"[错误] 发送失败: {ex.Message}");
             }
         }
+        }
+        catch (OperationCanceledException)
+        {
+            // duration 到期正常退出，继续执行后续的保存和上报逻辑
+        }
 
-        // 保存标准答案日志
+        // 保存标准答案日志（用 CancellationToken.None 因为原 ct 可能已取消）
         var outputPath = Path.Combine(AppContext.BaseDirectory, "ground-truth");
-        await truthLogger.SaveAsync(outputPath, ct);
+        await truthLogger.SaveAsync(outputPath, CancellationToken.None);
         Console.WriteLine($"\n[信息] 标准答案已保存到: {outputPath}");
+
+        // 上报标准答案到后端评估 API（如配置了 --api-url）
+        if (!string.IsNullOrEmpty(options.ApiUrl))
+        {
+            await ReportGroundTruthAsync(options, truthLogger, deviceId, scenarioName, CancellationToken.None);
+        }
+    }
+
+    /// <summary>将标准答案上报到后端 /api/v1/evaluation/ground-truth</summary>
+    private static async Task ReportGroundTruthAsync(
+        SimulatorOptions options, GroundTruthLogger logger,
+        Guid deviceId, string scenarioName, CancellationToken ct)
+    {
+        try
+        {
+            // 从日志记录中提取故障注入事件（只取 started 事件）
+            var log = logger.BuildLog();
+            var events = log.Events
+                .Where(e => e.Action == "started")
+                .Select(e => new
+                {
+                    faultType = e.FaultType,
+                    expectedRootCause = e.ExpectedRootCause,
+                    expectedSeverity = e.ExpectedSeverity,
+                    affectedMetrics = e.AffectedMetrics,
+                    injectedAt = e.InjectedAt,
+                })
+                .ToList();
+
+            if (events.Count == 0)
+            {
+                Console.WriteLine("[信息] 无故障注入事件，跳过上报");
+                return;
+            }
+
+            var payload = JsonSerializer.Serialize(new
+            {
+                runId = log.RunId,
+                deviceId,
+                deviceCode = options.DeviceCode,
+                scenarioName,
+                events,
+            });
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            var url = options.ApiUrl!.TrimEnd('/') + "/api/v1/evaluation/ground-truth";
+            var response = await http.PostAsync(url, new StringContent(payload, Encoding.UTF8, "application/json"), ct);
+
+            if (response.IsSuccessStatusCode)
+                Console.WriteLine($"[信息] 标准答案已上报到 {url}（{events.Count} 条事件）");
+            else
+                Console.WriteLine($"[警告] 标准答案上报失败: HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[警告] 标准答案上报异常: {ex.Message}");
+        }
     }
 
     /// <summary>检测活跃故障列表变化，记录注入/移除事件到标准答案日志</summary>
@@ -203,6 +267,8 @@ class Program
                 case "--duration" when i + 1 < args.Length:
                     if (int.TryParse(args[++i], out var duration)) options.DurationSeconds = duration;
                     break;
+                case "--api-url" when i + 1 < args.Length:
+                    options.ApiUrl = args[++i]; break;
                 case "--help": options.ShowHelp = true; break;
             }
         }
@@ -227,6 +293,7 @@ class Program
         Console.WriteLine("  --mode random            随机故障模式");
         Console.WriteLine("  --fault-rate <0-1>       随机模式故障概率 (默认 0.1)");
         Console.WriteLine("  --duration <sec>         运行时长 (默认无限)");
+        Console.WriteLine("  --api-url <url>          后端地址，运行结束后上报标准答案 (如 http://localhost:8080)");
     }
 
     private static void PrintBanner(SimulatorOptions options)
@@ -257,5 +324,7 @@ internal class SimulatorOptions
     public string Mode { get; set; } = "scenario";
     public double FaultRate { get; set; } = 0.1;
     public int? DurationSeconds { get; set; }
+    /// <summary>后端 API 地址（用于上报标准答案，如 http://localhost:8080）</summary>
+    public string? ApiUrl { get; set; }
     public bool ShowHelp { get; set; }
 }

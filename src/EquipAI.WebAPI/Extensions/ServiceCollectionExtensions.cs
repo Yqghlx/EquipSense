@@ -266,6 +266,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<TelemetryEventHandler>();
         services.AddScoped<AlertEventHandler>();
         services.AddScoped<DashboardStatsService>();
+        // AI 诊断评估服务 — 对比 ground truth 与 analyses 表计算命中率
+        services.AddScoped<EquipAI.Application.Evaluation.EvaluationService>();
     }
 
     /// <summary>

@@ -85,18 +85,25 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
             var conditions = JsonSerializer.Deserialize<List<ConditionItem>>(conditionsJson, ConditionJsonOptions);
             if (conditions is null || conditions.Count == 0) return false;
 
+            // 跟踪是否有至少一个条件与目标指标相关
+            // 若规则的所有条件都不涉及目标指标（如电流告警遇到油温规则），该规则不应匹配
+            var hasRelevantCondition = false;
+
             foreach (var cond in conditions)
             {
                 // 只评估与目标指标相关的条件
                 if (!string.Equals(cond.Metric, targetMetric, StringComparison.OrdinalIgnoreCase))
                     continue;
 
+                hasRelevantCondition = true;
+
                 // 条件不满足时立即返回 false
                 if (!EvaluateCondition(targetValue, cond.Operator, cond.Threshold))
                     return false;
             }
 
-            return true;
+            // 没有任何相关条件时不匹配（此前错误返回 true 导致无关规则误匹配）
+            return hasRelevantCondition;
         }
         catch (JsonException ex)
         {

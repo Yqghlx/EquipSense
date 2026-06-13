@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EquipSense（内部代号 EquipAI）是一个工业设备智能监控与预测维护平台。核心目标：**在故障发生前预警，在告警触发后秒级给出根因和建议，在确认问题后自动创建工单闭环。**
 
-完整技术方案（2,457 行）见 `docs/FINAL_TECHNICAL_DESIGN.md`，涵盖系统架构、数据库 Schema、API 规范、安全设计、开发路线图等所有细节。
+完整技术方案（2,457 行）见 `docs/FINAL_TECHNICAL_DESIGN.md`，涵盖系统架构、数据库 Schema、API 规范、安全设计、开发路线图等所有细节。版本变更历史见根目录 `CHANGELOG.md`。
 
 ## 开发命令
 
@@ -31,6 +31,8 @@ dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~AlertServiceTe
 # 清理构建产物
 dotnet clean
 ```
+
+> ⚠️ **编译强约束**：`Directory.Build.props` 设置 `TreatWarningsAsErrors=true`、`Nullable=enable`、`ImplicitUsings=enable`，**任何警告都会让编译失败**。已显式抑制的 NuGet 警告：`NU1603`（版本自动解析）、`NU1901/NU1903`（已知漏洞）。新增依赖或写代码时必须保证零警告。
 
 ### 前端 (React 19 + TypeScript)
 
@@ -61,14 +63,22 @@ npm run preview
 
 ### E2E 测试 (Playwright)
 
+项目内有两套 E2E 测试：
+
+- **基础套件**：`tests/e2e/`（根目录，单文件场景测试）
+- **综合套件**：`frontend/e2e-comprehensive/`（推荐用于回归测试，按 6 大类组织：`00-setup / 01-auth / 02-crud / 03-realtime / 04-advanced / 05-error-handling / 06-edge-cases`，含 `helpers/` 共享代码与独立 `playwright.config.ts`）
+
 ```bash
 cd frontend
 
 # 安装 Playwright 浏览器
 npx playwright install
 
-# 运行 E2E 测试
+# 运行基础 E2E 测试
 npx playwright test
+
+# 运行综合 E2E 测试（基于 e2e-comprehensive/playwright.config.ts）
+npx playwright test --config e2e-comprehensive/playwright.config.ts
 
 # 运行特定测试文件
 npx playwright test tests/e2e/device-management.spec.ts
@@ -79,6 +89,21 @@ npx playwright test --debug
 # 查看测试报告
 npx playwright show-report
 ```
+
+### 压力测试 (k6)
+
+```bash
+# API 读压力测试
+k6 run tests/load/api-read.js
+
+# MQTT 发布压力测试
+k6 run tests/load/mqtt-publish.js
+
+# 遥测写入压力测试
+k6 run tests/load/telemetry-write.js
+```
+
+`tests/load/config.js` 含公共配置（baseURL、租户 ID 等），`tests/stress/` 含其他压测脚本。
 
 ### 模拟器（发送测试遥测数据）
 
@@ -144,19 +169,23 @@ EquipSense/
 │   ├── EquipAI.EdgeGateway/      # 边缘网关（独立部署，独立 Dockerfile）
 │   └── EquipAI.Simulator/        # MQTT 遥测数据模拟器
 ├── frontend/                      # 前端源码
-│   └── src/
-│       ├── pages/                # 页面组件（22 个，全部懒加载）
-│       ├── components/           # 通用组件（ui/、charts/、alert/ 等）
-│       ├── hooks/                # TanStack Query hooks
-│       ├── stores/               # Zustand stores（仅 authStore + notificationStore）
-│       ├── lib/                  # API 客户端、SignalR 连接、QueryClient 配置
-│       ├── i18n/                 # 国际化（中英文）
-│       └── types/                # TypeScript 类型定义
+│   ├── src/
+│   │   ├── pages/                # 页面组件（22 个，全部懒加载）
+│   │   ├── components/           # 通用组件（ui/、charts/、alert/ 等）
+│   │   ├── hooks/                # TanStack Query hooks
+│   │   ├── stores/               # Zustand stores（仅 authStore + notificationStore）
+│   │   ├── lib/                  # API 客户端、SignalR 连接、QueryClient 配置
+│   │   ├── i18n/                 # 国际化（中英文）
+│   │   ├── types/                # TypeScript 类型定义
+│   │   ├── test/                 # Vitest 公共 setup（setup.ts）
+│   │   └── utils/                # 通用工具（如 workorder.ts 工单辅助）
+│   └── e2e-comprehensive/        # 综合端到端测试套件（6 大类 + helpers/）
 ├── tests/                         # 测试项目
 │   ├── EquipAI.Tests.Unit/       # xUnit 单元测试
 │   ├── EquipAI.Tests.Integration/ # Testcontainers 集成测试
-│   ├── e2e/                      # Playwright E2E 测试
-│   └── stress/                   # 压力测试脚本
+│   ├── e2e/                      # Playwright 基础 E2E 测试
+│   ├── load/                     # k6 压力测试脚本（API 读 / MQTT 发布 / 遥测写入）
+│   └── stress/                   # 其他压力测试脚本
 ├── docker/                        # Docker 配置
 │   ├── Dockerfile.backend        # 后端多阶段构建
 │   ├── Dockerfile.frontend       # 前端 Nginx 构建
@@ -194,6 +223,13 @@ EquipSense/
 **DI 注册：**
 - `src/EquipAI.WebAPI/Extensions/ServiceCollectionExtensions.cs` 是唯一注册入口
 - 三个扩展方法：`AddInfrastructure()`（DbContext、Redis、MQTT、JWT、仓储）、`AddApplication()`（~40+ 业务服务、事件总线、告警评估器、分析引擎、工单集成）、`AddJwtAuthentication()`
+
+**`Program.cs` 中的关键后台服务与中间件配置：**
+- `BusinessMetricsCollector`（`HostedService`）：每 30 秒从数据库采集业务 Gauge 指标，Prometheus 暴露在 `/metrics`
+- `GatewayHeartbeatMonitor`（`HostedService`）：每 30 秒检查超时网关并标记 `offline`
+- **OutputCache 三档策略**：默认 30 秒、`Devices` 2 分钟、`AlertRules` 5 分钟、`TenantConfig` 10 分钟
+- **SignalR**：`KeepAliveInterval=15s`、`ClientTimeoutInterval=30s`
+- **CORS**：从 `Cors:Origins` 配置读取，未配置时默认 `http://localhost:5173`，**强制 `AllowCredentials`**（SignalR WebSocket 必需）
 
 ### 事件驱动管线（核心数据流）
 
@@ -297,7 +333,25 @@ Docker Compose 生产环境包含完整监控栈：
 - **Seq**：结构化日志聚合（Serilog sink）
 - **Prometheus**：指标采集（后端暴露 `/metrics`）
 - **Grafana**：可视化仪表盘
-- **健康检查**：三级探针（startup / liveness / ready），含依赖项检测
+- **健康检查**：三级探针（startup / liveness / ready），探针包含四类依赖项：
+  - `startup`：仅 PostgreSQL
+  - `liveness`：PostgreSQL + Redis
+  - `ready`：PostgreSQL + Redis + MQTT（`MqttHealthCheck`）+ LLM（`LlmHealthCheck`，5 秒超时）
+
+### 关键代码位置速查
+
+- 后端入口与中间件管线：`src/EquipAI.WebAPI/Program.cs`
+- DI 注册三件套：`src/EquipAI.WebAPI/Extensions/ServiceCollectionExtensions.cs`
+- 领域实体与事件：`src/EquipAI.Core/Entities/`、`src/EquipAI.Core/Events/`
+- 应用层按模块组织：`src/EquipAI.Application/{Alerts, Analysis, Approvals, Dashboard, Knowledge, Notifications, Telemetry, WorkOrders}/`
+- AI 客户端实现：`src/EquipAI.Infrastructure/AI/`
+- 多租户基础设施：`src/EquipAI.Infrastructure/Tenant/`（含 `ITenantContext` 实现）
+- 中间件：`src/EquipAI.Infrastructure/Middleware/` + `src/EquipAI.WebAPI/Middleware/`
+- 种子数据：`src/EquipAI.Infrastructure/Seeding/`（含行业预置设备类型模板、告警规则、默认管理员）
+- SignalR Hub：`src/EquipAI.WebAPI/Hubs/IndustrialHub.cs`
+- 业务指标采集：`src/EquipAI.WebAPI/Metrics/` + `BusinessMetricsCollector` 后台服务
+- 前端 API 客户端：`frontend/src/lib/api.ts`
+- 前端 SignalR 单例：`frontend/src/lib/signalr.ts`
 
 ## 实现阶段核心设计原则
 
