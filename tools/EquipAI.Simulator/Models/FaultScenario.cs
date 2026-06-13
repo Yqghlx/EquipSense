@@ -8,18 +8,23 @@ namespace EquipAI.Simulator.Models;
 public sealed class FaultScenario
 {
     /// <summary>剧本名称</summary>
+    [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
     /// <summary>目标设备编码</summary>
+    [JsonPropertyName("deviceCode")]
     public string DeviceCode { get; set; } = string.Empty;
 
     /// <summary>剧本描述</summary>
+    [JsonPropertyName("description")]
     public string Description { get; set; } = string.Empty;
 
     /// <summary>时间加速倍率（1 秒真实 = N 秒模拟）</summary>
+    [JsonPropertyName("timeScale")]
     public int TimeScale { get; set; } = 1;
 
     /// <summary>时间线条目列表</summary>
+    [JsonPropertyName("timeline")]
     public List<ScenarioTimelineEntry> Timeline { get; set; } = [];
 }
 
@@ -27,6 +32,7 @@ public sealed class FaultScenario
 public sealed class ScenarioTimelineEntry
 {
     /// <summary>触发时刻（格式 HH:MM:SS）</summary>
+    [JsonPropertyName("at")]
     public string At { get; set; } = "00:00:00";
 
     /// <summary>动作：start 或 stop</summary>
@@ -39,5 +45,5 @@ public sealed class ScenarioTimelineEntry
 
     /// <summary>将 At 字符串解析为 TimeSpan</summary>
     public TimeSpan ParseAt() =>
-        TimeSpan.TryParseExact(At, @"hh\:mm\:ss", null, out var ts) ? ts : TimeSpan.Zero;
+        TimeSpan.TryParse(At, out var ts) ? ts : TimeSpan.Zero;
 }
