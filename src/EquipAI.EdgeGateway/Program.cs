@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using EquipAI.EdgeGateway;
+using EquipAI.EdgeGateway.Persistence;
 using EquipAI.EdgeGateway.Pipeline;
 using EquipAI.EdgeGateway.Protocols;
 using EquipAI.EdgeGateway.Security;
@@ -37,22 +38,44 @@ try
         _ => throw new ArgumentException($"不支持的协议: {protocol}")
     });
 
-    // 注册上传器
-    builder.Services.AddSingleton<CloudUploader>();
+    // 注册离线缓冲存储（SQLite 持久化 + 内存环形队列）
+    System.IO.Directory.CreateDirectory("data");
+    var sqliteStore = new SqliteBufferStore("data/buffer.db");
+    await sqliteStore.InitializeAsync();
+    builder.Services.AddSingleton(sqliteStore);
+
+    var gatewayOpts = new GatewayOptions();
+    builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(gatewayOpts);
+
+    var localBuffer = new LocalBuffer(
+        capacity: gatewayOpts.BufferSize,
+        offlineStore: sqliteStore);
+    builder.Services.AddSingleton(localBuffer);
+
+    // 注册上传器（注入离线缓冲组件，启用断网保护）
+    builder.Services.AddSingleton<CloudUploader>(sp => new CloudUploader(
+        sp.GetRequiredService<ILogger<CloudUploader>>(),
+        sp.GetRequiredService<GatewayOptions>(),
+        sqliteStore,
+        localBuffer,
+        sp.GetRequiredService<GatewayMetrics>()));
 
     // 注册指标收集器（全局单例）
     builder.Services.AddSingleton<GatewayMetrics>();
 
-    // 加载设备配置 — 优先从后端 API 拉取，fallback 到本地 appsettings.json
+    // 注册设备管理器（管理活跃的采集器实例，支持动态增删）
+    builder.Services.AddSingleton<DeviceManager>(sp => new DeviceManager(
+        sp,
+        adapterFactory,
+        sp.GetRequiredService<ILogger<DeviceManager>>()));
+
+    // 加载初始设备配置 — 优先从后端 API 拉取，fallback 到本地 appsettings.json
     var devicesSection = builder.Configuration.GetSection("Devices");
     var localDevices = devicesSection.Get<DeviceConfig[]>() ?? [];
     DeviceConfig[] devices;
 
     try
     {
-        var gatewayOpts = new GatewayOptions();
-        builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(gatewayOpts);
-
         if (!string.IsNullOrEmpty(gatewayOpts.BackendUrl) && !string.IsNullOrEmpty(gatewayOpts.AuthKey))
         {
             using var httpClient = new HttpClient();
@@ -100,21 +123,20 @@ try
 
     Log.Information("已加载 {Count} 个设备配置", devices.Length);
 
-    foreach (var device in devices)
+    // 通过 DeviceManager 应用初始配置（替代原先的 foreach 注册方式）
+    // DeviceManager 将在 host.Build() 后通过 IHostedLifecycleService 启动采集器
+    var initialDevices = devices;
+    builder.Services.AddSingleton<IHostedService>(sp =>
     {
-        var deviceConfig = device;
-        builder.Services.AddSingleton<IHostedService>(sp => new DataCollector(
-            sp.GetRequiredService<ILogger<DataCollector>>(),
-            adapterFactory(sp, deviceConfig.Protocol),
-            sp.GetRequiredService<CloudUploader>(),
-            deviceConfig,
-            deviceConfig.DeviceType ?? "Unknown",
-            sp.GetRequiredService<GatewayMetrics>()));
-    }
+        var deviceManager = sp.GetRequiredService<DeviceManager>();
+        // 初始配置在服务启动后异步应用
+        _ = deviceManager.ApplyConfigAsync(initialDevices);
+        return new InitialConfigApplier(deviceManager, initialDevices);
+    });
 
     builder.Services.AddSerilog();
 
-    // 注册 HTTP 客户端工厂（供心跳服务使用）
+    // 注册 HTTP 客户端工厂（供心跳和配置刷新服务使用）
     builder.Services.AddHttpClient("Backend");
 
     // 注册心跳服务 — 定期向后端发送心跳以保持在线状态
@@ -123,11 +145,20 @@ try
         sp.GetRequiredService<GatewayOptions>(),
         sp.GetRequiredService<IHttpClientFactory>()));
 
-    // 注册健康检查和 Prometheus 指标端点
+    // 注册健康检查和 Prometheus 指标端点（含真实连接测试）
     builder.Services.AddSingleton<IHostedService>(sp => new HealthEndpoints(
         sp.GetRequiredService<ILogger<HealthEndpoints>>(),
         sp.GetRequiredService<GatewayOptions>(),
-        sp.GetRequiredService<GatewayMetrics>()));
+        sp.GetRequiredService<GatewayMetrics>(),
+        adapterFactory,
+        sp));
+
+    // 注册配置定时刷新服务 — 每 60s 从后端拉取最新配置并动态应用
+    builder.Services.AddSingleton<IHostedService>(sp => new ConfigRefreshService(
+        sp.GetRequiredService<DeviceManager>(),
+        sp.GetRequiredService<GatewayOptions>(),
+        sp.GetRequiredService<IHttpClientFactory>(),
+        sp.GetRequiredService<ILogger<ConfigRefreshService>>()));
 
     var host = builder.Build();
     Log.Information("边缘网关启动中...");
@@ -152,3 +183,14 @@ record GatewayDevicePullItem(
     Dictionary<string, string> DataPoints,
     int PollIntervalMs,
     string? DeviceType);
+
+/// <summary>
+/// 初始配置应用器 — 在服务启动时通过 DeviceManager 启动初始采集器
+/// </summary>
+file class InitialConfigApplier(DeviceManager deviceManager, DeviceConfig[] devices) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await deviceManager.ApplyConfigAsync(devices);
+    }
+}

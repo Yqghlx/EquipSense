@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -197,8 +198,8 @@ public class GatewayConfigController : ControllerBase
     }
 
     /// <summary>
-    /// 测试设备连接 — 验证协议和连接参数是否可达
-    /// 当前为模拟实现，Phase 2 接入真实协议后将调用对应适配器
+    /// 测试设备连接 — 代理到在线边缘网关执行真实协议连接测试。
+    /// 无在线网关时回退到 JSON 格式校验。
     /// </summary>
     /// <param name="request">测试连接请求</param>
     /// <returns>测试连接结果</returns>
@@ -223,16 +224,55 @@ public class GatewayConfigController : ControllerBase
             });
         }
 
-        // Phase 1 模拟连接测试：解析配置格式并返回成功
-        // Phase 2 将调用真实的协议适配器进行连接测试
+        // 尝试代理到当前租户的在线边缘网关
+        var onlineGateway = await _dbContext.UnfilteredSet<Gateway>()
+            .Where(g => g.TenantId == _tenantContext.TenantId && g.Status == "online" && g.Enabled)
+            .OrderByDescending(g => g.LastHeartbeatAt)
+            .FirstOrDefaultAsync();
+
+        if (onlineGateway != null)
+        {
+            try
+            {
+                using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+                var payload = new { protocol, connectionString = request.ConnectionConfig };
+                var response = await httpClient.PostAsJsonAsync(
+                    $"http://{onlineGateway.Host}:{onlineGateway.HealthPort}/test-connection",
+                    payload);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+                    return Ok(new TestConnectionResponse
+                    {
+                        Success = result.TryGetProperty("success", out var successEl) && successEl.GetBoolean(),
+                        Message = result.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "连接测试完成" : "连接测试完成"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "代理连接测试到网关 {GatewayId} 失败，回退到配置校验", onlineGateway.GatewayId);
+            }
+        }
+
+        // 回退：JSON 格式校验
+        return await TestConnectionValidationAsync(protocol, request.ConnectionConfig);
+    }
+
+    /// <summary>
+    /// 纯 JSON 格式校验回退（无在线网关时使用）
+    /// </summary>
+    private async Task<ActionResult<TestConnectionResponse>> TestConnectionValidationAsync(string protocol, string connectionConfig)
+    {
         try
         {
-            var configDoc = JsonDocument.Parse(request.ConnectionConfig);
+            var configDoc = JsonDocument.Parse(connectionConfig);
             var hasRequiredField = protocol switch
             {
                 "opcua" => configDoc.RootElement.TryGetProperty("endpointUrl", out _),
                 "modbus-tcp" => configDoc.RootElement.TryGetProperty("host", out _),
-                "modbus-rtu" => configDoc.RootElement.TryGetProperty("portName", out _),
+                "modbus-rtu" => configDoc.RootElement.TryGetProperty("portName", out _) || configDoc.RootElement.TryGetProperty("port", out _),
                 _ => false
             };
 
@@ -242,7 +282,7 @@ public class GatewayConfigController : ControllerBase
                 {
                     "opcua" => "endpointUrl",
                     "modbus-tcp" => "host",
-                    "modbus-rtu" => "portName",
+                    "modbus-rtu" => "portName 或 port",
                     _ => "unknown"
                 };
 
@@ -253,12 +293,10 @@ public class GatewayConfigController : ControllerBase
                 });
             }
 
-            // 模拟连接成功（Phase 1 使用模拟服务器，始终返回成功）
-            await Task.Delay(100); // 模拟网络延迟
             return Ok(new TestConnectionResponse
             {
                 Success = true,
-                Message = $"连接测试成功（{protocol} 模拟模式）"
+                Message = $"配置格式校验通过（{protocol}），无在线网关可执行真实连接测试"
             });
         }
         catch (JsonException)

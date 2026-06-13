@@ -30,6 +30,11 @@ public class CloudUploader : IAsyncDisposable
     public bool IsOnline => _mqttClient?.IsConnected == true;
 
     /// <summary>
+    /// 当前网关所属的租户 ID（供外部构建 MQTT 主题使用）
+    /// </summary>
+    public string TenantId => _options.TenantId;
+
+    /// <summary>
     /// 初始化云端上传器
     /// </summary>
     /// <param name="logger">日志记录器</param>

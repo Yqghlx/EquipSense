@@ -1,19 +1,25 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using EquipAI.EdgeGateway.Protocols;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.EdgeGateway;
 
 /// <summary>
-/// 轻量级 HTTP 健康检查和 Prometheus 指标端点
-/// 使用 HttpListener 监听，不依赖 ASP.NET Core
+/// 轻量级 HTTP 健康检查和 Prometheus 指标端点。
+/// 使用 HttpListener 监听，不依赖 ASP.NET Core。
+/// 额外提供 /test-connection 端点用于代理真实协议连接测试。
 /// </summary>
 public class HealthEndpoints : BackgroundService
 {
     private readonly ILogger<HealthEndpoints> _logger;
     private readonly GatewayOptions _options;
     private readonly Pipeline.GatewayMetrics _metrics;
+    private readonly Func<IServiceProvider, string, IProtocolAdapter> _adapterFactory;
+    private readonly IServiceProvider _serviceProvider;
     private readonly int _port;
 
     /// <summary>
@@ -22,16 +28,22 @@ public class HealthEndpoints : BackgroundService
     /// <param name="logger">日志记录器</param>
     /// <param name="options">网关配置选项</param>
     /// <param name="metrics">指标收集器</param>
+    /// <param name="adapterFactory">协议适配器工厂</param>
+    /// <param name="serviceProvider">DI 服务提供者（用于创建适配器）</param>
     /// <param name="port">监听端口（默认 8081）</param>
     public HealthEndpoints(
         ILogger<HealthEndpoints> logger,
         GatewayOptions options,
         Pipeline.GatewayMetrics metrics,
+        Func<IServiceProvider, string, IProtocolAdapter> adapterFactory,
+        IServiceProvider serviceProvider,
         int port = 8081)
     {
         _logger = logger;
         _options = options;
         _metrics = metrics;
+        _adapterFactory = adapterFactory;
+        _serviceProvider = serviceProvider;
         _port = port;
     }
 
@@ -95,6 +107,9 @@ public class HealthEndpoints : BackgroundService
                 case "/metrics":
                     await WriteMetricsAsync(response, ct);
                     break;
+                case "/test-connection":
+                    await HandleTestConnectionAsync(context, ct);
+                    break;
                 default:
                     response.StatusCode = 404;
                     response.Close();
@@ -106,6 +121,99 @@ public class HealthEndpoints : BackgroundService
             _logger.LogWarning(ex, "处理健康检查请求失败: {Path}", path);
             try { response.StatusCode = 500; response.Close(); } catch { }
         }
+    }
+
+    /// <summary>
+    /// 处理真实协议连接测试请求
+    /// 请求体 JSON 格式：{ "protocol": "opcua|modbus-tcp|modbus-rtu", "connectionString": "..." }
+    /// </summary>
+    private async Task HandleTestConnectionAsync(HttpListenerContext context, CancellationToken ct)
+    {
+        if (context.Request.HttpMethod != "POST")
+        {
+            context.Response.StatusCode = 405;
+            context.Response.Close();
+            return;
+        }
+
+        string body;
+        using (var reader = new StreamReader(context.Request.InputStream))
+        {
+            body = await reader.ReadToEndAsync(ct);
+        }
+
+        string protocol;
+        string connectionString;
+        try
+        {
+            var doc = JsonDocument.Parse(body);
+            protocol = doc.RootElement.GetProperty("protocol").GetString()!;
+            connectionString = doc.RootElement.GetProperty("connectionString").GetString()!;
+        }
+        catch (Exception ex)
+        {
+            await WriteJsonAsync(context, new { success = false, message = $"请求格式无效: {ex.Message}" }, 400, ct);
+            return;
+        }
+
+        var supportedProtocols = new[] { "opcua", "modbus-tcp", "modbus-rtu" };
+        if (!supportedProtocols.Contains(protocol.ToLowerInvariant()))
+        {
+            await WriteJsonAsync(context, new { success = false, message = $"不支持的协议: {protocol}" }, 400, ct);
+            return;
+        }
+
+        // 创建临时适配器进行真实连接测试
+        IProtocolAdapter? adapter = null;
+        try
+        {
+            adapter = _adapterFactory(_serviceProvider, protocol);
+            var config = new DeviceConfig("test-device", protocol, connectionString, new Dictionary<string, string>());
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+            var sw = Stopwatch.StartNew();
+            await adapter.ConnectAsync(config, cts.Token);
+            sw.Stop();
+
+            await WriteJsonAsync(context, new
+            {
+                success = true,
+                message = $"连接测试成功（{protocol}），耗时 {sw.ElapsedMilliseconds}ms",
+                latencyMs = sw.ElapsedMilliseconds
+            }, 200, ct);
+        }
+        catch (Exception ex)
+        {
+            var shortMessage = ex.InnerException?.Message ?? ex.Message;
+            await WriteJsonAsync(context, new
+            {
+                success = false,
+                message = $"连接失败: {shortMessage}"
+            }, 200, ct);
+        }
+        finally
+        {
+            if (adapter is not null)
+            {
+                try { await adapter.DisposeAsync(); } catch { }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 写入 JSON 响应
+    /// </summary>
+    private static async Task WriteJsonAsync(HttpListenerContext context, object data, int statusCode, CancellationToken ct)
+    {
+        var json = JsonSerializer.Serialize(data);
+        var buffer = System.Text.Encoding.UTF8.GetBytes(json);
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+        context.Response.ContentLength64 = buffer.Length;
+        await context.Response.OutputStream.WriteAsync(buffer, ct);
+        context.Response.Close();
     }
 
     /// <summary>

@@ -37,7 +37,7 @@ public class DataCollectorTests
 
         var collector = new DataCollector(
             new NullLogger<DataCollector>(),
-            adapterMock.Object,
+            () => adapterMock.Object,
             uploader,
             config,
             "TestDevice");

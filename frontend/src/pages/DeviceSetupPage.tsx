@@ -6,9 +6,11 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Textarea } from '../components/ui/textarea';
 import { Badge } from '../components/ui/badge';
 import { useTestConnection, useCreateGatewayDevice } from '../hooks/useGatewayDevices';
+import OpcUaConnectionForm from '../components/gateway/OpcUaConnectionForm';
+import ModbusTcpConnectionForm from '../components/gateway/ModbusTcpConnectionForm';
+import ModbusRtuConnectionForm from '../components/gateway/ModbusRtuConnectionForm';
 
 // =============================================================================
 // 协议类型与配置
@@ -202,8 +204,9 @@ export default function DeviceSetupPage() {
   const addDataPoint = () => {
     setDataPoints((prev) => [
       ...prev,
-      { id: 1, address: '', metric: '', dataType: 'float' },
+      { id: nextId, address: '', metric: '', dataType: 'float' },
     ]);
+    setNextId((prev) => prev + 1);
   };
 
   /** 删除指定数据点 */
@@ -217,6 +220,9 @@ export default function DeviceSetupPage() {
       prev.map((dp) => (dp.id === id ? { ...dp, [field]: value } : dp)),
     );
   };
+
+  /** 数据点自增 ID */
+  const [nextId, setNextId] = useState(2);
 
   // ===========================================================================
   // 提交创建
@@ -328,21 +334,18 @@ export default function DeviceSetupPage() {
         </Badge>
       </div>
 
-      {/* 连接配置 JSON 编辑区 */}
+      {/* 连接配置 — 根据协议类型渲染对应的结构化表单 */}
       <div className="space-y-2">
-        <Label htmlFor="connectionConfig">{t('gatewayWizard.connectionConfig')}</Label>
-        <Textarea
-          id="connectionConfig"
-          className="font-mono text-sm min-h-48"
-          value={connectionConfig}
-          onChange={(e) => {
-            setConnectionConfig(e.target.value);
-          }}
-          placeholder="{}"
-        />
-        <p className="text-xs text-muted-foreground">
-          {t('gatewayWizard.connectionConfigHint')}
-        </p>
+        <Label>{t('gatewayWizard.connectionConfig')}</Label>
+        {selectedProtocol === 'opcua' && (
+          <OpcUaConnectionForm value={connectionConfig} onChange={setConnectionConfig} />
+        )}
+        {selectedProtocol === 'modbus-tcp' && (
+          <ModbusTcpConnectionForm value={connectionConfig} onChange={setConnectionConfig} />
+        )}
+        {selectedProtocol === 'modbus-rtu' && (
+          <ModbusRtuConnectionForm value={connectionConfig} onChange={setConnectionConfig} />
+        )}
       </div>
 
       {/* 采集间隔 */}
