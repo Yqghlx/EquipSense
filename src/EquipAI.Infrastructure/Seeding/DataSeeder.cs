@@ -55,6 +55,7 @@ public class DataSeeder
         await SeedAdminUserAsync();
         await SeedDeviceTypeTemplatesAsync();
         await SeedSampleDeviceAndAlertRulesAsync();
+        await SeedAirCompressorKnowledgeRulesAsync();
 
         _logger.LogInformation("数据库种子数据初始化完成");
     }
@@ -451,5 +452,85 @@ public class DataSeeder
             Enabled = enabled,
             AutoCreateWorkorder = autoWo,
         };
+    }
+
+    /// <summary>
+    /// 种子空压机知识规则到系统租户（所有租户共享）
+    /// 规则条件与告警阈值对齐，使 L2 规则引擎能在告警触发时给出诊断（无需 LLM Key）
+    /// </summary>
+    private async Task SeedAirCompressorKnowledgeRulesAsync()
+    {
+        var hasRules = await _dbContext.KnowledgeRules
+            .IgnoreQueryFilters()
+            .AnyAsync(r => r.TenantId == SystemConstants.SystemTenantId && r.DeviceType == "空压机");
+
+        if (hasRules)
+            return;
+
+        // 规则条件格式：[{metric, operator, threshold}]，与 RuleEngineAnalysisService 的 TryMatchConditions 对齐
+        // 使用显式 JSON 字符串确保 jsonb 列正确解析（匿名对象序列化曾导致 invalid input syntax）
+        var rules = new[]
+        {
+            new
+            {
+                Name = "油温过高诊断",
+                Conditions = """[{"metric":"oil_temperature","operator":">","threshold":90.0}]""",
+                Conclusion = "润滑油温过高，可能原因：润滑系统故障、冷却不足、轴承磨损",
+                RecommendedActions = "检查油位和油泵运行状态；检查冷却器是否堵塞；监测轴承振动趋势",
+                ConfidenceWeight = 0.8m,
+            },
+            new
+            {
+                Name = "振动超标诊断",
+                Conditions = """[{"metric":"vibration","operator":">","threshold":7.0}]""",
+                Conclusion = "振动幅值超标，可能原因：轴承磨损、转子不平衡、对中不良",
+                RecommendedActions = "检查轴承游隙和润滑；做动平衡校正；检查联轴器对中",
+                ConfidenceWeight = 0.75m,
+            },
+            new
+            {
+                Name = "排气压力过高诊断",
+                Conditions = """[{"metric":"discharge_pressure","operator":">","threshold":1.1}]""",
+                Conclusion = "排气压力异常升高，可能原因：排气系统堵塞、阀片故障",
+                RecommendedActions = "检查排气过滤器和管路；检查最小压力阀；监测阀片密封",
+                ConfidenceWeight = 0.8m,
+            },
+            new
+            {
+                Name = "排气压力过低诊断",
+                Conditions = """[{"metric":"discharge_pressure","operator":"<","threshold":0.5}]""",
+                Conclusion = "排气压力低于正常范围，可能原因：气阀泄漏、进气不足、活塞环磨损",
+                RecommendedActions = "检查进气阀和阀片密封；检查管路泄漏；监测排气量变化",
+                ConfidenceWeight = 0.75m,
+            },
+            new
+            {
+                Name = "电机电流过高诊断",
+                Conditions = """[{"metric":"motor_current","operator":">","threshold":180.0}]""",
+                Conclusion = "电机电流过载，可能原因：机械过载、电压异常、轴承卡阻",
+                RecommendedActions = "检查负载是否超标；测量三相电压平衡；检查轴承转动灵活性",
+                ConfidenceWeight = 0.8m,
+            },
+        };
+
+        foreach (var r in rules)
+        {
+            _dbContext.KnowledgeRules.Add(new KnowledgeRule
+            {
+                TenantId = SystemConstants.SystemTenantId,
+                DeviceType = "空压机",
+                Name = r.Name,
+                Conditions = r.Conditions,
+                // Conclusion 由 EF Core HasConversion 自动序列化（KnowledgeRuleConfiguration 配置了 jsonb 转换）
+                Conclusion = r.Conclusion,
+                RecommendedActions = r.RecommendedActions,
+                ConfidenceWeight = r.ConfidenceWeight,
+                Source = "preset",
+                Enabled = true,
+            });
+        }
+
+        await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("已为空压机种子 {Count} 条知识规则到系统租户", rules.Length);
     }
 }

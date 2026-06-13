@@ -35,7 +35,9 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 查询设备类型，用于匹配规则的 DeviceType 字段
+        // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让查询返回 null
         var deviceType = await db.Devices
+            .IgnoreQueryFilters()
             .Where(d => d.Id == deviceId)
             .Select(d => d.Type)
             .FirstOrDefaultAsync(ct);
