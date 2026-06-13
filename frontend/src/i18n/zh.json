@@ -66,7 +66,8 @@
     "knowledge": "知识库",
     "settings": "系统设置",
     "tenantManagement": "租户管理",
-    "evaluation": "诊断评估"
+    "evaluation": "诊断评估",
+    "auditLogs": "审计日志"
   },
   "sidebar": {
     "expand": "展开侧边栏",
@@ -702,5 +703,17 @@
     "match": "命中",
     "mismatch": "误诊",
     "miss": "漏报"
+  },
+  "audit": {
+    "title": "审计日志",
+    "description": "记录系统中所有敏感操作，用于合规追溯",
+    "allActions": "全部动作",
+    "allResources": "全部资源",
+    "action": "动作",
+    "resource": "资源",
+    "descColumn": "描述",
+    "ip": "IP 地址",
+    "method": "方法",
+    "time": "时间"
   }
 }

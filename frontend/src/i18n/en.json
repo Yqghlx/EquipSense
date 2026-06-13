@@ -66,7 +66,8 @@
     "knowledge": "Knowledge Base",
     "settings": "Settings",
     "tenantManagement": "Tenant Management",
-    "evaluation": "Diagnosis Evaluation"
+    "evaluation": "Diagnosis Evaluation",
+    "auditLogs": "Audit Logs"
   },
   "sidebar": {
     "expand": "Expand Sidebar",
@@ -695,5 +696,17 @@
     "match": "Match",
     "mismatch": "Mismatch",
     "miss": "Miss"
+  },
+  "audit": {
+    "title": "Audit Logs",
+    "description": "Records of all sensitive operations for compliance tracing",
+    "allActions": "All Actions",
+    "allResources": "All Resources",
+    "action": "Action",
+    "resource": "Resource",
+    "descColumn": "Description",
+    "ip": "IP Address",
+    "method": "Method",
+    "time": "Time"
   }
 }

@@ -1,12 +1,31 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Button } from '../components/ui/button';
 import { AlertDetailDrawer } from '../components/alert/AlertDetailDrawer';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
 import { useAlerts, useAcknowledgeAlert, useResolveAlert } from '../hooks/useAlerts';
+import api from '../lib/api';
 import type { Alert } from '../types';
+
+/** 导出当前筛选条件下的告警为 CSV（触发浏览器下载） */
+async function exportAlertsCsv(status: string, severity: string) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (severity) params.set('severity', severity);
+  const query = params.toString();
+  const response = await api.get(`/alerts/export${query ? `?${query}` : ''}`, { responseType: 'blob' });
+  const url = URL.createObjectURL(response.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `alerts_${Date.now()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 /**
  * 告警中心页
@@ -36,7 +55,17 @@ export default function AlertCenterPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">{t('alert.title')}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">{t('alert.title')}</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => exportAlertsCsv(status, severity)}
+        >
+          <Download className="h-4 w-4 mr-2" />
+          {t('common.export', '导出 CSV')}
+        </Button>
+      </div>
 
       {/* 过滤条件：状态 + 严重级别 */}
       <div className="flex gap-3">

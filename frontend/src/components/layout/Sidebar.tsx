@@ -16,6 +16,7 @@ import {
   Building2,
   Network,
   Target,
+  Shield,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
@@ -35,6 +36,7 @@ const baseNavItems = [
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
   { path: '/knowledge', icon: BookOpen, labelKey: 'nav.knowledge' },
   { path: '/evaluation', icon: Target, labelKey: 'nav.evaluation' },
+  { path: '/audit-logs', icon: Shield, labelKey: 'nav.auditLogs' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 
