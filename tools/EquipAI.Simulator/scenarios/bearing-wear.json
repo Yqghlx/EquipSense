@@ -1,0 +1,1 @@
+{"name": "bearing-wear-scenario", "deviceCode": "AC-001", "description": "模拟轴承磨损渐进故障，振动在约 90 小时（模拟时间）内从 2.5 升至 7.0 触发告警。timeScale=360 使 90 小时模拟时间压缩为 15 分钟真实时间", "timeScale": 360, "timeline": [{"at": "00:00:00", "action": "start", "faultType": "bearing_wear"}, {"at": "90:00:00", "action": "stop", "faultType": "bearing_wear"}]}

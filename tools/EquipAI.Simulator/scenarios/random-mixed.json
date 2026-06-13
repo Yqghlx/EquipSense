@@ -1,0 +1,1 @@
+{"name": "random-mixed", "deviceCode": "AC-001", "description": "随机模式 — 由 --mode random --fault-rate 0.1 触发，此文件仅作文档说明。引擎会从 6 种故障中随机选取并注入", "timeScale": 1, "timeline": []}
