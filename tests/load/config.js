@@ -4,6 +4,7 @@
  * 所有测试脚本共享的基础 URL、阈值和认证信息。
  * 使用方式：import { config, thresholds } from './config.js';
  */
+import http from 'k6/http';
 
 // 基础配置 — 通过环境变量覆盖：k6 run -e BASE_URL=http://host:port script.js
 export const config = {
@@ -32,11 +33,21 @@ export const relaxedThresholds = {
   http_req_failed: ['rate<0.05'],
 };
 
+/** 缓存的 token（避免每次迭代都登录，提升压测准确性） */
+let cachedToken = null;
+
 /**
- * 获取 JWT Token — 通过登录 API 获取认证令牌
+ * 获取 JWT Token — 通过登录 API 获取认证令牌（带缓存）
+ *
+ * 首次调用登录获取 token 并缓存，后续调用直接返回缓存值。
+ * 这样压测的 default 函数里每次迭代不会产生登录请求，只测目标 API。
+ *
+ * 如需每次迭代都重新登录（测试认证性能），调用前重置 cachedToken = null。
  * @returns {string} JWT Token
  */
 export function getToken() {
+  if (cachedToken) return cachedToken;
+
   const res = http.post(`${config.baseUrl}/api/v1/auth/login`, JSON.stringify({
     username: config.username,
     password: config.password,
@@ -48,7 +59,12 @@ export function getToken() {
     throw new Error(`登录失败: ${res.status} ${res.body}`);
   }
 
-  return res.json().token;
+  // 登录 API 返回字段是 accessToken（非 token）
+  cachedToken = res.json().accessToken;
+  if (!cachedToken) {
+    throw new Error('登录响应缺少 accessToken 字段');
+  }
+  return cachedToken;
 }
 
 /** 常用请求头构造 */

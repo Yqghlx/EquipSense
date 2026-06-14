@@ -30,7 +30,7 @@ export const options = {
 const endpoints = [
   { name: '设备列表', path: '/api/v1/devices?page=1&pageSize=20' },
   { name: '告警列表', path: '/api/v1/alerts?page=1&pageSize=20' },
-  { name: '工单列表', path: '/api/v1/workorders?page=1&pageSize=20' },
+  { name: '工单列表', path: '/api/v1/work-orders?page=1&pageSize=20' },
   { name: '仪表盘统计', path: '/api/v1/dashboard/stats' },
   { name: '通知列表', path: '/api/v1/notifications?page=1&pageSize=20' },
 ];
