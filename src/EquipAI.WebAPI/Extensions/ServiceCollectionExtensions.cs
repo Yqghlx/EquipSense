@@ -287,6 +287,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<EquipAI.Application.Analysis.TrendAnalysisService>();
         // 设备对比分析（Phase 5 新增）
         services.AddScoped<EquipAI.Application.Analysis.DeviceComparisonService>();
+        // 运营报表引擎（Phase 5 新增）
+        services.AddScoped<EquipAI.Application.Reports.OperationsReportService>();
     }
 
     /// <summary>
