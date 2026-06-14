@@ -31,12 +31,21 @@
 | **知识库** | 规则双表（knowledge_rules / pending_rules）+ 版本管理 + 冲突检测 | 单测 |
 | **审计日志全覆盖** ✨ | 全局 AuditActionFilter 自动拦截所有增删改 + 语义化标注 | E2E（Create/Update/Login 全记录） |
 | **设备健康度 + OEE** ✨ | 加权评分（告警40%+状态30%+质量30%）+ 可用率×性能×质量 | 单测 + API |
-| **告警多渠道通知** ✨ | 站内通知按运维角色分发 + 钉钉/飞书机器人主动推送 | E2E（按角色分发验证通过） |
+| **告警多渠道通知** ✨ | 站内通知按运维角色分发 + 钉钉/飞书机器人主动推送 | E2E（按角色分发 + mock webhook 捕获 2 个推送请求 Status=OK） |
 | **数据导出** ✨ | 告警/审计日志 CSV（UTF-8 BOM Excel 兼容） | E2E（文件内容验证） |
 | **密码重置** ✨ | 忘记密码→邮件重置链接→重置密码，防邮箱枚举，token 一次性 | E2E（全流程验证） |
 | **PWA 离线** ✨ | Service Worker + offline.html fallback + manifest 图标 | 构建产出 + preview 验证 |
 
 > ✨ 标记为本轮新增/修复的能力
+
+### 🐛 本轮 E2E 实测发现的潜伏 Bug（均已修复）
+
+| Bug | 根因 | 影响 | 提交 |
+|-----|------|------|------|
+| AlertEventHandler FindAsync 租户过滤 | 后台无 HttpContext，全局租户过滤器让 FindAsync 返回 null | 告警的 SignalR 推送 + 通知分发历史上从未执行 | `59a3752` |
+| JSON 反序列化大小写敏感 | `TryDeserialize` 用默认 JsonSerializer，camelCase 的 webhookUrl 反序列化为 null | 即使走到推送代码，WebhookUrl 空判断提前 return，钉钉/飞书 HTTP 请求从未发出 | `2755d2a` |
+
+这两个 bug 叠加导致**历史上告警的多渠道通知功能从未真正工作过**。现已修复并通过 mock webhook 端到端验证（告警触发 → 站内通知按角色分发 + 钉钉 ActionCard + 飞书交互卡片，mock 服务器捕获 2 个 POST 请求，后端 Status=OK）。
 
 ### ⏳ 代码已就绪、待真实环境联调
 
@@ -74,7 +83,7 @@
 | 密码重置防邮箱枚举 | ✅ |
 | 审计日志全操作可追溯 | ✅ |
 
-## 五、本轮提交记录（18 次）
+## 五、本轮提交记录（17 次）
 
 | 提交 | 类型 | 说明 |
 |------|------|------|
@@ -93,6 +102,7 @@
 | `66dcc6b` | fix | SettingsPage + GatewayDevicesPage 硬编码中文修复 |
 | `6a3201d` | test | E2E 测试补全（10 个场景：密码重置/审计/用户/规则启停） |
 | `7c510c6` | feat | appsettings.Production.json 生产配置 |
+| `2755d2a` | fix | JSON 反序列化大小写 bug（钉钉/飞书推送从未真正发送，E2E 实测发现） |
 
 ## 六、质量门禁
 
