@@ -281,6 +281,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<EquipAI.Application.Analysis.OeeService>();
         // AI 诊断评估服务 — 对比 ground truth 与 analyses 表计算命中率
         services.AddScoped<EquipAI.Application.Evaluation.EvaluationService>();
+        // FMEA 故障模式库（Phase 5 新增）
+        services.AddScoped<EquipAI.Application.Fmea.FmeaService>();
     }
 
     /// <summary>

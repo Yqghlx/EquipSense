@@ -36,6 +36,7 @@ const baseNavItems = [
   { path: '/dispatch', icon: Users, labelKey: 'nav.dispatch' },
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
   { path: '/knowledge', icon: BookOpen, labelKey: 'nav.knowledge' },
+  { path: '/fmea', icon: AlertTriangle, labelKey: 'nav.fmea' },
   { path: '/evaluation', icon: Target, labelKey: 'nav.evaluation' },
   { path: '/audit-logs', icon: Shield, labelKey: 'nav.auditLogs' },
   { path: '/settings', icon: Settings, labelKey: 'nav.settings' },

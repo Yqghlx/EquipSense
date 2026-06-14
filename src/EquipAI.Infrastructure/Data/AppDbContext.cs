@@ -94,6 +94,11 @@ public class AppDbContext : DbContext
     public DbSet<KnowledgeRuleVersion> KnowledgeRuleVersions => Set<KnowledgeRuleVersion>();
 
     /// <summary>
+    /// FMEA 故障模式库（Phase 5 新增）
+    /// </summary>
+    public DbSet<Core.Entities.FmeaEntry> FmeaLibrary => Set<Core.Entities.FmeaEntry>();
+
+    /// <summary>
     /// 技术人员画像表
     /// </summary>
     public DbSet<TechnicianProfile> TechnicianProfiles => Set<TechnicianProfile>();

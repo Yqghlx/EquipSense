@@ -32,6 +32,7 @@ const WorkOrderReportsPage = lazy(() => import('./pages/WorkOrderReportsPage'));
 const DispatchBoardPage = lazy(() => import('./pages/DispatchBoardPage'));
 const AnalysesPage = lazy(() => import('./pages/AnalysesPage'));
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
+const FmeaPage = lazy(() => import('./pages/FmeaPage'));
 const PendingRulesPage = lazy(() => import('./pages/PendingRulesPage'));
 const PendingApprovalsPage = lazy(() => import('./pages/PendingApprovalsPage'));
 const EvaluationPage = lazy(() => import('./pages/EvaluationPage'));
@@ -99,6 +100,7 @@ function AppRoutes() {
           <Route path="/dispatch" element={<Suspense fallback={<PageFallback />}><DispatchBoardPage /></Suspense>} />
           <Route path="/analyses" element={<Suspense fallback={<PageFallback />}><AnalysesPage /></Suspense>} />
           <Route path="/knowledge" element={<Suspense fallback={<PageFallback />}><KnowledgePage /></Suspense>} />
+          <Route path="/fmea" element={<Suspense fallback={<PageFallback />}><FmeaPage /></Suspense>} />
           <Route path="/evaluation" element={<Suspense fallback={<PageFallback />}><EvaluationPage /></Suspense>} />
           <Route path="/pending-rules" element={<Suspense fallback={<PageFallback />}><PendingRulesPage /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
