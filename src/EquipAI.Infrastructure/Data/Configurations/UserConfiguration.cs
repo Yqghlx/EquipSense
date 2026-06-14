@@ -94,6 +94,15 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("created_at")
             .IsRequired();
 
+        // MFA 双因素认证
+        builder.Property(e => e.MfaEnabled)
+            .HasColumnName("mfa_enabled")
+            .IsRequired();
+
+        builder.Property(e => e.TotpSecret)
+            .HasColumnName("totp_secret")
+            .HasMaxLength(200);
+
         // 唯一复合索引 — 确保同一租户内用户名唯一
         builder.HasIndex(e => new { e.TenantId, e.Username }).IsUnique();
 

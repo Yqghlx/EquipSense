@@ -178,7 +178,6 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-8443}:443"
-      - "80:80"
     environment:
       BACKEND_URL: http://backend:8080
       SSL_CERT_PATH: "${SSL_CERT_PATH:-/etc/nginx/ssl/cert.pem}"
