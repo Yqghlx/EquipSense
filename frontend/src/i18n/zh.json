@@ -721,6 +721,15 @@
     "mismatch": "误诊",
     "miss": "漏报"
   },
+  "gatewayMonitor": {
+    "uptime": "运行时长",
+    "collectCount": "采集次数",
+    "bufferQueue": "缓冲队列",
+    "uploadSuccess": "上传成功",
+    "uploadFailed": "上传失败",
+    "offlineRetry": "断网重传",
+    "errorRate": "错误率"
+  },
   "audit": {
     "title": "审计日志",
     "description": "记录系统中所有敏感操作，用于合规追溯",

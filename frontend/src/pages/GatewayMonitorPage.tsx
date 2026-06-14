@@ -4,6 +4,7 @@
  * 展示网关实时运行状态、采集指标概览和设备配置列表。
  */
 import { useNavigate, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Activity,
   AlertTriangle,
@@ -86,6 +87,7 @@ function formatUptime(seconds?: number): string {
 }
 
 export default function GatewayMonitorPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { gatewayId } = useParams<{ gatewayId: string }>();
   const { data: status, isLoading: statusLoading, refetch } = useGatewayStatus(gatewayId);
@@ -157,7 +159,7 @@ export default function GatewayMonitorPage() {
             {/* 运行时长 */}
             <MetricCard
               icon={<Clock className="h-5 w-5 text-blue-500" />}
-              label="运行时长"
+              label={t("gatewayMonitor.uptime", "运行时长")}
               value={formatUptime(status?.uptimeSeconds)}
               sub={status?.startedAt ? `启动于 ${new Date(status.startedAt).toLocaleString()}` : undefined}
               color="bg-blue-500/10"
@@ -166,7 +168,7 @@ export default function GatewayMonitorPage() {
             {/* 采集次数 */}
             <MetricCard
               icon={<Activity className="h-5 w-5 text-purple-500" />}
-              label="采集次数"
+              label={t("gatewayMonitor.collectCount", "采集次数")}
               value={metrics?.collections?.toLocaleString() ?? '--'}
               sub={metrics ? `错误 ${metrics.errors}` : undefined}
               color="bg-purple-500/10"
@@ -175,7 +177,7 @@ export default function GatewayMonitorPage() {
             {/* 缓冲队列 */}
             <MetricCard
               icon={<Database className="h-5 w-5 text-orange-500" />}
-              label="缓冲队列"
+              label={t("gatewayMonitor.bufferQueue", "缓冲队列")}
               value={metrics?.bufferQueueDepth?.toLocaleString() ?? '--'}
               sub={metrics ? `重传 ${metrics.replays}` : undefined}
               color="bg-orange-500/10"
@@ -223,25 +225,25 @@ export default function GatewayMonitorPage() {
                 <div className="grid gap-4 md:grid-cols-4">
                   <MetricCard
                     icon={<ArrowUpCircle className="h-5 w-5 text-green-500" />}
-                    label="上传成功"
+                    label={t("gatewayMonitor.uploadSuccess", "上传成功")}
                     value={metrics.uploads.toLocaleString()}
                     color="bg-green-500/10"
                   />
                   <MetricCard
                     icon={<ArrowDownCircle className="h-5 w-5 text-red-500" />}
-                    label="上传失败"
+                    label={t("gatewayMonitor.uploadFailed", "上传失败")}
                     value={metrics.uploadFailures.toLocaleString()}
                     color="bg-red-500/10"
                   />
                   <MetricCard
                     icon={<RefreshCw className="h-5 w-5 text-yellow-500" />}
-                    label="断网重传"
+                    label={t("gatewayMonitor.offlineRetry", "断网重传")}
                     value={metrics.replays.toLocaleString()}
                     color="bg-yellow-500/10"
                   />
                   <MetricCard
                     icon={<AlertTriangle className="h-5 w-5 text-orange-500" />}
-                    label="错误率"
+                    label={t("gatewayMonitor.errorRate", "错误率")}
                     value={
                       metrics.collections > 0
                         ? ((metrics.errors / metrics.collections) * 100).toFixed(2) + '%'

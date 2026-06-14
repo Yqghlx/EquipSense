@@ -721,6 +721,15 @@
     "mismatch": "Mismatch",
     "miss": "Miss"
   },
+  "gatewayMonitor": {
+    "uptime": "Uptime",
+    "collectCount": "Collection Count",
+    "bufferQueue": "Buffer Queue",
+    "uploadSuccess": "Upload Success",
+    "uploadFailed": "Upload Failed",
+    "offlineRetry": "Offline Retry",
+    "errorRate": "Error Rate"
+  },
   "audit": {
     "title": "Audit Logs",
     "description": "Records of all sensitive operations for compliance tracing",
