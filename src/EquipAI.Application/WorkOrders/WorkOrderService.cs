@@ -1,6 +1,7 @@
 using EquipAI.Application.Approvals;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Core.Models;
+using EquipAI.Core.Extensions;
 using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -86,7 +87,8 @@ public class WorkOrderService : IWorkOrderService
             AlertId = request.AlertId,
             RootCause = request.RootCause,
             AssignedTo = null,
-            DueDate = request.DueDate,
+            // JSON 反序列化的 DueDate 可能 Kind=Unspecified，入库 timestamptz 列前需转 Utc
+            DueDate = request.DueDate.ToSafeUtc(),
             CreatedBy = userId
         };
 

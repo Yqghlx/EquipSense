@@ -1,4 +1,5 @@
 using EquipAI.Application.Reports;
+using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.WebAPI.Middleware;
@@ -36,9 +37,9 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? endDate,
         CancellationToken ct = default)
     {
-        // 默认本月
-        var end = endDate?.ToUniversalTime() ?? DateTime.UtcNow;
-        var start = startDate?.ToUniversalTime() ?? new DateTime(end.Year, end.Month, 1);
+        // 默认本月 — new DateTime(...) 构造的 Kind=Unspecified，查 timestamptz 列会崩，用 ToSafeUtc 规范化
+        var end = (endDate ?? DateTime.UtcNow).ToSafeUtc();
+        var start = (startDate ?? new DateTime(end.Year, end.Month, 1)).ToSafeUtc();
 
         var bytes = await _reportService.GenerateReportAsync(
             _tenantContext.TenantId, start, end, ct);
@@ -56,7 +57,7 @@ public class ReportsController : ControllerBase
     public async Task<IActionResult> GenerateCurrentMonthReport(CancellationToken ct = default)
     {
         var now = DateTime.UtcNow;
-        var start = new DateTime(now.Year, now.Month, 1);
+        var start = new DateTime(now.Year, now.Month, 1).ToSafeUtc();
 
         var bytes = await _reportService.GenerateReportAsync(
             _tenantContext.TenantId, start, now, ct);

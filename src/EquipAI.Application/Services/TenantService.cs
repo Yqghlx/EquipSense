@@ -1,6 +1,7 @@
 using AutoMapper;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Core.Models;
+using EquipAI.Core.Extensions;
 using EquipAI.Application.DTOs.Tenants;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Constants;
@@ -216,8 +217,8 @@ public class TenantService : ITenantService
             .CountAsync(w => w.TenantId == tenantId
                 && (w.Status == WorkOrderStatus.PendingDispatch || w.Status == WorkOrderStatus.Assigned));
 
-        // 查询本月 AI 分析次数
-        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        // 查询本月 AI 分析次数 — ToSafeUtc 规范化 Kind 避免 timestamptz 列异常
+        var monthStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).ToSafeUtc();
         detail.MonthlyAnalysisCount = await _dbContext.UnfilteredSet<Core.Entities.Analysis>()
             .CountAsync(a => a.TenantId == tenantId && a.CreatedAt >= monthStart);
 

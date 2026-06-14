@@ -1,5 +1,6 @@
 using EquipAI.Application.Telemetry;
 using EquipAI.Application.Telemetry.DTOs;
+using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
@@ -89,8 +90,9 @@ public class TelemetryController : ControllerBase
         [FromQuery] DateTime? startTime,
         [FromQuery] DateTime? endTime)
     {
-        var end = endTime ?? DateTime.UtcNow;
-        var start = startTime ?? end.AddHours(-1);
+        // query string 反序列化的 DateTime Kind=Unspecified，查 timestamptz 列会崩，统一转 Utc
+        var end = (endTime ?? DateTime.UtcNow).ToSafeUtc();
+        var start = (startTime ?? end.AddHours(-1)).ToSafeUtc();
 
         // 未指定指标时，返回所有指标的最新值
         if (string.IsNullOrEmpty(metric))

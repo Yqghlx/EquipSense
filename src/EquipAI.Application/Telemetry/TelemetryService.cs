@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using EquipAI.Core.Events;
+using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Data.Entities;
@@ -78,7 +79,8 @@ public class TelemetryService : ITelemetryService, IDisposable
 
             var rows = items.Select(i => new DeviceTelemetry
             {
-                Time = i.Timestamp,
+                // MQTT/HTTP 上报的时间戳可能 Kind=Unspecified（JSON 反序列化不带 Z），查 timestamptz 列会崩
+                Time = i.Timestamp.ToSafeUtc(),
                 TenantId = i.TenantId,
                 DeviceId = i.DeviceId,
                 Metric = i.Metric,
