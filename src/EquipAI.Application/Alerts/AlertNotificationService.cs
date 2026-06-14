@@ -80,9 +80,9 @@ public class AlertNotificationService
             try
             {
                 if (type == "dingtalk")
-                    await PushDingTalkAsync(@event, alert, config, ct);
+                    await PushDingTalkAsync(@event, alert, config!, ct);
                 else if (type == "feishu")
-                    await PushFeishuAsync(@event, alert, config, ct);
+                    await PushFeishuAsync(@event, alert, config!, ct);
             }
             catch (Exception ex)
             {
@@ -260,9 +260,14 @@ public class AlertNotificationService
         return $"{url}{separator}timestamp={timestamp}&sign={Uri.EscapeDataString(sign)}";
     }
 
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private static T? TryDeserialize<T>(string json) where T : class
     {
-        try { return JsonSerializer.Deserialize<T>(json); }
+        try { return JsonSerializer.Deserialize<T>(json, JsonOptions); }
         catch { return null; }
     }
 
