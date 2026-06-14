@@ -123,6 +123,50 @@ curl http://localhost:8080/api/v1/system/info
 
 **重要：** 首次登录后请立即修改默认密码。
 
+## 功能配置（按需启用）
+
+### SMTP 邮件（密码重置必需）
+
+密码重置流程依赖邮件发送重置链接。在 `docker/.env` 配置 SMTP 后即可启用：
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_FROM_EMAIL=noreply@example.com
+SMTP_FROM_NAME=EquipSense
+SMTP_USERNAME=your_username
+SMTP_PASSWORD=your_password
+SMTP_ENABLE_SSL=true
+```
+
+> 未配置 SMTP 时，密码重置请求仍会记录审计日志，但不会发送邮件。
+
+### 钉钉/飞书告警机器人推送
+
+通过租户管理界面或 API 配置（`PUT /api/v1/settings/integrations/{type}`），将告警推送到群：
+
+**钉钉**（自定义机器人，加签模式）：
+1. 在钉钉群创建自定义机器人，勾选"加签"，复制 Webhook URL 和 Secret
+2. 调用 API 配置：`PUT /api/v1/settings/integrations/dingtalk`，body: `{"enabled": true, "webhookUrl": "...", "secret": "...", "atMobiles": []}`
+3. 触发 Critical/High 告警后，ActionCard 卡片自动推送到群
+
+**飞书**（自定义机器人）：
+1. 在飞书群添加自定义机器人，复制 Webhook URL
+2. 调用 API 配置：`PUT /api/v1/settings/integrations/feishu`，body: `{"enabled": true, "webhookUrl": "..."}`
+3. 交互式卡片自动推送（红色=严重，橙色=高级）
+
+> 仅 Critical/High 级别告警推送机器人，避免低级别刷屏。所有级别告警都会生成站内通知。
+
+### 设备健康度定时刷新
+
+设备健康度（health_score）默认手动刷新。如需定时自动更新，可配置定时任务调用：
+
+```bash
+# 刷新所有设备健康度（建议每小时一次）
+curl -X POST http://localhost:8080/api/v1/devices/health-score/refresh-all \
+  -H "Authorization: Bearer <admin_token>"
+```
+
 ## 备份与恢复
 
 ### PostgreSQL 备份
