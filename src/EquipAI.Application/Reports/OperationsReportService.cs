@@ -33,6 +33,11 @@ public class OperationsReportService
     public async Task<byte[]> GenerateReportAsync(
         Guid tenantId, DateTime startDate, DateTime endDate, CancellationToken ct = default)
     {
+        // PostgreSQL timestamptz 列要求 DateTime.Kind 为 Utc，否则抛 ArgumentException
+        // Controller 传入的 startDate/endDate 可能是 Kind=Unspecified（如 new DateTime(year,month,1)）
+        startDate = DateTime.SpecifyKind(startDate, DateTimeKind.Utc);
+        endDate = DateTime.SpecifyKind(endDate, DateTimeKind.Utc);
+
         var sb = new StringBuilder();
         // BOM 头（Excel 中文兼容）
         sb.Append('\uFEFF');
