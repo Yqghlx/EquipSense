@@ -73,6 +73,12 @@ public class AlertNotificationService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var configs = await GetIntegrationConfigsAsync(db, @event.TenantId, ct);
 
+        // 查询设备编码/名称，卡片里显示友好的设备标识而非 UUID
+        var deviceLabel = await db.UnfilteredSet<Core.Entities.Device>()
+            .Where(d => d.Id == @event.DeviceId)
+            .Select(d => d.DeviceCode + (string.IsNullOrEmpty(d.Name) ? "" : $"（{d.Name}）"))
+            .FirstOrDefaultAsync(ct) ?? @event.DeviceId.ToString();
+
         foreach (var (type, enabled, config) in configs)
         {
             if (!enabled) continue;
@@ -80,9 +86,9 @@ public class AlertNotificationService
             try
             {
                 if (type == "dingtalk")
-                    await PushDingTalkAsync(@event, alert, config!, ct);
+                    await PushDingTalkAsync(@event, alert, deviceLabel, config!, ct);
                 else if (type == "feishu")
-                    await PushFeishuAsync(@event, alert, config!, ct);
+                    await PushFeishuAsync(@event, alert, deviceLabel, config!, ct);
             }
             catch (Exception ex)
             {
@@ -139,7 +145,7 @@ public class AlertNotificationService
     }
 
     /// <summary>钉钉机器人推送（加签 + ActionCard）</summary>
-    private async Task PushDingTalkAsync(AlertTriggeredEvent @event, Alert alert, string config, CancellationToken ct)
+    private async Task PushDingTalkAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
     {
         var dingConfig = TryDeserialize<DingTalkConfig>(config);
         if (dingConfig is null || string.IsNullOrEmpty(dingConfig.WebhookUrl))
@@ -153,7 +159,7 @@ public class AlertNotificationService
         var text =
             "## ⚠️ 设备告警通知\n\n" +
             $"- **级别**: {severityText}\n" +
-            $"- **设备**: {alert.DeviceId}\n" +
+            $"- **设备**: {deviceLabel}\n" +
             $"- **指标**: {@event.Metric}\n" +
             $"- **当前值**: {@event.Value}\n" +
             $"- **告警编码**: {alert.AlertCode}\n" +
@@ -178,7 +184,7 @@ public class AlertNotificationService
     }
 
     /// <summary>飞书机器人推送（交互式卡片消息）</summary>
-    private async Task PushFeishuAsync(AlertTriggeredEvent @event, Alert alert, string config, CancellationToken ct)
+    private async Task PushFeishuAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
     {
         var feishuConfig = TryDeserialize<FeishuAlertConfig>(config);
         if (feishuConfig is null || string.IsNullOrEmpty(feishuConfig.WebhookUrl))
@@ -203,7 +209,7 @@ public class AlertNotificationService
                 elements = new object[]
                 {
                     new { tag = "div", text = new { tag = "lark_md", content = $"**级别**: {severityText}" } },
-                    new { tag = "div", text = new { tag = "lark_md", content = $"**设备**: {alert.DeviceId}" } },
+                    new { tag = "div", text = new { tag = "lark_md", content = $"**设备**: {deviceLabel}" } },
                     new { tag = "div", text = new { tag = "lark_md", content = $"**指标**: {@event.Metric}  当前值: {@event.Value}" } },
                     new { tag = "div", text = new { tag = "lark_md", content = $"**告警编码**: {alert.AlertCode}" } },
                     new { tag = "div", text = new { tag = "lark_md", content = $"**触发时间**: {now}" } },
