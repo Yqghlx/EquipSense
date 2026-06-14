@@ -64,6 +64,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'auth-extended',
+      testMatch: /05-auth\/.*\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
       name: 'edge',
       testMatch: /06-edge-cases\/.*\.spec\.ts/,
       dependencies: ['setup'],
