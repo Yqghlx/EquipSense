@@ -87,6 +87,14 @@
 
 | 提交 | 类型 | 说明 |
 |------|------|------|
+| `05bc091` | feat | **Phase 4 完成**：mTLS + WAF + ML.NET 验证 + 缓存优化 + 等保报告 |
+| `8572fee` | feat | OPC UA + Modbus 模拟器联调 |
+| `27a70e8` | feat | 飞书应用机器人集成 + 真实群推送验证 |
+| `6d26b3b` | fix | 告警卡片设备名替代 UUID |
+| `c2ff482` | fix | 前端生产构建失败（tsc -b 6 错误） |
+| `f2d7286` | fix | 压测脚本 config.js 缺 import http |
+| `fd1ee9b` | docs | 部署手册合并 |
+| `814ce93` | docs | 落地就绪报告更新 |
 | `feeb620` | feat | 审计日志 + 健康度/OEE + 多渠道通知 + 数据导出 |
 | `59a3752` | fix | AlertEventHandler FindAsync 租户过滤 bug（潜伏 bug，E2E 发现） |
 | `cac150f` | feat | 前端审计日志页面 + 告警 CSV 导出按钮 |
