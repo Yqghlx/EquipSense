@@ -227,6 +227,12 @@ public class OpcUaAdapter : IProtocolAdapter
                     StoreType = CertificateStoreType.Directory,
                     StorePath = trustedPath
                 },
+                // SDK 1.5.x 要求 TrustedIssuerCertificates 必须指定（即使为空目录）
+                TrustedIssuerCertificates = new CertificateTrustList
+                {
+                    StoreType = CertificateStoreType.Directory,
+                    StorePath = "certificates/issuers"
+                },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = CertificateStoreType.Directory,
@@ -237,6 +243,12 @@ public class OpcUaAdapter : IProtocolAdapter
             TransportQuotas = new TransportQuotas
             {
                 OperationTimeout = 15000
+            },
+            // SDK 1.5.x 要求 Client 应用必须指定 ClientConfiguration
+            ClientConfiguration = new ClientConfiguration
+            {
+                DefaultSessionTimeout = 30000,
+                MinSubscriptionLifetime = 10000,
             }
         };
 
