@@ -1,5 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
 using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Analysis.Handlers;
 using EquipAI.Application.Knowledge;
@@ -94,6 +96,21 @@ try
         options.KeepAliveInterval = TimeSpan.FromSeconds(15);
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
     });
+
+    // OpenTelemetry 分布式链路追踪 — 自动 instrument ASP.NET Core 请求 + HttpClient 出站调用
+    // 开发环境用 Console exporter（日志可见 trace），生产环境应换 OTLP + Jaeger
+    builder.Services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .AddAspNetCoreInstrumentation(opts =>
+            {
+                opts.RecordException = true;
+                opts.EnrichWithHttpRequest = (activity, request) =>
+                {
+                    activity.SetTag("http.user_agent", request.Headers.UserAgent.ToString());
+                };
+            })
+            .AddHttpClientInstrumentation()
+            .AddConsoleExporter());
 
     // 健康检查：三级探针 — startup(仅DB) / liveness(DB+Redis) / ready(全部)
     builder.Services.AddHealthChecks()
