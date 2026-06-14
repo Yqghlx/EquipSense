@@ -184,44 +184,102 @@ public class AlertNotificationService
     }
 
     /// <summary>飞书机器人推送（交互式卡片消息）</summary>
+    /// <remarks>
+    /// 支持两种接入方式（自动判断）：
+    /// 1. 应用机器人：配置 appId + appSecret + chatId，走 im/v1/messages API（需开通 im:message 权限）
+    /// 2. 自定义机器人 Webhook：配置 webhookUrl，直接 POST（更简单，无需应用审批）
+    /// </remarks>
     private async Task PushFeishuAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
     {
         var feishuConfig = TryDeserialize<FeishuAlertConfig>(config);
-        if (feishuConfig is null || string.IsNullOrEmpty(feishuConfig.WebhookUrl))
+        if (feishuConfig is null)
             return;
 
         var severityText = @event.Severity.Equals("Critical", StringComparison.OrdinalIgnoreCase) ? "🔴 严重" : "🟠 高级";
         var now = DateTime.UtcNow.ToString(DateFormat);
         var headerColor = @event.Severity.Equals("Critical", StringComparison.OrdinalIgnoreCase) ? "red" : "orange";
 
-        // 飞书自定义机器人交互卡片格式
-        var message = new
+        // 飞书交互卡片内容（两种接入方式共用）
+        var card = new
         {
-            msg_type = "interactive",
-            card = new
+            config = new { wide_screen_mode = true },
+            header = new
             {
-                config = new { wide_screen_mode = true },
-                header = new
-                {
-                    title = new { tag = "plain_text", content = "⚠️ 设备告警通知" },
-                    template = headerColor,
-                },
-                elements = new object[]
-                {
-                    new { tag = "div", text = new { tag = "lark_md", content = $"**级别**: {severityText}" } },
-                    new { tag = "div", text = new { tag = "lark_md", content = $"**设备**: {deviceLabel}" } },
-                    new { tag = "div", text = new { tag = "lark_md", content = $"**指标**: {@event.Metric}  当前值: {@event.Value}" } },
-                    new { tag = "div", text = new { tag = "lark_md", content = $"**告警编码**: {alert.AlertCode}" } },
-                    new { tag = "div", text = new { tag = "lark_md", content = $"**触发时间**: {now}" } },
-                    new { tag = "hr" },
-                    new { tag = "note", elements = new[] { new { tag = "plain_text", content = "请及时确认处理" } } },
-                },
+                title = new { tag = "plain_text", content = "⚠️ 设备告警通知" },
+                template = headerColor,
+            },
+            elements = new object[]
+            {
+                new { tag = "div", text = new { tag = "lark_md", content = $"**级别**: {severityText}" } },
+                new { tag = "div", text = new { tag = "lark_md", content = $"**设备**: {deviceLabel}" } },
+                new { tag = "div", text = new { tag = "lark_md", content = $"**指标**: {@event.Metric}  当前值: {@event.Value}" } },
+                new { tag = "div", text = new { tag = "lark_md", content = $"**告警编码**: {alert.AlertCode}" } },
+                new { tag = "div", text = new { tag = "lark_md", content = $"**触发时间**: {now}" } },
+                new { tag = "hr" },
+                new { tag = "note", elements = new[] { new { tag = "plain_text", content = "请及时确认处理" } } },
             },
         };
 
         var client = _httpClientFactory.CreateClient("AlertIntegration");
-        var resp = await client.PostAsJsonAsync(feishuConfig.WebhookUrl, message, ct);
-        _logger.LogInformation("告警飞书推送完成: AlertId={AlertId}, Status={Status}", alert.Id, resp.StatusCode);
+
+        // 方式一：应用机器人（appId + appSecret + chatId）
+        if (!string.IsNullOrEmpty(feishuConfig.AppId) && !string.IsNullOrEmpty(feishuConfig.ChatId))
+        {
+            await PushFeishuViaAppAsync(client, feishuConfig, card, alert.Id, ct);
+            return;
+        }
+
+        // 方式二：自定义机器人 Webhook
+        if (!string.IsNullOrEmpty(feishuConfig.WebhookUrl))
+        {
+            var message = new { msg_type = "interactive", card };
+            var resp = await client.PostAsJsonAsync(feishuConfig.WebhookUrl, message, ct);
+            _logger.LogInformation("告警飞书推送完成（Webhook）: AlertId={AlertId}, Status={Status}", alert.Id, resp.StatusCode);
+            return;
+        }
+    }
+
+    /// <summary>飞书应用机器人推送：先获取 tenant_access_token，再调 im/v1/messages 发送卡片</summary>
+    private async Task PushFeishuViaAppAsync(HttpClient client, FeishuAlertConfig config, object card, Guid alertId, CancellationToken ct)
+    {
+        // 1. 获取 tenant_access_token
+        var tokenReq = new
+        {
+            app_id = config.AppId,
+            app_secret = config.AppSecret,
+        };
+        var tokenResp = await client.PostAsJsonAsync("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", tokenReq, ct);
+        if (!tokenResp.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("飞书应用 token 获取失败: Status={Status}", tokenResp.StatusCode);
+            return;
+        }
+
+        var tokenJson = await tokenResp.Content.ReadFromJsonAsync<JsonElement>(ct);
+        if (tokenJson.TryGetProperty("tenant_access_token", out var tokenEl))
+        {
+            var accessToken = tokenEl.GetString();
+            // 2. 发送交互卡片到指定群
+            var messageReq = new
+            {
+                receive_id = config.ChatId,
+                msg_type = "interactive",
+                content = JsonSerializer.Serialize(card),  // content 必须是字符串化的 JSON
+            };
+            var msgReq = new HttpRequestMessage(HttpMethod.Post, "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id")
+            {
+                Headers = { { "Authorization", $"Bearer {accessToken}" } },
+                Content = JsonContent.Create(messageReq),
+            };
+            var msgResp = await client.SendAsync(msgReq, ct);
+            var msgBody = await msgResp.Content.ReadAsStringAsync(ct);
+            _logger.LogInformation("告警飞书推送完成（App）: AlertId={AlertId}, Status={Status}, Body={Body}",
+                alertId, msgResp.StatusCode, msgBody.Length > 200 ? msgBody[..200] : msgBody);
+        }
+        else
+        {
+            _logger.LogWarning("飞书应用 token 响应异常: {Body}", await tokenResp.Content.ReadAsStringAsync(ct));
+        }
     }
 
     /// <summary>读取租户的集成配置（复用工单集成的 tenant.Settings.integrations 格式）</summary>
@@ -287,6 +345,16 @@ public class AlertNotificationService
 
     private sealed class FeishuAlertConfig
     {
+        /// <summary>自定义机器人 Webhook URL（方式二，简单接入）</summary>
         public string? WebhookUrl { get; set; }
+
+        /// <summary>飞书应用 App ID（方式一，应用机器人）</summary>
+        public string? AppId { get; set; }
+
+        /// <summary>飞书应用 App Secret（方式一）</summary>
+        public string? AppSecret { get; set; }
+
+        /// <summary>目标群聊 chat_id（方式一，应用机器人发消息的目标群）</summary>
+        public string? ChatId { get; set; }
     }
 }
