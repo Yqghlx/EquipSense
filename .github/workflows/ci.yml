@@ -43,6 +43,10 @@ jobs:
       - name: 运行集成测试
         run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal
 
+      # NuGet 包漏洞检查（已知 CVE 的依赖会列出，不阻断 CI）
+      - name: 检查 NuGet 依赖漏洞
+        run: dotnet list EquipAI.slnx package --vulnerable --include-transitive || true
+
   # ============================================================================
   # 前端构建 + 测试
   # ============================================================================
@@ -127,6 +131,27 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta.outputs.sha_short }}
+
+      # ========================================================
+      # 安全扫描：Trivy 扫描镜像已知漏洞（CVE）
+      # ========================================================
+      - name: Trivy 扫描后端镜像
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:${{ steps.meta.outputs.sha_short }}
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
+      - name: Trivy 扫描前端镜像
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta.outputs.sha_short }}
+          format: table
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
 
   # ============================================================================
   # E2E 测试（仅 main 分支，CI 内启动前后端）

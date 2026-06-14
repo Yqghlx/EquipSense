@@ -1,7 +1,17 @@
-# Prometheus 配置 — 采集 EquipSense 后端指标
+# Prometheus 配置 — 采集 EquipSense 后端指标 + 告警规则
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+
+# 告警规则文件
+rule_files:
+  - /etc/prometheus/rules.yml
+
+# 告警推送到 AlertManager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
 
 scrape_configs:
   # 后端 ASP.NET Core 指标

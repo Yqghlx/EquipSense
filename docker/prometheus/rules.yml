@@ -1,0 +1,80 @@
+# Prometheus 告警规则 — 基础设施异常检测
+# 配合 AlertManager 实现主动告警通知（此前仅展示不通知）
+
+groups:
+  # ============================================================
+  # 服务可用性告警
+  # ============================================================
+  - name: service-availability
+    rules:
+      # 后端服务宕机 — 1 分钟内连续探测失败
+      - alert: BackendDown
+        expr: up{job="equipai-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "后端服务不可达"
+          description: "后端服务 {{ $labels.instance }} 已宕机超过 1 分钟，整个系统不可用"
+
+      # 边缘网关宕机 — 2 分钟内连续探测失败
+      - alert: EdgeGatewayDown
+        expr: up{job="equipai-edgegateway"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "边缘网关不可达"
+          description: "边缘网关 {{ $labels.instance }} 已离线超过 2 分钟，遥测数据采集中断"
+
+      # Prometheus 自身探测失败
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          category: monitoring
+        annotations:
+          summary: "Prometheus 自身不可达"
+
+  # ============================================================
+  # 后端应用健康告警
+  # ============================================================
+  - name: backend-health
+    rules:
+      # 告警评估耗时过高（>2 秒说明规则匹配或 DB 查询有性能问题）
+      - alert: HighAlertEvaluationDuration
+        expr: histogram_quantile(0.95, rate(alert_evaluation_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "告警评估耗时异常（P95 > 2s）"
+          description: "告警引擎评估单条规则耗时 P95 达 {{ $value }}s，可能存在规则匹配性能瓶颈"
+
+      # 告警静默率过高（>50% 持续 10 分钟，说明告警风暴被聚合器大量抑制）
+      - alert: HighAlertSuppressionRate
+        expr: |
+          sum(rate(alerts_evaluated_total{result="suppressed"}[5m])) /
+          sum(rate(alerts_evaluated_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "告警静默率 > 50%"
+          description: "过去 10 分钟超半数告警被防风暴聚合器抑制，可能存在设备异常导致的告警风暴"
+
+      # AI 分析请求积压（5 分钟内无任何分析请求完成）
+      - alert: AnalysisStalled
+        expr: sum(rate(analysis_requests_total[5m])) == 0
+        for: 5m
+        labels:
+          severity: info
+          category: business
+        annotations:
+          summary: "AI 分析请求停滞"
+          description: "过去 5 分钟无 AI 分析请求，可能是告警未触发或分析服务卡死"
