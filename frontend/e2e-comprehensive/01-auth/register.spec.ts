@@ -339,7 +339,7 @@ test.describe('01-注册功能', () => {
 
       // 如果成功跳转，验证已存储 Token
       if (/dashboard/.test(page.url())) {
-        const token = await page.evaluate(() => localStorage.getItem('token'));
+        const token = await page.evaluate(() => sessionStorage.getItem('token'));
         expect(token).toBeTruthy();
       }
     }
@@ -390,7 +390,7 @@ test.describe('01-注册功能', () => {
       const currentUrl = page.url();
       if (/dashboard/.test(currentUrl)) {
         // 中文用户名注册成功
-        const token = await page.evaluate(() => localStorage.getItem('token'));
+        const token = await page.evaluate(() => sessionStorage.getItem('token'));
         expect(token).toBeTruthy();
       } else {
         // 中文用户名可能被拒绝，验证错误提示出现

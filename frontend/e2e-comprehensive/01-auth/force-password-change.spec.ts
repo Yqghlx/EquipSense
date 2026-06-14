@@ -101,7 +101,7 @@ test.describe('01-强制改密流程', () => {
     await page.evaluate(() => {
       // 设置用户状态为 mustChangePassword
       const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem('user', JSON.stringify(user));
     });
 
     // 重新加载页面，触发改密对话框
@@ -137,7 +137,7 @@ test.describe('01-强制改密流程', () => {
 
     await page.evaluate(() => {
       const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem('user', JSON.stringify(user));
     });
 
     await page.goto(`${BASE_URL}/dashboard`);
@@ -173,7 +173,7 @@ test.describe('01-强制改密流程', () => {
 
     await page.evaluate(() => {
       const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem('user', JSON.stringify(user));
     });
 
     await page.goto(`${BASE_URL}/dashboard`);
@@ -208,7 +208,7 @@ test.describe('01-强制改密流程', () => {
 
     await page.evaluate(() => {
       const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem('user', JSON.stringify(user));
     });
 
     await page.goto(`${BASE_URL}/dashboard`);
@@ -259,7 +259,7 @@ test.describe('01-强制改密流程', () => {
 
     await page.evaluate(() => {
       const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      localStorage.setItem('user', JSON.stringify(user));
+      sessionStorage.setItem('user', JSON.stringify(user));
     });
 
     await page.goto(`${BASE_URL}/dashboard`);

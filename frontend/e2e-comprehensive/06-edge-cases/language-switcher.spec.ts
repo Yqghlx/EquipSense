@@ -42,7 +42,7 @@ test.describe('06-i18n 语言切换', () => {
     await expect(page).toHaveURL(/dashboard/);
 
     // 确保当前是中文
-    await page.evaluate(() => localStorage.setItem('language', 'zh'));
+    await page.evaluate(() => localStorage.setItem("language", 'zh'));
     await page.reload();
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
@@ -73,7 +73,7 @@ test.describe('06-i18n 语言切换', () => {
     await expect(page).toHaveURL(/dashboard/);
 
     // 先切换到英文
-    await page.evaluate(() => localStorage.setItem('language', 'en'));
+    await page.evaluate(() => localStorage.setItem("language", 'en'));
     await page.reload();
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
@@ -100,7 +100,7 @@ test.describe('06-i18n 语言切换', () => {
     await expect(page).toHaveURL(/dashboard/);
 
     // 确保当前是中文
-    await page.evaluate(() => localStorage.setItem('language', 'zh'));
+    await page.evaluate(() => localStorage.setItem("language", 'zh'));
 
     // 点击切换到英文
     const langButton = page.getByRole('button', { name: /切换语言/i }).first();
@@ -109,7 +109,7 @@ test.describe('06-i18n 语言切换', () => {
       await page.waitForTimeout(1000);
 
       // 验证 localStorage 中语言值更新为 en
-      const storedLang = await page.evaluate(() => localStorage.getItem('language'));
+      const storedLang = await page.evaluate(() => localStorage.getItem("language"));
       expect(storedLang).toBe('en');
     }
 
@@ -122,7 +122,7 @@ test.describe('06-i18n 语言切换', () => {
     await expect(page).toHaveURL(/dashboard/);
 
     // 设置语言为英文
-    await page.evaluate(() => localStorage.setItem('language', 'en'));
+    await page.evaluate(() => localStorage.setItem("language", 'en'));
 
     // 刷新页面
     await page.reload();
@@ -130,11 +130,11 @@ test.describe('06-i18n 语言切换', () => {
     await page.waitForTimeout(1500);
 
     // 验证 localStorage 中的语言仍然是 en
-    const storedLang = await page.evaluate(() => localStorage.getItem('language'));
+    const storedLang = await page.evaluate(() => localStorage.getItem("language"));
     expect(storedLang).toBe('en');
 
     // 恢复为中文
-    await page.evaluate(() => localStorage.setItem('language', 'zh'));
+    await page.evaluate(() => localStorage.setItem("language", 'zh'));
 
     expect(errors).toEqual([]);
   });
@@ -145,7 +145,7 @@ test.describe('06-i18n 语言切换', () => {
     await expect(page).toHaveURL(/dashboard/);
 
     // 确保是中文
-    await page.evaluate(() => localStorage.setItem('language', 'zh'));
+    await page.evaluate(() => localStorage.setItem("language", 'zh'));
     await page.reload();
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
@@ -170,7 +170,7 @@ test.describe('06-i18n 语言切换', () => {
     }
 
     // 恢复中文
-    await page.evaluate(() => localStorage.setItem('language', 'zh'));
+    await page.evaluate(() => localStorage.setItem("language", 'zh'));
 
     expect(errors).toEqual([]);
   });

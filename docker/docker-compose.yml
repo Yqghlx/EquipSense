@@ -104,6 +104,7 @@ services:
       Smtp__Password: "${SMTP_PASSWORD:-}"
       Smtp__EnableSsl: "${SMTP_ENABLE_SSL:-true}"
       BEHIND_PROXY: "${BEHIND_PROXY:-true}"
+      DisableRateLimiting: "${DISABLE_RATE_LIMITING:-false}"
       # Serilog 日志配置由 appsettings.Production.json 提供（Seq Warning+ / Console）
       # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）

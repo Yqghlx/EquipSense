@@ -20,8 +20,8 @@ test.describe('00-种子数据验证', () => {
     // 登录成功后应跳转到仪表盘
     await expect(page).toHaveURL(/dashboard/);
 
-    // 验证 localStorage 中保存了 Token
-    const token = await page.evaluate(() => localStorage.getItem('token'));
+    // 验证 sessionStorage 中保存了 Token
+    const token = await page.evaluate(() => sessionStorage.getItem("token"));
     expect(token).toBeTruthy();
 
     expect(errors).toEqual([]);

@@ -122,6 +122,21 @@ public static class ServiceCollectionExtensions
 
         // IP 限流 — 使用 ASP.NET Core 8 内置 RateLimiter
         // 固定窗口策略：每 IP 每分钟最多 60 次请求
+        // E2E 测试环境可通过 DISABLE_RATE_LIMITING=true 关闭
+        var disableRateLimiting = configuration.GetValue("DisableRateLimiting", false);
+        if (disableRateLimiting)
+        {
+            // E2E 测试模式：注册一个空限流器（所有请求放行）
+            services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.AddPolicy("fixed", context => RateLimitPartition.GetNoLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "default"));
+                options.AddPolicy("auth", context => RateLimitPartition.GetNoLimiter(context.Connection.RemoteIpAddress?.ToString() ?? "default"));
+                options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(_ =>
+                    RateLimitPartition.GetNoLimiter("global"));
+            });
+            return;
+        }
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;

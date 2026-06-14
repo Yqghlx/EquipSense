@@ -88,7 +88,7 @@ test.describe('API 错误响应处理', () => {
     await expect(page).toHaveURL(/dashboard/);
 
     // 验证已登录
-    const tokenBefore = await page.evaluate(() => localStorage.getItem('token'));
+    const tokenBefore = await page.evaluate(() => sessionStorage.getItem('token'));
     expect(tokenBefore).toBeTruthy();
 
     // 拦截所有 API 请求返回 401
@@ -111,7 +111,7 @@ test.describe('API 错误响应处理', () => {
     const currentUrl = page.url();
     const redirectedToLogin = /login/.test(currentUrl);
 
-    const tokenAfter = await page.evaluate(() => localStorage.getItem('token'));
+    const tokenAfter = await page.evaluate(() => sessionStorage.getItem('token'));
     const tokenCleared = tokenAfter === null || tokenAfter !== tokenBefore;
 
     // 至少满足一个条件：跳转登录页或 Token 被清除
