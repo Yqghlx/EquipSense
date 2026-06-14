@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.OutputCaching;
 using AutoMapper;
 using EquipAI.Application.Alerts.DTOs;
 using EquipAI.Application.DTOs.Common;
@@ -38,6 +39,7 @@ public class AlertsController : ControllerBase
 
     [HttpGet]
     [RequirePermission("alert:read")]
+    [OutputCache(Duration = 30)] // 30 秒缓存，平衡实时性与数据库负载
     [ProducesResponseType(typeof(PagedResult<AlertDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<AlertDto>>> GetAlerts(
         [FromQuery] PagedQuery query,

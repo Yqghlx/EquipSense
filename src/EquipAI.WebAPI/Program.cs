@@ -1,3 +1,5 @@
+using System.Security.Cryptography.X509Certificates;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Analysis.Handlers;
 using EquipAI.Application.Knowledge;
@@ -51,6 +53,42 @@ try
         options.AddPolicy("AlertRules", policy => policy.Expire(TimeSpan.FromMinutes(5)).Tag("alert-rules"));
         options.AddPolicy("TenantConfig", policy => policy.Expire(TimeSpan.FromMinutes(10)).Tag("tenant-config"));
     });
+    // mTLS 双向认证配置（Phase 4 安全加固）
+    // 边缘网关上传数据时携带客户端证书，后端验证证书合法性
+    // 开发环境默认关闭（MTLS_ENABLED=false），生产环境开启需配置证书路径
+    var mtlsEnabled = builder.Configuration.GetValue("Mtls:Enabled", false);
+    if (mtlsEnabled)
+    {
+        var certPath = builder.Configuration["Mtls:ServerCertPath"];
+        var keyPath = builder.Configuration["Mtls:ServerKeyPath"];
+        var caPath = builder.Configuration["Mtls:CaCertPath"];
+
+        if (!string.IsNullOrEmpty(certPath) && !string.IsNullOrEmpty(keyPath))
+        {
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                options.ConfigureHttpsDefaults(httpsOptions =>
+                {
+                    httpsOptions.ServerCertificate = X509Certificate2.CreateFromPemFile(certPath, keyPath);
+                    // 要求客户端提供证书（mTLS 核心）
+                    httpsOptions.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+                    // 用自定义验证回调信任我们的 CA 签发的证书
+                    if (!string.IsNullOrEmpty(caPath))
+                    {
+                        var caCert = new X509Certificate2(caPath);
+                        httpsOptions.ClientCertificateValidation = (cert, chain, errors) =>
+                        {
+                            // 验证客户端证书是否由我们的 CA 签发
+                            chain!.ChainPolicy.ExtraStore.Add(caCert);
+                            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                            return chain.Build(cert);
+                        };
+                    }
+                });
+            });
+        }
+    }
+
     builder.Services.AddSignalR(options =>
     {
         options.KeepAliveInterval = TimeSpan.FromSeconds(15);
@@ -120,7 +158,9 @@ try
     app.UseMiddleware<ExceptionHandlingMiddleware>();
     // 1.5 安全响应头 — 为所有响应添加 X-Content-Type-Options、X-Frame-Options 等安全头
     app.UseMiddleware<SecurityHeadersMiddleware>();
-    // 1.6 输入净化 — 检查请求体中的 XSS 攻击模式（script 标签、事件处理器等）
+    // 1.6 WAF（Web 应用防火墙）— SQL 注入/路径遍历/命令注入/XSS 综合拦截（Phase 4 安全加固）
+    app.UseMiddleware<WafMiddleware>();
+    // 1.7 输入净化 — 检查请求体中的 XSS 攻击模式（script 标签、事件处理器等）
     app.UseMiddleware<InputSanitizationMiddleware>();
     // 1.7 Prometheus HTTP 指标 — 自动记录每个请求的耗时和状态码
     app.UseHttpMetrics();
