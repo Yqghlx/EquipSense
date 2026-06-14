@@ -136,6 +136,7 @@
     "telemetryTrends": "Telemetry Trends",
     "recentAlerts": "Recent Alerts",
     "basicInfo": "Basic Info",
+    "deviceCodeRequired": "Please enter device code",
     "nameRequired": "Please enter device name",
     "typeRequired": "Please select device type",
     "tabs": {
@@ -220,7 +221,13 @@
     "autoCreateWorkOrder": "Auto Create Work Order",
     "multipleConditions": "Multiple Conditions",
     "nameRequired": "Please enter rule name",
-    "metricRequired": "Please enter metric name"
+    "metricRequired": "Please enter metric name",
+    "addCondition": "Add Condition",
+    "and": "AND",
+    "or": "OR",
+    "logicOperator": "Logic Operator",
+    "baselineWindow": "Time Window (hours)",
+    "calculateBaseline": "Auto Calculate Baseline"
   },
   "operator": {
     "greaterThan": "Greater Than",
