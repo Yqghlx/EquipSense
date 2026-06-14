@@ -122,8 +122,12 @@ public static class ServiceCollectionExtensions
 
         // IP 限流 — 使用 ASP.NET Core 8 内置 RateLimiter
         // 固定窗口策略：每 IP 每分钟最多 60 次请求
-        // E2E 测试环境可通过 DISABLE_RATE_LIMITING=true 关闭
-        var disableRateLimiting = configuration.GetValue("DisableRateLimiting", false);
+        //
+        // 自动按环境区分：
+        // - Production：强制开启限流（忽略 DISABLE_RATE_LIMITING，防暴力破解）
+        // - Development / Testing：允许通过 DISABLE_RATE_LIMITING=true 关闭（E2E 测试需要）
+        var env = configuration["ASPNETCORE_ENVIRONMENT"] ?? "Production";
+        var disableRateLimiting = env is not "Production" && configuration.GetValue("DisableRateLimiting", false);
         if (disableRateLimiting)
         {
             // E2E 测试模式：注册一个空限流器（所有请求放行）
