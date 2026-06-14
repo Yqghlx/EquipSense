@@ -36,7 +36,7 @@ export async function loginAs(page: Page, role: string): Promise<void> {
   await page.getByPlaceholder(/密码|password/i).fill(credentials.password);
   await page.getByRole('button', { name: /登录|login/i }).click();
   // CI 环境较慢，等待时间设为 20 秒以应对冷启动和网络延迟
-  await page.waitForURL(/dashboard/, { timeout: 20000 });
+  await page.waitForURL(/dashboard/, { timeout: 30000 });
   await page.waitForLoadState('networkidle');
   // 等待仪表盘组件初始化完成（图表、卡片等异步数据加载）
   await page.waitForTimeout(2000);
