@@ -56,6 +56,7 @@ public class DataSeeder
         await SeedDeviceTypeTemplatesAsync();
         await SeedSampleDeviceAndAlertRulesAsync();
         await SeedAirCompressorKnowledgeRulesAsync();
+        await SeedFmeaLibraryAsync();
 
         _logger.LogInformation("数据库种子数据初始化完成");
     }
@@ -532,5 +533,40 @@ public class DataSeeder
 
         await _dbContext.SaveChangesAsync();
         _logger.LogInformation("已为空压机种子 {Count} 条知识规则到系统租户", rules.Length);
+    }
+
+    /// <summary>
+    /// 种子 FMEA 故障模式库（覆盖 5 类常见工业设备）
+    /// </summary>
+    private async Task SeedFmeaLibraryAsync()
+    {
+        var fmeaExists = await _dbContext.FmeaLibrary.IgnoreQueryFilters().AnyAsync();
+        if (fmeaExists) return;
+
+        var defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+        var entries = new[]
+        {
+            // 空压机
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "电机过载", Cause = "负载过大或冷却不足", Effect = "电机烧毁导致停机", Detection = "电流 > 180A 持续 5 分钟", RecommendedAction = "减小负载，检查冷却系统", Severity = 8, Occurrence = 4, Detectability = 3, Rpn = 96 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "排气压力异常", Cause = "气阀泄漏或滤芯堵塞", Effect = "产气效率下降", Detection = "排气压力 < 0.5MPa 或 > 1.1MPa", RecommendedAction = "检查气阀密封，更换滤芯", Severity = 6, Occurrence = 5, Detectability = 2, Rpn = 60 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "油温过高", Cause = "润滑油不足或冷却器失效", Effect = "润滑油变质加速磨损", Detection = "油温 > 90°C", RecommendedAction = "补充润滑油，清洗冷却器", Severity = 7, Occurrence = 3, Detectability = 2, Rpn = 42 },
+            // 离心泵
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "离心泵", FailureMode = "轴承磨损", Cause = "润滑不足或对中不良", Effect = "振动增大导致密封失效", Detection = "振动 > 7mm/s", RecommendedAction = "检查润滑和对中，必要时更换轴承", Severity = 7, Occurrence = 5, Detectability = 3, Rpn = 105 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "离心泵", FailureMode = "密封泄漏", Cause = "密封件老化或磨损", Effect = "介质泄漏环境污染", Detection = "目视检查或泄漏检测器", RecommendedAction = "更换机械密封件", Severity = 8, Occurrence = 3, Detectability = 4, Rpn = 96 },
+            // 电机
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "电机", FailureMode = "定子绕组过热", Cause = "过载或散热不良", Effect = "绝缘老化缩短寿命", Detection = "绕组温度 > 120°C", RecommendedAction = "减小负载，检查散热风扇", Severity = 9, Occurrence = 3, Detectability = 3, Rpn = 81 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "电机", FailureMode = "转子不平衡", Cause = "积垢或材料不均匀", Effect = "振动增大加速轴承磨损", Detection = "振动频谱 1x 分量突出", RecommendedAction = "动平衡校正", Severity = 6, Occurrence = 4, Detectability = 5, Rpn = 120 },
+            // 风机
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "风机", FailureMode = "叶片磨损", Cause = "粉尘颗粒冲刷", Effect = "风量下降效率降低", Detection = "风量下降 > 15%", RecommendedAction = "更换叶片或喷涂耐磨涂层", Severity = 5, Occurrence = 6, Detectability = 4, Rpn = 120 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "风机", FailureMode = "轴承故障", Cause = "润滑失效或疲劳剥落", Effect = "突然停机可能引发联锁停车", Detection = "振动加速度 > 10g", RecommendedAction = "更换轴承", Severity = 8, Occurrence = 3, Detectability = 3, Rpn = 72 },
+            // 变压器
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "变压器", FailureMode = "绕组过热", Cause = "过载或冷却系统故障", Effect = "绝缘老化可能引发短路", Detection = "顶层油温 > 85°C", RecommendedAction = "降低负载，检查冷却系统", Severity = 9, Occurrence = 2, Detectability = 2, Rpn = 36 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "变压器", FailureMode = "油位异常", Cause = "渗漏或油膨胀收缩", Effect = "绝缘性能下降", Detection = "油位计读数异常", RecommendedAction = "检查渗漏点，补充变压器油", Severity = 6, Occurrence = 3, Detectability = 2, Rpn = 36 },
+        };
+
+        await _dbContext.FmeaLibrary.AddRangeAsync(entries);
+        await _dbContext.SaveChangesAsync();
+        _logger.LogInformation("已种子 {Count} 条 FMEA 故障模式数据（5 类设备）", entries.Length);
     }
 }
