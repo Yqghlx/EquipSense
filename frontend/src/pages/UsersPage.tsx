@@ -8,7 +8,7 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Users, UserPlus, Shield } from 'lucide-react';
+import { Users, Shield } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -16,10 +16,10 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '../components/ui/dialog';
 import {
-  useUsers, useCreateUser, useUpdateUser, useDeactivateUser, useChangeUserRole,
+  useUsers, useCreateUser, useDeactivateUser, useChangeUserRole,
   type UserItem, type CreateUserPayload,
 } from '../hooks/useUsers';
 import { formatDate } from '../lib/utils';
@@ -42,7 +42,6 @@ export default function UsersPage() {
 
   const { data, isLoading } = useUsers({ page, pageSize: 20, keyword });
   const createUser = useCreateUser();
-  const updateUser = useUpdateUser();
   const deactivateUser = useDeactivateUser();
   const changeRole = useChangeUserRole();
 
@@ -225,12 +224,6 @@ function CreateUserDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <UserPlus className="h-4 w-4 mr-2" />
-          {t('users.createUser', '创建用户')}
-        </Button>
-      </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

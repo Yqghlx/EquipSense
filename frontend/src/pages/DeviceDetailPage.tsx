@@ -58,6 +58,7 @@ export default function DeviceDetailPage() {
   const [timeRange, setTimeRange] = useState('1h');
 
   const { data: device, isLoading } = useDevice(id ?? '');
+  const refreshHealth = useRefreshHealthScore();
   const { data: telemetry } = useTelemetry(
     id ?? '',
     selectedMetric,
@@ -711,7 +712,6 @@ interface DeviceInfoCardProps {
 function DeviceInfoCard({ device }: DeviceInfoCardProps) {
   const { t } = useTranslation();
   const updateMutation = useUpdateDevice();
-  const refreshHealth = useRefreshHealthScore();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: '', type: '', model: '', manufacturer: '' });
 
