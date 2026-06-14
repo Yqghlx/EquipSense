@@ -50,9 +50,17 @@ public static class ServiceCollectionExtensions
     public static void AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         // 注册数据库上下文，使用 Npgsql 连接 PostgreSQL
+        // EnableRetryOnFailure：对瞬时故障（网络抖动、连接池耗尽、锁超时）自动重试
+        // 默认策略：最多重试 6 次，指数退避（初始 1 秒，最大 30 秒）
+        // 注意：启用重试后，SaveChanges 中的非幂等操作需确保幂等性，否则会重复执行
         services.AddDbContext<AppDbContext>(options =>
         {
-            options.UseNpgsql(configuration.GetConnectionString("Default"));
+            options.UseNpgsql(
+                configuration.GetConnectionString("Default"),
+                npgsqlOptions => npgsqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 6,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    errorCodesToAdd: null));
         });
 
         // 租户上下文注册为 Scoped，从 HttpContext.Items["TenantContext"] 中获取
@@ -78,6 +86,8 @@ public static class ServiceCollectionExtensions
 
         // JWT 令牌服务，Singleton 生命周期，无状态服务
         services.AddSingleton<JwtTokenService>();
+        // TOTP 多因素认证服务（无状态，密钥通过参数传入，可安全作为单例）
+        services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpService, EquipAI.Infrastructure.Identity.TotpService>();
 
         // 通用仓储注册，Scoped 生命周期，随请求创建和释放
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
@@ -329,18 +339,34 @@ public static class ServiceCollectionExtensions
                 ClockSkew = TimeSpan.Zero
             };
 
-            // SignalR WebSocket 连接无法通过 HTTP Header 传递 JWT，
-            // 改为从 query string 的 access_token 参数读取（仅限 /hubs 路径）
+            // Token 来源优先级：
+            //   1. SignalR WebSocket：从 query string 的 access_token 参数读取（WebSocket 无法携带 Cookie/Header）
+            //   2. HttpOnly Cookie：浏览器自动携带，防 XSS 窃取（前端迁移完成后主要来源）
+            //   3. Authorization Header：Bearer Token（向后兼容，开发阶段 / 非浏览器客户端）
             options.Events = new JwtBearerEvents
             {
                 OnMessageReceived = context =>
                 {
-                    var accessToken = context.Request.Query["access_token"];
                     var path = context.HttpContext.Request.Path;
-                    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+
+                    // SignalR WebSocket 路径：优先从 query string 取 token
+                    if (path.StartsWithSegments("/hubs"))
                     {
-                        context.Token = accessToken;
+                        var qsToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(qsToken))
+                        {
+                            context.Token = qsToken;
+                            return Task.CompletedTask;
+                        }
                     }
+
+                    // 非 SignalR 请求（或 SignalR 未携带 query token）：从 HttpOnly Cookie 读取
+                    if (context.Request.Cookies.TryGetValue("access_token", out var cookieToken)
+                        && !string.IsNullOrEmpty(cookieToken))
+                    {
+                        context.Token = cookieToken;
+                    }
+
                     return Task.CompletedTask;
                 }
             };

@@ -28,10 +28,10 @@ try
     var builder = WebApplication.CreateBuilder(args);
 
     // 配置 Serilog 日志，从 appsettings.json 中读取日志级别和输出目标
+    // Console 和 Seq sink 均在配置文件中定义，此处不再重复添加
     builder.Host.UseSerilog((context, config) =>
     {
-        config.ReadFrom.Configuration(context.Configuration)
-              .WriteTo.Console();
+        config.ReadFrom.Configuration(context.Configuration);
     });
 
     // 注册 HTTP 上下文访问器，供中间件和服务获取当前请求上下文
@@ -125,13 +125,23 @@ try
     builder.Services.AddHostedService<EquipAI.WebAPI.Services.GatewayHeartbeatMonitor>();
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
-    // 从配置中读取允许的域名列表，未配置时使用默认值
-    var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? new[] { "http://localhost:5173" };
+    // 从配置中读取允许的域名列表，未配置时使用默认值（仅开发/测试环境有效）
+    var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+    // 生产环境必须显式配置允许的前端域名，防止 CORS 回退到 localhost 或空列表
+    // 开发环境（Development）和集成测试环境（Testing）跳过此校验
+    var skipCorsValidation = builder.Environment.IsDevelopment() || builder.Environment.IsEnvironment("Testing");
+    if (!skipCorsValidation && corsOrigins.Length == 0)
+    {
+        Log.Fatal("生产环境未配置 CORS 允许的前端域名（Cors:Origins），请在 appsettings.Production.json 或环境变量 Cors__Origins__0 中设置");
+        throw new InvalidOperationException("CORS 配置缺失，生产环境必须显式指定允许的前端域名");
+    }
+    // 开发/测试环境未配置时使用 localhost 默认值
+    var effectiveOrigins = corsOrigins.Length > 0 ? corsOrigins : new[] { "http://localhost:5173" };
     builder.Services.AddCors(options =>
     {
         options.AddDefaultPolicy(policy =>
         {
-            policy.WithOrigins(corsOrigins)
+            policy.WithOrigins(effectiveOrigins)
                   .AllowAnyMethod()
                   .AllowAnyHeader()
                   .AllowCredentials();
@@ -169,6 +179,24 @@ try
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderIntegrationHandler>();
     eventBus.Subscribe<WorkOrderCreatedEvent, WorkOrderNotificationHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderNotificationHandler>();
+
+    // 优雅停机：接收 SIGTERM/SIGINT 后，依次断开 MQTT 连接、等待在途请求完成
+    // .NET Host 默认提供 5 秒 ShutdownTimeout，可通过 --shutdownTimeoutSeconds 或 Docker stop --time 调整
+    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+    lifetime.ApplicationStopping.Register(() =>
+    {
+        Log.Information("收到停机信号，开始优雅关闭...");
+        // 异步操作同步化：ApplicationStopping 回调不支持 async，用 Wait 阻塞等待（停机时间受 ShutdownTimeout 约束）
+        try
+        {
+            var mqttClient = app.Services.GetRequiredService<EquipAI.Infrastructure.Messaging.MqttClientService>();
+            mqttClient.DisconnectAsync().Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "优雅停机过程中 MQTT 断开失败（非致命）");
+        }
+    });
 
     // 中间件管线（顺序很重要，决定请求的处理流程）
     // 1. 全局异常处理 — 最外层捕获所有未处理异常

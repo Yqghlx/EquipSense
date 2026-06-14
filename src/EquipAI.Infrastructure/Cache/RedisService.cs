@@ -32,38 +32,63 @@ public class RedisService
     }
 
     /// <summary>
-    /// 存储刷新令牌，以用户 ID 为键，设置过期时间
-    /// 键格式：refresh:{userId}
+    /// 存储刷新令牌，同时写入反向索引（refresh_token → userId）
+    /// 反向索引使 RefreshTokenAsync 可 O(1) 定位用户，无需全表扫描
+    ///
+    /// 键格式：
+    ///   正向：refresh:{userId}        → refreshToken
+    ///   反向：refresh_token:{token}   → userId
+    ///
+    /// 写入前先清理该用户已有的旧反向索引，防止废弃 token 的索引残留
     /// </summary>
     /// <param name="userId">用户 ID</param>
     /// <param name="refreshToken">刷新令牌字符串</param>
     /// <param name="expiry">令牌过期时间跨度</param>
     public virtual async Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
     {
-        var key = $"refresh:{userId}";
-        await _database.StringSetAsync(key, refreshToken, expiry);
+        var forwardKey = $"refresh:{userId}";
+
+        // 清理旧 token 的反向索引（若存在），避免 Redis 中残留无效映射
+        var oldToken = await _database.StringGetAsync(forwardKey);
+        if (oldToken.HasValue)
+        {
+            await _database.KeyDeleteAsync($"refresh_token:{oldToken}");
+        }
+
+        // 写入正向索引 + 反向索引（两条写入均为原子操作；极端宕机时最多出现单向残留，不影响正确性）
+        await _database.StringSetAsync(forwardKey, refreshToken, expiry);
+        await _database.StringSetAsync($"refresh_token:{refreshToken}", userId.ToString(), expiry);
     }
 
     /// <summary>
-    /// 获取指定用户的刷新令牌
+    /// 根据刷新令牌反向查找对应用户 ID（O(1) Redis 读取）
+    /// 返回 null 表示令牌无效或已过期
     /// </summary>
-    /// <param name="userId">用户 ID</param>
-    /// <returns>刷新令牌字符串，若不存在或已过期则返回 null</returns>
-    public virtual async Task<string?> GetRefreshTokenAsync(Guid userId)
+    /// <param name="refreshToken">刷新令牌字符串</param>
+    /// <returns>对应的用户 ID，不存在返回 null</returns>
+    public virtual async Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
     {
-        var key = $"refresh:{userId}";
+        var key = $"refresh_token:{refreshToken}";
         var value = await _database.StringGetAsync(key);
-        return value.HasValue ? value.ToString() : null;
+        if (!value.HasValue) return null;
+        return Guid.TryParse(value.ToString(), out var userId) ? userId : null;
     }
 
     /// <summary>
-    /// 删除指定用户的刷新令牌，用于令牌吊销或刷新后作废旧令牌
+    /// 删除指定用户的刷新令牌（正向索引）及其反向索引
+    /// 用于令牌吊销或登出场景
     /// </summary>
     /// <param name="userId">用户 ID</param>
     public virtual async Task RemoveRefreshTokenAsync(Guid userId)
     {
-        var key = $"refresh:{userId}";
-        await _database.KeyDeleteAsync(key);
+        var forwardKey = $"refresh:{userId}";
+        // 先读取当前 token 用于清理反向索引
+        var currentToken = await _database.StringGetAsync(forwardKey);
+        if (currentToken.HasValue)
+        {
+            await _database.KeyDeleteAsync($"refresh_token:{currentToken}");
+        }
+        await _database.KeyDeleteAsync(forwardKey);
     }
 
     /// <summary>

@@ -28,6 +28,8 @@ export interface UserItem {
   createdAt: string;
   /** 是否需要修改密码 */
   mustChangePassword: boolean;
+  /** 是否已启用多因素认证（MFA/TOTP） */
+  mfaEnabled: boolean;
 }
 
 /** 用户列表查询参数 */

@@ -49,4 +49,9 @@ public class UserDto
     /// 是否需要在下次登录时强制修改密码
     /// </summary>
     public bool MustChangePassword { get; set; }
+
+    /// <summary>
+    /// 是否已启用多因素认证（MFA/TOTP）
+    /// </summary>
+    public bool MfaEnabled { get; set; }
 }

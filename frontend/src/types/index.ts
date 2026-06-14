@@ -47,12 +47,26 @@ export interface LoginRequest {
 
 /** 认证响应（包含令牌和用户信息） */
 export interface AuthResponse {
-  /** JWT 访问令牌 */
+  /** JWT 访问令牌（MFA 阶段为空） */
   accessToken: string;
-  /** 刷新令牌 */
+  /** 刷新令牌（MFA 阶段为空） */
   refreshToken: string;
   /** 当前登录用户信息 */
   userInfo: UserInfo;
+  /** Access Token 有效时长（秒），前端据此调度主动续期 */
+  expiresIn?: number;
+  /** 是否需要 MFA 二次验证（为 true 时需调用 /auth/mfa/verify 完成登录） */
+  mfaRequired?: boolean;
+  /** MFA 挑战令牌（mfaRequired=true 时返回，传递给 /auth/mfa/verify） */
+  mfaChallengeToken?: string;
+}
+
+/** MFA 初始化响应（/auth/mfa/setup） */
+export interface MfaSetupResponse {
+  /** Base32 编码的 TOTP 密钥（用户可在 authenticator 中手动输入） */
+  secret: string;
+  /** otpauth:// URI（前端用 QRCode 库将其渲染为二维码） */
+  qrCodeUri: string;
 }
 
 /** 用户基本信息 */
@@ -75,6 +89,8 @@ export interface UserInfo {
   createdAt: string;
   /** 是否需要强制修改密码 */
   mustChangePassword: boolean;
+  /** 是否已启用多因素认证（MFA/TOTP） */
+  mfaEnabled: boolean;
 }
 
 // ============================================================================

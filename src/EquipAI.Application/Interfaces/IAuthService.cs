@@ -64,4 +64,52 @@ public interface IAuthService
     /// </summary>
     /// <returns>套餐信息列表</returns>
     Task<List<PlanDto>> GetPlansAsync();
+
+    /// <summary>
+    /// 验证 MFA 挑战令牌和 TOTP 验证码，完成登录
+    /// 仅当 LoginAsync 返回 MfaRequired=true 时调用
+    /// </summary>
+    /// <param name="challengeToken">LoginAsync 返回的 MFA 挑战令牌</param>
+    /// <param name="totpCode">用户 authenticator 应用生成的 6 位数字验证码</param>
+    /// <returns>完整的认证响应（含 Access Token、Refresh Token）</returns>
+    /// <exception cref="UnauthorizedAccessException">挑战令牌无效或验证码错误</exception>
+    Task<AuthResponse> VerifyMfaAsync(string challengeToken, string totpCode);
+
+    /// <summary>
+    /// 初始化 MFA 设置：生成 TOTP 密钥和 QR 码 URI
+    /// 此阶段仅生成临时密钥（存 Redis），不写入数据库；用户需调用 ConfirmMfaSetupAsync 确认启用
+    /// </summary>
+    /// <param name="userId">目标用户 ID</param>
+    /// <returns>包含临时密钥、QR 码 URI 的响应（前端展示 QR 码供 authenticator 扫描）</returns>
+    Task<MfaSetupResponse> SetupMfaAsync(Guid userId);
+
+    /// <summary>
+    /// 确认 MFA 设置：用户用 authenticator 扫码后提供验证码，验证通过后将密钥正式写入用户记录
+    /// </summary>
+    /// <param name="userId">目标用户 ID</param>
+    /// <param name="totpCode">authenticator 生成的验证码（用于首次验证密钥正确性）</param>
+    /// <exception cref="UnauthorizedAccessException">临时密钥不存在或验证码错误</exception>
+    Task ConfirmMfaSetupAsync(Guid userId, string totpCode);
+
+    /// <summary>
+    /// 禁用 MFA：清除用户的 TOTP 密钥并标记 MfaEnabled=false
+    /// </summary>
+    /// <param name="userId">目标用户 ID</param>
+    Task DisableMfaAsync(Guid userId);
+}
+
+/// <summary>
+/// MFA 初始化响应 DTO
+/// </summary>
+public class MfaSetupResponse
+{
+    /// <summary>
+    /// Base32 编码的 TOTP 密钥（用户可在 authenticator 中手动输入）
+    /// </summary>
+    public string Secret { get; set; } = string.Empty;
+
+    /// <summary>
+    /// otpauth:// URI（前端生成 QR 码图片供 authenticator 扫描）
+    /// </summary>
+    public string QrCodeUri { get; set; } = string.Empty;
 }

@@ -64,6 +64,8 @@ public class AuthServiceTests : IAsyncDisposable
         services.AddSingleton(_jwtService);
         services.AddSingleton<RedisService>(_stubRedis);  // 注册为基类 RedisService 类型
         services.AddScoped<IAuditLogService, StubAuditLogService>();
+        // 注册 TOTP 服务 Stub（默认接受任意 6 位验证码，测试 MFA 流程）
+        services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpService>(new StubTotpService());
         // 注册邮件服务（测试中 SendAsync 会因无 SMTP 配置进入 catch，不影响测试逻辑）
         services.Configure<EquipAI.Application.Notifications.SmtpOptions>(_ => { });
         services.AddScoped<EquipAI.Application.Notifications.SmtpEmailNotificationService>();
@@ -296,7 +298,7 @@ public class AuthServiceTests : IAsyncDisposable
         var result = await service.LoginAsync(request);
 
         // Assert：刷新令牌应已存入 StubRedis（内存字典），可按用户 ID 取回
-        var storedToken = await _stubRedis.GetRefreshTokenAsync(user.Id);
+        var storedToken = _stubRedis.GetStoredRefreshToken(user.Id);
         storedToken.Should().Be(result.RefreshToken);
     }
 
@@ -381,7 +383,7 @@ public class AuthServiceTests : IAsyncDisposable
         result.RefreshToken.Should().NotBe(oldRefreshToken);
 
         // 新令牌应已写入 StubRedis（旧令牌被替换）
-        var storedToken = await _stubRedis.GetRefreshTokenAsync(user.Id);
+        var storedToken = _stubRedis.GetStoredRefreshToken(user.Id);
         storedToken.Should().Be(result.RefreshToken);
     }
 
@@ -398,14 +400,14 @@ public class AuthServiceTests : IAsyncDisposable
         await _stubRedis.SetRefreshTokenAsync(userId, "token-to-remove", TimeSpan.FromDays(7));
 
         // 验证令牌已存在
-        var tokenBefore = await _stubRedis.GetRefreshTokenAsync(userId);
+        var tokenBefore = _stubRedis.GetStoredRefreshToken(userId);
         tokenBefore.Should().Be("token-to-remove");
 
         // Act
         await service.LogoutAsync(userId);
 
         // Assert：登出后令牌应被移除
-        var tokenAfter = await _stubRedis.GetRefreshTokenAsync(userId);
+        var tokenAfter = _stubRedis.GetStoredRefreshToken(userId);
         tokenAfter.Should().BeNull();
     }
 
@@ -851,20 +853,47 @@ public class AuthServiceTests : IAsyncDisposable
 
         public override Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
         {
+            // 清理旧 token 的反向索引（模拟真实 RedisService 行为）
+            if (_store.TryGetValue(userId, out var oldToken))
+            {
+                _stringStore.Remove($"refresh_token:{oldToken}");
+            }
             _store[userId] = refreshToken;
+            // 同时写入 _stringStore，供 AuthService 正向索引一致性检查（GetStringAsync）读取
+            _stringStore[$"refresh:{userId}"] = refreshToken;
+            _stringStore[$"refresh_token:{refreshToken}"] = userId.ToString();
             return Task.CompletedTask;
         }
 
-        public override Task<string?> GetRefreshTokenAsync(Guid userId)
+        public override Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
         {
-            _store.TryGetValue(userId, out var token);
-            return Task.FromResult(token);
+            if (_stringStore.TryGetValue($"refresh_token:{refreshToken}", out var userIdStr)
+                && Guid.TryParse(userIdStr, out var userId))
+            {
+                return Task.FromResult<Guid?>(userId);
+            }
+            return Task.FromResult<Guid?>(null);
         }
 
         public override Task RemoveRefreshTokenAsync(Guid userId)
         {
+            if (_store.TryGetValue(userId, out var token))
+            {
+                _stringStore.Remove($"refresh_token:{token}");
+            }
             _store.Remove(userId);
+            _stringStore.Remove($"refresh:{userId}");
             return Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// 测试断言辅助：按 userId 读取存储的刷新令牌（对应正向索引）
+        /// 替代原 GetRefreshTokenAsync，仅用于测试内部状态验证
+        /// </summary>
+        public string? GetStoredRefreshToken(Guid userId)
+        {
+            _store.TryGetValue(userId, out var token);
+            return token;
         }
 
         public override Task SetStringAsync(string key, string value, TimeSpan expiry)
@@ -907,6 +936,28 @@ public class AuthServiceTests : IAsyncDisposable
 
         public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20, CancellationToken ct = default)
             => Task.FromResult(new PagedResult<AuditLogDto> { Items = [], Total = 0, Page = page, PageSize = pageSize });
+    }
+
+    /// <summary>
+    /// TOTP 服务 Stub，用于测试中避免依赖密码学随机数和真实的 TOTP 算法
+    /// - GenerateSecret 返回固定测试密钥
+    /// - VerifyCode 默认接受任意 6 位数字验证码（模拟正确验证码）
+    /// - 通过 SetVerifyResult 可自定义验证码校验结果（用于测试验证码错误场景）
+    /// </summary>
+    private class StubTotpService : EquipAI.Infrastructure.Identity.ITotpService
+    {
+        private bool _verifyResult = true;
+
+        public string GenerateSecret() => "JBSWY3DPEHPK3PXP"; // 固定测试密钥（Base32）
+
+        public string BuildQrCodeUri(string secret, string account, string issuer)
+            => $"otpauth://totp/{issuer}:{account}?secret={secret}&issuer={issuer}";
+
+        public bool VerifyCode(string secret, string code)
+            => _verifyResult && !string.IsNullOrWhiteSpace(code) && code.Length == 6;
+
+        /// <summary>设置后续 VerifyCode 的返回值（用于测试验证码错误场景）</summary>
+        public void SetVerifyResult(bool result) => _verifyResult = result;
     }
 
     public async ValueTask DisposeAsync() => await _sp.DisposeAsync();

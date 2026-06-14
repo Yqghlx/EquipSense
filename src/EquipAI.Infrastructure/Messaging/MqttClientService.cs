@@ -31,6 +31,12 @@ public class MqttClientService
     private IMqttClient? _client;
     private MqttClientOptions? _clientOptions;
 
+    /// <summary>
+    /// 停机保护标志：为 true 时 HandleDisconnectedAsync 不再尝试重连。
+    /// 由 GracefulShutdown 钩子在断开前设置，避免 SIGTERM 后触发无意义的重连尝试。
+    /// </summary>
+    private bool _isStopping;
+
     public event Func<string, string, byte[], Task>? OnMessageReceived;
 
     public MqttClientService(IOptions<MqttOptions> options, ILogger<MqttClientService> logger)
@@ -87,11 +93,14 @@ public class MqttClientService
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
+        // 停机保护：先置标志位，防止 Disconnect 事件回调触发重连
+        _isStopping = true;
+
         if (_client?.IsConnected == true)
         {
             await _client.DisconnectAsync(cancellationToken: cancellationToken);
             BusinessMetrics.MqttConnected.Set(0);
-            _logger.LogInformation("MQTT 已断开连接");
+            _logger.LogInformation("MQTT 已断开连接（优雅停机）");
         }
     }
 
@@ -105,12 +114,22 @@ public class MqttClientService
 
     private async Task HandleDisconnectedAsync(MqttClientDisconnectedEventArgs e)
     {
+        // 停机保护：应用正在关闭时不再尝试重连
+        if (_isStopping)
+        {
+            _logger.LogInformation("MQTT 连接断开（停机中），跳过重连");
+            return;
+        }
+
         if (e.ClientWasConnected)
         {
             _logger.LogWarning("MQTT 连接断开，{Seconds} 秒后尝试重连", _options.ReconnectDelaySeconds);
         }
 
         await Task.Delay(TimeSpan.FromSeconds(_options.ReconnectDelaySeconds));
+
+        // Delay 期间可能已收到停机信号，再次检查
+        if (_isStopping) return;
 
         try
         {

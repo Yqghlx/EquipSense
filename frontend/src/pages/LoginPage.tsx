@@ -19,11 +19,19 @@ type LoginFormData = {
   password: string;
 };
 
+/** TOTP 验证码表单数据类型 */
+type TotpFormData = {
+  totpCode: string;
+};
+
 /**
  * 登录页面组件
  *
- * 使用 react-hook-form + zod 进行表单校验，
- * 登录成功后保存令牌和用户信息并跳转仪表盘。
+ * 两阶段登录流程：
+ *   1. 密码验证：提交用户名/密码
+ *   2. MFA 验证（仅当用户启用了 MFA）：提交 authenticator 生成的 6 位 TOTP 验证码
+ *
+ * 认证 Cookie 由后端在每次成功响应时自动通过 Set-Cookie 设置。
  */
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -34,10 +42,19 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [mustChangePassword, setMustChangePassword] = useState(false);
 
-  /** 登录表单校验规则（放在组件内部以使用 t() 函数） */
+  // MFA 阶段状态
+  const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
+  const [mfaUserInfo, setMfaUserInfo] = useState<AuthResponse['userInfo'] | null>(null);
+
+  /** 登录表单校验规则 */
   const loginSchema = z.object({
     username: z.string().min(1, t('auth.usernameRequired')),
     password: z.string().min(1, t('auth.passwordRequired')),
+  });
+
+  /** TOTP 验证码校验规则：6 位数字 */
+  const totpSchema = z.object({
+    totpCode: z.string().regex(/^\d{6}$/, '验证码必须为 6 位数字'),
   });
 
   const {
@@ -48,16 +65,32 @@ export default function LoginPage() {
     resolver: zodResolver(loginSchema),
   });
 
-  /** 提交登录表单 */
+  const {
+    register: registerTotp,
+    handleSubmit: handleSubmitTotp,
+    formState: { errors: totpErrors },
+  } = useForm<TotpFormData>({
+    resolver: zodResolver(totpSchema),
+  });
+
+  /** 提交登录表单（第一阶段：密码验证） */
   const onSubmit = async (data: LoginFormData) => {
     setLoading(true);
     setError('');
     try {
       const response = await api.post<AuthResponse>('/auth/login', data);
+
+      // 检查是否需要 MFA 二次验证
+      if (response.data.mfaRequired && response.data.mfaChallengeToken) {
+        setMfaChallengeToken(response.data.mfaChallengeToken);
+        setMfaUserInfo(response.data.userInfo);
+        setLoading(false);
+        return;
+      }
+
+      // 无需 MFA，直接完成登录
       setAuth(response.data.accessToken, response.data.userInfo);
-      // 保存刷新令牌到 localStorage，用于自动续期
-      localStorage.setItem('refreshToken', response.data.refreshToken);
-      // 首次登录需要强制修改密码
+      // 认证 Cookie 由后端登录响应自动设置
       if (response.data.userInfo.mustChangePassword) {
         setMustChangePassword(true);
       } else {
@@ -71,6 +104,73 @@ export default function LoginPage() {
     }
   };
 
+  /** 提交 TOTP 验证码（第二阶段：MFA 验证） */
+  const onMfaSubmit = async (data: TotpFormData) => {
+    if (!mfaChallengeToken) return;
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.post<AuthResponse>('/auth/mfa/verify', {
+        challengeToken: mfaChallengeToken,
+        totpCode: data.totpCode,
+      });
+      setAuth(response.data.accessToken, response.data.userInfo);
+      const from = (location.state as { from?: string })?.from || '/dashboard';
+      navigate(from, { replace: true });
+    } catch {
+      setError('验证码错误，请检查 authenticator 应用中的时间是否准确');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** 返回密码输入阶段（清空 MFA 状态） */
+  const backToPassword = () => {
+    setMfaChallengeToken(null);
+    setMfaUserInfo(null);
+    setError('');
+  };
+
+  // MFA 验证阶段 UI
+  if (mfaChallengeToken) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>多因素认证</CardTitle>
+          <CardDescription>
+            请输入 Authenticator 应用中的 6 位验证码
+            {mfaUserInfo && <span className="block text-xs">用户：{mfaUserInfo.displayName || mfaUserInfo.username}</span>}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmitTotp(onMfaSubmit)} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="totpCode">验证码</Label>
+              <Input
+                id="totpCode"
+                {...registerTotp('totpCode')}
+                placeholder="000000"
+                maxLength={6}
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                autoFocus
+              />
+              {totpErrors.totpCode && <p className="text-sm text-destructive">{totpErrors.totpCode.message}</p>}
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? t('common.loading') : '验证'}
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={backToPassword} disabled={loading}>
+              返回
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // 密码输入阶段 UI
   return (
     <Card>
       <CardHeader>

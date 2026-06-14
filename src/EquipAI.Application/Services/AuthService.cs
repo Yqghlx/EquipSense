@@ -28,6 +28,7 @@ public class AuthService : IAuthService
     private readonly ILogger<AuthService> _logger;
     private readonly IAuditLogService _auditLogService;
     private readonly SmtpEmailNotificationService _emailService;
+    private readonly ITotpService _totpService;
 
     /// <summary>
     /// 连续登录失败达到此数值时自动锁定账户
@@ -48,6 +49,20 @@ public class AuthService : IAuthService
     /// 密码重置 token 在 Redis 中的键前缀
     /// </summary>
     private const string PasswordResetKeyPrefix = "pwdreset:";
+
+    /// <summary>
+    /// MFA 登录挑战令牌在 Redis 中的键前缀
+    /// 键格式：mfa_challenge:{token} → userId（GUID 字符串）
+    /// 有效期：5 分钟，一次性使用
+    /// </summary>
+    private const string MfaChallengeKeyPrefix = "mfa_challenge:";
+
+    /// <summary>
+    /// MFA 设置流程的临时 TOTP 密钥在 Redis 中的键前缀
+    /// 键格式：mfa_setup:{userId} → secret（Base32 字符串）
+    /// 有效期：10 分钟（用户需在此时间内扫码并确认）
+    /// </summary>
+    private const string MfaSetupKeyPrefix = "mfa_setup:";
 
     /// <summary>
     /// 各套餐对应的配额限制（最大设备数、最大用户数、数据保留天数）
@@ -80,7 +95,8 @@ public class AuthService : IAuthService
         IMapper mapper,
         ILogger<AuthService> logger,
         IAuditLogService auditLogService,
-        SmtpEmailNotificationService emailService)
+        SmtpEmailNotificationService emailService,
+        ITotpService totpService)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
@@ -89,6 +105,7 @@ public class AuthService : IAuthService
         _logger = logger;
         _auditLogService = auditLogService;
         _emailService = emailService;
+        _totpService = totpService;
     }
 
     /// <summary>
@@ -166,6 +183,34 @@ public class AuthService : IAuthService
         user.AccessFailedCount = 0;
         user.LockoutEnd = null;
 
+        // MFA 二步验证检查：若用户启用了 TOTP，不直接颁发令牌，而是返回挑战令牌
+        // 客户端需携带挑战令牌 + TOTP 验证码调用 /auth/mfa/verify 完成登录
+        if (user.MfaEnabled && !string.IsNullOrEmpty(user.TotpSecret))
+        {
+            // 生成一次性挑战令牌（GUID 去掉连字符），存入 Redis 与 userId 绑定
+            var challengeToken = Guid.NewGuid().ToString("N");
+            await _redisService.SetStringAsync(
+                $"{MfaChallengeKeyPrefix}{challengeToken}",
+                user.Id.ToString(),
+                TimeSpan.FromMinutes(5));
+
+            // 更新最后登录时间（MFA 验证前即记录，避免挑战令牌过期后无法追踪登录尝试）
+            user.LastLoginAt = DateTime.UtcNow;
+            await _dbContext.SaveChangesAsync();
+
+            _logger.LogInformation("用户 {Username} 密码验证通过，进入 MFA 二次验证阶段", user.Username);
+            await _auditLogService.LogAsync(user.TenantId, "AuthMfaChallenge", "User", user.Id.ToString(),
+                $"用户 {user.Username} 通过密码验证，等待 MFA 验证码", default);
+
+            return new AuthResponse
+            {
+                // MFA 阶段不颁发令牌，前端应识别 MfaRequired=true 并展示验证码输入界面
+                MfaRequired = true,
+                MfaChallengeToken = challengeToken,
+                UserInfo = _mapper.Map<UserDto>(user)!,
+            };
+        }
+
         // 生成访问令牌和刷新令牌
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
         var refreshToken = _jwtTokenService.GenerateRefreshToken();
@@ -203,30 +248,32 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("刷新令牌不能为空");
         }
 
-        // 从旧 Access Token 中解析用户 ID（客户端需在请求体中附带过期 Access Token）
-        // 此处简化：遍历 Redis 查找匹配的刷新令牌（单用户场景高效）
-        // 改进方案：后续可在请求中携带 userId 或使用 refreshToken 查找索引
-
-        // 查找所有用户的刷新令牌并比对——仅适用于小规模场景
-        // 生产优化：使用 Redis 反向索引 refreshToken → userId
-        var allUsers = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .Where(u => u.IsActive)
-            .ToListAsync();
-
-        Core.Entities.User? matchedUser = null;
-        foreach (var u in allUsers)
+        // O(1) 反向索引查找：refresh_token:{token} → userId
+        // 替代原先的全表扫描（遍历所有活跃用户逐一比对 Redis），在万级用户场景下将刷新延迟从秒级降到毫秒级
+        var userId = await _redisService.GetUserIdByRefreshTokenAsync(refreshToken);
+        if (userId == null)
         {
-            var storedToken = await _redisService.GetRefreshTokenAsync(u.Id);
-            if (storedToken == refreshToken)
-            {
-                matchedUser = u;
-                break;
-            }
+            _logger.LogWarning("刷新令牌无效或已过期");
+            throw new UnauthorizedAccessException("刷新令牌无效或已过期");
         }
+
+        var matchedUser = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId.Value && u.IsActive);
 
         if (matchedUser == null)
         {
-            _logger.LogWarning("刷新令牌无效或已过期");
+            // 反向索引存在但用户不存在或已禁用（账号删除/禁用后残留索引）
+            _logger.LogWarning("刷新令牌对应用户 {UserId} 不存在或已禁用，清理残留索引", userId);
+            await _redisService.RemoveRefreshTokenAsync(userId.Value);
+            throw new UnauthorizedAccessException("刷新令牌无效或已过期");
+        }
+
+        // 验证正向索引与反向索引一致性（防止 Redis 数据不一致）
+        var forwardKey = $"refresh:{matchedUser.Id}";
+        var storedToken = await _redisService.GetStringAsync(forwardKey);
+        if (storedToken != refreshToken)
+        {
+            _logger.LogWarning("刷新令牌正反向索引不一致（用户：{UserId}），可能已轮换", matchedUser.Id);
             throw new UnauthorizedAccessException("刷新令牌无效或已过期");
         }
 
@@ -234,7 +281,7 @@ public class AuthService : IAuthService
         var newAccessToken = _jwtTokenService.GenerateAccessToken(matchedUser);
         var newRefreshToken = _jwtTokenService.GenerateRefreshToken();
 
-        // 更新 Redis 中的刷新令牌（旋转令牌，旧令牌失效）
+        // 更新 Redis 中的刷新令牌（SetRefreshTokenAsync 内部自动清理旧反向索引 + 写入新正反向索引）
         await _redisService.SetRefreshTokenAsync(matchedUser.Id, newRefreshToken, TimeSpan.FromDays(7));
 
         _logger.LogInformation("用户 {Username} 刷新令牌成功", matchedUser.Username);
@@ -245,6 +292,159 @@ public class AuthService : IAuthService
             RefreshToken = newRefreshToken,
             UserInfo = _mapper.Map<UserDto>(matchedUser)!
         };
+    }
+
+    /// <summary>
+    /// 验证 MFA 挑战令牌和 TOTP 验证码，完成登录
+    ///
+    /// 安全机制：
+    ///   - 挑战令牌一次性：验证成功后立即从 Redis 删除，防止重放攻击
+    ///   - 挑战令牌 5 分钟过期：超时需重新输入密码
+    ///   - 验证码 ±1 步窗口：容忍客户端/服务器时钟偏差 30 秒
+    /// </summary>
+    public async Task<AuthResponse> VerifyMfaAsync(string challengeToken, string totpCode)
+    {
+        if (string.IsNullOrWhiteSpace(challengeToken) || string.IsNullOrWhiteSpace(totpCode))
+        {
+            throw new UnauthorizedAccessException("挑战令牌和验证码不能为空");
+        }
+
+        // 从 Redis 读取挑战令牌对应的 userId（读取后立即删除，实现一次性使用）
+        var challengeKey = $"{MfaChallengeKeyPrefix}{challengeToken}";
+        var userIdStr = await _redisService.GetStringAsync(challengeKey);
+        await _redisService.RemoveKeyAsync(challengeKey); // 无论成败均删除，防重放
+
+        if (userIdStr == null || !Guid.TryParse(userIdStr, out var userId))
+        {
+            _logger.LogWarning("MFA 验证失败：挑战令牌无效或已过期");
+            throw new UnauthorizedAccessException("挑战令牌无效或已过期，请重新登录");
+        }
+
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+
+        if (user == null || !user.MfaEnabled || string.IsNullOrEmpty(user.TotpSecret))
+        {
+            _logger.LogWarning("MFA 验证失败：用户 {UserId} 不存在或 MFA 未启用", userId);
+            throw new UnauthorizedAccessException("用户状态异常，请重新登录");
+        }
+
+        // 校验 TOTP 验证码
+        if (!_totpService.VerifyCode(user.TotpSecret, totpCode))
+        {
+            _logger.LogWarning("MFA 验证失败：用户 {Username} TOTP 验证码错误", user.Username);
+            await _auditLogService.LogAsync(user.TenantId, "AuthMfaFailed", "User", user.Id.ToString(),
+                $"用户 {user.Username} MFA 验证码错误", default);
+            throw new UnauthorizedAccessException("验证码错误，请重试");
+        }
+
+        // MFA 验证通过：颁发令牌（与正常登录相同流程）
+        var accessToken = _jwtTokenService.GenerateAccessToken(user);
+        var refreshToken = _jwtTokenService.GenerateRefreshToken();
+        await _redisService.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
+
+        _logger.LogInformation("用户 {Username} MFA 验证通过，登录成功", user.Username);
+        await _auditLogService.LogAsync(user.TenantId, "AuthMfaSuccess", "User", user.Id.ToString(),
+            $"用户 {user.Username} MFA 验证通过，登录成功", default);
+
+        return new AuthResponse
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            UserInfo = _mapper.Map<UserDto>(user)!,
+        };
+    }
+
+    /// <summary>
+    /// 初始化 MFA 设置：生成 TOTP 密钥和 QR 码 URI
+    /// 临时密钥存 Redis（10 分钟有效），不写入数据库，需调用 ConfirmMfaSetupAsync 确认后才正式启用
+    /// </summary>
+    public async Task<MfaSetupResponse> SetupMfaAsync(Guid userId)
+    {
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
+
+        var secret = _totpService.GenerateSecret();
+
+        // 临时密钥存 Redis，10 分钟内未确认则自动失效
+        await _redisService.SetStringAsync(
+            $"{MfaSetupKeyPrefix}{userId}",
+            secret,
+            TimeSpan.FromMinutes(10));
+
+        // 构建 QR 码 URI（优先使用邮箱，其次用户名，作为 authenticator 中的账户标识）
+        var account = user.Email ?? user.Username;
+        var qrCodeUri = _totpService.BuildQrCodeUri(secret, account, "EquipSense");
+
+        _logger.LogInformation("用户 {Username} 初始化 MFA 设置", user.Username);
+
+        return new MfaSetupResponse
+        {
+            Secret = secret,
+            QrCodeUri = qrCodeUri,
+        };
+    }
+
+    /// <summary>
+    /// 确认 MFA 设置：用户扫码后输入验证码，验证成功后将临时密钥正式写入用户记录
+    /// 若验证码错误，临时密钥保留（允许用户重试直到 10 分钟超时）
+    /// </summary>
+    public async Task ConfirmMfaSetupAsync(Guid userId, string totpCode)
+    {
+        if (string.IsNullOrWhiteSpace(totpCode))
+        {
+            throw new UnauthorizedAccessException("验证码不能为空");
+        }
+
+        var setupKey = $"{MfaSetupKeyPrefix}{userId}";
+        var secret = await _redisService.GetStringAsync(setupKey);
+
+        if (string.IsNullOrEmpty(secret))
+        {
+            throw new UnauthorizedAccessException("MFA 设置已过期，请重新初始化");
+        }
+
+        // 校验验证码（确认用户 authenticator 中的密钥与服务器生成的一致）
+        if (!_totpService.VerifyCode(secret, totpCode))
+        {
+            _logger.LogWarning("MFA 设置确认失败：用户 {UserId} 验证码错误", userId);
+            throw new UnauthorizedAccessException("验证码错误，请检查 authenticator 应用中的时间是否准确");
+        }
+
+        // 验证通过：将密钥正式写入用户记录并启用 MFA
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
+
+        user.TotpSecret = secret;
+        user.MfaEnabled = true;
+        await _dbContext.SaveChangesAsync();
+
+        // 清理临时密钥
+        await _redisService.RemoveKeyAsync(setupKey);
+
+        _logger.LogInformation("用户 {Username} 已成功启用 MFA", user.Username);
+        await _auditLogService.LogAsync(user.TenantId, "MfaEnabled", "User", user.Id.ToString(),
+            $"用户 {user.Username} 启用多因素认证", default);
+    }
+
+    /// <summary>
+    /// 禁用 MFA：清除用户的 TOTP 密钥并标记 MfaEnabled=false
+    /// </summary>
+    public async Task DisableMfaAsync(Guid userId)
+    {
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId)
+            ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
+
+        user.TotpSecret = null;
+        user.MfaEnabled = false;
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("用户 {Username} 已禁用 MFA", user.Username);
+        await _auditLogService.LogAsync(user.TenantId, "MfaDisabled", "User", user.Id.ToString(),
+            $"用户 {user.Username} 禁用多因素认证", default);
     }
 
     /// <summary>

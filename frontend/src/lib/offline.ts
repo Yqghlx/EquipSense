@@ -107,12 +107,12 @@ export const offlineQueue = {
 
     for (const op of operations) {
       try {
-        const token = localStorage.getItem('token');
+        // 认证通过 Cookie 自动携带（credentials: 'include'），无需手动设置 Authorization 头
         const response = await fetch(op.url, {
           method: op.method,
+          credentials: 'include', // 携带 HttpOnly Cookie（access_token）
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: op.body,
         });

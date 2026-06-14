@@ -93,6 +93,19 @@ public class User : BaseEntity
     /// </summary>
     public DateTime? LastLoginAt { get; set; }
 
+    /// <summary>
+    /// 是否启用多因素认证（MFA/TOTP）
+    /// 启用后登录时需额外提供 TOTP 动态验证码
+    /// </summary>
+    public bool MfaEnabled { get; set; }
+
+    /// <summary>
+    /// TOTP 密钥（Base32 编码）
+    /// MfaEnabled=false 时为 null；MfaEnabled=true 时保存用户确认后的最终密钥
+    /// 注：setup 流程中的临时密钥通过 Redis 存储，不写入此字段
+    /// </summary>
+    public string? TotpSecret { get; set; }
+
     // 导航属性
 
     /// <summary>

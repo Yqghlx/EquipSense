@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useAuthStore } from '../authStore';
 import type { UserInfo } from '../../types';
 
-/** 模拟的 localStorage（jsdom 已提供，但每个测试前需清空） */
+/** 模拟的 sessionStorage（jsdom 已提供，但每个测试前需清空） */
 beforeEach(() => {
-  localStorage.clear();
+  sessionStorage.clear();
   // 重置 store 到初始状态
   useAuthStore.setState({
     token: null,
@@ -22,6 +22,7 @@ const mockUser: UserInfo = {
   isActive: true,
   createdAt: '2026-01-01T00:00:00Z',
   mustChangePassword: false,
+  mfaEnabled: false,
 };
 
 describe('authStore', () => {
@@ -53,12 +54,12 @@ describe('authStore', () => {
       expect(state.isAuthenticated).toBe(true);
     });
 
-    it('调用 setAuth 后应将令牌和用户信息保存到 localStorage', () => {
+    it('调用 setAuth 后应将令牌和用户信息保存到 sessionStorage', () => {
       const { setAuth } = useAuthStore.getState();
       setAuth('jwt-token-abc', mockUser);
 
-      expect(localStorage.getItem('token')).toBe('jwt-token-abc');
-      expect(localStorage.getItem('user')).toBe(JSON.stringify(mockUser));
+      expect(sessionStorage.getItem('token')).toBe('jwt-token-abc');
+      expect(sessionStorage.getItem('user')).toBe(JSON.stringify(mockUser));
     });
   });
 
@@ -76,23 +77,23 @@ describe('authStore', () => {
       expect(state.isAuthenticated).toBe(false);
     });
 
-    it('调用 logout 后应清除 localStorage 中的认证信息', () => {
+    it('调用 logout 后应清除 sessionStorage 中的认证信息', () => {
       // 先登录
       useAuthStore.getState().setAuth('jwt-token-abc', mockUser);
 
       // 登出
       useAuthStore.getState().logout();
 
-      expect(localStorage.getItem('token')).toBeNull();
-      expect(localStorage.getItem('user')).toBeNull();
+      expect(sessionStorage.getItem('token')).toBeNull();
+      expect(sessionStorage.getItem('user')).toBeNull();
     });
   });
 
   describe('loadFromStorage（从存储恢复）', () => {
-    it('localStorage 中有有效数据时应恢复认证状态', () => {
+    it('sessionStorage 中有有效数据时应恢复认证状态', () => {
       // 先存入有效数据
-      localStorage.setItem('token', 'restored-token');
-      localStorage.setItem('user', JSON.stringify(mockUser));
+      sessionStorage.setItem('token', 'restored-token');
+      sessionStorage.setItem('user', JSON.stringify(mockUser));
 
       useAuthStore.getState().loadFromStorage();
 
@@ -102,7 +103,7 @@ describe('authStore', () => {
       expect(state.isAuthenticated).toBe(true);
     });
 
-    it('localStorage 中无数据时应保持未认证状态', () => {
+    it('sessionStorage 中无数据时应保持未认证状态', () => {
       useAuthStore.getState().loadFromStorage();
 
       const state = useAuthStore.getState();
@@ -111,16 +112,16 @@ describe('authStore', () => {
       expect(state.isAuthenticated).toBe(false);
     });
 
-    it('localStorage 中用户信息损坏时应清除无效数据', () => {
-      localStorage.setItem('token', 'some-token');
-      localStorage.setItem('user', 'invalid-json{{{');
+    it('sessionStorage 中用户信息损坏时应清除无效数据', () => {
+      sessionStorage.setItem('token', 'some-token');
+      sessionStorage.setItem('user', 'invalid-json{{{');
 
       useAuthStore.getState().loadFromStorage();
 
       const state = useAuthStore.getState();
       expect(state.isAuthenticated).toBe(false);
-      expect(localStorage.getItem('token')).toBeNull();
-      expect(localStorage.getItem('user')).toBeNull();
+      expect(sessionStorage.getItem('token')).toBeNull();
+      expect(sessionStorage.getItem('user')).toBeNull();
     });
   });
 });

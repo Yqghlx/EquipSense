@@ -10,6 +10,7 @@ import { InstallPrompt } from './components/layout/InstallPrompt';
 import { OfflineIndicator } from './components/layout/OfflineIndicator';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
+import useTokenRefresh from './hooks/useTokenRefresh';
 
 // 认证页面 — 首屏需要，直接导入
 import LoginPage from './pages/LoginPage';
@@ -63,10 +64,13 @@ function AppRoutes() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
-  /** 页面加载时从 localStorage 恢复认证状态 */
+  /** 页面加载时从 sessionStorage 恢复认证状态（Cookie 由浏览器自动管理） */
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
+
+  /** Access Token 过期前 5 分钟自动刷新，避免用户操作中途 401 */
+  useTokenRefresh();
 
   return (
     <Routes>

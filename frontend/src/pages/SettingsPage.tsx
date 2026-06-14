@@ -47,6 +47,7 @@ import {
   type UpdateUserPayload,
 } from '../hooks/useUsers';
 import { UserFormDialog } from '../components/user/UserFormDialog';
+import MfaSettingsPanel from '../components/settings/MfaSettingsPanel';
 import { formatDate } from '../lib/utils';
 import type { ApprovalChainTemplate } from '../types';
 
@@ -1410,6 +1411,7 @@ export default function SettingsPage() {
           <TabsTrigger value="approval-chains" className="w-full justify-start px-3">审批链配置</TabsTrigger>
           <TabsTrigger value="subscription" className="w-full justify-start px-3">{t('settings.subscription')}</TabsTrigger>
           <TabsTrigger value="notifications" className="w-full justify-start px-3">通知偏好</TabsTrigger>
+          <TabsTrigger value="security" className="w-full justify-start px-3">安全与 MFA</TabsTrigger>
         </TabsList>
 
         <div className="flex-1 min-w-0 space-y-4">
@@ -1555,6 +1557,11 @@ export default function SettingsPage() {
             onSubscribe={subscribe}
             onUnsubscribe={unsubscribe}
           />
+        </TabsContent>
+
+        {/* 安全与 MFA 设置 */}
+        <TabsContent value="security">
+          <MfaSettingsPanel />
         </TabsContent>
         </div>
       </Tabs>

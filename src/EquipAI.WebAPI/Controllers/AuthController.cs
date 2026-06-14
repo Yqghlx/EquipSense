@@ -45,6 +45,7 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request)
     {
         var response = await _authService.LoginAsync(request);
+        SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
         return Ok(response);
     }
 
@@ -62,6 +63,7 @@ public class AuthController : ControllerBase
         try
         {
             var response = await _authService.RegisterAsync(request);
+            SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
             return Ok(response);
         }
         catch (InvalidOperationException ex)
@@ -84,15 +86,26 @@ public class AuthController : ControllerBase
 
     /// <summary>
     /// 使用 Refresh Token 刷新 Access Token
+    ///
+    /// Refresh Token 来源优先级：
+    ///   1. 请求体 refreshToken 字段（前端主动续期 Hook 使用，token 可读时传入）
+    ///   2. HttpOnly Cookie（401 拦截器无法读取 HttpOnly cookie，降级为此路径，浏览器自动携带）
     /// </summary>
-    /// <param name="request">刷新令牌请求</param>
+    /// <param name="request">刷新令牌请求（body 可空）</param>
     /// <returns>新的认证响应</returns>
     [HttpPost("refresh")]
     [SkipAudit] // 刷新令牌高频，不审计（登录已记录）    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponse>> Refresh([FromBody] RefreshTokenRequest request)
     {
-        var response = await _authService.RefreshTokenAsync(request.RefreshToken);
+        // 优先用请求体中的 token，其次从 HttpOnly Cookie 中读取（前端无法访问 HttpOnly cookie 时降级）
+        var refreshToken = !string.IsNullOrWhiteSpace(request.RefreshToken)
+            ? request.RefreshToken
+            : Request.Cookies["refresh_token"];
+
+        var response = await _authService.RefreshTokenAsync(refreshToken ?? string.Empty);
+        // 刷新令牌对：同时更新 Cookie（浏览器下次请求自动携带）和响应体（前端主动续期 Hook 读取 expiresIn）
+        SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
         return Ok(response);
     }
 
@@ -112,6 +125,9 @@ public class AuthController : ControllerBase
         {
             await _authService.LogoutAsync(userId);
         }
+
+        // 清除认证 Cookie（无论登出是否成功都清除，避免残留）
+        ClearAuthCookies();
 
         return Ok(new { message = "登出成功" });
     }
@@ -183,6 +199,105 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// 验证 MFA 挑战令牌和 TOTP 验证码，完成登录
+    /// 仅在 Login 返回 MfaRequired=true 时调用
+    /// </summary>
+    /// <param name="request">MFA 验证请求（挑战令牌 + 6 位验证码）</param>
+    [HttpPost("mfa/verify")]
+    [EnableRateLimiting("auth")]
+    [SkipAudit] // 验证过程在 AuthService 内部记录审计
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> VerifyMfa([FromBody] MfaVerifyRequest request)
+    {
+        try
+        {
+            var response = await _authService.VerifyMfaAsync(request.ChallengeToken, request.TotpCode);
+            SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { code = 401, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 初始化 MFA 设置：生成 TOTP 密钥和 QR 码 URI
+    /// 前端根据 QrCodeUri 生成 QR 码图片，用户用 authenticator 应用扫描
+    /// </summary>
+    [HttpPost("mfa/setup")]
+    [Authorize]
+    [Audit("MfaSetup", "User")]
+    [ProducesResponseType(typeof(MfaSetupResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<MfaSetupResponse>> SetupMfa()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            return Unauthorized(new { code = 401, message = "无法识别用户身份" });
+        }
+
+        var response = await _authService.SetupMfaAsync(userId);
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// 确认 MFA 设置：用户扫码后输入验证码，验证通过后正式启用 MFA
+    /// </summary>
+    /// <param name="request">MFA 确认请求（6 位验证码）</param>
+    [HttpPost("mfa/confirm")]
+    [Authorize]
+    [Audit("MfaConfirm", "User")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ConfirmMfa([FromBody] MfaConfirmRequest request)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            return Unauthorized(new { code = 401, message = "无法识别用户身份" });
+        }
+
+        try
+        {
+            await _authService.ConfirmMfaSetupAsync(userId, request.TotpCode);
+            return Ok(new { message = "MFA 已成功启用" });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return BadRequest(new { code = 400, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 禁用 MFA：清除用户的 TOTP 密钥
+    /// </summary>
+    [HttpPost("mfa/disable")]
+    [Authorize]
+    [Audit("MfaDisable", "User")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> DisableMfa()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            return Unauthorized(new { code = 401, message = "无法识别用户身份" });
+        }
+
+        await _authService.DisableMfaAsync(userId);
+        return Ok(new { message = "MFA 已成功禁用" });
+    }
+
+    /// <summary>
     /// 获取当前登录用户信息
     /// </summary>
     /// <returns>当前用户信息</returns>
@@ -218,6 +333,82 @@ public class AuthController : ControllerBase
             CreatedAt = user.CreatedAt
         });
     }
+
+    /// <summary>
+    /// 设置认证 Cookie（Access Token + Refresh Token）
+    ///
+    /// Cookie 安全策略：
+    ///   - HttpOnly：refresh_token 设为 HttpOnly（JavaScript 不可访问，防 XSS 窃取）
+    ///     access_token 不设 HttpOnly（前端 useTokenRefresh Hook 需解析 exp 字段调度定时器）
+    ///   - Secure：仅 HTTPS 传输（开发环境 HTTPS 不可用时降级为非 Secure）
+    ///   - SameSite=Lax：防止 CSRF（同源请求携带，跨站顶级导航不携带）
+    ///   - Path=/：覆盖所有路径，包括 SignalR Hub 连接
+    /// </summary>
+    private void SetAuthCookies(string accessToken, string refreshToken, int expiresInSeconds)
+    {
+        var isHttps = Request.IsHttps
+            || string.Equals(Request.Headers["X-Forwarded-Proto"], "https", StringComparison.OrdinalIgnoreCase);
+
+        var cookieOptions = new CookieOptions
+        {
+            HttpOnly = false,      // access_token 需前端可读（useTokenRefresh 解析 exp）
+            Secure = isHttps,      // 生产 HTTPS 环境启用；开发 localhost HTTP 时降级
+            SameSite = SameSiteMode.Lax,
+            Path = "/",            // 覆盖所有路径，含 /api/ 和 /hubs/
+        };
+
+        Response.Cookies.Append("access_token", accessToken, new CookieOptions
+        {
+            HttpOnly = cookieOptions.HttpOnly,
+            Secure = cookieOptions.Secure,
+            SameSite = cookieOptions.SameSite,
+            Path = cookieOptions.Path,
+            MaxAge = TimeSpan.FromSeconds(expiresInSeconds),
+        });
+
+        Response.Cookies.Append("refresh_token", refreshToken, new CookieOptions
+        {
+            HttpOnly = true,       // refresh_token 严格 HttpOnly，JavaScript 不可见
+            Secure = cookieOptions.Secure,
+            SameSite = cookieOptions.SameSite,
+            Path = cookieOptions.Path,
+            MaxAge = TimeSpan.FromDays(7),
+        });
+    }
+
+    /// <summary>
+    /// 清除认证 Cookie（登出或令牌失效时调用）
+    /// 通过设置 MaxAge=0 + Expires=过去时间使浏览器立即丢弃 Cookie
+    /// </summary>
+    private void ClearAuthCookies()
+    {
+        var isHttps = Request.IsHttps
+            || string.Equals(Request.Headers["X-Forwarded-Proto"], "https", StringComparison.OrdinalIgnoreCase);
+
+        var opts = new CookieOptions
+        {
+            Secure = isHttps,
+            SameSite = SameSiteMode.Lax,
+            Path = "/",
+        };
+
+        // 清除时必须设置与写入时完全一致的属性（Path/Secure/SameSite），否则浏览器拒绝删除
+        Response.Cookies.Delete("access_token", new CookieOptions
+        {
+            HttpOnly = false,
+            Secure = opts.Secure,
+            SameSite = opts.SameSite,
+            Path = opts.Path,
+        });
+
+        Response.Cookies.Delete("refresh_token", new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = opts.Secure,
+            SameSite = opts.SameSite,
+            Path = opts.Path,
+        });
+    }
 }
 
 /// <summary>
@@ -229,4 +420,31 @@ public class RefreshTokenRequest
     /// 刷新令牌字符串
     /// </summary>
     public string RefreshToken { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// MFA 登录验证请求 DTO
+/// </summary>
+public class MfaVerifyRequest
+{
+    /// <summary>
+    /// 登录时返回的 MFA 挑战令牌
+    /// </summary>
+    public string ChallengeToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 用户 authenticator 应用生成的 6 位数字 TOTP 验证码
+    /// </summary>
+    public string TotpCode { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// MFA 设置确认请求 DTO
+/// </summary>
+public class MfaConfirmRequest
+{
+    /// <summary>
+    /// 用户 authenticator 应用生成的 6 位数字 TOTP 验证码（用于首次验证密钥正确性）
+    /// </summary>
+    public string TotpCode { get; set; } = string.Empty;
 }

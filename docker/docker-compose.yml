@@ -104,8 +104,10 @@ services:
       Smtp__Password: "${SMTP_PASSWORD:-}"
       Smtp__EnableSsl: "${SMTP_ENABLE_SSL:-true}"
       BEHIND_PROXY: "${BEHIND_PROXY:-true}"
-      Serilog__WriteTo__1__Name: "Seq"
-      Serilog__WriteTo__1__Args__serverUrl: "http://seq:5341"
+      # Serilog 日志配置由 appsettings.Production.json 提供（Seq Warning+ / Console）
+      # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
+      # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
+      Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -210,6 +212,11 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       SEQ_FIRSTRUN_ADMINPASSWORD: "${SEQ_ADMIN_PASSWORD:-SeqAdmin2026!}"
+      # 限制内存中缓存的日志量，防止日志风暴撑满内存（默认会用容器内存上限的一半）
+      SEQ_MEMORY_INGEST_RAM_TARGET: "128"
+      # 日志保留策略：超过 30 天的事件自动删除（可通过 SEQ_RETENTION_TIME 覆盖）
+      # 格式：数字+单位（d=天, h=小时），如 7d / 30d / 90d
+      SEQ_RETENTION_TIME: "${SEQ_RETENTION_TIME:-30d}"
     volumes:
       - seq_data:/data
     deploy:

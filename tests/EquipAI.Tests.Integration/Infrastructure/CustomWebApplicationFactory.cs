@@ -152,19 +152,51 @@ internal class FakeRedisService : RedisService
 
     public override Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
     {
+        // 清理旧 token 的反向索引（模拟真实 RedisService 行为）
+        if (_store.TryGetValue($"refresh:{userId}", out var oldToken))
+        {
+            _store.TryRemove($"refresh_token:{oldToken}", out _);
+        }
         _store[$"refresh:{userId}"] = refreshToken;
+        _store[$"refresh_token:{refreshToken}"] = userId.ToString();
         return Task.CompletedTask;
     }
 
-    public override Task<string?> GetRefreshTokenAsync(Guid userId)
+    public override Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
     {
-        _store.TryGetValue($"refresh:{userId}", out var token);
-        return Task.FromResult(token);
+        if (_store.TryGetValue($"refresh_token:{refreshToken}", out var userIdStr)
+            && Guid.TryParse(userIdStr, out var userId))
+        {
+            return Task.FromResult<Guid?>(userId);
+        }
+        return Task.FromResult<Guid?>(null);
     }
 
     public override Task RemoveRefreshTokenAsync(Guid userId)
     {
+        if (_store.TryGetValue($"refresh:{userId}", out var token))
+        {
+            _store.TryRemove($"refresh_token:{token}", out _);
+        }
         _store.TryRemove($"refresh:{userId}", out _);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 通用字符串写入（集成测试内存实现），AuthService 正向索引一致性检查会调用
+    /// </summary>
+    public override Task SetStringAsync(string key, string value, TimeSpan expiry)
+    {
+        _store[key] = value;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// 通用字符串读取（集成测试内存实现）
+    /// </summary>
+    public override Task<string?> GetStringAsync(string key)
+    {
+        _store.TryGetValue(key, out var value);
+        return Task.FromResult(value);
     }
 }
