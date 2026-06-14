@@ -74,7 +74,7 @@
 | 密码重置防邮箱枚举 | ✅ |
 | 审计日志全操作可追溯 | ✅ |
 
-## 五、本轮提交记录（7 次）
+## 五、本轮提交记录（18 次）
 
 | 提交 | 类型 | 说明 |
 |------|------|------|
@@ -84,16 +84,30 @@
 | `c23c5bc` | feat | 密码重置流程（忘记/重置密码） |
 | `3db52b5` | fix | PWA 缺失图标补齐 |
 | `082b60d` | fix | SMTP 环境变量接入 docker-compose |
+| `af62527` | docs | 落地就绪检查报告 |
+| `65457a0` | feat | 用户管理页面（补 useUsers hook 断层） |
+| `648b56d` | feat | 告警规则在线启停用（toggle） |
+| `cb8952c` | feat | 设备详情页健康度展示 + 刷新 |
+| `5408971` | fix | i18n 键对齐补齐（660/660，0 差异） |
+| `248b8d8` | fix | GatewayMonitorPage 硬编码中文修复 |
+| `66dcc6b` | fix | SettingsPage + GatewayDevicesPage 硬编码中文修复 |
+| `6a3201d` | test | E2E 测试补全（10 个场景：密码重置/审计/用户/规则启停） |
+| `7c510c6` | feat | appsettings.Production.json 生产配置 |
 
 ## 六、质量门禁
 
 | 门禁 | 结果 |
 |------|------|
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
+| 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
 | 后端单元测试 | ✅ 629/629 通过 |
+| 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
 | 前端单元测试 | ✅ 293/293 通过 |
+| E2E 测试 | ✅ 431 个测试被发现可执行 |
+| i18n 完整性 | ✅ 660 键中英文完全对齐，23 处硬编码中文清零 |
 | 生产构建 | ✅ PWA SW 产出 + precache 90 entries |
+| 生产配置 | ✅ appsettings.Production.json |
 
 ## 七、部署前检查清单
 
