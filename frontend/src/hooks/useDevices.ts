@@ -161,3 +161,29 @@ export async function downloadImportTemplate(): Promise<void> {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+/** 健康度刷新响应 */
+export interface HealthScoreResult {
+  deviceId: string;
+  healthScore: number;
+  level: string;
+}
+
+/**
+ * 刷新单个设备健康度评分
+ *
+ * 调用 POST /api/v1/devices/{id}/health-score，后端基于告警历史+状态+遥测质量重算。
+ */
+export function useRefreshHealthScore() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (deviceId: string) => {
+      const { data } = await api.post<HealthScoreResult>(`/devices/${deviceId}/health-score`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['devices'] });
+      queryClient.invalidateQueries({ queryKey: ['device'] });
+    },
+  });
+}

@@ -132,6 +132,7 @@
     "modelPlaceholder": "Device Model",
     "manufacturer": "Manufacturer",
     "healthScore": "Health Score",
+    "refreshHealth": "Refresh Health Score",
     "telemetryTrends": "Telemetry Trends",
     "recentAlerts": "Recent Alerts",
     "basicInfo": "Basic Info",

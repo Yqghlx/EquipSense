@@ -132,6 +132,7 @@
     "modelPlaceholder": "设备型号",
     "manufacturer": "制造商",
     "healthScore": "健康评分",
+    "refreshHealth": "刷新健康度",
     "telemetryTrends": "遥测趋势",
     "recentAlerts": "最近告警",
     "basicInfo": "基本信息",

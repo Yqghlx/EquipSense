@@ -17,7 +17,7 @@ import { DeviceStatusBadge } from '../components/device/DeviceStatusBadge';
 import { TrendChart } from '../components/charts/TrendChart';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
 import { DataQualityOverviewCard } from '../components/dataquality/DataQualityOverview';
-import { useDevice, useUpdateDevice } from '../hooks/useDevices';
+import { useDevice, useUpdateDevice, useRefreshHealthScore } from '../hooks/useDevices';
 import { useTelemetry, type TelemetryDataPoint } from '../hooks/useTelemetry';
 import { useAlerts } from '../hooks/useAlerts';
 import {
@@ -84,7 +84,32 @@ export default function DeviceDetailPage() {
           <h1 className="text-2xl font-bold">{device.name}</h1>
           <p className="text-sm text-muted-foreground">{device.deviceCode}</p>
         </div>
-        <div className="ml-auto"><DeviceStatusBadge status={device.status} /></div>
+        <div className="ml-auto flex items-center gap-3">
+          <DeviceStatusBadge status={device.status} />
+          {/* 设备健康度展示 + 刷新按钮 */}
+          {typeof device.healthScore === 'number' && (
+            <div className="flex items-center gap-2 rounded-md border px-3 py-1.5">
+              <span className="text-sm text-muted-foreground">{t('device.healthScore', '健康度')}</span>
+              <span className={`text-lg font-bold ${
+                device.healthScore >= 85 ? 'text-green-600'
+                  : device.healthScore >= 70 ? 'text-blue-600'
+                    : device.healthScore >= 50 ? 'text-yellow-600' : 'text-red-600'
+              }`}>
+                {device.healthScore.toFixed(1)}
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                disabled={refreshHealth.isPending}
+                onClick={() => refreshHealth.mutate(device.id)}
+                title={t('device.refreshHealth', '刷新健康度')}
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshHealth.isPending ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Tab 布局：概览 + 连接配置 */}
@@ -686,6 +711,7 @@ interface DeviceInfoCardProps {
 function DeviceInfoCard({ device }: DeviceInfoCardProps) {
   const { t } = useTranslation();
   const updateMutation = useUpdateDevice();
+  const refreshHealth = useRefreshHealthScore();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ name: '', type: '', model: '', manufacturer: '' });
 
