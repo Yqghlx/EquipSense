@@ -421,7 +421,7 @@ function ApprovalChainSettings() {
           </div>
         ) : (
           <p className="text-center text-muted-foreground">
-            暂无审批链模板，点击"新增模板"创建第一个审批流程
+            {t('settings.noApprovalChain', '暂无审批链模板，点击"新增模板"创建第一个审批流程')}
           </p>
         )}
       </CardContent>
@@ -438,7 +438,7 @@ function ApprovalChainSettings() {
               <Input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
-                placeholder="例如：高优先级工单审批流程"
+                placeholder={t("settings.approvalChainNamePlaceholder", "例如：高优先级工单审批流程")}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -447,7 +447,7 @@ function ApprovalChainSettings() {
                 <Input
                   value={formWorkOrderType}
                   onChange={(e) => setFormWorkOrderType(e.target.value)}
-                  placeholder="留空表示通用"
+                  placeholder={t("settings.leaveBlankForAll", "留空表示通用")}
                 />
               </div>
               <div className="space-y-2">
@@ -455,7 +455,7 @@ function ApprovalChainSettings() {
                 <Input
                   value={formPriority}
                   onChange={(e) => setFormPriority(e.target.value)}
-                  placeholder="留空表示通用"
+                  placeholder={t("settings.leaveBlankForAll", "留空表示通用")}
                 />
               </div>
             </div>
@@ -486,13 +486,13 @@ function ApprovalChainSettings() {
                   <Input
                     value={step.role}
                     onChange={(e) => updateStep(index, 'role', e.target.value)}
-                    placeholder="角色"
+                    placeholder={t("settings.role", "角色")}
                     className="flex-1"
                   />
                   <Input
                     value={step.specificApproverId}
                     onChange={(e) => updateStep(index, 'specificApproverId', e.target.value)}
-                    placeholder="指定审批人 ID"
+                    placeholder={t("settings.approverId", "指定审批人 ID")}
                     className="flex-1"
                   />
                   <Button
@@ -1061,7 +1061,7 @@ function IntegrationSettings() {
               <div className="space-y-2">
                 <Label>审批定义 Code（可选，用于创建审批实例）</Label>
                 <Input
-                  placeholder="从飞书审批管理中获取"
+                  placeholder={t("settings.getFromFeishu", "从飞书审批管理中获取")}
                   value={feishu.approvalCode}
                   onChange={(e) => setFeishu({ ...feishu, approvalCode: e.target.value })}
                 />
@@ -1185,13 +1185,13 @@ function IntegrationSettings() {
                   <Label>或 Basic Auth</Label>
                   <div className="grid grid-cols-2 gap-2">
                     <Input
-                      placeholder="用户名"
+                      placeholder={t("auth.username", "用户名")}
                       value={eam.username}
                       onChange={(e) => setEam({ ...eam, username: e.target.value })}
                     />
                     <Input
                       type="password"
-                      placeholder="密码"
+                      placeholder={t("auth.password", "密码")}
                       value={eam.password}
                       onChange={(e) => setEam({ ...eam, password: e.target.value })}
                     />

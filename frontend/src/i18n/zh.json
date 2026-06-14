@@ -28,7 +28,8 @@
     "totalItems": "共 {{count}} 条",
     "submit": "提交",
     "time": "时间",
-    "id": "ID"
+    "id": "ID",
+    "testConnection": "测试连接"
   },
   "auth": {
     "login": "登录",
@@ -407,7 +408,13 @@
     "systemInfo": "系统信息",
     "version": "版本",
     "environment": "运行环境",
-    "uptime": "运行时间"
+    "uptime": "运行时间",
+    "approvalChainNamePlaceholder": "例如：高优先级工单审批流程",
+    "leaveBlankForAll": "留空表示通用",
+    "role": "角色",
+    "approverId": "指定审批人 ID",
+    "getFromFeishu": "从飞书审批管理中获取",
+    "noApprovalChain": "暂无审批链模板，点击\"新增模板\"创建第一个审批流程"
   },
   "integration": {
     "dingtalk": "钉钉机器人",

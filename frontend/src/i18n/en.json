@@ -28,7 +28,8 @@
     "totalItems": "{{count}} items",
     "submit": "Submit",
     "time": "Time",
-    "id": "ID"
+    "id": "ID",
+    "testConnection": "Test Connection"
   },
   "auth": {
     "login": "Login",
@@ -407,7 +408,13 @@
     "systemInfo": "System Information",
     "version": "Version",
     "environment": "Environment",
-    "uptime": "Uptime"
+    "uptime": "Uptime",
+    "approvalChainNamePlaceholder": "e.g. High-priority work order approval",
+    "leaveBlankForAll": "Leave blank for all",
+    "role": "Role",
+    "approverId": "Approver ID",
+    "getFromFeishu": "Get from Feishu approval management",
+    "noApprovalChain": "No approval chain templates. Click \"Add Template\" to create one."
   },
   "integration": {
     "dingtalk": "DingTalk Robot",

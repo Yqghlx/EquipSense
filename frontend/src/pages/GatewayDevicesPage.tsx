@@ -6,6 +6,7 @@
  */
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Plus,
   Trash2,
@@ -55,6 +56,7 @@ const protocolMeta: Record<string, { label: string; icon: React.ReactNode; color
 };
 
 export default function GatewayDevicesPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: devices, isLoading, refetch } = useGatewayDevices();
   const deleteMutation = useDeleteGatewayDevice();
@@ -215,7 +217,7 @@ export default function GatewayDevicesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            title="测试连接"
+                            title={t("common.testConnection", "测试连接")}
                             onClick={() => runTestConnection(device.protocol, device.connectionConfig)}
                           >
                             <RefreshCw className="h-4 w-4" />
@@ -224,7 +226,7 @@ export default function GatewayDevicesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            title="编辑"
+                            title={t("common.edit", "编辑")}
                             onClick={() =>
                               setEditTarget({
                                 id: device.id,
@@ -241,7 +243,7 @@ export default function GatewayDevicesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-destructive hover:text-destructive"
-                            title="删除"
+                            title={t("common.delete", "删除")}
                             onClick={() => setDeleteTarget(device.id)}
                           >
                             <Trash2 className="h-4 w-4" />
