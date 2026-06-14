@@ -283,6 +283,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<EquipAI.Application.Evaluation.EvaluationService>();
         // FMEA 故障模式库（Phase 5 新增）
         services.AddScoped<EquipAI.Application.Fmea.FmeaService>();
+        // 趋势预警分析（Phase 5 新增）
+        services.AddScoped<EquipAI.Application.Analysis.TrendAnalysisService>();
     }
 
     /// <summary>
