@@ -35,7 +35,7 @@ export async function gotoAlertRules(page: Page): Promise<void> {
  */
 export async function gotoAlertCenter(page: Page): Promise<void> {
   await page.goto(`${BASE_URL}/alerts`);
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(1000);
 }
 
@@ -46,7 +46,7 @@ export async function gotoAlertCenter(page: Page): Promise<void> {
  */
 export async function gotoKnowledge(page: Page): Promise<void> {
   await page.goto(`${BASE_URL}/knowledge`);
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(1000);
 }
 
@@ -57,32 +57,38 @@ export async function gotoKnowledge(page: Page): Promise<void> {
  */
 export async function gotoRegister(page: Page): Promise<void> {
   await page.goto(`${BASE_URL}/register`);
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(1000);
 }
 
 /**
  * 直接跳转到设备详情页
  *
+ * 注意：使用 domcontentloaded 而非 networkidle。
+ * 原因：设备详情页通过 useSignalR Hook 建立长连接 WebSocket，
+ * networkidle（要求 500ms 内无网络活动）会永远无法触发，导致测试超时。
+ *
  * @param page - Playwright Page 实例
  * @param deviceId - 设备 UUID
  */
 export async function gotoDeviceDetail(page: Page, deviceId: string): Promise<void> {
   await page.goto(`${BASE_URL}/devices/${deviceId}`);
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(1000);
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(1500);
 }
 
 /**
  * 直接跳转到工单详情页
+ *
+ * 注意：使用 domcontentloaded 而非 networkidle（同 gotoDeviceDetail，因 SignalR 长连接）。
  *
  * @param page - Playwright Page 实例
  * @param woId - 工单 UUID
  */
 export async function gotoWorkOrderDetail(page: Page, woId: string): Promise<void> {
   await page.goto(`${BASE_URL}/work-orders/${woId}`);
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(1000);
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(1500);
 }
 
 /**

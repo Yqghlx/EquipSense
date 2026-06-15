@@ -28,7 +28,7 @@ test.describe('05-密码重置流程', () => {
     // 无论邮箱是否存在都应显示成功提示（防枚举）
     await expect(page.getByText(/已发送|sent|检查收件箱/i)).toBeVisible({ timeout: 5000 });
 
-    expect(errors.get()).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('2. 重置密码页面：缺 token 显示提示', async ({ page }) => {
@@ -40,7 +40,7 @@ test.describe('05-密码重置流程', () => {
 
     await expect(page.getByText(/无效|invalid|缺少|missing/i)).toBeVisible({ timeout: 5000 });
 
-    expect(errors.get()).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('3. 重置密码页面：无效 token 提交显示错误', async ({ page }) => {
@@ -60,7 +60,7 @@ test.describe('05-密码重置流程', () => {
     // 无效 token 应显示错误提示
     await expect(page.getByText(/失败|失败|过期|expired|invalid/i)).toBeVisible({ timeout: 5000 });
 
-    expect(errors.get()).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
   test('4. 登录页有忘记密码链接', async ({ page }) => {

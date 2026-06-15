@@ -215,18 +215,19 @@ test.describe('02-审批链', () => {
   test('8. 审批人角色不匹配应无法审批', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 先清除浏览器认证状态，否则已登录状态下 /login 会被重定向到 /dashboard
-    await page.evaluate(() => localStorage.clear());
+    // 先清除浏览器认证状态（sessionStorage，与 authStore 实现一致），
+    // 否则已登录状态下 /login 会被同步重定向到 /dashboard
+    await page.evaluate(() => { sessionStorage.clear(); localStorage.clear(); });
 
     // 使用 operator 角色登录（不应有审批权限）
     await loginAs(page, 'operator');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // 创建工单并导航详情
     const wo = await createTestWorkOrder(page, 'E2E-角色限制');
     const woId = (wo as Record<string, unknown>).id as string;
     await page.goto(`${BASE_URL}/work-orders/${woId}`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
     // 验证通过/驳回按钮不可见或禁用

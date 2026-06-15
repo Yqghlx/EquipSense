@@ -28,8 +28,8 @@ test.describe('02-待审批页面', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1500);
 
-    // 验证页面标题（实际页面标题为"待审批"）
-    await expect(page.getByText('待审批')).toBeVisible({ timeout: 5000 });
+    // 验证页面标题（h1 标题，避免与侧边栏链接/卡片文字歧义）
+    await expect(page.getByRole('heading', { name: '待审批' })).toBeVisible({ timeout: 5000 });
 
     // 验证表格存在
     const table = page.locator('table');

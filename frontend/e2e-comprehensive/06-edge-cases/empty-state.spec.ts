@@ -213,16 +213,17 @@ test.describe('空数据友好提示', () => {
   test('设备详情无遥测数据', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 创建测试设备（无遥测数据）
+    // 创建测试设备（无遥测数据）— 使用唯一编码避免跨运行冲突
     const token = await getToken(page);
+    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const dev = await createDeviceViaAPI(page, token, {
-      deviceCode: 'NO-TELEMETRY-TEST',
+      deviceCode: `NO-TELEMETRY-${suffix}`,
       name: '无遥测数据设备',
     });
 
-    // 导航到设备详情页
+    // 导航到设备详情页（domcontentloaded，避免 SignalR 长连接阻塞 networkidle）
     await page.goto(`${BASE_URL}/devices/${dev.id}`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
     // 验证遥测数据区域有"无数据"提示
@@ -255,13 +256,13 @@ test.describe('空数据友好提示', () => {
     // 创建测试设备（无告警）
     const token = await getToken(page);
     const dev = await createDeviceViaAPI(page, token, {
-      deviceCode: 'NO-ALERT-TEST',
+      deviceCode: `NO-ALERT-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
       name: '无告警设备',
     });
 
-    // 导航到设备详情页
+    // 导航到设备详情页（domcontentloaded，避免 SignalR 长连接阻塞 networkidle）
     await page.goto(`${BASE_URL}/devices/${dev.id}`);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
 
     // 验证告警区域有"无告警"提示
@@ -304,9 +305,9 @@ test.describe('空数据友好提示', () => {
     if (woResp.ok()) {
       const wo = await woResp.json();
 
-      // 导航到工单详情页
+      // 导航到工单详情页（domcontentloaded，避免 SignalR 长连接阻塞 networkidle）
       await page.goto(`${BASE_URL}/work-orders/${wo.id}`);
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
       await page.waitForTimeout(2000);
 
       // 验证无关联告警提示

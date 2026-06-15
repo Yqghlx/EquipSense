@@ -39,11 +39,11 @@ test.describe('05-告警规则启停用', () => {
       expect(stateAfter).not.toBe(stateBefore);
     }
 
-    expect(errors.get()).toEqual([]);
+    expect(errors).toEqual([]);
   });
 
-  test('2. toggle API 端点正确切换状态', async ({ request }) => {
-    const token = await getToken();
+  test('2. toggle API 端点正确切换状态', async ({ page, request }) => {
+    const token = await getToken(page);
     expect(token).toBeTruthy();
 
     // 获取第一条规则
