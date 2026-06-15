@@ -8,7 +8,7 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Users, Shield } from 'lucide-react';
+import { Users, Shield, UserPlus } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -62,6 +62,11 @@ export default function UsersPage() {
             {t('users.description', '管理本租户的用户账户、角色和启用状态')}
           </p>
         </div>
+        {/* 创建用户入口 — 点击打开 CreateUserDialog。SystemAdmin 专属（页面本身已受路由权限保护） */}
+        <Button onClick={() => setCreateOpen(true)}>
+          <UserPlus className="h-4 w-4" />
+          {t('users.createUser', '创建用户')}
+        </Button>
         <CreateUserDialog
           open={createOpen}
           onOpenChange={setCreateOpen}

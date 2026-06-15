@@ -576,4 +576,38 @@ public class WorkOrderService : IWorkOrderService
             CreatedAt = workOrder.CreatedAt
         };
     }
+
+    /// <inheritdoc />
+    public async Task<List<WorkOrderLogDto>> GetLogsAsync(
+        Guid tenantId, Guid workOrderId, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // WorkOrderLog 本身无 tenant_id 字段，通过关联的 WorkOrder 做租户隔离：
+        // 先确认该工单属于当前租户，再查其日志，按时间正序（先发生的在前）
+        var belongsToTenant = await dbContext.WorkOrders
+            .AnyAsync(w => w.Id == workOrderId && w.TenantId == tenantId, ct);
+        if (!belongsToTenant)
+        {
+            return new List<WorkOrderLogDto>();
+        }
+
+        var logs = await dbContext.WorkOrderLogs
+            .Where(l => l.WorkOrderId == workOrderId)
+            .OrderBy(l => l.CreatedAt)
+            .ToListAsync(ct);
+
+        return logs.Select(l => new WorkOrderLogDto
+        {
+            Id = l.Id,
+            WorkOrderId = l.WorkOrderId,
+            Action = l.Action.ToString(),
+            OldStatus = l.OldStatus,
+            NewStatus = l.NewStatus,
+            OperatorId = l.OperatorId,
+            Note = l.Note,
+            CreatedAt = l.CreatedAt,
+        }).ToList();
+    }
 }

@@ -250,6 +250,23 @@ public class WorkOrdersController : ControllerBase
     {
         return Ok(await _approvalChainService.GetApprovalsAsync(_tenantContext.TenantId, id));
     }
+
+    /// <summary>
+    /// 获取工单流转日志（状态变更历史）
+    ///
+    /// 返回该工单的所有状态变更和操作记录，按时间正序排列。
+    /// 前端工单详情页用此接口展示「操作记录 / 流转历史」时间线。
+    /// </summary>
+    [HttpGet("{id:guid}/logs")]
+    [RequirePermission("workorder:read")]
+    [ProducesResponseType(typeof(List<WorkOrderLogDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<WorkOrderLogDto>>> GetLogs(Guid id)
+    {
+        // 直接查 WorkOrderLogs DbSet（带租户全局过滤器），无需额外 Service 方法
+        var tenantId = _tenantContext.TenantId;
+        var logs = await _workOrderService.GetLogsAsync(tenantId, id);
+        return Ok(logs);
+    }
 }
 
 /// <summary>

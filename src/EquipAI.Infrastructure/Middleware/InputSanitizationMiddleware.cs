@@ -72,8 +72,13 @@ public partial class InputSanitizationMiddleware
 
     /// <summary>
     /// 恶意内容正则表达式（源生成器编译，运行时零开销）
-    /// 匹配：&lt;script 标签、on* 事件处理器赋值、javascript: 协议
+    /// 匹配：&lt;script 标签、HTML on* 事件处理器赋值（onclick=、onerror= 等）、javascript: 协议
+    ///
+    /// 注意：on\w+\s*= 会误伤合法的 query 参数（如 availableOnly=true、isEnabled=false），
+    /// 因为参数名含 "on" 子串。这里限定为已知的事件处理器前缀，避免误报。
     /// </summary>
-    [GeneratedRegex(@"<\s*script|on\w+\s*=|javascript\s*:", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+    [GeneratedRegex(
+        @"<\s*script|on(click|load|error|mouse\w*|key\w*|change|submit|focus|blur|toggle|input|drag\w*|drop|scroll|resize|contextmenu|dblclick|wheel|touch\w*|pointer\w*|pointerdown|pointerup|pointermove|animation\w*|transitionend|copy|cut|paste|select|abort|canplay|playing|seeking|seeked|stalled|suspend|timeupdate|volumechange|waiting|hashchange|popstate|unload|beforeunload)\s*=|javascript\s*:",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex MaliciousPattern();
 }

@@ -26,4 +26,9 @@ public interface IWorkOrderService
     /// 若无匹配的审批链模板，则直接走原来的 Complete 流程
     /// </summary>
     Task<WorkOrderDto> SubmitAsync(Guid tenantId, Guid id, CompleteWorkOrderRequest request, Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// 获取工单的流转日志（状态变更历史），按时间正序排列
+    /// </summary>
+    Task<List<WorkOrderLogDto>> GetLogsAsync(Guid tenantId, Guid workOrderId, CancellationToken ct = default);
 }
