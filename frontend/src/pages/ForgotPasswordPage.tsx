@@ -81,7 +81,7 @@ export default function ForgotPasswordPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">{t('auth.email', '邮箱')}</Label>
-            <Input id="email" type="email" {...register('email')} placeholder="you@example.com" />
+            <Input id="email" type="email" {...register('email')} placeholder={t('auth.emailPlaceholder', '请输入邮箱 you@example.com')} />
             {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
           </div>
           <Button type="submit" className="w-full" disabled={loading}>

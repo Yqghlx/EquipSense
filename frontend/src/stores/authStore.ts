@@ -23,10 +23,32 @@ interface AuthState {
   loadFromStorage: () => void;
 }
 
+/**
+ * 从 sessionStorage 同步恢复认证状态（模块加载时立即执行）
+ *
+ * 关键修复：必须在 store 创建时同步调用，而非在 App.tsx 的 useEffect 中调用。
+ * 原因：React Router 在首次渲染时就会评估 AuthGuard，若此时 isAuthenticated=false，
+ * 会立即重定向到 /login（然后又因已认证跳回 /dashboard），导致刷新或直接访问
+ * 任意业务页面 URL 时都落到 /dashboard，懒加载子页面永远无法直接访问。
+ */
+function loadFromStorageSync(): { token: string | null; user: UserInfo | null; isAuthenticated: boolean } {
+  if (typeof window === 'undefined') return { token: null, user: null, isAuthenticated: false };
+  const token = sessionStorage.getItem('token');
+  const userStr = sessionStorage.getItem('user');
+  if (token && userStr) {
+    try {
+      const user = JSON.parse(userStr) as UserInfo;
+      return { token, user, isAuthenticated: true };
+    } catch {
+      sessionStorage.removeItem('token');
+      sessionStorage.removeItem('user');
+    }
+  }
+  return { token: null, user: null, isAuthenticated: false };
+}
+
 export const useAuthStore = create<AuthState>((set) => ({
-  token: null,
-  user: null,
-  isAuthenticated: false,
+  ...loadFromStorageSync(),
 
   setAuth: (token, user) => {
     sessionStorage.setItem('token', token);
@@ -41,6 +63,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   loadFromStorage: () => {
+    // 模块加载时已同步初始化，这里仅做幂等兜底（如外部清空 sessionStorage 后重新恢复）
     const token = sessionStorage.getItem('token');
     const userStr = sessionStorage.getItem('user');
     if (token && userStr) {
@@ -50,7 +73,10 @@ export const useAuthStore = create<AuthState>((set) => ({
       } catch {
         sessionStorage.removeItem('token');
         sessionStorage.removeItem('user');
+        set({ token: null, user: null, isAuthenticated: false });
       }
+    } else {
+      set({ token: null, user: null, isAuthenticated: false });
     }
   },
 }));
