@@ -122,7 +122,12 @@ public class InMemoryEventBus : IEventBus, IDisposable
                 try
                 {
                     var handler = scope.ServiceProvider.GetRequiredService(handlerType);
-                    var handleMethod = handlerType.GetMethod("HandleAsync");
+                    // 解析 HandleAsync 方法时需指定参数类型，避免多接口实现的处理器
+                    // （如 WorkOrderNotificationHandler 同时实现两个 IEventHandler<> 接口）
+                    // 触发 AmbiguousMatchException
+                    var handleMethod = handlerType.GetMethod(
+                        "HandleAsync",
+                        new[] { eventType, typeof(CancellationToken) });
                     if (handleMethod != null)
                     {
                         var task = (Task?)handleMethod.Invoke(handler, new object[] { integrationEvent, _cts.Token });

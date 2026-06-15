@@ -107,11 +107,18 @@ public class RootCauseAnalysisEngine : IAnalysisService
             }
             else
             {
-                status = AnalysisStatus.Failed;
-                rootCause = $"LLM 分析失败：{result.ErrorMessage}";
-                suggestion = "请人工排查";
-                confidence = 0.0;
+                // LLM 不可用时降级为通用经验性诊断（不把 API 错误暴露给用户）
+                // 场景：未配置 LLM_API_KEY、API Key 失效、网络不通等
+                level = AnalysisLevel.L2;
+                status = AnalysisStatus.Completed;
+                rootCause = $"指标 {metric} 当前值 {value:F2} 超出告警阈值，可能存在设备异常。" +
+                            (baseline != null
+                                ? $"历史均值 {baseline.AvgValue:F2}，当前偏离显著。"
+                                : "暂无足够历史数据做统计分析，建议人工排查。");
+                suggestion = "建议：1) 检查设备运行参数是否正常；2) 排查传感器是否故障；3) 联系维保人员现场检查";
+                confidence = 0.3; // 低置信度（通用经验，非精确诊断）
                 rawResponse = null;
+                _logger?.LogWarning("LLM 诊断失败，降级为通用经验诊断: {Error}", result.ErrorMessage);
             }
         }
 

@@ -53,12 +53,17 @@ public class BusinessMetricsCollector : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 活跃告警数（按严重级别分组）
-        var activeAlerts = await db.Alerts
+        // 注意：EF Core 无法翻译枚举 ToString()，先查到内存再分组
+        var activeAlertsRaw = await db.Alerts
             .IgnoreQueryFilters()
             .Where(a => a.Status == AlertStatus.Active)
+            .Select(a => new { a.Severity })
+            .ToListAsync();
+
+        var activeAlerts = activeAlertsRaw
             .GroupBy(a => a.Severity.ToString())
             .Select(g => new { Severity = g.Key, Count = g.Count() })
-            .ToListAsync();
+            .ToList();
 
         // 将上一次存在但本次不存在的标签归零
         var currentAlertLabels = activeAlerts.Select(g => g.Severity).ToHashSet();
@@ -74,11 +79,16 @@ public class BusinessMetricsCollector : BackgroundService
         }
 
         // 工单数（按状态分组）
-        var workOrders = await db.WorkOrders
+        // 注意：同上，EF Core 无法翻译枚举 ToString()，先查内存再分组
+        var workOrdersRaw = await db.WorkOrders
             .IgnoreQueryFilters()
+            .Select(w => new { w.Status })
+            .ToListAsync();
+
+        var workOrders = workOrdersRaw
             .GroupBy(w => w.Status.ToString())
             .Select(g => new { Status = g.Key, Count = g.Count() })
-            .ToListAsync();
+            .ToList();
 
         var currentWoLabels = workOrders.Select(g => g.Status).ToHashSet();
         foreach (var old in _lastWorkOrderLabels.Except(currentWoLabels))
