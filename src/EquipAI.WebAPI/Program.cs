@@ -123,6 +123,8 @@ try
     builder.Services.AddHostedService<BusinessMetricsCollector>();
     // 网关心跳监控 — 每 30 秒检查超时网关并标记 offline
     builder.Services.AddHostedService<EquipAI.WebAPI.Services.GatewayHeartbeatMonitor>();
+    // 设备状态监控 — 每 30 秒扫描 LastSeenAt 超时设备标记 offline（配合 TelemetryEventHandler 的上线逻辑）
+    builder.Services.AddHostedService<EquipAI.WebAPI.Services.DeviceStatusMonitor>();
 
     // CORS：允许前端域名携带凭据（SignalR WebSocket 需要 AllowCredentials）
     // 从配置中读取允许的域名列表，未配置时使用默认值（仅开发/测试环境有效）

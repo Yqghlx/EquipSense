@@ -93,6 +93,12 @@ public class Device : BaseEntity
     public DeviceStatus Status { get; set; } = DeviceStatus.Offline;
 
     /// <summary>
+    /// 最近一次收到该设备遥测数据的时间（UTC）
+    /// 由 TelemetryEventHandler 在收到数据时更新；DeviceStatusMonitor 据此判定是否超时
+    /// </summary>
+    public DateTime? LastSeenAt { get; set; }
+
+    /// <summary>
     /// 标签列表，用于设备分类和筛选
     /// </summary>
     public List<string> Tags { get; set; } = [];

@@ -33,7 +33,9 @@ public class WorkOrderAnalysisHandler : IEventHandler<AnalysisCompletedEvent>
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 查找与该告警关联的活跃工单（未关闭、未取消）
+        // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让查询返回 null
         var workOrder = await dbContext.WorkOrders
+            .IgnoreQueryFilters()
             .Where(wo => wo.AlertId == @event.AlertId
                 && wo.Status != WorkOrderStatus.Closed
                 && wo.Status != WorkOrderStatus.Cancelled)

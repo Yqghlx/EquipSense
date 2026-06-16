@@ -73,11 +73,21 @@ class Program
 
         // 连接 MQTT
         using var mqttClient = new MqttFactory().CreateMqttClient();
-        var connectOptions = new MqttClientOptionsBuilder()
+        var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(options.BrokerHost, options.Port)
             .WithClientId($"EquipAI-Sim-{Guid.NewGuid():N}")
-            .WithCleanSession(true)
-            .Build();
+            .WithCleanSession(true);
+
+        // 生产环境 mosquitto 禁用匿名访问，必须提供凭证
+        // 也支持从环境变量 SIM_MQTT_USERNAME / SIM_MQTT_PASSWORD 读取，避免命令行暴露密码
+        var mqttUser = options.MqttUsername ?? Environment.GetEnvironmentVariable("SIM_MQTT_USERNAME");
+        var mqttPass = options.MqttPassword ?? Environment.GetEnvironmentVariable("SIM_MQTT_PASSWORD");
+        if (!string.IsNullOrEmpty(mqttUser))
+        {
+            builder = builder.WithCredentials(mqttUser, mqttPass ?? string.Empty);
+        }
+
+        var connectOptions = builder.Build();
 
         Console.WriteLine($"[信息] 连接 MQTT {options.BrokerHost}:{options.Port}...");
         await mqttClient.ConnectAsync(connectOptions, ct);
@@ -247,6 +257,10 @@ class Program
                 case "--port" or "-p" when i + 1 < args.Length:
                     if (int.TryParse(args[++i], out var port)) options.Port = port;
                     break;
+                case "--mqtt-username" when i + 1 < args.Length:
+                    options.MqttUsername = args[++i]; break;
+                case "--mqtt-password" when i + 1 < args.Length:
+                    options.MqttPassword = args[++i]; break;
                 case "--tenant" or "-t" when i + 1 < args.Length:
                     options.TenantId = args[++i]; break;
                 case "--device-code" when i + 1 < args.Length:
@@ -314,6 +328,10 @@ internal class SimulatorOptions
 {
     public string BrokerHost { get; set; } = "localhost";
     public int Port { get; set; } = 1883;
+    /// <summary>MQTT 用户名（生产环境 mosquitto 禁用匿名访问，必须配置）</summary>
+    public string? MqttUsername { get; set; }
+    /// <summary>MQTT 密码（生产环境 mosquitto 禁用匿名访问，必须配置）</summary>
+    public string? MqttPassword { get; set; }
     public string TenantId { get; set; } = "11111111-1111-1111-1111-111111111111";
     public string DeviceCode { get; set; } = "AC-001";
 

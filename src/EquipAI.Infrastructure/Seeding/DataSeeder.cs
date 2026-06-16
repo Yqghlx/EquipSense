@@ -51,6 +51,11 @@ public class DataSeeder
         // 兜底：确保数据库已创建（新数据库场景，无迁移历史时直接创建）
         await _dbContext.Database.EnsureCreatedAsync();
 
+        // 数据修复：早期版本（v1.3.0 前）的种子告警规则硬编码 device_type='空压机'，
+        // 导致非空压机设备永远不触发告警。已部署的旧库需要一次性迁移到通用规则（device_type=null）。
+        // 新部署的库不受影响（SeedSampleDeviceAndAlertRulesAsync 已用 null）
+        await MigrateLegacyAirCompressorRulesToGenericAsync();
+
         await SeedTenantsAsync();
         await SeedAdminUserAsync();
         await SeedDeviceTypeTemplatesAsync();
@@ -59,6 +64,31 @@ public class DataSeeder
         await SeedFmeaLibraryAsync();
 
         _logger.LogInformation("数据库种子数据初始化完成");
+    }
+
+    /// <summary>
+    /// <summary>
+    /// 数据迁移：把 v1.3.0 前硬编码 device_type='空压机' 的种子告警规则改为通用规则（device_type=null）
+    ///
+    /// 背景：早期种子数据把所有预置告警规则（振动/温度/压力/电流）绑定到 device_type='空压机'，
+    /// 但 AlertEvaluationService 的查询是 `WHERE device_type IS NULL OR device_type = @current_device_type`，
+    /// 导致用户在前端创建 type='电机' 或 'motor' 的设备时，即使指标值超阈值也永远不触发告警。
+    ///
+    /// 此迁移在 startup 时执行一次，幂等（已迁移的库不会重复执行）。
+    /// </summary>
+    private async Task MigrateLegacyAirCompressorRulesToGenericAsync()
+    {
+        var affected = await _dbContext.AlertRules
+            .IgnoreQueryFilters()
+            .Where(r => r.DeviceType == "空压机")
+            .ExecuteUpdateAsync(s => s.SetProperty(r => r.DeviceType, (string?)null));
+
+        if (affected > 0)
+        {
+            _logger.LogInformation(
+                "已将 {Count} 条历史种子规则从 device_type='空压机' 迁移为通用规则（device_type=null）",
+                affected);
+        }
     }
 
     /// <summary>
@@ -381,10 +411,11 @@ public class DataSeeder
             await _dbContext.SaveChangesAsync();
         }
 
-        // 2. 提取空压机模板的 DefaultAlarmRules 到 alert_rules 表（若尚无空压机规则）
+        // 2. 提取空压机模板的 DefaultAlarmRules 到 alert_rules 表（若尚无通用告警规则）
+        // 注意：种子规则 DeviceType=null（通用），按 metric 维度去重即可
         var hasAirCompressorRules = await _dbContext.AlertRules
             .IgnoreQueryFilters()
-            .AnyAsync(r => r.TenantId == DefaultTenantId && r.DeviceType == "空压机");
+            .AnyAsync(r => r.TenantId == DefaultTenantId && r.DeviceType == null);
 
         if (hasAirCompressorRules)
             return;
@@ -442,7 +473,11 @@ public class DataSeeder
         {
             TenantId = DefaultTenantId,
             Name = name,
-            DeviceType = "空压机",
+            // DeviceType=null 让规则成为「通用规则」，匹配任意设备类型
+            // 设计权衡：空压机的振动/温度阈值参考 ISO 10816 / 一般机械安全工况，对其他旋转设备（电机、泵、风机）大体适用。
+            // 若需特定设备的精细阈值，可由用户在前端新建 device_type 专用规则覆盖。
+            // 此前硬编码 "空压机" 会导致用户建非空压机设备时告警永不触发（CLAUDE.md 误标"已完成"的真实 bug）。
+            DeviceType = null,
             DeviceId = null,
             Metric = metric,
             RuleType = Enum.TryParse<RuleType>(ruleTypeStr, ignoreCase: true, out var rt) ? rt : RuleType.Threshold,

@@ -353,9 +353,9 @@ Docker Compose 生产环境包含完整监控栈：
 - 前端 API 客户端：`frontend/src/lib/api.ts`
 - 前端 SignalR 单例：`frontend/src/lib/signalr.ts`
 
-## 实现阶段核心设计原则
+## 核心设计原则（已落地）
 
-1. **单体优先** — Phase 1 模块化单体 + Docker Compose，不拆微服务
+1. **单体优先** — 模块化单体 + Docker Compose，模块间通过 `IEventBus` 解耦，不拆微服务
 2. **Day 1 多租户** — 所有业务表从第一条建表语句就有 `tenant_id`，EF Core 全局查询过滤器
 3. **时序窄表** — `device_telemetry` 一行一个指标，新增指标不改 schema
 4. **AI 四级自动降级** — L1 LLM → L2 规则 → L3 统计 → L4 ML.NET，数据质量评分影响分析级别和置信度乘数
@@ -365,10 +365,35 @@ Docker Compose 生产环境包含完整监控栈：
 
 ## 开发路线图
 
-- **Phase 1（当前）**：核心闭环 — 设备 CRUD、MQTT 遥测、告警引擎、AI 根因、工单、前端完整页面、Docker 部署
-- **Phase 2**：真实接入 — OPC UA / Modbus 适配器、边缘网关断网保护、知识沉淀闭环
-- **Phase 3**：产品化 — 工单完整工作流、钉钉/飞书集成、PWA、多租户 SaaS 完善
-- **Phase 4**：智能化 — ML.NET 异常检测、安全加固、压力测试、v1.0 发布
+> ⚠️ 历史规划（Phase 1-4）已全部完成，下面是实际进度，请勿再当作 TODO 参考。当前版本 v1.2.0（详见 `CHANGELOG.md`），v1.3.0 进行中。
+
+### 已完成（原 Phase 1-4 全部落地）
+
+- **核心闭环**：设备 CRUD、MQTT 遥测、告警引擎、AI 四级降级根因、工单生命周期、22 个前端页面、Docker 全栈部署
+- **协议接入**：`EquipAI.EdgeGateway/Protocols/` 下 `OpcUaAdapter` / `ModbusTcpAdapter` / `ModbusRtuAdapter` 三种适配器
+- **断网保护**：`Persistence/SqliteBufferStore` + `Pipeline/LocalBuffer`（环形队列 10000）+ `CloudUploader`（断网缓存 7 天）
+- **知识沉淀闭环**：`PendingRuleConfiguration` + AI 候选规则写入 pending_rules，专家审核后移入 knowledge_rules
+- **工单完整工作流**：多级审批链（`ApprovalChainService` + 三级模板回退）+ 工单日志
+- **可插拔集成**：`WorkOrders/Integration/` 下 `DingTalkIntegration` / `FeishuIntegration` / `EamIntegration` / `WebhookIntegration` 四种
+- **PWA + Web Push**：`usePushNotifications` hook + `PushNotificationService` + VAPID 配置
+- **ML.NET 异常检测**：`Analysis/MlAnomalyDetectionService`（L4 级别）
+- **安全加固**：JWT + Refresh Token + HttpOnly Cookie + MFA/TOTP（RFC 6238）+ 强密码 + IP 限速 + 输入消毒 + CSP/HSTS 安全头
+- **可观测性**：Serilog + Seq + Prometheus + Grafana + AlertManager + OpenTelemetry 分布式追踪
+- **运维**：`docker/backup.sh`（pg_dump + Redis 备份 + S3 同步 + 完整性校验 + webhook 通知）
+
+### v1.3.0 进行中
+
+- MFA/TOTP 双因素认证全流程（设置 → 两阶段登录 → 禁用）
+- HttpOnly Cookie 认证迁移（access_token + refresh_token）
+- 设备批量导入 CSV/JSON
+- Dashboard 实时推送（SignalR OnWorkOrderCreated/OnWorkOrderStatusChanged）
+
+### 下一步候选（按工程价值）
+
+- **数据准确性回归**：模拟器跑真实数据流，验证 Dashboard 聚合（设备可用率、OEE、SLA、告警级别分布）在真实流量下是否正确
+- **真实协议联调**：用真实 PLC/OPC UA 服务器对接 `OpcUaAdapter`，验证协议适配器在工业现场可用
+- **压力测试**：`tests/load/` 下 k6 脚本（API 读、MQTT 发布、遥测写入）跑真实压测，找出吞吐瓶颈
+- **CI 自动化**：当前 `.github/workflows/ci.yml` 仅 `workflow_dispatch` 手动触发，可考虑打开 push/PR 自动触发
 
 ## RBAC 权限矩阵
 

@@ -105,6 +105,10 @@ public class DeviceConfiguration : IEntityTypeConfiguration<Device>
             .HasMaxLength(20)
             .IsRequired();
 
+        // 最近一次收到遥测的时间，用于在线检测（DeviceStatusMonitor）
+        builder.Property(e => e.LastSeenAt)
+            .HasColumnName("last_seen_at");
+
         // text[] 数组 — Npgsql 原生支持 PostgreSQL 数组类型
         builder.Property(e => e.Tags)
             .HasColumnName("tags");
