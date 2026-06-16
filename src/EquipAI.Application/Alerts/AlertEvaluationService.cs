@@ -101,7 +101,13 @@ public class AlertEvaluationService : IAlertEvaluationService
             BusinessMetrics.AlertEvaluationDuration.Observe(sw.Elapsed.TotalMilliseconds);
 
             if (!triggered)
+            {
+                // 指标回到阈值内：检查是否有该设备该指标该规则的 Active 告警，自动恢复
+                // 设计目的：避免 Active 告警无限累积。运维若已介入处置，告警状态会被改成 Acknowledged，
+                // 不会被这里自动 Resolve（只处理 Status=Active 的告警）。
+                await TryAutoResolveAsync(dbContext, tenantId, deviceId, metric, rule.Id, cancellationToken);
                 continue;
+            }
 
             _logger.LogInformation("告警规则 {RuleName} 已触发（设备: {DeviceId}, 指标: {Metric}, 值: {Value}）",
                 rule.Name, deviceId, metric, value);
@@ -209,6 +215,44 @@ public class AlertEvaluationService : IAlertEvaluationService
         await dbContext.SaveChangesAsync();
 
         _logger.LogDebug("告警已更新: {AlertCode}（新值: {Value}）", existingAlert.AlertCode, value);
+    }
+
+    /// <summary>
+    /// 自动恢复：当指标回到阈值内（评估未触发）时，把对应规则的 Active 告警标记为 Resolved。
+    ///
+    /// 设计权衡：
+    /// - 只处理 Status=Active 的告警。Acknowledged 状态表示运维已介入，保留供后续追溯。
+    /// - 用 RuleId 精确匹配，避免误恢复其他规则的告警。
+    /// - 自动 Resolve 后发布 AlertTriggeredEvent？不需要 — 这里没有"新事件"，
+    ///   SignalR 推送通过 AlertStatusChanged 事件（如果需要）由调用方处理。
+    ///   目前先简单做 DB 更新 + 日志，前端通过轮询或下次跳转刷新看到状态变化。
+    /// </summary>
+    private async Task TryAutoResolveAsync(
+        AppDbContext dbContext, Guid tenantId, Guid deviceId, string metric, Guid ruleId,
+        CancellationToken ct)
+    {
+        // 查找该规则触发的、仍 Active 的告警（按 AlertId 倒序取最新一条，避免一次 Resolve 多条历史告警）
+        // IgnoreQueryFilters: 后台事件处理器无 HttpContext
+        var activeAlert = await dbContext.Alerts
+            .IgnoreQueryFilters()
+            .Where(a => a.TenantId == tenantId
+                && a.DeviceId == deviceId
+                && a.Metric == metric
+                && a.RuleId == ruleId
+                && a.Status == AlertStatus.Active)
+            .OrderByDescending(a => a.OccurredAt)
+            .FirstOrDefaultAsync(ct);
+
+        if (activeAlert == null)
+            return;
+
+        activeAlert.Status = AlertStatus.Resolved;
+        activeAlert.ResolvedAt = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "告警已自动恢复（指标回到阈值内）: AlertId={AlertId}, DeviceId={DeviceId}, Metric={Metric}",
+            activeAlert.Id, deviceId, metric);
     }
 
     /// <summary>
