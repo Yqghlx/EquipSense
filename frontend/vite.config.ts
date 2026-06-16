@@ -48,7 +48,7 @@ export default defineConfig({
               cacheName: 'api-cache',
               expiration: { maxEntries: 200, maxAgeSeconds: 60 * 10 },
               cacheableResponse: { statuses: [0, 200] },
-              fetchOptions: { credentials: 'include' as const },
+              fetchOptions: { credentials: 'include' },
             },
           },
           {

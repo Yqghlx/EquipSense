@@ -20,16 +20,16 @@ public class RbacService : IRbacService
         [
             // 设备管理（全部 CRUD）
             "device:create", "device:read", "device:update", "device:delete",
-            // 用户管理（全部 CRUD）
-            "user:create", "user:read", "user:update", "user:delete",
+            // 用户管理（全部 CRUD + 角色变更）
+            "user:create", "user:read", "user:update", "user:delete", "user:role",
             // 租户管理（全部 CRUD）
             "tenant:create", "tenant:read", "tenant:update", "tenant:delete",
-            // 告警管理（全部 CRUD）
-            "alert:create", "alert:read", "alert:update", "alert:delete", "alert:config",
-            // 工单管理（全部 CRUD）
+            // 告警管理（全部 CRUD + 确认）
+            "alert:create", "alert:read", "alert:update", "alert:delete", "alert:config", "alert:acknowledge",
+            // 工单管理（全部 CRUD + 全部状态流转）
             "workorder:create", "workorder:read", "workorder:update", "workorder:delete",
             "workorder:dispatch", "workorder:accept", "workorder:execute",
-            "workorder:close", "workorder:cancel",
+            "workorder:close", "workorder:cancel", "workorder:manage",
             // 知识库管理（全部 CRUD）
             "knowledge:create", "knowledge:read", "knowledge:update", "knowledge:delete", "knowledge:verify",
             // 报表
@@ -48,11 +48,11 @@ public class RbacService : IRbacService
             "device:read", "device:update",
             // 用户管理（只读）
             "user:read",
-            // 告警管理（读 + 更新 + 配置）
-            "alert:read", "alert:update", "alert:config",
-            // 工单管理（创建 + 读 + 更新 + 派工 + 接受）
+            // 告警管理（读 + 确认 + 更新 + 配置）
+            "alert:read", "alert:update", "alert:config", "alert:acknowledge",
+            // 工单管理（创建 + 读 + 更新 + 派工 + 接受 + 管理）
             "workorder:create", "workorder:read", "workorder:update",
-            "workorder:dispatch", "workorder:accept",
+            "workorder:dispatch", "workorder:accept", "workorder:manage",
             // 知识库管理（读 + 更新 + 验证）
             "knowledge:read", "knowledge:update", "knowledge:verify",
             // 报表（只读）

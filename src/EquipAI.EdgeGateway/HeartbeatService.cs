@@ -79,6 +79,17 @@ public class HeartbeatService : BackgroundService
             return false;
         }
 
+        // 防御性校验：HTTP header 必须是纯 ASCII
+        // .env 中若残留中文占位符（如「请修改为网关认证密钥」），HttpClient 抛 HttpRequestException
+        // 在此提前拦截，给出明确的错误提示而非每次心跳都堆栈异常
+        if (_options.AuthKey.Any(c => c > 127))
+        {
+            _logger.LogError(
+                "Gateway:AuthKey 含非 ASCII 字符（可能残留 .env 中文占位符），心跳已禁用。" +
+                "请在 docker/.env 设置一个纯英文/数字/符号的强密钥（≥32 字符），例如：openssl rand -hex 32");
+            return false;
+        }
+
         var client = _httpClientFactory.CreateClient("Backend");
         client.DefaultRequestHeaders.Clear();
         client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", _options.AuthKey);

@@ -104,13 +104,55 @@ public class DeviceImportService
         }
 
         // 使用事务保证一致性：设备插入 + 租户计数更新要么全成功要么全回滚
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
+        // ⚠️ 由于 DbContext 配置了 EnableRetryOnFailure（NpgsqlRetryingExecutionStrategy），
+        // 不能直接调 BeginTransactionAsync — 必须用 CreateExecutionStrategy().ExecuteAsync 包装整个事务体。
+        // 详见 https://learn.microsoft.com/ef/core/miscellaneous/connection-resiliency
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
 
+        await executionStrategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
+            try
+            {
+                await ExecuteImportInTransactionAsync(preview, result, tenantId, ct);
+                await transaction.CommitAsync(ct);
+            }
+            catch (Exception)
+            {
+                await transaction.RollbackAsync(ct);
+                throw;
+            }
+        });
+
+        // 审计日志（事务外执行，不影响导入结果）
         try
         {
-            // 租户设备配额检查（在事务内查询，防止并发导入超额）
-            var tenant = await _dbContext.UnfilteredSet<Tenant>()
-                .FirstOrDefaultAsync(t => t.Id == tenantId, ct);
+            await _auditLogService.LogFromContextAsync(
+                "DevicesImported", "Device", "",
+                $"批量导入设备：成功 {result.Imported} 台，跳过 {result.Skipped} 台，失败 {result.Failed} 台", ct);
+        }
+        catch (Exception ex)
+        {
+            // 审计日志写入失败不应影响导入结果
+            _logger.LogWarning(ex, "设备导入审计日志写入失败");
+        }
+
+        _logger.LogInformation(
+            "设备批量导入完成: Tenant={TenantId}, Imported={Imported}, Skipped={Skipped}, Failed={Failed}",
+            tenantId, result.Imported, result.Skipped, result.Failed);
+
+        return result;
+    }
+
+    /// <summary>
+    /// 在事务内执行导入逻辑（拆分以便配合 CreateExecutionStrategy 使用）
+    /// </summary>
+    private async Task ExecuteImportInTransactionAsync(
+        DeviceImportPreviewResult preview, ImportResult result, Guid tenantId, CancellationToken ct)
+    {
+        // 租户设备配额检查（在事务内查询，防止并发导入超额）
+        var tenant = await _dbContext.UnfilteredSet<Tenant>()
+            .FirstOrDefaultAsync(t => t.Id == tenantId, ct);
 
             if (tenant != null && tenant.MaxDevices > 0)
             {
@@ -126,8 +168,8 @@ public class DeviceImportService
                     });
                     result.Failed = preview.ValidCount;
                     result.Skipped = preview.ErrorCount;
-                    // 配额不足不需要回滚（无写入），直接返回
-                    return result;
+                    // 配额不足不需要回滚（无写入），直接返回；result 通过引用参数返回给调用方
+                    return;
                 }
             }
 
@@ -191,34 +233,6 @@ public class DeviceImportService
 
                 await _dbContext.SaveChangesAsync(ct);
             }
-
-            await transaction.CommitAsync(ct);
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync(ct);
-            _logger.LogError(ex, "设备批量导入事务失败，已回滚: Tenant={TenantId}", tenantId);
-            throw;
-        }
-
-        // 审计日志（事务外执行，不影响导入结果）
-        try
-        {
-            await _auditLogService.LogFromContextAsync(
-                "DevicesImported", "Device", "",
-                $"批量导入设备：成功 {result.Imported} 台，跳过 {result.Skipped} 台，失败 {result.Failed} 台", ct);
-        }
-        catch (Exception ex)
-        {
-            // 审计日志写入失败不应影响导入结果
-            _logger.LogWarning(ex, "设备导入审计日志写入失败");
-        }
-
-        _logger.LogInformation(
-            "设备批量导入完成: Tenant={TenantId}, Imported={Imported}, Skipped={Skipped}, Failed={Failed}",
-            tenantId, result.Imported, result.Skipped, result.Failed);
-
-        return result;
     }
 
     /// <summary>

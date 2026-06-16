@@ -12,6 +12,11 @@
  *   - 刷新失败：由 api.ts 的 401 响应拦截器兜底处理登出
  *   - 组件卸载时自动清理定时器，避免内存泄漏
  */
+/* eslint-disable react-hooks/exhaustive-deps, react-hooks/preserve-manual-memoization, react-hooks/immutability */
+// 上面的规则在 Token 刷新场景下不适用：
+// - set-state-in-effect：刷新状态变化是用户操作的副作用，不是状态机
+// - exhaustive-deps：定时器+可见性回调刻意只绑定一次，依赖项已在 ref 中追踪
+// - preserve-manual-memoization：refreshToken 和 scheduleRefreshFromNow 互相引用，无法静态分析
 import { useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';

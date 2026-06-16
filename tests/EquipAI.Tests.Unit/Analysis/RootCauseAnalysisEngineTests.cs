@@ -132,9 +132,10 @@ public class RootCauseAnalysisEngineTests
     }
 
     [Fact]
-    public async Task AnalyzeAsync_LLMFailure_ReturnsFailedStatus()
+    public async Task AnalyzeAsync_LLMFailure_DegradesToL2WithGenericDiagnosis()
     {
-        // L4、L2 都无结果，降级到 L1 但 LLM 失败
+        // L4、L2 都无结果，降级到 L1 但 LLM 失败 → 优雅降级为 L2 通用经验诊断（Status=Completed）
+        // 设计意图：不把 LLM API 错误（超时/Key 失效/未配置）暴露给用户，仍给出可执行的排查建议
         _mockDataQuality.Setup(d => d.CalculateScoreAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(0.5);
         _mockLLMService.Setup(l => l.AnalyzeAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
@@ -143,8 +144,15 @@ public class RootCauseAnalysisEngineTests
         var result = await _engine.AnalyzeAsync(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             "temperature", 75.0, null);
 
-        result.Status.Should().Be(AnalysisStatus.Failed);
-        result.Level.Should().Be(AnalysisLevel.L1);
+        // 不暴露 API 错误：状态保持 Completed，用户能看到通用建议
+        result.Status.Should().Be(AnalysisStatus.Completed);
+        // 降级到 L2（通用经验诊断）
+        result.Level.Should().Be(AnalysisLevel.L2);
+        // 低置信度（通用经验，非精确诊断）
+        result.Confidence.Should().Be(0.3);
+        // 诊断结论应包含指标名和当前值，便于人工判断
+        result.RootCause.Should().Contain("temperature");
+        result.RootCause.Should().Contain("75");
     }
 
     [Fact]

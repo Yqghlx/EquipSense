@@ -1,0 +1,222 @@
+{
+  "results": [
+    {
+      "page": "dashboard",
+      "url": "https://localhost:8443/dashboard",
+      "h1": "仪表盘",
+      "sample": "仪表盘 全局统计 12 总租户 11 活跃租户 9 试用租户 1 冻结租户 28 总设备 24 总用户 0 在线 25 活跃 63 待处理工单 0% 设备可用率 设备综合效率 (OEE) OEE = 可用率 × 性能 × 质量 综合 OEE 0% 可用率 0% 0/28 在线 性能 100% 产能达标率 质量 100% 无严重故障占比 工单状态分布 待派工 63 已完成 13 执行中 10 已关闭",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "devices",
+      "url": "https://localhost:8443/devices",
+      "h1": "设备管理",
+      "sample": "设备管理 导入 新建 状态 设备编码 设备名称 设备类型 状态 型号 操作 IMP-FINAL-1781541388 最终验证设备 motor device.Offline - IMP-FIX2-1781541336 导入设备B pump device.Offline - IMP-FIX-1781541336 导入设备A motor device.Offline - FUNC-DEV-178154",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "device-detail",
+      "error": "Page.goto: Timeout 20000ms exceeded.\nCall log:\n  - navigating to \"https://localhost:8443/devices/e144672b-efa8-4eca-86be-69c8a490e9a6\", waiting until \"networkidle\"\n"
+    },
+    {
+      "page": "device-setup",
+      "url": "https://localhost:8443/device-setup",
+      "h1": "设备接入向导",
+      "sample": "设备接入向导 1 选择协议 2 连接配置 3 数据点 4 确认保存 选择设备的通信协议类型 OPC UA 工业标准通信协议，适用于 PLC、SCADA 等设备 Modbus TCP 基于 TCP 的 Modbus 协议，适用于以太网连接的设备 Modbus RTU 基于串口的 Modbus 协议，适用于 RS-485 连接的设备 上一页 下一页",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "gateways",
+      "url": "https://localhost:8443/gateways",
+      "h1": "网关管理",
+      "sample": "网关管理 查看和管理所有已注册的边缘网关 刷新 gateway-001 在线 gateway-001 设备数 0 版本 1.0.0 地址 edgegateway:8081 最后心跳 6/16/2026, 12:47:56 AM 查看监控",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "alerts",
+      "url": "https://localhost:8443/alerts",
+      "h1": "告警中心",
+      "sample": "告警中心 导出 状态 级别 告警编码 设备名称 指标 当前值 级别 状态 触发时间 操作 ALT-RT-DEV-mqf8gkg7-temperature-20260615131233 7e68d7c6… temperature 99 alert.High alert.Resolved 6/15/2026, 9:12:33 PM ALT-E2E-ALERT-mqf7q32x8tyv-temperat",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "alert-rules",
+      "url": "https://localhost:8443/alert-rules",
+      "h1": "告警规则",
+      "sample": "告警规则 新建 名称 类型 指标 条件 级别 状态 操作 RT-RULE-mqf8gkg7 Threshold temperature alert.High 启用 PERM-RULE-1781528119394-lead Threshold temperature alert.Low 启用 电机电流过高 Threshold motor_current alert.High 启用 排气压力过低 Th",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "work-orders",
+      "url": "https://localhost:8443/work-orders",
+      "h1": "工单管理",
+      "sample": "工单管理 新建 状态 工单编码 标题 状态 优先级 创建时间 截止日期 WO-20260615-0102 APPR-WO-1781541388 已验收 Medium 6/16/2026, 12:36:28 AM - WO-20260615-0101 APPR-WO-1781541388 已验收 Medium 6/16/2026, 12:36:28 AM - WO-20260615-0100 FUN",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "work-order-detail",
+      "url": "https://localhost:8443/work-orders/74fd6726-7d1a-40bb-a173-976d1510e616",
+      "h1": "APPR-WO-1781541388",
+      "sample": "APPR-WO-1781541388 WO-20260615-0102 已验收 Medium 类型 Preventive 状态 已验收 派工人 00000000-0000-0000-0000-000000000000 截止日期 - 创建时间 6/16/2026, 12:36:28 AM 完成时间 6/16/2026, 12:36:28 AM 关闭 关联信息 解决措施 已完成，请审批 操作记录 暂无",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "work-order-reports",
+      "url": "https://localhost:8443/work-orders/reports",
+      "h1": "工单报表",
+      "sample": "工单报表 7 天 30 天 90 天 工单总数 102 平均完成时长 0.0 h SLA 达成率 0.0% 按状态分布 按类型分布 新建 / 完成趋势 新建 完成 SLA 达成率（按优先级） 暂无 SLA 数据",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "pending-approvals",
+      "url": "https://localhost:8443/pending-approvals",
+      "h1": "待审批",
+      "sample": "待审批 我的待审批任务 共 0 条待审批 暂无待审批任务 所有审批任务都已处理完毕",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "dispatch",
+      "url": "https://localhost:8443/dispatch",
+      "h1": "智能派工看板",
+      "sample": "智能派工看板 待派工工单 APPR-WO-1781541351 WO-20260615-0097 Medium APPR-WO-1781540812 WO-20260615-0093 Medium FUNC-WO-1781540309 WO-20260615-0089 Medium PERM-WO-lead WO-20260615-0087 Low PERM-WO-admin WO-2026061",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "analyses",
+      "url": "https://localhost:8443/analyses",
+      "h1": "AI 分析",
+      "sample": "AI 分析 手动触发 分析级别 状态 ID 设备 分析级别 置信度 数据质量 状态 耗时 完成时间 4f74a8a3 7e68d7c6 L2 30% 0% Completed 59ms 6/16/2026, 12:36:28 AM eecb385c adb27d13 L2 30% 0% Completed 501ms 6/16/2026, 12:35:52 AM 0520e01b 9721ff15",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "knowledge",
+      "url": "https://localhost:8443/knowledge",
+      "h1": "知识库管理",
+      "sample": "知识库管理 导入文件 导出 导入行业预置数据 诊断规则 待审核 10 故障案例 v1 启用 AI 推荐 触发条件 {} 结论 {} 应用次数: 0 置信度权重: 50% 编辑 版本历史 v1 启用 AI 推荐 触发条件 {} 结论 {} 应用次数: 0 置信度权重: 50% 编辑 版本历史 v1 启用 AI 推荐 触发条件 {} 结论 {} 应用次数: 0 置信度权重: 50% 编辑 版本历史 E",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "pending-rules",
+      "url": "https://localhost:8443/pending-rules",
+      "h1": "候选规则审核",
+      "sample": "候选规则审核 Pending 全选 E2E-删除测试 待审核 置信度: 85% 触发条件 {\"metric\": \"temperature\", \"operator\": \"GT\", \"threshold\": 95} 结论 {\"recommendation\": \"待删除的测试规则\"} 推荐措施 待删除的测试规则 创建时间: 6/15/2026, 7:15:28 PM 批准 编辑后批准 驳回 E2E-手动",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "fmea",
+      "url": "https://localhost:8443/fmea",
+      "h1": "FMEA 故障模式库",
+      "sample": "FMEA 故障模式库 基于 ISO 14224 标准的故障模式与影响分析，用于系统化评估设备风险 设备类型 故障模式 故障原因 故障影响 严重度 (S) 发生频率 (O) 可检测性 (D) RPN 状态 操作 风机 叶片磨损 粉尘颗粒冲刷 风量下降效率降低 5 6 4 120 启用 电机 转子不平衡 积垢或材料不均匀 振动增大加速轴承磨损 6 4 5 120 启用 离心泵 轴承磨损 润滑不足或对中",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "evaluation",
+      "url": "https://localhost:8443/evaluation",
+      "h1": "AI 诊断评估",
+      "sample": "AI 诊断评估 暂无评估数据。运行模拟器并带上 --api-url 参数上报标准答案后，此处会显示诊断命中率。",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "audit-logs",
+      "url": "https://localhost:8443/audit-logs",
+      "h1": "审计日志",
+      "sample": "审计日志 记录系统中所有敏感操作，用于合规追溯 导出 筛选: 全部动作 Create Update Delete Login Logout 全部资源 Device WorkOrder Alert User AlertRule 动作 资源 描述 IP 地址 方法 时间 AuthLoginSuccess User 用户 admin 登录成功 ::ffff:172.18.0.10 POST 6/16/2",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "notifications",
+      "url": "https://localhost:8443/notifications",
+      "h1": "通知中心",
+      "sample": "通知中心 全部已读 全部 未读 告警 工单 系统 类型 标题 内容 时间 操作 告警触发: temperature 指标 temperature 达到 99，严重级别: High 6/15/2026, 9:12:33 PM 告警触发: temperature 指标 temperature 达到 95，严重级别: High 6/15/2026, 8:51:58 PM 告警触发: temperatur",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "settings",
+      "url": "https://localhost:8443/settings",
+      "h1": "系统设置",
+      "sample": "系统设置 用户管理 角色权限 LLM 配置 系统参数 外部集成 审批链配置 订阅管理 通知偏好 安全与 MFA 用户管理 管理系统用户账号 创建用户 用户名 显示名称 角色 联系方式 状态 创建时间 操作 funcuser_1781541387 改名用户 settings.role.operator func_1781541387@test.com 禁用 6/16/2026, 12:36:28 A",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "users",
+      "url": "https://localhost:8443/users",
+      "h1": "用户管理",
+      "sample": "用户管理 管理本租户的用户账户、角色和启用状态 创建用户 搜索 用户名 姓名 角色 邮箱 状态 创建时间 操作 funcuser_1781541387 改名用户 系统管理员 维保主管 技术员 操作员 观察者 func_1781541387@test.com 停用 6/16/2026, 12:36:28 AM mfauser_1781541351 MFA测试用户 系统管理员 维保主管 技术员 操作员",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    },
+    {
+      "page": "tenants",
+      "url": "https://localhost:8443/admin/tenants",
+      "h1": "租户管理",
+      "sample": "租户管理 企业名称 Slug 套餐 状态 设备数 用户数 创建时间 操作 E2E测试企业mqf42dhi e2e-test-mqf42dhi Trial 试用中 0/5 1/3 6/15/2026 冻结 E2E测试企业mqdvs3tb e2e-test-mqdvs3tb Trial 试用中 0/5 1/3 6/14/2026 冻结 E2E测试企业mqdvs0rm e2e-test-mqdvs0rm",
+      "errors": [
+        "[warning] Service Worker registration blocked by Playwright"
+      ]
+    }
+  ],
+  "all_console_errors": [
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright",
+    "[warning] Service Worker registration blocked by Playwright"
+  ]
+}

@@ -41,7 +41,8 @@ export interface CreateFmeaEntryRequest {
   knowledgeRuleId?: string;
 }
 
-export interface UpdateFmeaEntryRequest extends CreateFmeaEntryRequest {}
+// UpdateFmeaEntryRequest 与 CreateFmeaEntryRequest 字段完全一致，直接复用类型别名
+export type UpdateFmeaEntryRequest = CreateFmeaEntryRequest;
 
 /**
  * 获取 FMEA 条目列表（分页）

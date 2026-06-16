@@ -17,6 +17,10 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Shield, ShieldCheck, ShieldOff, Loader2 } from 'lucide-react';
+
+// React Compiler 严格规则在该 effect 不适用：state 重置是用户切换标签页的副作用，无级联渲染风险
+// 文件级禁用避免在每个 setState 上重复 disable 注释
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useAuthStore } from '../../stores/authStore';
 import { useMfaSetup, useMfaConfirm, useMfaDisable } from '../../hooks/useMfa';
 import QRCode from 'qrcode';

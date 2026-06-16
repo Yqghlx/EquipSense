@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   CheckCircle2,
@@ -52,7 +52,11 @@ export default function PendingRulesPage() {
     reviewStatus: statusFilter || undefined,
   });
 
-  const pendingItems = data?.items.filter((r) => r.reviewStatus === 'Pending') ?? [];
+  // 用 useMemo 缓存 pendingItems，避免每次渲染都创建新数组导致下游 useCallback 依赖抖动
+  const pendingItems = useMemo(
+    () => data?.items.filter((r) => r.reviewStatus === 'Pending') ?? [],
+    [data?.items],
+  );
   const allSelected = pendingItems.length > 0 && pendingItems.every((r) => selectedIds.has(r.id));
 
   /** 全选/取消全选 */

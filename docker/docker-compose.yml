@@ -84,6 +84,9 @@ services:
       Jwt__Secret: "${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}"
       Jwt__Issuer: "EquipAI"
       Jwt__Audience: "EquipAI"
+      # 网关认证密钥：必须与 edgegateway 服务使用同一变量，保证两侧一致
+      # ⚠️ 必须为纯 ASCII（HTTP header 不允许中文），生产环境请替换为强随机值
+      Gateway__AuthKey: "${GATEWAY_AUTH_KEY:?请在 .env 中设置 GATEWAY_AUTH_KEY（纯 ASCII）}"
       Mqtt__Host: mosquitto
       Mqtt__Port: 1883
       Mqtt__ClientIdPrefix: "equipai-backend"
