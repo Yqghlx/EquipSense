@@ -1,0 +1,8 @@
+[
+  {
+    "severity": "🟡P1",
+    "page": "devices-create",
+    "msg": "创建后列表未自动刷新或设备未出现",
+    "detail": ""
+  }
+]

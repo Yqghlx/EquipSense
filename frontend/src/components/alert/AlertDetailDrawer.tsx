@@ -41,7 +41,7 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
           {/* 严重级别与状态标签 */}
           <div className="flex items-center gap-2">
             <SeverityBadge severity={alert.severity} />
-            <Badge variant="outline">{t(`alert.${alert.status}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}</Badge>
+            <Badge variant="outline">{t(`alert.${alert.status.toLowerCase()}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}</Badge>
           </div>
           <Separator />
 

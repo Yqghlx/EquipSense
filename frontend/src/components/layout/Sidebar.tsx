@@ -54,7 +54,7 @@ const adminNavItems = [
  * 支持展开/收起切换，导航项高亮当前路由，
  * 收起时仅显示图标，展开时显示图标+文字。
  */
-export function Sidebar() {
+export function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
@@ -67,10 +67,22 @@ export function Sidebar() {
     : baseNavItems;
 
   return (
+    <>
+      {/* 移动端 overlay：仅在 drawer 打开时显示，点击关闭 */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
+      )}
     <aside
       className={cn(
         'flex h-screen flex-col border-r border-border bg-[var(--sidebar-bg)] transition-all duration-200',
         collapsed ? 'w-16' : 'w-60',
+        // 移动端：fixed drawer，通过 mobileOpen 控制滑入/滑出
+        'fixed inset-y-0 left-0 z-50 transform md:static md:translate-x-0',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
       )}
     >
       {/* 品牌区域 + 收起/展开按钮 */}
@@ -129,5 +141,6 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }

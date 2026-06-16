@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Bell, Sun, Moon, Globe, LogOut, User } from 'lucide-react';
+import { Bell, Sun, Moon, Globe, LogOut, User, Menu } from 'lucide-react';
 import { Button } from '../ui/button';
 import {
   DropdownMenu,
@@ -19,7 +19,7 @@ import { useState } from 'react';
  *
  * 包含通知铃铛（下拉展示最近通知）、主题切换、语言切换、用户菜单（退出登录）。
  */
-export function Header() {
+export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const { t, i18n } = useTranslation();
   const { theme, toggleTheme } = useTheme();
   const user = useAuthStore((s) => s.user);
@@ -46,7 +46,13 @@ export function Header() {
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-background px-4">
-      <div className="text-sm text-muted-foreground">EquipSense</div>
+      <div className="flex items-center gap-2">
+        {/* 移动端 hamburger 按钮：触发 AppLayout 的 drawer */}
+        <Button variant="ghost" size="icon" className="md:hidden" onClick={onMenuClick} aria-label="打开菜单">
+          <Menu className="h-5 w-5" />
+        </Button>
+        <span className="text-sm text-muted-foreground">EquipSense</span>
+      </div>
 
       <div className="flex items-center gap-2">
         {/* 通知铃铛 */}

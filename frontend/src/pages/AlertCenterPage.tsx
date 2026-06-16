@@ -125,7 +125,7 @@ export default function AlertCenterPage() {
                     <TableCell><SeverityBadge severity={alert.severity} /></TableCell>
                     <TableCell>
                       <Button variant="ghost" size="sm" className="h-auto p-0 text-sm">
-                        {t(`alert.${alert.status}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}
+                        {t(`alert.${alert.status.toLowerCase()}` as 'alert.active' | 'alert.acknowledged' | 'alert.resolved')}
                       </Button>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{new Date(alert.occurredAt).toLocaleString()}</TableCell>

@@ -23,7 +23,8 @@ interface DeviceStatusBadgeProps {
  */
 export function DeviceStatusBadge({ status }: DeviceStatusBadgeProps) {
   const { t } = useTranslation();
-  const label = t(`device.${status}` as 'device.online' | 'device.offline' | 'device.maintenance');
+  // 后端返回 PascalCase（Online/Offline/Maintenance），i18n 键用小写
+  const label = t(`device.${status.toLowerCase()}` as 'device.online' | 'device.offline' | 'device.maintenance');
   return (
     <Badge variant="outline" className={statusStyles[status] ?? ''}>
       {label}

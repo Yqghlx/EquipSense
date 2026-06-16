@@ -27,7 +27,7 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
   const { t } = useTranslation();
   return (
     <Badge variant="outline" className={severityStyles[severity] ?? ''}>
-      {t(`alert.${severity}` as 'alert.critical' | 'alert.high' | 'alert.normal' | 'alert.low')}
+      {t(`alert.${severity.toLowerCase()}` as 'alert.critical' | 'alert.high' | 'alert.normal' | 'alert.low')}
     </Badge>
   );
 }
