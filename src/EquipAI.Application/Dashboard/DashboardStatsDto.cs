@@ -17,7 +17,13 @@ public class DashboardStats
     /// <summary>待派工工单数</summary>
     public int PendingWorkOrders { get; set; }
 
-    /// <summary>设备可用率（百分比）</summary>
+    /// <summary>
+    /// 设备瞬时在线率（百分比）= OnlineDevices / TotalDevices × 100
+    ///
+    /// 重要：这不是工业可用率（Availability），只是当前时刻的在线比例。
+    /// 真正的工业可用率 = 运行时间 / 计划运行时间，需要接入设备状态历史遥测。
+    /// 保留字段名是为了 API 兼容性，前端展示时建议标注"在线率"而非"可用率"。
+    /// </summary>
     public double Availability { get; set; }
 
     /// <summary>告警级别分布（级别名 → 数量）</summary>

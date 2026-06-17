@@ -2,12 +2,31 @@
 name: CI/CD
 
 on:
-  # 暂时禁用自动触发，等稳定后取消注释即可恢复
-  # push:
-  #   branches: [main, develop]
-  # pull_request:
-  #   branches: [main]
-  workflow_dispatch:  # 保留手动触发能力
+  # 自动触发：push 到主分支或针对主分支的 PR
+  # paths 过滤避免只改文档/输出时白跑测试
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'frontend/**'
+      - 'docker/**'
+      - 'tools/**'
+      - '.github/workflows/ci.yml'
+      - 'EquipAI.slnx'
+      - 'Directory.Build.props'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'frontend/**'
+      - 'docker/**'
+      - 'tools/**'
+      - '.github/workflows/ci.yml'
+      - 'EquipAI.slnx'
+      - 'Directory.Build.props'
+  workflow_dispatch:  # 保留手动触发能力（紧急验证 / 选择性重跑）
 
 env:
   DOTNET_VERSION: '8.0.x'

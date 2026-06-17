@@ -86,7 +86,7 @@ public class DashboardStatsServiceTests : IDisposable
     {
         var deviceId = Guid.NewGuid();
 
-        // 添加 2 个 Critical、1 个 High、3 个 Normal
+        // 添加 2 个 Critical、1 个 High、3 个 Normal（Active 状态）
         _db.Alerts.Add(new Core.Entities.Alert
         {
             DeviceId = deviceId, TenantId = _tenantId, Metric = "temp", Severity = AlertSeverity.Critical,
@@ -131,6 +131,53 @@ public class DashboardStatsServiceTests : IDisposable
         result.AlertsBySeverity["Normal"].Should().Be(3);
         // Low 是 Resolved，不在 Active 中
         result.AlertsBySeverity.Should().NotContainKey("Low");
+    }
+
+    /// <summary>
+    /// 关键修复测试：Acknowledged 状态（已确认未解决）应计入活跃告警
+    ///
+    /// 修复前：只算 Status=Active，用户确认告警后活跃数立即减少，误以为问题已处理
+    /// 修复后：包含 Active + Acknowledged，只有 Resolved 才从活跃数中扣除
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_已确认未解决的告警应计入活跃数()
+    {
+        var deviceId = Guid.NewGuid();
+
+        // 1 个 Active + 2 个 Acknowledged + 1 个 Resolved
+        _db.Alerts.Add(new Core.Entities.Alert
+        {
+            DeviceId = deviceId, TenantId = _tenantId, Metric = "temp", Severity = AlertSeverity.High,
+            Value = 100, Threshold = 80,
+            Status = AlertStatus.Active, OccurredAt = DateTime.UtcNow,
+        });
+        _db.Alerts.Add(new Core.Entities.Alert
+        {
+            DeviceId = deviceId, TenantId = _tenantId, Metric = "temp", Severity = AlertSeverity.High,
+            Value = 95, Threshold = 80,
+            Status = AlertStatus.Acknowledged, OccurredAt = DateTime.UtcNow,
+        });
+        _db.Alerts.Add(new Core.Entities.Alert
+        {
+            DeviceId = deviceId, TenantId = _tenantId, Metric = "vibration", Severity = AlertSeverity.Normal,
+            Value = 5, Threshold = 3,
+            Status = AlertStatus.Acknowledged, OccurredAt = DateTime.UtcNow,
+        });
+        _db.Alerts.Add(new Core.Entities.Alert
+        {
+            DeviceId = deviceId, TenantId = _tenantId, Metric = "pressure", Severity = AlertSeverity.Low,
+            Value = 110, Threshold = 100,
+            Status = AlertStatus.Resolved, OccurredAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await _service.GetStatsAsync(_tenantId, CancellationToken.None);
+
+        // 1 Active + 2 Acknowledged = 3 活跃（Resolved 不算）
+        result.ActiveAlerts.Should().Be(3, "Acknowledged 也应计入活跃告警");
+        result.AlertsBySeverity["High"].Should().Be(2, "1 Active + 1 Acknowledged 都是 High");
+        result.AlertsBySeverity["Normal"].Should().Be(1);
+        result.AlertsBySeverity.Should().NotContainKey("Low", "Resolved 不应出现");
     }
 
     // =========================================================================

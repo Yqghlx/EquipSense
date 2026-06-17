@@ -7,6 +7,15 @@ namespace EquipAI.Application.Dashboard;
 
 /// <summary>
 /// 仪表盘统计服务 — 聚合设备、告警、工单等多维度统计数据
+///
+/// 数据准确性说明（v1.3.0 校准）：
+/// 1. Availability 字段是"瞬时在线设备比例"，不是工业可用率。
+///    真正的工业可用率 = 运行时间 / 计划运行时间，需要接入设备状态历史遥测后才能实现。
+/// 2. 趋势数据按 UTC 当天分组，未做时区转换。
+///    跨时区用户（如 UTC+8 中国用户）会在 UTC 0:00-7:59 期间看到趋势图错位一天。
+///    修复需要给 Tenant 加 TimeZone 字段，属于 v1.4 范畴。
+/// 3. 所有查询依赖 EF Core 全局查询过滤器自动附加 WHERE TenantId = @current，
+///    所以 tenantId 参数虽未显式传入 LINQ，但过滤器保证租户隔离。
 /// </summary>
 public class DashboardStatsService
 {
@@ -25,6 +34,7 @@ public class DashboardStatsService
     /// 注意：EF Core DbContext 不是线程安全的，不能并行执行多个查询。
     /// 此处改为顺序执行，每次查询间隔极短（微秒级网络往返已足够快）。
     /// </summary>
+    /// <param name="tenantId">租户 ID（实际过滤由 EF 全局查询过滤器完成，保留参数为可读性 + 未来支持跨租户查询）</param>
     public async Task<DashboardStats> GetStatsAsync(Guid tenantId, CancellationToken ct = default)
     {
         // 顺序执行所有统计查询（EF Core DbContext 不支持并发操作）
@@ -40,6 +50,7 @@ public class DashboardStatsService
             OnlineDevices = deviceStats.Online,
             ActiveAlerts = alertStats.ActiveCount,
             PendingWorkOrders = workOrderStats.PendingCount,
+            // 注意：这是"瞬时在线比例"，不是工业可用率（详见类头注释）
             Availability = deviceStats.Total > 0
                 ? Math.Round((double)deviceStats.Online / deviceStats.Total * 100, 1)
                 : 0,
@@ -62,12 +73,17 @@ public class DashboardStatsService
 
     /// <summary>
     /// 告警统计：活跃告警数和按级别分布
+    ///
+    /// 业务定义：活跃告警 = Active（已触发未确认）+ Acknowledged（已确认未解决）
+    /// 修复历史（v1.3.0）：
+    ///   原代码只查 Status=Active，漏算 Acknowledged，导致用户确认告警后活跃数立即减少，
+    ///   误以为问题已处理。实际只有 Resolved（已解决）才应该从活跃数中扣除。
     /// </summary>
     private async Task<(int ActiveCount, Dictionary<string, int> BySeverity)> GetAlertStatsAsync(Guid tenantId, CancellationToken ct)
     {
         // 先查询原始数据再在内存中分组，避免 EF Core 翻译枚举 ToString() 失败
         var alerts = await _db.Alerts
-            .Where(a => a.Status == AlertStatus.Active)
+            .Where(a => a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged)
             .Select(a => new { a.Severity })
             .ToListAsync(ct);
 

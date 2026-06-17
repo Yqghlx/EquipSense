@@ -10,15 +10,13 @@ namespace EquipAI.Application.Analysis;
 ///
 /// OEE = Availability × Performance × Quality，三维度均为 0-1 比率
 ///
-/// 工业空压机场景适配：
-/// - Availability（可用率）= Online 设备数 / 总设备数
-///   反映设备实际可运行时间占比
-/// - Performance（性能指数）= 平均实际产能 / 标称产能
-///   用最近 air_flow 遥测均值 / 标称产能(20 m³/min)，clamp 到 [0,1]
-/// - Quality（质量指数）= 1 - Critical 告警设备占比
-///   无严重故障的设备比例，反映产出质量稳定性
-///
-/// 返回整体 OEE 和三维度明细，便于前端拆分展示
+/// 重要说明（v1.3.0 修复）：
+/// 这里的 OEE 是"简化版"，并非严格工业 OEE。
+/// - Availability 用"瞬时在线设备比例"代理，不是真正的"运行时间 / 计划运行时间"
+///   后续接入设备状态历史遥测后可改为基于时间窗口的真实可用率
+/// - Performance 用最近 air_flow 遥测均值 / 标称产能
+/// - Quality 用"无 Critical 告警设备比例"代理，不是真正的"良品率"
+/// 命名保留是为了 API 兼容性，前端展示时需注明"基于实时状态的近似值"
 /// </summary>
 public class OeeService
 {
@@ -40,9 +38,11 @@ public class OeeService
     /// <summary>
     /// 计算租户整体 OEE
     /// </summary>
+    /// <param name="tenantId">租户 ID（EF 全局过滤器已自动附加 WHERE TenantId = @tenantId）</param>
     public async Task<OeeResult> CalculateAsync(Guid tenantId, CancellationToken ct = default)
     {
-        // 维度一：Availability — 在线设备占比
+        // 维度一：Availability — 瞬时在线设备占比（简化版，不是工业可用率）
+        // 注意：依赖 EF Core 全局查询过滤器自动加 WHERE TenantId = @current
         var devices = await _db.Devices
             .Select(d => new { d.Status })
             .ToListAsync(ct);
@@ -54,8 +54,10 @@ public class OeeService
         var performance = await CalculatePerformanceAsync(tenantId, ct);
 
         // 维度三：Quality — 无 Critical 活跃告警的设备占比
+        // 修复历史（v1.3.0）：原代码用 IgnoreQueryFilters() 绕过租户过滤器，
+        //   导致租户 A 的 Quality 会被租户 B 的 Critical 告警污染 — 多租户隔离安全漏洞
+        //   现在使用默认过滤器，严格限制在当前租户范围内
         var devicesWithCriticalAlert = await _db.Alerts
-            .IgnoreQueryFilters()
             .Where(a => a.Status == AlertStatus.Active && a.Severity == AlertSeverity.Critical)
             .Select(a => a.DeviceId)
             .Distinct()
@@ -81,6 +83,11 @@ public class OeeService
     /// <summary>
     /// 计算性能指数：租户所有设备最近 air_flow 均值 / 标称产能，clamp 到 [0,1]
     /// 性能 = min(1, 实际产能 / 标称产能)
+    ///
+    /// 修复历史（v1.3.0）：
+    ///   原代码无遥测时返回 1.0（满性能），这是误导性的"乐观假设"，
+    ///   会让用户以为设备性能正常但其实根本没数据。
+    ///   现在改为：无遥测时返回 0，让前端展示"数据不足"提示。
     /// </summary>
     private async Task<double> CalculatePerformanceAsync(Guid tenantId, CancellationToken ct)
     {
@@ -95,16 +102,19 @@ public class OeeService
                 .ToListAsync(ct);
 
             if (recentFlows.Count == 0)
-                return 1.0; // 无遥测数据时假设满性能，避免误判
+            {
+                _logger.LogDebug("租户 {TenantId} 无 air_flow 遥测，Performance 返回 0", tenantId);
+                return 0;
+            }
 
             var avgFlow = recentFlows.Average();
             return Math.Clamp(avgFlow / NominalAirFlow, 0, 1.0);
         }
         catch (Exception ex)
         {
-            // TimescaleDB 在测试环境可能不可用，降级为满性能
-            _logger.LogDebug(ex, "air_flow 遥测查询失败，租户 {TenantId} Performance 降级为满值", tenantId);
-            return 1.0;
+            // TimescaleDB 在测试环境可能不可用，降级为 0（保守值）
+            _logger.LogWarning(ex, "air_flow 遥测查询失败，租户 {TenantId} Performance 降级为 0", tenantId);
+            return 0;
         }
     }
 }
