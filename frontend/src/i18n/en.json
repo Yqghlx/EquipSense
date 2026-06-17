@@ -356,7 +356,7 @@
       "aiAnalysis": "AI Analysis"
     },
     "role": {
-      "systemAdmin": "System Administrator",
+      "systemAdmin": "System Admin",
       "maintenanceLead": "Maintenance Lead",
       "technician": "Technician",
       "operator": "Operator",
@@ -364,7 +364,6 @@
     },
     "manageUserAccounts": "Manage System User Accounts",
     "username": "Username",
-    "role": "Role",
     "userManagementNote": "User management requires backend /api/v1/users API implementation",
     "user": {
       "createUser": "Create User",
@@ -412,10 +411,10 @@
     "uptime": "Uptime",
     "approvalChainNamePlaceholder": "e.g. High-priority work order approval",
     "leaveBlankForAll": "Leave blank for all",
-    "role": "Role",
     "approverId": "Approver ID",
     "getFromFeishu": "Get from Feishu approval management",
-    "noApprovalChain": "No approval chain templates. Click \"Add Template\" to create one."
+    "noApprovalChain": "No approval chain templates. Click \"Add Template\" to create one.",
+    "roleLabel": "Role"
   },
   "integration": {
     "dingtalk": "DingTalk Robot",

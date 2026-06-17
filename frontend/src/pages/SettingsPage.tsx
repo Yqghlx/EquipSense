@@ -487,7 +487,7 @@ function ApprovalChainSettings() {
                   <Input
                     value={step.role}
                     onChange={(e) => updateStep(index, 'role', e.target.value)}
-                    placeholder={t("settings.role", "角色")}
+                    placeholder={t("settings.roleLabel", "角色")}
                     className="flex-1"
                   />
                   <Input
@@ -545,18 +545,32 @@ function SystemInfoCard() {
 
   /** 将 ISO 8601 duration 或 TimeSpan 字符串格式化为可读文本 */
   const formatUptime = (raw: string): string => {
-    // 后端返回 TimeSpan 格式如 "01:23:45.6789" 或 "1.02:03:04"
-    if (/^\d/.test(raw)) {
-      const parts = raw.split(':');
-      if (parts.length >= 3) {
-        const days = raw.includes('.') ? raw.split('.')[0] : null;
-        const timePart = days ? raw.split('.')[1] : raw;
-        const [h, m] = timePart.split(':');
-        if (days) return `${days}天 ${h}小时 ${m}分钟`;
-        return `${h}小时 ${m}分钟 ${Math.floor(parseFloat(parts[2]))}秒`;
-      }
+    // 后端返回 .NET TimeSpan.ToString() 格式：
+    //   - 不足 1 天：HH:MM:SS.fffffff（如 "01:23:45.6789000"）
+    //   - 超过 1 天：d.HH:MM:SS.fffffff（如 "1.02:03:04.5670000"）
+    // 关键区分：d.HH:MM:SS 中第一个 '.' 出现在第一个 ':' 之前；而 HH:MM:SS.fffffff 中 '.' 在最后一个 ':' 之后
+    if (!raw || !/^\d/.test(raw)) return raw ?? '—';
+
+    const firstDot = raw.indexOf('.');
+    const firstColon = raw.indexOf(':');
+
+    let days = 0;
+    let timePart = raw;
+
+    // 只有当 '.' 在 ':' 之前时，才把 '.' 前视为天数
+    if (firstDot > 0 && firstColon > 0 && firstDot < firstColon) {
+      days = parseInt(raw.substring(0, firstDot), 10);
+      timePart = raw.substring(firstDot + 1);
     }
-    return raw;
+
+    // 去掉秒的小数部分（如果有）
+    const cleaned = timePart.split('.')[0];
+    const [h, m, s] = cleaned.split(':').map(x => parseInt(x, 10) || 0);
+
+    if (days > 0) return `${days}天 ${h}小时 ${m}分钟`;
+    if (h > 0) return `${h}小时 ${m}分钟`;
+    if (m > 0) return `${m}分钟 ${s}秒`;
+    return `${s}秒`;
   };
 
   return (
@@ -713,7 +727,7 @@ function UserManagementPanel() {
                   <TableRow>
                     <TableHead>{t('settings.username')}</TableHead>
                     <TableHead>{t('settings.user.displayName')}</TableHead>
-                    <TableHead>{t('settings.role')}</TableHead>
+                    <TableHead>{t('settings.roleLabel')}</TableHead>
                     <TableHead>{t('settings.user.contact')}</TableHead>
                     <TableHead>{t('common.status')}</TableHead>
                     <TableHead>{t('common.createdAt')}</TableHead>

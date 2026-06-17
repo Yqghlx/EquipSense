@@ -29,7 +29,11 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // 注意：不要加 isolate / isolation，否则会创建层叠上下文，
+        // 让同 z-index 的 select-content / popover-content 被 overlay 挡住，
+        // 导致 Dialog 内的 Select/Combobox 选项不可点击。
+        // 仅用 z-50 + bg-black/10 + backdrop-blur，让 overlay 与内容按 DOM 顺序自然层叠。
+        "fixed inset-0 z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}

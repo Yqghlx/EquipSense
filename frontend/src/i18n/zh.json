@@ -364,7 +364,6 @@
     },
     "manageUserAccounts": "管理系统用户账号",
     "username": "用户名",
-    "role": "角色",
     "userManagementNote": "用户管理功能需要后端 /api/v1/users API 完整实现",
     "user": {
       "createUser": "创建用户",
@@ -412,10 +411,10 @@
     "uptime": "运行时间",
     "approvalChainNamePlaceholder": "例如：高优先级工单审批流程",
     "leaveBlankForAll": "留空表示通用",
-    "role": "角色",
     "approverId": "指定审批人 ID",
     "getFromFeishu": "从飞书审批管理中获取",
-    "noApprovalChain": "暂无审批链模板，点击\"新增模板\"创建第一个审批流程"
+    "noApprovalChain": "暂无审批链模板，点击\"新增模板\"创建第一个审批流程",
+    "roleLabel": "角色"
   },
   "integration": {
     "dingtalk": "钉钉机器人",

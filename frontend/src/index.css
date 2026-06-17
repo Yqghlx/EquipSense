@@ -95,3 +95,18 @@
 body {
   @apply bg-background text-foreground;
 }
+
+/* ===========================================================================
+   Base UI Select 在 Dialog 内的层叠修复
+   ===========================================================================
+   问题：Base UI Select 的 Portal 默认渲染到 body 末尾，但被嵌入到
+   Dialog 的 Portal 内时，select-content 的 positioner z-50 不生效
+   （因为外层 portal div 是 z=auto position=static，被 dialog-overlay z=50 覆盖）。
+   后果：Dialog 内点 Select trigger 后，option listbox 虽然渲染了但不可点击。
+   
+   修复：让所有 Base UI Portal 容器都参与层叠上下文（z-50），
+   与 Dialog overlay 同级，按 DOM 顺序自然层叠（后渲染覆盖前）。
+   =========================================================================== */
+[data-base-ui-portal] {
+  z-index: 50;
+}

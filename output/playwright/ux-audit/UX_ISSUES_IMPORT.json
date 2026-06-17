@@ -1,0 +1,8 @@
+[
+  {
+    "severity": "🟡P1",
+    "page": "devices-import",
+    "msg": "导入后设备未出现在列表",
+    "detail": "{'imp1': False, 'imp2': False, 'imp3': False}"
+  }
+]

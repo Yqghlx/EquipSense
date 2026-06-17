@@ -169,7 +169,7 @@ export function UserFormDialog({ open, onClose, user, onSubmit, submitting }: Us
           {/* 创建模式：角色选择 */}
           {!isEdit && (
             <div className="space-y-2">
-              <Label>{t('settings.role')}</Label>
+              <Label>{t('settings.roleLabel')}</Label>
               <Select value={currentRole} onValueChange={(v) => { if (v) setValue('role', v); }}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
