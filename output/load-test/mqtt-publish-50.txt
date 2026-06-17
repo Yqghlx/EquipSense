@@ -1,0 +1,12 @@
+=== MQTT 吞吐测试 ===
+Broker:     localhost:1883
+Tenant:     11111111-1111-1111-1111-111111111111
+Devices:    50
+Interval:   2s per device
+Duration:   60s
+Expected msgs: 1500
+----------------
+----------------
+实际发送: 1350 条
+耗时:     61s
+吞吐量:   22.1 msg/s

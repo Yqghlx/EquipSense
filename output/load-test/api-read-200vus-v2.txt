@@ -1,0 +1,158 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: tests/load/api-read.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 200 max VUs, 1m0s max duration (incl. graceful stop):
+              * api_read: 200 looping VUs for 30s (gracefulStop: 30s)
+
+time="2026-06-17T21:28:42+08:00" level=info msg="setup: 已集中登录，token 长度 519，将共享给 200 个 VU" source=console
+
+running (0m01.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [   3% ] 200 VUs  00.9s/30s
+
+running (0m02.0s), 200/200 VUs, 200 complete and 0 interrupted iterations
+api_read   [   6% ] 200 VUs  01.9s/30s
+
+running (0m03.0s), 200/200 VUs, 346 complete and 0 interrupted iterations
+api_read   [  10% ] 200 VUs  02.9s/30s
+
+running (0m04.0s), 200/200 VUs, 459 complete and 0 interrupted iterations
+api_read   [  13% ] 200 VUs  03.9s/30s
+
+running (0m05.0s), 200/200 VUs, 657 complete and 0 interrupted iterations
+api_read   [  16% ] 200 VUs  04.9s/30s
+
+running (0m06.0s), 200/200 VUs, 855 complete and 0 interrupted iterations
+api_read   [  20% ] 200 VUs  05.9s/30s
+
+running (0m07.0s), 200/200 VUs, 1055 complete and 0 interrupted iterations
+api_read   [  23% ] 200 VUs  06.9s/30s
+
+running (0m08.0s), 200/200 VUs, 1242 complete and 0 interrupted iterations
+api_read   [  26% ] 200 VUs  07.9s/30s
+
+running (0m09.0s), 200/200 VUs, 1441 complete and 0 interrupted iterations
+api_read   [  30% ] 200 VUs  08.9s/30s
+
+running (0m10.0s), 200/200 VUs, 1638 complete and 0 interrupted iterations
+api_read   [  33% ] 200 VUs  09.9s/30s
+
+running (0m11.0s), 200/200 VUs, 1838 complete and 0 interrupted iterations
+api_read   [  36% ] 200 VUs  10.9s/30s
+
+running (0m12.0s), 200/200 VUs, 2004 complete and 0 interrupted iterations
+api_read   [  40% ] 200 VUs  11.9s/30s
+
+running (0m13.0s), 200/200 VUs, 2200 complete and 0 interrupted iterations
+api_read   [  43% ] 200 VUs  12.9s/30s
+
+running (0m14.0s), 200/200 VUs, 2400 complete and 0 interrupted iterations
+api_read   [  46% ] 200 VUs  13.9s/30s
+
+running (0m15.0s), 200/200 VUs, 2600 complete and 0 interrupted iterations
+api_read   [  50% ] 200 VUs  14.9s/30s
+
+running (0m16.0s), 200/200 VUs, 2800 complete and 0 interrupted iterations
+api_read   [  53% ] 200 VUs  15.9s/30s
+
+running (0m17.0s), 200/200 VUs, 3000 complete and 0 interrupted iterations
+api_read   [  56% ] 200 VUs  16.9s/30s
+
+running (0m18.0s), 200/200 VUs, 3200 complete and 0 interrupted iterations
+api_read   [  60% ] 200 VUs  17.9s/30s
+
+running (0m19.0s), 200/200 VUs, 3400 complete and 0 interrupted iterations
+api_read   [  63% ] 200 VUs  18.9s/30s
+
+running (0m20.0s), 200/200 VUs, 3600 complete and 0 interrupted iterations
+api_read   [  66% ] 200 VUs  19.9s/30s
+
+running (0m21.0s), 200/200 VUs, 3800 complete and 0 interrupted iterations
+api_read   [  70% ] 200 VUs  20.9s/30s
+
+running (0m22.0s), 200/200 VUs, 4000 complete and 0 interrupted iterations
+api_read   [  73% ] 200 VUs  21.9s/30s
+
+running (0m23.0s), 200/200 VUs, 4200 complete and 0 interrupted iterations
+api_read   [  76% ] 200 VUs  22.9s/30s
+
+running (0m24.0s), 200/200 VUs, 4400 complete and 0 interrupted iterations
+api_read   [  80% ] 200 VUs  23.9s/30s
+
+running (0m25.0s), 200/200 VUs, 4600 complete and 0 interrupted iterations
+api_read   [  83% ] 200 VUs  24.9s/30s
+
+running (0m26.0s), 200/200 VUs, 4800 complete and 0 interrupted iterations
+api_read   [  86% ] 200 VUs  25.9s/30s
+
+running (0m27.0s), 200/200 VUs, 5000 complete and 0 interrupted iterations
+api_read   [  90% ] 200 VUs  26.9s/30s
+
+running (0m28.0s), 200/200 VUs, 5182 complete and 0 interrupted iterations
+api_read   [  93% ] 200 VUs  27.9s/30s
+
+running (0m29.0s), 200/200 VUs, 5373 complete and 0 interrupted iterations
+api_read   [  96% ] 200 VUs  28.9s/30s
+
+running (0m30.0s), 200/200 VUs, 5565 complete and 0 interrupted iterations
+api_read   [ 100% ] 200 VUs  29.9s/30s
+
+running (0m31.0s), 035/200 VUs, 5765 complete and 0 interrupted iterations
+api_read ↓ [ 100% ] 200 VUs  30s
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<500' p(95)=68.34ms
+
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 58000   1864.451184/s
+    checks_succeeded...: 100.00% 58000 out of 58000
+    checks_failed......: 0.00%   0 out of 58000
+
+    ✓ 设备列表 成功
+    ✓ 设备列表 P95<500ms
+    ✓ 告警列表 成功
+    ✓ 告警列表 P95<500ms
+    ✓ 工单列表 成功
+    ✓ 工单列表 P95<500ms
+    ✓ 仪表盘统计 成功
+    ✓ 仪表盘统计 P95<500ms
+    ✓ 通知列表 成功
+    ✓ 通知列表 P95<500ms
+
+    HTTP
+    http_req_duration..............: avg=11.34ms min=947µs med=2.89ms max=383.85ms p(90)=19.27ms p(95)=68.34ms
+      { expected_response:true }...: avg=11.34ms min=947µs med=2.89ms max=383.85ms p(90)=19.27ms p(95)=68.34ms
+    http_req_failed................: 0.00%  0 out of 29001
+    http_reqs......................: 29001  932.257738/s
+
+    EXECUTION
+    iteration_duration.............: avg=1.05s   min=1s    med=1.01s  max=1.62s    p(90)=1.1s    p(95)=1.23s  
+    iterations.....................: 5800   186.445118/s
+    vus............................: 35     min=35         max=200
+    vus_max........................: 200    min=200        max=200
+
+    NETWORK
+    data_received..................: 234 MB 7.5 MB/s
+    data_sent......................: 20 MB  632 kB/s
+
+
+
+
+running (0m31.1s), 000/200 VUs, 5800 complete and 0 interrupted iterations
+api_read ✓ [ 100% ] 200 VUs  30s

@@ -27,6 +27,12 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // 提升 ThreadPool 最小线程数 — 默认等于 CPU 核心数（容器内通常 2-4）
+    // 遇到突发并发（如 200 VUs）时，新线程会以 1 个/秒的速度缓慢启动，导致请求堆积
+    // 工业场景写入 + SignalR 推送需要更高的小并发处理能力，预设 50 个 worker / IOCP
+    // 避免 .NET ThreadPool 饥饿。该设置是全局的，需在 host build 前调用。
+    ThreadPool.SetMinThreads(workerThreads: 50, completionPortThreads: 50);
+
     // 配置 Serilog 日志，从 appsettings.json 中读取日志级别和输出目标
     // Console 和 Seq sink 均在配置文件中定义，此处不再重复添加
     builder.Host.UseSerilog((context, config) =>

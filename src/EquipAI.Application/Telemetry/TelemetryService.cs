@@ -77,29 +77,11 @@ public class TelemetryService : ITelemetryService, IDisposable
             using var scope = _scopeFactory.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var rows = items.Select(i => new DeviceTelemetry
-            {
-                // MQTT/HTTP 上报的时间戳可能 Kind=Unspecified（JSON 反序列化不带 Z），查 timestamptz 列会崩
-                Time = i.Timestamp.ToSafeUtc(),
-                TenantId = i.TenantId,
-                DeviceId = i.DeviceId,
-                Metric = i.Metric,
-                Value = i.Value,
-                Quality = i.Quality,
-                Source = i.Source
-            }).ToList();
+            // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
+            // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
+            await InsertBatchAsync(dbContext, items);
 
-            // HasNoKey 实体无法使用 AddRange，改用原始 SQL 批量插入
-            foreach (var row in rows)
-            {
-                await dbContext.Database.ExecuteSqlRawAsync(
-                    "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) " +
-                    "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6})",
-                    row.Time, row.TenantId, row.DeviceId, row.Metric,
-                    (object?)row.Value ?? DBNull.Value, row.Quality, row.Source);
-            }
-
-            _logger.LogDebug("已写入 {Count} 条遥测数据", rows.Count);
+            _logger.LogDebug("已写入 {Count} 条遥测数据", items.Count);
 
             foreach (var item in items)
             {
@@ -122,6 +104,50 @@ public class TelemetryService : ITelemetryService, IDisposable
     {
         _flushTimer.Dispose();
         FlushAsync().GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// 批量写入时序数据 — 用多值 INSERT 替代逐行 INSERT
+    ///
+    /// 为什么不用 EF Core AddRange：DeviceTelemetry 是 HasNoKey 实体，EF Core 不支持批量插入。
+    /// 为什么不用 PostgreSQL COPY：当前规模（每批 ≤ 100 行）下多值 INSERT 已足够快，
+    ///   若未来单批超过 1000 行可再升级到 Npgsql Binary COPY（性能可再提升 10×）。
+    /// 为什么不用 foreach：每次 ExecuteSqlRawAsync 都是一次完整的网络往返 + commit，
+    ///   100 条数据 = 100 次往返，理论耗时 500-1500ms（实测 P95=1.38s）。
+    ///
+    /// 单批限制：≤ 100 行 × 7 列 = 700 参数，远低于 PostgreSQL 65535 单 SQL 参数上限。
+    /// </summary>
+    private static async Task InsertBatchAsync(AppDbContext dbContext, List<TelemetryQueueItem> items)
+    {
+        const int columnCount = 7;
+        var valueBuilders = new List<string>(items.Count);
+        var parameters = new List<object>(items.Count * columnCount);
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var baseIdx = i * columnCount;
+            // 占位符 {0}..{6} 对应第一行、{7}..{13} 对应第二行，依此类推
+            valueBuilders.Add(
+                $"({{{baseIdx}}}, {{{baseIdx + 1}}}, {{{baseIdx + 2}}}, {{{baseIdx + 3}}}, " +
+                $"{{{baseIdx + 4}}}, {{{baseIdx + 5}}}, {{{baseIdx + 6}}})");
+
+            var row = items[i];
+            // MQTT/HTTP 上报的时间戳可能 Kind=Unspecified（JSON 反序列化不带 Z），查 timestamptz 列会崩
+            parameters.Add(row.Timestamp.ToSafeUtc());
+            parameters.Add(row.TenantId);
+            parameters.Add(row.DeviceId);
+            parameters.Add(row.Metric);
+            // double 不可能为 null，但保持原始代码的防御性写法
+            parameters.Add((object)row.Value);
+            parameters.Add(row.Quality);
+            parameters.Add(row.Source);
+        }
+
+        var sql =
+            "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) VALUES " +
+            string.Join(",", valueBuilders);
+
+        await dbContext.Database.ExecuteSqlRawAsync(sql, parameters);
     }
 }
 

@@ -1,0 +1,572 @@
+=== MQTT 吞吐测试 ===
+Broker:     localhost:1883
+Tenant:     11111111-1111-1111-1111-111111111111
+Devices:    20
+Interval:   2s per device
+Duration:   30s
+Expected msgs: 300
+----------------
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+Connection error: Connection Refused: not authorised
+Error: The connection was refused
+----------------
+实际发送: 280 条
+耗时:     30s
+吞吐量:   9.3 msg/s

@@ -1,0 +1,216 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: tests/load/api-read.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 200 max VUs, 1m0s max duration (incl. graceful stop):
+              * api_read: 200 looping VUs for 30s (gracefulStop: 30s)
+
+
+running (0m01.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [   3% ] 200 VUs  01.0s/30s
+
+running (0m02.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [   7% ] 200 VUs  02.0s/30s
+
+running (0m03.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  10% ] 200 VUs  03.0s/30s
+
+running (0m04.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  13% ] 200 VUs  04.0s/30s
+
+running (0m05.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  17% ] 200 VUs  05.0s/30s
+
+running (0m06.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  20% ] 200 VUs  06.0s/30s
+
+running (0m07.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  23% ] 200 VUs  07.0s/30s
+
+running (0m08.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  27% ] 200 VUs  08.0s/30s
+
+running (0m09.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  30% ] 200 VUs  09.0s/30s
+
+running (0m10.0s), 200/200 VUs, 0 complete and 0 interrupted iterations
+api_read   [  33% ] 200 VUs  10.0s/30s
+time="2026-06-17T21:25:52+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:25:52+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:25:53+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m11.0s), 200/200 VUs, 3 complete and 0 interrupted iterations
+api_read   [  37% ] 200 VUs  11.0s/30s
+time="2026-06-17T21:25:53+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m12.0s), 200/200 VUs, 4 complete and 0 interrupted iterations
+api_read   [  40% ] 200 VUs  12.0s/30s
+time="2026-06-17T21:25:55+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m13.0s), 200/200 VUs, 5 complete and 0 interrupted iterations
+api_read   [  43% ] 200 VUs  13.0s/30s
+
+running (0m14.0s), 200/200 VUs, 5 complete and 0 interrupted iterations
+api_read   [  47% ] 200 VUs  14.0s/30s
+time="2026-06-17T21:25:56+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:25:57+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m15.0s), 200/200 VUs, 7 complete and 0 interrupted iterations
+api_read   [  50% ] 200 VUs  15.0s/30s
+
+running (0m16.0s), 200/200 VUs, 7 complete and 0 interrupted iterations
+api_read   [  53% ] 200 VUs  16.0s/30s
+time="2026-06-17T21:25:58+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m17.0s), 200/200 VUs, 8 complete and 0 interrupted iterations
+api_read   [  57% ] 200 VUs  17.0s/30s
+
+running (0m18.0s), 200/200 VUs, 8 complete and 0 interrupted iterations
+api_read   [  60% ] 200 VUs  18.0s/30s
+
+running (0m19.0s), 200/200 VUs, 8 complete and 0 interrupted iterations
+api_read   [  63% ] 200 VUs  19.0s/30s
+
+running (0m20.0s), 200/200 VUs, 8 complete and 0 interrupted iterations
+api_read   [  67% ] 200 VUs  20.0s/30s
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:02+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m21.0s), 200/200 VUs, 45 complete and 0 interrupted iterations
+api_read   [  70% ] 200 VUs  21.0s/30s
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+time="2026-06-17T21:26:03+08:00" level=error msg="Error: 登录失败: 500 {\"code\":500,\"message\":\"\\u670D\\u52A1\\u5668\\u5185\\u90E8\\u9519\\u8BEF\",\"details\":null}\n\tat getToken (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/config.js:59:11(44))\n\tat default (file:///Users/yqgmac/yqg/project/EquipSense/tests/load/api-read.js:39:25(3))\n" executor=constant-vus scenario=api_read source=stacktrace
+
+running (0m22.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  73% ] 200 VUs  22.0s/30s
+
+running (0m23.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  77% ] 200 VUs  23.0s/30s
+
+running (0m24.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  80% ] 200 VUs  24.0s/30s
+
+running (0m25.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  83% ] 200 VUs  25.0s/30s
+
+running (0m26.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  87% ] 200 VUs  26.0s/30s
+
+running (0m27.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  90% ] 200 VUs  27.0s/30s
+
+running (0m28.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  93% ] 200 VUs  28.0s/30s
+
+running (0m29.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [  97% ] 200 VUs  29.0s/30s
+
+running (0m30.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read   [ 100% ] 200 VUs  30.0s/30s
+
+running (0m31.0s), 200/200 VUs, 54 complete and 0 interrupted iterations
+api_read ↓ [ 100% ] 200 VUs  30s
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✗ 'p(95)<500' p(95)=26.94s
+
+    http_req_failed
+    ✗ 'rate<0.01' rate=4.30%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 2000   63.379311/s
+    checks_succeeded...: 83.35% 1667 out of 2000
+    checks_failed......: 16.65% 333 out of 2000
+
+    ✓ 设备列表 成功
+    ✗ 设备列表 P95<500ms
+      ↳  25% — ✓ 51 / ✗ 149
+    ✓ 告警列表 成功
+    ✗ 告警列表 P95<500ms
+      ↳  55% — ✓ 111 / ✗ 89
+    ✓ 工单列表 成功
+    ✗ 工单列表 P95<500ms
+      ↳  83% — ✓ 166 / ✗ 34
+    ✓ 仪表盘统计 成功
+    ✗ 仪表盘统计 P95<500ms
+      ↳  69% — ✓ 139 / ✗ 61
+    ✓ 通知列表 成功
+    ✓ 通知列表 P95<500ms
+
+    HTTP
+    http_req_duration..............: avg=4.84s  min=1.31ms med=489.78ms max=30.38s p(90)=25.84s p(95)=26.94s
+      { expected_response:true }...: avg=4.18s  min=1.31ms med=417.41ms max=30.38s p(90)=26.04s p(95)=26.96s
+    http_req_failed................: 4.30%  54 out of 1254
+    http_reqs......................: 1254   39.738828/s
+
+    EXECUTION
+    iteration_duration.............: avg=24.75s min=10.15s med=31.35s   max=31.55s p(90)=31.46s p(95)=31.46s
+    iterations.....................: 254    8.049172/s
+    vus............................: 200    min=200        max=200
+    vus_max........................: 200    min=200        max=200
+
+    NETWORK
+    data_received..................: 8.6 MB 273 kB/s
+    data_sent......................: 1.3 MB 42 kB/s
+
+
+
+
+running (0m31.6s), 000/200 VUs, 254 complete and 0 interrupted iterations
+api_read ✓ [ 100% ] 200 VUs  30s
+time="2026-06-17T21:26:14+08:00" level=error msg="thresholds on metrics 'http_req_duration, http_req_failed' have been crossed"

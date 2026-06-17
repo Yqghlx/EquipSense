@@ -7,6 +7,11 @@
  * 运行方式：
  *   k6 run -e VUS=50 tests/load/api-read.js
  *   k6 run -e VUS=200 tests/load/api-read.js
+ *
+ * 设计要点（v2 修复）：
+ *   - 在 setup 阶段集中登录拿 token，所有 VU 共享（避免每个 VU 自己登录导致登录风暴）
+ *   - 之前每 VU 独立 JS context + 独立 cachedToken，200 VUs 启动 = 200 个并发登录请求，
+ *     击垮 Redis 的 refresh token 检查（StackExchange.Redis 5s 超时）。
  */
 import http from 'k6/http';
 import { check, sleep } from 'k6';
@@ -35,9 +40,15 @@ const endpoints = [
   { name: '通知列表', path: '/api/v1/notifications?page=1&pageSize=20' },
 ];
 
-export default function () {
+/** setup 阶段集中登录一次，token 传给所有 VU 共享 */
+export function setup() {
   const token = getToken();
-  const headers = authHeaders(token);
+  console.log(`setup: 已集中登录，token 长度 ${token.length}，将共享给 ${vus} 个 VU`);
+  return { token };
+}
+
+export default function (data) {
+  const headers = authHeaders(data.token);
 
   // 轮询所有端点
   for (const ep of endpoints) {

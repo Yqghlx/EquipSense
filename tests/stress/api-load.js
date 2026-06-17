@@ -38,9 +38,12 @@ function login() {
 }
 
 export default function () {
-  // 匿名端点：系统信息
-  {
-    const res = http.get(`${BASE_URL}/api/v1/system/info`);
+  // 认证端点：系统信息（需带 JWT，否则 401）
+  const sysToken = login();
+  if (sysToken) {
+    const res = http.get(`${BASE_URL}/api/v1/system/info`, {
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sysToken}` },
+    });
     const ok = check(res, { 'system/info 200': (r) => r.status === 200 });
     if (!ok) errorRate.add(1);
     apiLatency.add(res.timings.duration);

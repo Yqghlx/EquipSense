@@ -1,0 +1,237 @@
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: tests/load/telemetry-write.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 100 max VUs, 1m30s max duration (incl. graceful stop):
+              * telemetry_write: 100 looping VUs for 1m0s (gracefulStop: 30s)
+
+time="2026-06-17T21:29:53+08:00" level=info msg="setup: 已集中登录，token 长度 519，将共享给 100 个 VU" source=console
+time="2026-06-17T21:29:53+08:00" level=info msg="setup: 取到 30 个真实设备，循环复用模拟 100 设备" source=console
+
+running (0m01.0s), 100/100 VUs, 0 complete and 0 interrupted iterations
+telemetry_write   [   1% ] 100 VUs  0m00.9s/1m0s
+
+running (0m02.0s), 100/100 VUs, 0 complete and 0 interrupted iterations
+telemetry_write   [   3% ] 100 VUs  0m01.9s/1m0s
+
+running (0m03.0s), 100/100 VUs, 100 complete and 0 interrupted iterations
+telemetry_write   [   5% ] 100 VUs  0m02.9s/1m0s
+
+running (0m04.0s), 100/100 VUs, 100 complete and 0 interrupted iterations
+telemetry_write   [   6% ] 100 VUs  0m03.9s/1m0s
+
+running (0m05.0s), 100/100 VUs, 200 complete and 0 interrupted iterations
+telemetry_write   [   8% ] 100 VUs  0m04.9s/1m0s
+
+running (0m06.0s), 100/100 VUs, 200 complete and 0 interrupted iterations
+telemetry_write   [  10% ] 100 VUs  0m05.9s/1m0s
+
+running (0m07.0s), 100/100 VUs, 300 complete and 0 interrupted iterations
+telemetry_write   [  11% ] 100 VUs  0m06.9s/1m0s
+
+running (0m08.0s), 100/100 VUs, 300 complete and 0 interrupted iterations
+telemetry_write   [  13% ] 100 VUs  0m07.9s/1m0s
+
+running (0m09.0s), 100/100 VUs, 400 complete and 0 interrupted iterations
+telemetry_write   [  15% ] 100 VUs  0m08.9s/1m0s
+
+running (0m10.0s), 100/100 VUs, 400 complete and 0 interrupted iterations
+telemetry_write   [  16% ] 100 VUs  0m09.9s/1m0s
+
+running (0m11.0s), 100/100 VUs, 500 complete and 0 interrupted iterations
+telemetry_write   [  18% ] 100 VUs  0m10.9s/1m0s
+
+running (0m12.0s), 100/100 VUs, 500 complete and 0 interrupted iterations
+telemetry_write   [  20% ] 100 VUs  0m11.9s/1m0s
+
+running (0m13.0s), 100/100 VUs, 600 complete and 0 interrupted iterations
+telemetry_write   [  21% ] 100 VUs  0m12.9s/1m0s
+
+running (0m14.0s), 100/100 VUs, 600 complete and 0 interrupted iterations
+telemetry_write   [  23% ] 100 VUs  0m13.9s/1m0s
+
+running (0m15.0s), 100/100 VUs, 700 complete and 0 interrupted iterations
+telemetry_write   [  25% ] 100 VUs  0m14.9s/1m0s
+
+running (0m16.0s), 100/100 VUs, 700 complete and 0 interrupted iterations
+telemetry_write   [  26% ] 100 VUs  0m15.9s/1m0s
+
+running (0m17.0s), 100/100 VUs, 800 complete and 0 interrupted iterations
+telemetry_write   [  28% ] 100 VUs  0m16.9s/1m0s
+
+running (0m18.0s), 100/100 VUs, 800 complete and 0 interrupted iterations
+telemetry_write   [  30% ] 100 VUs  0m17.9s/1m0s
+
+running (0m19.0s), 100/100 VUs, 900 complete and 0 interrupted iterations
+telemetry_write   [  31% ] 100 VUs  0m18.9s/1m0s
+
+running (0m20.0s), 100/100 VUs, 900 complete and 0 interrupted iterations
+telemetry_write   [  33% ] 100 VUs  0m19.9s/1m0s
+
+running (0m21.0s), 100/100 VUs, 1000 complete and 0 interrupted iterations
+telemetry_write   [  35% ] 100 VUs  0m20.9s/1m0s
+
+running (0m22.0s), 100/100 VUs, 1000 complete and 0 interrupted iterations
+telemetry_write   [  36% ] 100 VUs  0m21.9s/1m0s
+
+running (0m23.0s), 100/100 VUs, 1100 complete and 0 interrupted iterations
+telemetry_write   [  38% ] 100 VUs  0m22.9s/1m0s
+
+running (0m24.0s), 100/100 VUs, 1100 complete and 0 interrupted iterations
+telemetry_write   [  40% ] 100 VUs  0m23.9s/1m0s
+
+running (0m25.0s), 100/100 VUs, 1200 complete and 0 interrupted iterations
+telemetry_write   [  41% ] 100 VUs  0m24.9s/1m0s
+
+running (0m26.0s), 100/100 VUs, 1200 complete and 0 interrupted iterations
+telemetry_write   [  43% ] 100 VUs  0m25.9s/1m0s
+
+running (0m27.0s), 100/100 VUs, 1300 complete and 0 interrupted iterations
+telemetry_write   [  45% ] 100 VUs  0m26.9s/1m0s
+
+running (0m28.0s), 100/100 VUs, 1300 complete and 0 interrupted iterations
+telemetry_write   [  46% ] 100 VUs  0m27.9s/1m0s
+
+running (0m29.0s), 100/100 VUs, 1400 complete and 0 interrupted iterations
+telemetry_write   [  48% ] 100 VUs  0m28.9s/1m0s
+
+running (0m30.0s), 100/100 VUs, 1400 complete and 0 interrupted iterations
+telemetry_write   [  50% ] 100 VUs  0m29.9s/1m0s
+
+running (0m31.0s), 100/100 VUs, 1500 complete and 0 interrupted iterations
+telemetry_write   [  51% ] 100 VUs  0m30.9s/1m0s
+
+running (0m32.0s), 100/100 VUs, 1500 complete and 0 interrupted iterations
+telemetry_write   [  53% ] 100 VUs  0m31.9s/1m0s
+
+running (0m33.0s), 100/100 VUs, 1600 complete and 0 interrupted iterations
+telemetry_write   [  55% ] 100 VUs  0m32.9s/1m0s
+
+running (0m34.0s), 100/100 VUs, 1600 complete and 0 interrupted iterations
+telemetry_write   [  56% ] 100 VUs  0m33.9s/1m0s
+
+running (0m35.0s), 100/100 VUs, 1700 complete and 0 interrupted iterations
+telemetry_write   [  58% ] 100 VUs  0m34.9s/1m0s
+
+running (0m36.0s), 100/100 VUs, 1700 complete and 0 interrupted iterations
+telemetry_write   [  60% ] 100 VUs  0m35.9s/1m0s
+
+running (0m37.0s), 100/100 VUs, 1800 complete and 0 interrupted iterations
+telemetry_write   [  61% ] 100 VUs  0m36.9s/1m0s
+
+running (0m38.0s), 100/100 VUs, 1800 complete and 0 interrupted iterations
+telemetry_write   [  63% ] 100 VUs  0m37.9s/1m0s
+
+running (0m39.0s), 100/100 VUs, 1900 complete and 0 interrupted iterations
+telemetry_write   [  65% ] 100 VUs  0m38.9s/1m0s
+
+running (0m40.0s), 100/100 VUs, 1900 complete and 0 interrupted iterations
+telemetry_write   [  66% ] 100 VUs  0m39.9s/1m0s
+
+running (0m41.0s), 100/100 VUs, 2000 complete and 0 interrupted iterations
+telemetry_write   [  68% ] 100 VUs  0m40.9s/1m0s
+
+running (0m42.0s), 100/100 VUs, 2000 complete and 0 interrupted iterations
+telemetry_write   [  70% ] 100 VUs  0m41.9s/1m0s
+
+running (0m43.0s), 100/100 VUs, 2100 complete and 0 interrupted iterations
+telemetry_write   [  71% ] 100 VUs  0m42.9s/1m0s
+
+running (0m44.0s), 100/100 VUs, 2100 complete and 0 interrupted iterations
+telemetry_write   [  73% ] 100 VUs  0m43.9s/1m0s
+
+running (0m45.0s), 100/100 VUs, 2200 complete and 0 interrupted iterations
+telemetry_write   [  75% ] 100 VUs  0m44.9s/1m0s
+
+running (0m46.0s), 100/100 VUs, 2200 complete and 0 interrupted iterations
+telemetry_write   [  76% ] 100 VUs  0m45.9s/1m0s
+
+running (0m47.0s), 100/100 VUs, 2300 complete and 0 interrupted iterations
+telemetry_write   [  78% ] 100 VUs  0m46.9s/1m0s
+
+running (0m48.0s), 100/100 VUs, 2300 complete and 0 interrupted iterations
+telemetry_write   [  80% ] 100 VUs  0m47.9s/1m0s
+
+running (0m49.0s), 100/100 VUs, 2400 complete and 0 interrupted iterations
+telemetry_write   [  81% ] 100 VUs  0m48.9s/1m0s
+
+running (0m50.0s), 100/100 VUs, 2400 complete and 0 interrupted iterations
+telemetry_write   [  83% ] 100 VUs  0m49.9s/1m0s
+
+running (0m51.0s), 100/100 VUs, 2500 complete and 0 interrupted iterations
+telemetry_write   [  85% ] 100 VUs  0m50.9s/1m0s
+
+running (0m52.0s), 100/100 VUs, 2500 complete and 0 interrupted iterations
+telemetry_write   [  86% ] 100 VUs  0m51.9s/1m0s
+
+running (0m53.0s), 100/100 VUs, 2600 complete and 0 interrupted iterations
+telemetry_write   [  88% ] 100 VUs  0m52.9s/1m0s
+
+running (0m54.0s), 100/100 VUs, 2600 complete and 0 interrupted iterations
+telemetry_write   [  90% ] 100 VUs  0m53.9s/1m0s
+
+running (0m55.0s), 100/100 VUs, 2700 complete and 0 interrupted iterations
+telemetry_write   [  91% ] 100 VUs  0m54.9s/1m0s
+
+running (0m56.0s), 100/100 VUs, 2700 complete and 0 interrupted iterations
+telemetry_write   [  93% ] 100 VUs  0m55.9s/1m0s
+
+running (0m57.0s), 100/100 VUs, 2800 complete and 0 interrupted iterations
+telemetry_write   [  95% ] 100 VUs  0m56.9s/1m0s
+
+running (0m58.0s), 100/100 VUs, 2800 complete and 0 interrupted iterations
+telemetry_write   [  96% ] 100 VUs  0m57.9s/1m0s
+
+running (0m59.0s), 100/100 VUs, 2900 complete and 0 interrupted iterations
+telemetry_write   [  98% ] 100 VUs  0m58.9s/1m0s
+
+running (1m00.0s), 100/100 VUs, 2900 complete and 0 interrupted iterations
+telemetry_write   [ 100% ] 100 VUs  0m59.9s/1m0s
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<1000' p(95)=23.66ms
+
+    http_req_failed
+    ✓ 'rate<0.05' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 3000    49.526894/s
+    checks_succeeded...: 100.00% 3000 out of 3000
+    checks_failed......: 0.00%   0 out of 3000
+
+    ✓ 写入成功
+
+    HTTP
+    http_req_duration..............: avg=12.15ms min=1.44ms med=10.76ms max=136.29ms p(90)=20.65ms p(95)=23.66ms
+      { expected_response:true }...: avg=12.15ms min=1.44ms med=10.76ms max=136.29ms p(90)=20.65ms p(95)=23.66ms
+    http_req_failed................: 0.00%  0 out of 3002
+    http_reqs......................: 3002   49.559912/s
+
+    EXECUTION
+    iteration_duration.............: avg=2.01s   min=2s     med=2.01s   max=2.06s    p(90)=2.02s   p(95)=2.02s  
+    iterations.....................: 3000   49.526894/s
+    vus............................: 100    min=100       max=100
+    vus_max........................: 100    min=100       max=100
+
+    NETWORK
+    data_received..................: 2.6 MB 43 kB/s
+    data_sent......................: 2.5 MB 41 kB/s
+
+
+
+
+running (1m00.6s), 000/100 VUs, 3000 complete and 0 interrupted iterations
+telemetry_write ✓ [ 100% ] 100 VUs  1m0s

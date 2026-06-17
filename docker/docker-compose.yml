@@ -12,6 +12,10 @@ services:
       POSTGRES_DB: ${PG_DB:-equipai}
       POSTGRES_USER: ${PG_USER:-postgres}
       POSTGRES_PASSWORD: ${PG_PASSWORD:?请在 .env 中设置 PG_PASSWORD}
+    # 提升最大连接数到 200，避免压测 / 多客户端场景下出现 "53300: too many clients already"
+    # TimescaleDB 容器默认 max_connections=25（CPU 核数自适应），对工业监控场景太小
+    # shared_buffers 也从默认 128MB 提到 512MB，让更多数据驻留内存减少磁盘 IO
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=512MB"]
     volumes:
       - pgdata:/var/lib/postgresql/data
       - pg_backup:/backup

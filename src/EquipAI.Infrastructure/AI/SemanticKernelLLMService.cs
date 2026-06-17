@@ -16,20 +16,23 @@ public class SemanticKernelLLMService : ILLMService
     private readonly IChatCompletionService _chatService;
     private readonly ILogger<SemanticKernelLLMService> _logger;
     private readonly int _timeoutSeconds;
+    // 缓存 ApiKey 用于 AnalyzeAsync 快速失败检测
+    // 没配 ApiKey 时直接返回错误，避免每次都发 HTTP 请求再等 401 响应（实测每次浪费 ~4s）
+    private readonly string _apiKey;
 
     public SemanticKernelLLMService(IConfiguration configuration, ILogger<SemanticKernelLLMService> logger)
     {
         _logger = logger;
         _timeoutSeconds = configuration.GetValue("Llm:TimeoutSeconds", 30);
 
-        var apiKey = configuration["Llm:ApiKey"] ?? "";
+        _apiKey = configuration["Llm:ApiKey"] ?? "";
         var modelId = configuration["Llm:ModelId"] ?? "qwen-plus";
         var endpoint = configuration["Llm:Endpoint"] ?? "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
         var builder = Kernel.CreateBuilder();
         builder.AddOpenAIChatCompletion(
             modelId: modelId,
-            apiKey: apiKey,
+            apiKey: _apiKey,
             endpoint: new Uri(endpoint));
         var kernel = builder.Build();
         _chatService = kernel.GetRequiredService<IChatCompletionService>();
@@ -38,6 +41,13 @@ public class SemanticKernelLLMService : ILLMService
     /// <inheritdoc />
     public async Task<LLMResponse> AnalyzeAsync(LLMRequest request, CancellationToken ct = default)
     {
+        // 未配置 ApiKey 时立即失败，跳过 HTTP 往返
+        // 上层调用方（RootCauseAnalysisHandler）会降级为规则匹配，不影响业务功能
+        if (string.IsNullOrWhiteSpace(_apiKey))
+        {
+            return new LLMResponse("", null, false, "未配置 LLM ApiKey（Llm:ApiKey），跳过 LLM 调用");
+        }
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(_timeoutSeconds));
 

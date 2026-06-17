@@ -1,8 +1,16 @@
 /**
  * 遥测数据写入压力测试
  *
- * 模拟多设备并发写入遥测数据，测试后端 MQTT → DB 管线的吞吐量。
+ * 模拟多设备并发写入遥测数据，测试后端 HTTP 上报通道 + MQTT→DB 管线的吞吐量。
  * 三种负载级别：100 设备 / 500 设备 / 1000 设备。
+ *
+ * 修复历史：
+ *   - v1：用 {metric, value} 单值格式 + 虚构 deviceId，全部 400。已废弃。
+ *   - v2：改为 {metrics: {name: value}} 字典格式 + setup 拉真实设备列表。
+ *   - v3（当前）：
+ *     • setup 阶段集中登录拿 token，所有 VU 共享（避免每 VU 独立登录击垮 Redis）
+ *     • 改用 constant-vus 替代 constant-arrival-rate（后者在 sleep-heavy 场景下测量失真）
+ *     • sleep(5) → sleep(2)，让请求密度更接近真实工业现场
  *
  * 运行方式：
  *   k6 run -e DEVICES=100 tests/load/telemetry-write.js
@@ -13,41 +21,66 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { config, relaxedThresholds, getToken, authHeaders } from './config.js';
 
-/** 设备数量 — 默认 100 */
+/** 设备数量 — 默认 100，作为 VU 数 */
 const deviceCount = parseInt(__ENV.DEVICES || '100');
 
-/** 每个 VU 代表一个设备 */
+/** 模拟的指标池，每次上报随机挑 3 个写入 metrics 字典 */
+const metricPool = ['temperature', 'pressure', 'vibration', 'humidity', 'rpm', 'current', 'voltage'];
+
 export const options = {
   scenarios: {
     telemetry_write: {
-      executor: 'constant-arrival-rate',
-      rate: deviceCount,
-      timeUnit: '5s',
+      executor: 'constant-vus',
+      vus: Math.min(deviceCount, 200),
       duration: '60s',
-      preAllocatedVUs: Math.min(deviceCount, 200),
-      maxVUs: Math.min(deviceCount, 500),
     },
   },
   thresholds: relaxedThresholds,
 };
 
-/** 指标列表 */
-const metrics = ['temperature', 'pressure', 'vibration', 'humidity', 'rpm'];
-
-export default function () {
+/**
+ * setup 阶段：集中登录 + 拉取真实设备列表
+ *  - token 共享给所有 VU，避免每 VU 独立登录击垮 Redis
+ *  - 用真实 device_code 避免压测时全部 400
+ */
+export function setup() {
   const token = getToken();
-  const headers = authHeaders(token);
-  const deviceId = `device-${__VU % deviceCount + 1}`;
+  console.log(`setup: 已集中登录，token 长度 ${token.length}，将共享给 ${deviceCount} 个 VU`);
 
-  // 生成遥测数据
-  const metric = metrics[__VU % metrics.length];
-  const value = Math.random() * 100;
+  const res = http.get(
+    `${config.baseUrl}/api/v1/devices?page=1&pageSize=${Math.min(deviceCount, 500)}`,
+    { headers: authHeaders(token) },
+  );
+  if (res.status !== 200) {
+    throw new Error(`拉取设备列表失败: ${res.status} ${res.body}`);
+  }
+  const items = res.json('items') || [];
+  if (items.length === 0) {
+    throw new Error('数据库无设备，无法压测');
+  }
+  const codes = items.map((d) => d.deviceCode);
+  console.log(`setup: 取到 ${codes.length} 个真实设备，循环复用模拟 ${deviceCount} 设备`);
+  return { token, codes };
+}
+
+export default function (data) {
+  const headers = authHeaders(data.token);
+
+  // 循环复用真实设备 code（实际设备数 < deviceCount 时仍可压满并发）
+  const deviceCode = data.codes[__VU % data.codes.length];
+
+  // 随机挑 3 个指标组成 metrics 字典，匹配 TelemetryUploadRequest.Metrics
+  const metrics = {};
+  for (let i = 0; i < 3; i++) {
+    const m = metricPool[(__VU + i) % metricPool.length];
+    metrics[m] = Math.round(Math.random() * 100 * 100) / 100;
+  }
 
   const payload = JSON.stringify({
-    deviceId,
-    metric,
-    value,
+    deviceId: deviceCode,
+    metrics,
     timestamp: new Date().toISOString(),
+    quality: 'good',
   });
 
   const res = http.post(
@@ -60,5 +93,5 @@ export default function () {
     '写入成功': (r) => r.status === 200 || r.status === 202,
   });
 
-  sleep(5);
+  sleep(2);
 }
