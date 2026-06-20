@@ -1,9 +1,18 @@
+import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
-import { useTenantDetail, useFreezeTenant, useUnfreezeTenant } from '../../hooks/useTenantsAdmin';
+import { Label } from '../../components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import { useTenantDetail, useFreezeTenant, useUnfreezeTenant, useUpdateTimeZone } from '../../hooks/useTenantsAdmin';
 import { useChangePlan } from '../../hooks/useSubscription';
 import { useBillingHistory } from '../../hooks/useBilling';
 import {
@@ -15,8 +24,37 @@ import {
   ClipboardList,
   Brain,
   FileText,
+  Globe,
 } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
+
+/**
+ * 常用时区候选（IANA ID）
+ *
+ * 设计取舍：
+ * - 不直接暴露 TimeZoneInfo.GetSystemTimeZones()（Linux 容器返回的 IANA ID 在 Windows 上不可用）
+ * - 这里只列工业监控场景常见的几个时区，未列出的可由 SysAdmin 直接通过 SQL/API 修改
+ * - 默认值统一用 "UTC"，避免空值导致 DashboardStatsService 报错
+ */
+const COMMON_TIME_ZONES: { value: string; label: string; offset: string }[] = [
+  { value: 'UTC', label: 'UTC（协调世界时）', offset: '+00:00' },
+  { value: 'Asia/Shanghai', label: '中国标准时间（北京）', offset: '+08:00' },
+  { value: 'Asia/Hong_Kong', label: '香港时间', offset: '+08:00' },
+  { value: 'Asia/Taipei', label: '台北时间', offset: '+08:00' },
+  { value: 'Asia/Singapore', label: '新加坡时间', offset: '+08:00' },
+  { value: 'Asia/Tokyo', label: '日本标准时间（东京）', offset: '+09:00' },
+  { value: 'Asia/Seoul', label: '韩国标准时间（首尔）', offset: '+09:00' },
+  { value: 'Asia/Kolkata', label: '印度标准时间（孟买）', offset: '+05:30' },
+  { value: 'Asia/Dubai', label: '海湾标准时间（迪拜）', offset: '+04:00' },
+  { value: 'Europe/London', label: '英国时间（伦敦）', offset: '+00:00/+01:00' },
+  { value: 'Europe/Paris', label: '中欧时间（巴黎）', offset: '+01:00/+02:00' },
+  { value: 'Europe/Berlin', label: '中欧时间（柏林）', offset: '+01:00/+02:00' },
+  { value: 'America/New_York', label: '美国东部时间（纽约）', offset: '-05:00/-04:00' },
+  { value: 'America/Chicago', label: '美国中部时间（芝加哥）', offset: '-06:00/-05:00' },
+  { value: 'America/Los_Angeles', label: '美国西部时间（洛杉矶）', offset: '-08:00/-07:00' },
+  { value: 'America/Sao_Paulo', label: '巴西时间（圣保罗）', offset: '-03:00' },
+  { value: 'Australia/Sydney', label: '澳东时间（悉尼）', offset: '+10:00/+11:00' },
+];
 
 /**
  * 租户详情页
@@ -35,7 +73,12 @@ export default function TenantDetailPage() {
   const freezeMutation = useFreezeTenant();
   const unfreezeMutation = useUnfreezeTenant();
   const changePlanMutation = useChangePlan();
+  const updateTimeZoneMutation = useUpdateTimeZone();
   const { data: billingData } = useBillingHistory(id);
+
+  // 本地编辑态：用于时区下拉框选择未保存的值
+  // 初始化为 tenant.timeZone，保存成功后被 useQueryClient invalidate 自动刷新
+  const [editingTimeZone, setEditingTimeZone] = useState<string | null>(null);
 
   if (isLoading) {
     return (
@@ -187,6 +230,61 @@ export default function TenantDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* 操作卡片 */}
+      {/* 时区配置（v1.4）— 影响该租户的 Dashboard 趋势聚合 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5 text-primary" />
+            {t('admin.tenants.detail.timeZone')}
+          </CardTitle>
+          <CardDescription>{t('admin.tenants.detail.timeZoneDescription')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="timezone-select">{t('admin.tenants.detail.timeZone')}</Label>
+            <Select
+              value={editingTimeZone ?? tenant.timeZone ?? 'UTC'}
+              onValueChange={(v) => setEditingTimeZone(v)}
+            >
+              <SelectTrigger id="timezone-select" className="w-full md:w-96">
+                <SelectValue placeholder="UTC" />
+              </SelectTrigger>
+              <SelectContent>
+                {COMMON_TIME_ZONES.map((tz) => (
+                  <SelectItem key={tz.value} value={tz.value}>
+                    <span className="font-mono text-xs text-muted-foreground mr-2">{tz.offset}</span>
+                    {tz.label} <span className="text-muted-foreground">({tz.value})</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t('admin.tenants.detail.timeZoneHint')}</p>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              onClick={() => {
+                if (!id || !editingTimeZone || editingTimeZone === tenant.timeZone) return;
+                updateTimeZoneMutation.mutate({ id, timeZone: editingTimeZone });
+                setEditingTimeZone(null);
+              }}
+              disabled={
+                updateTimeZoneMutation.isPending ||
+                !editingTimeZone ||
+                editingTimeZone === tenant.timeZone
+              }
+            >
+              {updateTimeZoneMutation.isPending
+                ? t('common.saving')
+                : t('common.save')}
+            </Button>
+          </div>
+          {updateTimeZoneMutation.isSuccess && (
+            <p className="text-xs text-green-600">{t('admin.tenants.detail.timeZoneSaved')}</p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* 操作卡片 */}
       <Card>

@@ -23,6 +23,7 @@ beforeEach(() => {
 
 const mockUser: UserInfo = {
   id: 'user-001',
+  tenantId: 'tenant-001',
   username: 'admin',
   displayName: '系统管理员',
   role: 'SystemAdmin',

@@ -3,6 +3,7 @@
     "appName": "EquipSense",
     "loading": "Loading...",
     "save": "Save",
+    "saving": "Saving...",
     "cancel": "Cancel",
     "delete": "Delete",
     "close": "Close",
@@ -696,7 +697,11 @@
         "users": "Users",
         "activeAlerts": "Active Alerts",
         "pendingWorkOrders": "Pending Work Orders",
-        "monthlyAnalysis": "Monthly AI Analysis"
+        "monthlyAnalysis": "Monthly AI Analysis",
+        "timeZone": "Time Zone",
+        "timeZoneDescription": "Affects Dashboard trend aggregation by local date. Set to Asia/Shanghai so daily trends split at Beijing midnight instead of UTC midnight.",
+        "timeZoneHint": "After saving, Dashboard trends will be re-aggregated using the new time zone.",
+        "timeZoneSaved": "Time zone updated"
       }
     },
     "globalStats": {

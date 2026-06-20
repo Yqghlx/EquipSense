@@ -16,6 +16,15 @@ public class UserDto
     public string Username { get; set; } = string.Empty;
 
     /// <summary>
+    /// 所属租户 ID（v1.4 加入）
+    ///
+    /// 用途：HttpOnly Cookie 迁移后前端无法再从 JWT 解析 tenant_id，
+    /// 改为通过 UserInfo 直接返回，避免 SubscriptionPanel / Dashboard 等
+    /// 需要租户上下文的页面拿不到 tenant_id。
+    /// </summary>
+    public Guid TenantId { get; set; }
+
+    /// <summary>
     /// 显示名称
     /// </summary>
     public string? DisplayName { get; set; }

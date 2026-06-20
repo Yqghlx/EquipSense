@@ -106,15 +106,9 @@ const plans = [
  */
 function SubscriptionPanel() {
   const { t } = useTranslation();
-  const token = useAuthStore((s) => s.token);
-  // 从 JWT 中解析 tenant_id
-  const tenantId = (() => {
-    if (!token) return undefined;
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.tenant_id as string | undefined;
-    } catch { return undefined; }
-  })();
+  // v1.4：HttpOnly Cookie 迁移后 token 不再前端可见，改用 UserInfo.tenantId
+  const user = useAuthStore((s) => s.user);
+  const tenantId = user?.tenantId;
   const { data: sub } = useSubscription(tenantId);
   const changePlanMutation = useChangePlan();
 

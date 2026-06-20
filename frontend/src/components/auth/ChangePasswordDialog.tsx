@@ -70,8 +70,9 @@ export function ChangePasswordDialog({ forced = false, onSuccess }: ChangePasswo
         newPassword: data.newPassword,
       });
       // 更新本地用户信息，清除 mustChangePassword 标志
+      // v1.3.0 HttpOnly Cookie 迁移后，setAuth 只接收 user（token 不再前端管理）
       if (user) {
-        setAuth(useAuthStore.getState().token!, { ...user, mustChangePassword: false });
+        setAuth({ ...user, mustChangePassword: false });
       }
       onSuccess?.();
     } catch {

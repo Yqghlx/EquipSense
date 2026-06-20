@@ -32,6 +32,8 @@ export interface TenantAdminItem {
   subscriptionEndsAt?: string;
   /** 数据保留天数 */
   dataRetentionDays: number;
+  /** 租户时区（IANA ID，如 "Asia/Shanghai"，影响 Dashboard 趋势分组） */
+  timeZone: string;
 }
 
 /** 租户详情（继承列表项，增加统计信息） */
@@ -155,6 +157,27 @@ export function useUnfreezeTenant() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'tenants'] });
       qc.invalidateQueries({ queryKey: ['admin', 'globalStats'] });
+    },
+  });
+}
+
+/**
+ * 更新租户时区（v1.4）
+ *
+ * 调用 PUT /admin/tenants/{id}，body 只传 timeZone 字段
+ * 影响范围：Dashboard 趋势聚合按本地日期分组
+ */
+export function useUpdateTimeZone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, timeZone }: { id: string; timeZone: string }) => {
+      const { data } = await api.put(`/admin/tenants/${id}`, { timeZone });
+      return data as TenantAdminItem;
+    },
+    onSuccess: () => {
+      // 刷新租户列表 + Dashboard（趋势会按时区重新聚合）
+      qc.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }

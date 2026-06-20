@@ -9,6 +9,7 @@ import {
   useGlobalStats,
   useFreezeTenant,
   useUnfreezeTenant,
+  useUpdateTimeZone,
 } from '../useTenantsAdmin';
 
 // Mock axios api 模块
@@ -263,6 +264,56 @@ describe('useUnfreezeTenant', () => {
     );
     expect(invalidateSpy).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: ['admin', 'globalStats'] }),
+    );
+
+    invalidateSpy.mockRestore();
+  });
+});
+
+describe('useUpdateTimeZone', () => {
+  it('应调用 PUT /admin/tenants/{id} 并 body 只含 timeZone', async () => {
+    mockedApi.put.mockResolvedValueOnce({
+      data: { id: 'tenant-001', timeZone: 'Asia/Shanghai' },
+    });
+
+    const { result } = renderHook(
+      () => useUpdateTimeZone(),
+      { wrapper: createWrapper() },
+    );
+
+    result.current.mutate({ id: 'tenant-001', timeZone: 'Asia/Shanghai' });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockedApi.put).toHaveBeenCalledWith(
+      '/admin/tenants/tenant-001',
+      { timeZone: 'Asia/Shanghai' },
+    );
+  });
+
+  it('成功后应刷新租户列表和 Dashboard 缓存', async () => {
+    const invalidateSpy = vi.spyOn(
+      QueryClient.prototype,
+      'invalidateQueries',
+    );
+
+    mockedApi.put.mockResolvedValueOnce({ data: null });
+
+    const { result } = renderHook(
+      () => useUpdateTimeZone(),
+      { wrapper: createWrapper() },
+    );
+
+    result.current.mutate({ id: 'tenant-001', timeZone: 'UTC' });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    // 时区变更后 Dashboard 趋势聚合会按新时区重新计算，必须失效 dashboard 缓存
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['admin', 'tenants'] }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: ['dashboard'] }),
     );
 
     invalidateSpy.mockRestore();

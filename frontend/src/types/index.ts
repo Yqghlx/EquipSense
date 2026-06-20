@@ -73,6 +73,8 @@ export interface MfaSetupResponse {
 export interface UserInfo {
   /** 用户唯一标识（UUID） */
   id: string;
+  /** 所属租户 ID（v1.4 加入：HttpOnly Cookie 后前端不再能从 JWT 解析，改为直接由 UserInfo 返回） */
+  tenantId: string;
   /** 用户名 */
   username: string;
   /** 显示名称 */

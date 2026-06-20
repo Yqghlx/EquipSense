@@ -3,6 +3,7 @@
     "appName": "EquipSense",
     "loading": "加载中...",
     "save": "保存",
+    "saving": "保存中...",
     "cancel": "取消",
     "delete": "删除",
     "close": "关闭",
@@ -696,7 +697,11 @@
         "users": "用户",
         "activeAlerts": "活跃告警",
         "pendingWorkOrders": "待处理工单",
-        "monthlyAnalysis": "本月 AI 分析"
+        "monthlyAnalysis": "本月 AI 分析",
+        "timeZone": "时区",
+        "timeZoneDescription": "影响 Dashboard 趋势聚合的本地日期分组。设为 Asia/Shanghai 后，告警/工单的日趋势按北京时间 0 点切分，而非 UTC 0 点。",
+        "timeZoneHint": "修改后 Dashboard 趋势将按新时区重新聚合。",
+        "timeZoneSaved": "时区已更新"
       }
     },
     "globalStats": {

@@ -69,6 +69,7 @@ const mockAuthResponse: AuthResponse = {
   refreshToken: 'refresh-token-xxx',
   userInfo: {
     id: 'user-001',
+    tenantId: 'tenant-001',
     username: 'admin',
     displayName: '管理员',
     email: 'admin@example.com',

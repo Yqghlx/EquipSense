@@ -554,6 +554,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_data_at");
 
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_seen_at");
+
                     b.Property<string>("Location")
                         .IsRequired()
                         .HasColumnType("jsonb")
@@ -1549,6 +1553,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("subscription_ends_at");
 
+                    b.Property<string>("TimeZone")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("TrialEndsAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("trial_ends_at");
@@ -1655,7 +1663,9 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnName("token_version");
 
                     b.Property<string>("TotpSecret")
-                        .HasColumnType("text");
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("totp_secret");
 
                     b.Property<string>("Username")
                         .IsRequired()

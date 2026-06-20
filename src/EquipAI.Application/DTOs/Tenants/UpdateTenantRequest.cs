@@ -24,4 +24,10 @@ public class UpdateTenantRequest
     /// 套餐等级
     /// </summary>
     public string? Plan { get; set; }
+
+    /// <summary>
+    /// 租户时区（IANA 时区 ID，如 "Asia/Shanghai"）
+    /// v1.4 加入：影响 Dashboard 趋势聚合的本地日期分组
+    /// </summary>
+    public string? TimeZone { get; set; }
 }
