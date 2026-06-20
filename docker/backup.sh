@@ -52,26 +52,39 @@ echo "=========================================="
 # ============================================================
 # 1. PostgreSQL 备份
 # ============================================================
+# 关键设计：用 docker exec 在 postgres 容器内执行 pg_dump
+# 原因：生产部署只装 Docker，主机没装 pg_dump 客户端工具
+# （v1.4 修复：之前用主机 pg_dump 导致备份无声失败）
+PG_CONTAINER="${PG_CONTAINER:-equipai-postgres}"
 PG_FILE="$BACKUP_DIR/${PG_DB}_${TIMESTAMP}.sql.gz"
-echo "[1/3] 备份 PostgreSQL ($PG_DB)..."
-if PGPASSWORD="$PG_PASSWORD" pg_dump \
-  -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PG_DB" \
-  --format=plain --no-owner --no-privileges \
-  | gzip > "$PG_FILE"; then
+echo "[1/3] 备份 PostgreSQL ($PG_DB) via docker exec..."
 
-  # 完整性校验（gzip -t 测试压缩文件是否损坏）
-  if gzip -t "$PG_FILE" 2>/dev/null; then
-    SIZE=$(du -h "$PG_FILE" | cut -f1)
-    echo "  ✓ PostgreSQL 备份成功: $PG_FILE ($SIZE)"
-    BACKUP_FILES+=("$PG_FILE")
+# 检查容器是否运行（避免容器停了还在尝试备份）
+if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
+  echo "  ✗ PostgreSQL 容器 $PG_CONTAINER 未运行，跳过备份"
+  BACKUP_SUCCESS=false
+else
+  # 在容器内执行 pg_dump，输出通过管道 gzip 压缩
+  # PGPASSWORD 通过 -e 传入容器环境，避免进程列表泄露
+  if docker exec -e PGPASSWORD="$PG_PASSWORD" "$PG_CONTAINER" \
+    pg_dump -U "$PG_USER" -d "$PG_DB" \
+    --format=plain --no-owner --no-privileges \
+    | gzip > "$PG_FILE"; then
+
+    # 完整性校验（gzip -t 测试压缩文件是否损坏）
+    if gzip -t "$PG_FILE" 2>/dev/null; then
+      SIZE=$(du -h "$PG_FILE" | cut -f1)
+      echo "  ✓ PostgreSQL 备份成功: $PG_FILE ($SIZE)"
+      BACKUP_FILES+=("$PG_FILE")
+    else
+      echo "  ✗ PostgreSQL 备份损坏，gzip -t 校验失败"
+      rm -f "$PG_FILE"
+      BACKUP_SUCCESS=false
+    fi
   else
-    echo "  ✗ PostgreSQL 备份损坏，gzip -t 校验失败"
-    rm -f "$PG_FILE"
+    echo "  ✗ PostgreSQL 备份失败"
     BACKUP_SUCCESS=false
   fi
-else
-  echo "  ✗ PostgreSQL 备份失败"
-  BACKUP_SUCCESS=false
 fi
 
 # ============================================================
