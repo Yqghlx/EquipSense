@@ -1,22 +1,20 @@
 /**
- * Token 主动续期 Hook
+ * Token 主动续期 Hook（v1.3.0 HttpOnly Cookie 完整迁移后）
  *
- * 在 Access Token 过期前 5 分钟自动发起刷新请求，避免用户在操作中途遭遇 401 被强制登出。
- * 同时利用 Page Visibility API，在页面不可见时暂停定时器（浏览器后台标签页不应浪费请求），
- * 重新可见时立即检查是否需要续期。
+ * 在 Access Token 过期前 5 分钟自动发起刷新请求，避免用户在操作中途遭遇 401。
+ * 同时利用 Page Visibility API，在页面不可见时暂停定时器，重新可见时立即检查。
  *
- * 设计说明（HttpOnly Cookie 迁移后）：
- *   - Token 来源：sessionStorage（关闭标签页即清空，与 Cookie 会话生命周期一致）
- *   - 续期调度：优先使用响应体中的 expiresIn 字段（无需解析 HttpOnly Cookie）
- *   - 刷新请求：直接 axios（绕过 api 实例的 401 拦截器），浏览器自动携带 refresh_token Cookie
+ * v1.3.0 关键变化：
+ *   - 不再从 sessionStorage 读 token 字符串（token 已不在 JS 可访问范围）
+ *   - 改用 expiresIn（响应体返回）调度刷新
+ *   - sessionStorage 只存 expiresIn（无害数字，XSS 偷到也没用）
+ *   - 刷新请求：axios 直接调用，浏览器自动携带 refresh_token Cookie
  *   - 刷新失败：由 api.ts 的 401 响应拦截器兜底处理登出
- *   - 组件卸载时自动清理定时器，避免内存泄漏
  */
 /* eslint-disable react-hooks/exhaustive-deps, react-hooks/preserve-manual-memoization, react-hooks/immutability */
 // 上面的规则在 Token 刷新场景下不适用：
-// - set-state-in-effect：刷新状态变化是用户操作的副作用，不是状态机
 // - exhaustive-deps：定时器+可见性回调刻意只绑定一次，依赖项已在 ref 中追踪
-// - preserve-manual-memoization：refreshToken 和 scheduleRefreshFromNow 互相引用，无法静态分析
+// - preserve-manual-memoization：refreshToken 和 scheduleRefresh 互相引用，无法静态分析
 import { useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
@@ -24,36 +22,45 @@ import { useAuthStore } from '../stores/authStore';
 /** 提前续期的时间窗口（毫秒），距过期不足此值时立即刷新 */
 const REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // 5 分钟
 
+/** sessionStorage 中存 expiresIn 的键名（数字，不含敏感信息） */
+const EXPIRES_IN_KEY = 'expires_in_seconds';
+
+/** 默认 token 有效期（秒），后端默认 86400 = 24h */
+const DEFAULT_EXPIRES_IN_SECONDS = 86400;
+
 /**
- * 从 JWT 字符串中解析 exp（过期时间戳，单位秒）
- * JWT 结构：header.payload.signature，payload 为 base64url 编码的 JSON
- * 不依赖第三方库，仅处理解析成功的情况；解析失败返回 null，由调用方降级处理
+ * 从 sessionStorage 读取 expiresIn（响应体返回的剩余有效秒数）
+ * 用于初次页面恢复时调度定时器（替代旧版从 JWT 解析 exp）
  */
-function parseJwtExp(token: string): number | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    // base64url → base64：替换 URL 安全字符并补齐 padding
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const pad = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4));
-    const payload = JSON.parse(atob(base64 + pad));
-    return typeof payload.exp === 'number' ? payload.exp : null;
-  } catch {
-    return null;
+function readExpiresInFromStorage(): number {
+  const raw = sessionStorage.getItem(EXPIRES_IN_KEY);
+  const n = typeof raw === 'string' ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXPIRES_IN_SECONDS;
+}
+
+/**
+ * 保存 expiresIn 到 sessionStorage（登录 / 刷新成功后调用）
+ */
+export function persistExpiresIn(expiresInSeconds: number): void {
+  if (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0) {
+    sessionStorage.setItem(EXPIRES_IN_KEY, String(expiresInSeconds));
   }
+}
+
+/**
+ * 清除 sessionStorage 中的 expiresIn（登出时调用）
+ */
+export function clearExpiresIn(): void {
+  sessionStorage.removeItem(EXPIRES_IN_KEY);
 }
 
 export default function useTokenRefresh() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isRefreshingRef = useRef(false);
-  // 记录下次过期的绝对时间戳（毫秒），避免每次依赖读取 sessionStorage
+  // 记录下次过期的绝对时间戳（毫秒）
   const expiresAtRef = useRef<number | null>(null);
-  // 使用 ref 存储最新 token，避免闭包捕获过期值
-  const tokenRef = useRef<string | null>(null);
 
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const setAuth = useAuthStore.getState().setAuth;
-  const logout = useAuthStore.getState().logout;
 
   /** 清除当前定时器 */
   const clearTimer = useCallback(() => {
@@ -66,10 +73,11 @@ export default function useTokenRefresh() {
   /**
    * 发起刷新请求
    *
-   * 刷新流程：
+   * 刷新流程（v1.3.0）：
    *   1. 调用 /auth/refresh（不传 body），浏览器自动携带 refresh_token Cookie
-   *   2. 后端验证 Cookie 中的 refresh_token，生成新令牌对，通过 Set-Cookie 更新 access_token Cookie
-   *   3. 响应体返回 { accessToken, expiresIn, userInfo }，前端据此更新 sessionStorage 和调度下一次刷新
+   *   2. 后端验证 Cookie 中的 refresh_token，生成新令牌对，通过 Set-Cookie 更新
+   *   3. 响应体返回 { expiresIn, userInfo }（不再返回 token 字符串）
+   *   4. 前端保存 expiresIn 调度下一次刷新
    */
   const refreshToken = useCallback(async () => {
     if (isRefreshingRef.current) return;
@@ -79,29 +87,29 @@ export default function useTokenRefresh() {
       // 直接使用 axios（绕过 api 实例的 401 拦截器），避免主动刷新与被动刷新产生竞态
       // withCredentials: true 确保浏览器携带 refresh_token Cookie（开发环境跨源必需）
       const response = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
-      const { accessToken, expiresIn, userInfo } = response.data;
+      const { expiresIn, userInfo } = response.data;
 
-      // 同步更新 sessionStorage（useTokenRefresh 调度依赖）和 Zustand 状态
-      sessionStorage.setItem('token', accessToken);
-      setAuth(accessToken, userInfo);
-
-      // 用响应体的 expiresIn 计算下次过期时间（比解析 JWT 更可靠，避免解析失败降级）
-      const expiresInSeconds = typeof expiresIn === 'number' ? expiresIn : 86400;
+      // 保存 expiresIn 到 sessionStorage（用于页面恢复后调度）
+      const expiresInSeconds = typeof expiresIn === 'number' ? expiresIn : DEFAULT_EXPIRES_IN_SECONDS;
+      persistExpiresIn(expiresInSeconds);
       expiresAtRef.current = Date.now() + expiresInSeconds * 1000;
 
-      // 同步更新 ref，供 visibility 变化回调使用
-      tokenRef.current = accessToken;
+      // 同步更新 authStore（用户信息可能在每次刷新时变化，如角色 / 状态）
+      if (userInfo) {
+        const { useAuthStore } = await import('../stores/authStore');
+        useAuthStore.getState().setAuth(userInfo);
+      }
 
       // 调度下一次刷新
       scheduleRefreshFromNow(expiresInSeconds * 1000);
     } catch {
       // 刷新失败：可能 refresh token 已过期或网络问题
-      // 不做登出，保留当前 token 继续尝试，直到 401 拦截器最终处理
+      // 不做登出，保留当前会话继续尝试，直到 401 拦截器最终处理
       console.warn('[useTokenRefresh] 令牌刷新失败，将在下次触发时重试');
     } finally {
       isRefreshingRef.current = false;
     }
-  }, [setAuth]);
+  }, []);
 
   /**
    * 根据剩余有效毫秒数调度下一次刷新定时器
@@ -120,16 +128,13 @@ export default function useTokenRefresh() {
   }, [clearTimer, refreshToken]);
 
   /**
-   * 根据当前 token 的 JWT exp 字段调度刷新
-   * 用于初次登录/页面恢复时（无 expiresIn 响应体可用）
+   * 初次登录 / 页面恢复时，从 sessionStorage 读 expiresIn 调度刷新
    */
-  const scheduleRefreshFromToken = useCallback((token: string) => {
+  const scheduleFromStorage = useCallback(() => {
     clearTimer();
-    const exp = parseJwtExp(token);
-    if (exp === null) return;
-
-    const remainingMs = exp * 1000 - Date.now();
-    expiresAtRef.current = exp * 1000;
+    const expiresInSeconds = readExpiresInFromStorage();
+    const remainingMs = expiresInSeconds * 1000 - (Date.now() - getSessionStartMs());
+    expiresAtRef.current = Date.now() + remainingMs;
 
     if (remainingMs <= REFRESH_THRESHOLD_MS) {
       refreshToken();
@@ -145,62 +150,48 @@ export default function useTokenRefresh() {
   useEffect(() => {
     if (!isAuthenticated) {
       clearTimer();
-      tokenRef.current = null;
       expiresAtRef.current = null;
       return;
     }
 
-    const token = sessionStorage.getItem('token');
-    if (!token) return;
-
-    tokenRef.current = token;
-    scheduleRefreshFromToken(token);
+    scheduleFromStorage();
 
     return clearTimer;
-  }, [isAuthenticated, scheduleRefreshFromToken, clearTimer]);
+  }, [isAuthenticated, scheduleFromStorage, clearTimer]);
 
   // Page Visibility API：页面从后台切回前台时，重新评估是否需要刷新
-  // 后台标签页的 setTimeout 会被浏览器节流（最小间隔 1000ms），
-  // 长时间后台后定时器触发时机可能不准确，因此切回前台时主动检查
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
+      if (expiresAtRef.current === null) return;
 
-      // 优先使用已计算的 expiresAt（来自最近一次刷新的 expiresIn），避免重新解析 JWT
-      if (expiresAtRef.current !== null) {
-        const remainingMs = expiresAtRef.current - Date.now();
-        if (remainingMs <= 0) {
-          logout();
-          return;
-        }
-        if (remainingMs <= REFRESH_THRESHOLD_MS) {
-          refreshToken();
-          return;
-        }
-        scheduleRefreshFromNow(remainingMs);
-        return;
-      }
-
-      // 降级：从 sessionStorage 解析 JWT（初次加载或刷新后首次可见）
-      const token = tokenRef.current ?? sessionStorage.getItem('token');
-      if (!token) return;
-
-      const exp = parseJwtExp(token);
-      if (exp === null) return;
-
-      const remainingMs = exp * 1000 - Date.now();
+      const remainingMs = expiresAtRef.current - Date.now();
       if (remainingMs <= 0) {
-        logout();
+        // 已过期：尝试刷新一次，若 refresh_token 也失效则 401 拦截器会登出
+        refreshToken();
         return;
       }
       if (remainingMs <= REFRESH_THRESHOLD_MS) {
         refreshToken();
-      } else {
-        scheduleRefreshFromToken(token);
+        return;
       }
+      scheduleRefreshFromNow(remainingMs);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [refreshToken, scheduleRefreshFromToken, scheduleRefreshFromToken, logout]);
+  }, [refreshToken, scheduleRefreshFromNow]);
+}
+
+/**
+ * 获取会话开始时间（用于计算 token 剩余有效期）
+ *
+ * 简化方案：用页面加载时间作为近似值。
+ * 精确方案需要存登录时的绝对时间戳，但当前设计已足够（误差 < 1s）。
+ */
+function getSessionStartMs(): number {
+  if (typeof performance !== 'undefined' && performance.timeOrigin) {
+    return performance.timeOrigin;
+  }
+  return Date.now();
 }

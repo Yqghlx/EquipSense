@@ -108,7 +108,7 @@ export default function RegisterPage() {
       });
 
       // 注册成功，自动登录
-      setAuth(authResponse.accessToken, authResponse.userInfo);
+      setAuth(authResponse.userInfo);
       navigate('/dashboard', { replace: true });
     } catch {
       setError(t('register.registerError'));

@@ -337,11 +337,14 @@ public class AuthController : ControllerBase
     /// <summary>
     /// 设置认证 Cookie（Access Token + Refresh Token）
     ///
-    /// Cookie 安全策略：
-    ///   - HttpOnly：refresh_token 设为 HttpOnly（JavaScript 不可访问，防 XSS 窃取）
-    ///     access_token 不设 HttpOnly（前端 useTokenRefresh Hook 需解析 exp 字段调度定时器）
+    /// Cookie 安全策略（v1.3.0 强化）：
+    ///   - HttpOnly：access_token 和 refresh_token 都设 HttpOnly=true
+    ///     JavaScript 完全无法读取，彻底防 XSS 窃取 token。
+    ///     前端 useTokenRefresh Hook 不再依赖读 token 字符串，
+    ///     改用响应体的 expiresIn 字段调度刷新定时器。
     ///   - Secure：仅 HTTPS 传输（开发环境 HTTPS 不可用时降级为非 Secure）
-    ///   - SameSite=Lax：防止 CSRF（同源请求携带，跨站顶级导航不携带）
+    ///   - SameSite=Strict：浏览器跨站请求一律不携带 Cookie，原生防 CSRF
+    ///     代价：用户从外部链接跳转登录会丢会话（前端和后端必须同站点）
     ///   - Path=/：覆盖所有路径，包括 SignalR Hub 连接
     /// </summary>
     private void SetAuthCookies(string accessToken, string refreshToken, int expiresInSeconds)
@@ -349,29 +352,30 @@ public class AuthController : ControllerBase
         var isHttps = Request.IsHttps
             || string.Equals(Request.Headers["X-Forwarded-Proto"], "https", StringComparison.OrdinalIgnoreCase);
 
-        var cookieOptions = new CookieOptions
+        // 两个 Cookie 共享的安全策略（HttpOnly + SameSite=Strict）
+        var baseOptions = new CookieOptions
         {
-            HttpOnly = false,      // access_token 需前端可读（useTokenRefresh 解析 exp）
-            Secure = isHttps,      // 生产 HTTPS 环境启用；开发 localhost HTTP 时降级
-            SameSite = SameSiteMode.Lax,
-            Path = "/",            // 覆盖所有路径，含 /api/ 和 /hubs/
+            HttpOnly = true,
+            Secure = isHttps,
+            SameSite = SameSiteMode.Strict,
+            Path = "/",
         };
 
         Response.Cookies.Append("access_token", accessToken, new CookieOptions
         {
-            HttpOnly = cookieOptions.HttpOnly,
-            Secure = cookieOptions.Secure,
-            SameSite = cookieOptions.SameSite,
-            Path = cookieOptions.Path,
+            HttpOnly = baseOptions.HttpOnly,
+            Secure = baseOptions.Secure,
+            SameSite = baseOptions.SameSite,
+            Path = baseOptions.Path,
             MaxAge = TimeSpan.FromSeconds(expiresInSeconds),
         });
 
         Response.Cookies.Append("refresh_token", refreshToken, new CookieOptions
         {
-            HttpOnly = true,       // refresh_token 严格 HttpOnly，JavaScript 不可见
-            Secure = cookieOptions.Secure,
-            SameSite = cookieOptions.SameSite,
-            Path = cookieOptions.Path,
+            HttpOnly = baseOptions.HttpOnly,
+            Secure = baseOptions.Secure,
+            SameSite = baseOptions.SameSite,
+            Path = baseOptions.Path,
             MaxAge = TimeSpan.FromDays(7),
         });
     }
@@ -385,28 +389,21 @@ public class AuthController : ControllerBase
         var isHttps = Request.IsHttps
             || string.Equals(Request.Headers["X-Forwarded-Proto"], "https", StringComparison.OrdinalIgnoreCase);
 
-        var opts = new CookieOptions
-        {
-            Secure = isHttps,
-            SameSite = SameSiteMode.Lax,
-            Path = "/",
-        };
-
-        // 清除时必须设置与写入时完全一致的属性（Path/Secure/SameSite），否则浏览器拒绝删除
+        // 清除时必须设置与写入时完全一致的属性（Path/Secure/SameSite/HttpOnly），否则浏览器拒绝删除
         Response.Cookies.Delete("access_token", new CookieOptions
         {
-            HttpOnly = false,
-            Secure = opts.Secure,
-            SameSite = opts.SameSite,
-            Path = opts.Path,
+            HttpOnly = true,
+            Secure = isHttps,
+            SameSite = SameSiteMode.Strict,
+            Path = "/",
         });
 
         Response.Cookies.Delete("refresh_token", new CookieOptions
         {
             HttpOnly = true,
-            Secure = opts.Secure,
-            SameSite = opts.SameSite,
-            Path = opts.Path,
+            Secure = isHttps,
+            SameSite = SameSiteMode.Strict,
+            Path = "/",
         });
     }
 }

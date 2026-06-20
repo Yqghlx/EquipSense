@@ -27,17 +27,17 @@ const api = axios.create({
 
 // 是否正在刷新令牌（防止并发刷新）
 let isRefreshing = false;
-// 等待令牌刷新的请求队列
+// 等待令牌刷新完成的请求队列（刷新期间到达的 401 请求排队等待）
 let pendingRequests: Array<{
-  resolve: (token: string) => void;
+  resolve: (value?: unknown) => void;
   reject: (error: unknown) => void;
 }> = [];
 
-/** 处理所有排队中的请求 */
-function processPendingRequests(token: string | null, error?: unknown) {
+/** 通知所有排队请求：刷新完成，可以重试 */
+function processPendingRequests(error?: unknown) {
   pendingRequests.forEach(({ resolve, reject }) => {
-    if (token) resolve(token);
-    else reject(error);
+    if (error) reject(error);
+    else resolve();
   });
   pendingRequests = [];
 }
@@ -78,7 +78,7 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // 无存储的用户信息，说明未登录，直接登出
+    // 无存储的用户信息，说明未登录，直接跳转登录页
     const storedUser = sessionStorage.getItem('user');
     if (!storedUser) {
       sessionStorage.clear();
@@ -91,7 +91,7 @@ api.interceptors.response.use(
       return new Promise((resolve, reject) => {
         pendingRequests.push({ resolve, reject });
       }).then(() => {
-        // Cookie 已更新，重发原始请求（浏览器自动携带新 access_token Cookie）
+        // Cookie 已由后端更新（Set-Cookie），重发原始请求时浏览器自动携带新 access_token
         return api(originalRequest);
       });
     }
@@ -102,27 +102,24 @@ api.interceptors.response.use(
     try {
       // 刷新请求不传 body：HttpOnly Cookie 中 refresh_token 由浏览器自动携带，
       // 后端 Refresh 端点在 body 为空时自动从 Cookie 读取
+      // 注意：v1.3.0 起响应体不再返回 accessToken（[JsonIgnore]），只返回 expiresIn + userInfo
       const response = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
-      const { accessToken } = response.data;
+      const { userInfo } = response.data;
 
-      // 更新 sessionStorage 中的 token（useTokenRefresh Hook 解析 exp 用）
-      sessionStorage.setItem('token', accessToken);
-
-      // 更新 authStore（同步 Zustand 内存状态）
-      const { useAuthStore } = await import('../stores/authStore');
-      const store = useAuthStore.getState();
-      if (store.user) {
-        store.setAuth(accessToken, store.user);
+      // 更新 authStore（同步 Zustand 内存状态，Cookie 由浏览器管理）
+      if (userInfo) {
+        const { useAuthStore } = await import('../stores/authStore');
+        useAuthStore.getState().setAuth(userInfo);
       }
 
-      // 通知排队请求使用新 Cookie 重试
-      processPendingRequests(accessToken);
+      // 通知排队请求重试
+      processPendingRequests();
 
       // 重发原始请求（浏览器自动携带新 access_token Cookie）
       return api(originalRequest);
     } catch (refreshError) {
       // 刷新失败（refresh_token 也过期或被吊销），清除会话并跳转登录
-      processPendingRequests(null, refreshError);
+      processPendingRequests(refreshError);
       sessionStorage.clear();
       window.location.href = '/login';
       return Promise.reject(refreshError);

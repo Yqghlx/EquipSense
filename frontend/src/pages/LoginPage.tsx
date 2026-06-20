@@ -89,7 +89,7 @@ export default function LoginPage() {
       }
 
       // 无需 MFA，直接完成登录
-      setAuth(response.data.accessToken, response.data.userInfo);
+      setAuth(response.data.userInfo);
       // 认证 Cookie 由后端登录响应自动设置
       if (response.data.userInfo.mustChangePassword) {
         setMustChangePassword(true);
@@ -114,7 +114,7 @@ export default function LoginPage() {
         challengeToken: mfaChallengeToken,
         totpCode: data.totpCode,
       });
-      setAuth(response.data.accessToken, response.data.userInfo);
+      setAuth(response.data.userInfo);
       const from = (location.state as { from?: string })?.from || '/dashboard';
       navigate(from, { replace: true });
     } catch {
