@@ -1,6 +1,7 @@
 using EquipAI.Application.Approvals;
 using EquipAI.Application.Approvals.DTOs;
 using EquipAI.Application.DTOs.Common;
+using EquipAI.Application.Services;
 using EquipAI.Application.WorkOrders;
 using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Core.Interfaces;
@@ -26,17 +27,20 @@ public class WorkOrdersController : ControllerBase
     private readonly IApprovalChainService _approvalChainService;
     private readonly WorkOrderStatisticsService _statisticsService;
     private readonly ITenantContext _tenantContext;
+    private readonly DataExportService _exportService;
 
     public WorkOrdersController(
         IWorkOrderService workOrderService,
         IApprovalChainService approvalChainService,
         WorkOrderStatisticsService statisticsService,
-        ITenantContext tenantContext)
+        ITenantContext tenantContext,
+        DataExportService exportService)
     {
         _workOrderService = workOrderService;
         _statisticsService = statisticsService;
         _approvalChainService = approvalChainService;
         _tenantContext = tenantContext;
+        _exportService = exportService;
     }
 
     /// <summary>
@@ -51,6 +55,26 @@ public class WorkOrdersController : ControllerBase
     {
         var result = await _workOrderService.ListAsync(_tenantContext.TenantId, page, pageSize, status, deviceId);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// 导出工单列表为 CSV（最多 10000 条，支持按状态/优先级/设备筛选）
+    ///
+    /// 用于月度运维报表、SLA 合规审计、绩效核算。
+    /// 覆盖工单生命周期全字段（创建 → 派工 → 完成 → 关闭）。
+    /// </summary>
+    [HttpGet("export")]
+    [RequirePermission("workorder:read")]
+    [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportWorkOrders(
+        [FromQuery] string? status = null,
+        [FromQuery] string? priority = null,
+        [FromQuery] Guid? deviceId = null,
+        CancellationToken ct = default)
+    {
+        var bytes = await _exportService.ExportWorkOrdersAsync(_tenantContext.TenantId, status, priority, deviceId, ct);
+        var fileName = $"work_orders_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
+        return File(bytes, "text/csv; charset=utf-8", fileName);
     }
 
     /// <summary>

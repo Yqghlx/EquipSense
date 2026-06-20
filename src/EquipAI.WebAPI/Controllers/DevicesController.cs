@@ -29,6 +29,7 @@ public class DevicesController : ControllerBase
     private readonly IMlAnomalyDetectionService _mlService;
     private readonly DeviceImportService _importService;
     private readonly DeviceHealthService _healthService;
+    private readonly DataExportService _exportService;
 
     /// <summary>
     /// 初始化设备管理控制器
@@ -38,18 +39,21 @@ public class DevicesController : ControllerBase
     /// <param name="mlService">ML 异常检测服务</param>
     /// <param name="importService">设备批量导入服务</param>
     /// <param name="healthService">设备健康度计算服务</param>
+    /// <param name="exportService">数据导出服务</param>
     public DevicesController(
         IDeviceService deviceService,
         ITenantContext tenantContext,
         IMlAnomalyDetectionService mlService,
         DeviceImportService importService,
-        DeviceHealthService healthService)
+        DeviceHealthService healthService,
+        DataExportService exportService)
     {
         _deviceService = deviceService;
         _tenantContext = tenantContext;
         _mlService = mlService;
         _importService = importService;
         _healthService = healthService;
+        _exportService = exportService;
     }
 
     /// <summary>
@@ -294,5 +298,24 @@ public class DevicesController : ControllerBase
         var content = bom.Concat(bytes).ToArray();
 
         return File(content, "text/csv; charset=utf-8", "device_import_template.csv");
+    }
+
+    /// <summary>
+    /// 导出设备列表为 CSV（最多 10000 条，支持按状态和类型筛选）
+    ///
+    /// 用于月度运维报表、资产盘点、合规归档等场景。
+    /// 文件名格式：devices_{yyyyMMdd_HHmmss}.csv，避免覆盖。
+    /// </summary>
+    [HttpGet("export")]
+    [RequirePermission("device:read")]
+    [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportDevices(
+        [FromQuery] string? status = null,
+        [FromQuery] string? type = null,
+        CancellationToken ct = default)
+    {
+        var bytes = await _exportService.ExportDevicesAsync(_tenantContext.TenantId, status, type, ct);
+        var fileName = $"devices_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
+        return File(bytes, "text/csv; charset=utf-8", fileName);
     }
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Download } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { Badge } from '../components/ui/badge';
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
 import { WorkOrderForm } from '../components/workorder/WorkOrderForm';
-import { useWorkOrders, useCreateWorkOrder } from '../hooks/useWorkOrders';
+import { useWorkOrders, useCreateWorkOrder, exportWorkOrdersCsv } from '../hooks/useWorkOrders';
 import { useDevices } from '../hooks/useDevices';
 import { usePermission } from '../hooks/usePermission';
 import { getWorkOrderStatusLabels } from '../utils/workorder';
@@ -52,9 +52,19 @@ export default function WorkOrderListPage() {
       {/* 页面头部 */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('workorder.title')}</h1>
-        <Button onClick={() => setDialogOpen(true)} disabled={!perm.canCreate}>
-          <Plus className="mr-2 h-4 w-4" />{t('common.create')}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => exportWorkOrdersCsv({ status: status || undefined })}
+            title={t('common.exportTip', '最多导出 10000 条')}
+          >
+            <Download className="mr-2 h-4 w-4" />{t('common.export', '导出')}
+          </Button>
+          <Button onClick={() => setDialogOpen(true)} disabled={!perm.canCreate}>
+            <Plus className="mr-2 h-4 w-4" />{t('common.create')}
+          </Button>
+        </div>
       </div>
 
       {/* 搜索和筛选栏 */}

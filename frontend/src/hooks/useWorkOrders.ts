@@ -193,3 +193,32 @@ export function useCancelWorkOrder() {
     },
   });
 }
+
+
+/**
+ * 导出工单列表为 CSV
+ *
+ * 后端最多返回 10000 条，覆盖前端筛选条件（status / priority / deviceId）。
+ * 用于月度运维报表、SLA 合规审计。
+ */
+export async function exportWorkOrdersCsv(params: {
+  status?: string;
+  priority?: string;
+  deviceId?: string;
+} = {}): Promise<void> {
+  const search = new URLSearchParams();
+  if (params.status) search.set('status', params.status);
+  if (params.priority) search.set('priority', params.priority);
+  if (params.deviceId) search.set('deviceId', params.deviceId);
+  const query = search.toString();
+  const response = await api.get(`/work-orders/export${query ? `?${query}` : ''}`, {
+    responseType: 'blob',
+  });
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `work_orders_${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}

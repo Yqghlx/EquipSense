@@ -12,6 +12,7 @@
     "search": "Search",
     "filter": "Filter",
     "export": "Export",
+    "exportTip": "Export up to 10000 rows",
     "confirm": "Confirm",
     "actions": "Actions",
     "status": "Status",

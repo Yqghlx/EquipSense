@@ -162,6 +162,29 @@ export async function downloadImportTemplate(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * 导出设备列表为 CSV
+ *
+ * 后端最多返回 10000 条，覆盖前端筛选条件（status / type）。
+ * 文件名由后端生成（devices_{timestamp}.csv），保持与 API 一致。
+ */
+export async function exportDevicesCsv(params: { status?: string; type?: string } = {}): Promise<void> {
+  const search = new URLSearchParams();
+  if (params.status) search.set('status', params.status);
+  if (params.type) search.set('type', params.type);
+  const query = search.toString();
+  const response = await api.get(`/devices/export${query ? `?${query}` : ''}`, {
+    responseType: 'blob',
+  });
+  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `devices_${Date.now()}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 /** 健康度刷新响应 */
 export interface HealthScoreResult {
   deviceId: string;

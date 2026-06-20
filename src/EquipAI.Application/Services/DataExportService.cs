@@ -160,4 +160,135 @@ public class DataExportService
         Buffer.BlockCopy(body, 0, result, bom.Length, body.Length);
         return result;
     }
+
+    /// <summary>
+    /// 导出设备列表为 CSV（最多 10000 条）
+    ///
+    /// 字段选择：与前端 DeviceListPage 表格列对齐，确保用户导出后能直接看到熟悉的数据结构
+    /// </summary>
+    public async Task<byte[]> ExportDevicesAsync(
+        Guid tenantId,
+        string? status = null,
+        string? type = null,
+        CancellationToken ct = default)
+    {
+        // status 字符串解析为枚举：避免 EF Core 翻译枚举失败 + 友好错误
+        DeviceStatus? statusEnum = null;
+        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<DeviceStatus>(status, ignoreCase: true, out var parsed))
+            statusEnum = parsed;
+
+        var query = _db.Devices.AsQueryable();
+        if (statusEnum.HasValue)
+            query = query.Where(d => d.Status == statusEnum.Value);
+        if (!string.IsNullOrWhiteSpace(type))
+            query = query.Where(d => d.Type == type);
+
+        var devices = await query
+            .OrderByDescending(d => d.CreatedAt)
+            .Take(10000)
+            .Select(d => new
+            {
+                d.DeviceCode,
+                d.Name,
+                d.Type,
+                d.Manufacturer,
+                d.Model,
+                d.SerialNumber,
+                Status = d.Status.ToString(),
+                d.HealthScore,
+                Criticality = d.Criticality.ToString(),
+                CreatedAt = d.CreatedAt,
+                LastDataAt = d.LastDataAt,
+            })
+            .ToListAsync(ct);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("设备编码,名称,类型,制造商,型号,序列号,状态,健康度,关键等级,创建时间,最后数据时间");
+
+        foreach (var d in devices)
+        {
+            sb.AppendLine(string.Join(',',
+                Escape(d.DeviceCode),
+                Escape(d.Name),
+                Escape(d.Type),
+                Escape(d.Manufacturer),
+                Escape(d.Model),
+                Escape(d.SerialNumber),
+                Escape(d.Status),
+                d.HealthScore.ToString(CultureInfo.InvariantCulture),
+                Escape(d.Criticality),
+                FormatTime(d.CreatedAt),
+                FormatTime(d.LastDataAt)));
+        }
+
+        return ToCsvBytes(sb.ToString());
+    }
+
+    /// <summary>
+    /// 导出工单列表为 CSV（最多 10000 条）
+    ///
+    /// 字段选择：覆盖工单生命周期关键节点（创建/派工/完成/关闭），适合月度运维报表
+    /// </summary>
+    public async Task<byte[]> ExportWorkOrdersAsync(
+        Guid tenantId,
+        string? status = null,
+        string? priority = null,
+        Guid? deviceId = null,
+        CancellationToken ct = default)
+    {
+        var query = _db.WorkOrders.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(status))
+            query = query.Where(w => w.Status.ToString() == status);
+        if (!string.IsNullOrWhiteSpace(priority))
+            query = query.Where(w => w.Priority.ToString() == priority);
+        if (deviceId.HasValue)
+            query = query.Where(w => w.DeviceId == deviceId.Value);
+
+        var workOrders = await query
+            .OrderByDescending(w => w.CreatedAt)
+            .Take(10000)
+            .Select(w => new
+            {
+                w.WorkOrderCode,
+                w.Title,
+                Type = w.Type.ToString(),
+                Status = w.Status.ToString(),
+                Priority = w.Priority.ToString(),
+                w.DeviceId,
+                w.AssignedTo,
+                RootCause = w.RootCause,
+                Resolution = w.Resolution,
+                ActualHours = w.ActualHours,
+                CreatedAt = w.CreatedAt,
+                StartedAt = w.StartedAt,
+                CompletedAt = w.CompletedAt,
+                ClosedAt = w.ClosedAt,
+            })
+            .ToListAsync(ct);
+
+        var sb = new StringBuilder();
+        sb.AppendLine("工单编码,标题,类型,状态,优先级,设备ID,负责人ID,根因,解决措施,实际工时,创建时间,开始时间,完成时间,关闭时间");
+
+        foreach (var w in workOrders)
+        {
+            sb.AppendLine(string.Join(',',
+                Escape(w.WorkOrderCode),
+                Escape(w.Title),
+                w.Type,
+                w.Status,
+                w.Priority,
+                w.DeviceId,
+                w.AssignedTo.HasValue ? w.AssignedTo.Value.ToString() : "",
+                Escape(w.RootCause),
+                Escape(w.Resolution),
+                w.ActualHours?.ToString(CultureInfo.InvariantCulture) ?? "",
+                FormatTime(w.CreatedAt),
+                FormatTime(w.StartedAt),
+                FormatTime(w.CompletedAt),
+                FormatTime(w.ClosedAt)));
+        }
+
+        return ToCsvBytes(sb.ToString());
+    }
 }

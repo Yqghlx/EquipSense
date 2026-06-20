@@ -16,12 +16,60 @@ import { formatDate } from '../lib/utils';
 
 /** 动作类型对应的 Badge 颜色 */
 const actionVariant: Record<string, string> = {
+  // CRUD 类
   Create: 'bg-green-500/10 text-green-600',
   Update: 'bg-blue-500/10 text-blue-600',
   Delete: 'bg-red-500/10 text-red-600',
+  // 认证类
   Login: 'bg-purple-500/10 text-purple-600',
   Logout: 'bg-gray-500/10 text-gray-600',
+  AuthLoginSuccess: 'bg-purple-500/10 text-purple-600',
+  AuthLoginFailed: 'bg-red-500/10 text-red-600',
+  AuthLogout: 'bg-gray-500/10 text-gray-600',
+  // 业务类
+  RecalculateHealth: 'bg-amber-500/10 text-amber-600',
+  Acknowledge: 'bg-yellow-500/10 text-yellow-600',
+  Resolve: 'bg-emerald-500/10 text-emerald-600',
+  SlaCheck: 'bg-cyan-500/10 text-cyan-600',
+  GenerateReport: 'bg-indigo-500/10 text-indigo-600',
 };
+
+/**
+ * 筛选下拉框的 action 选项（与后端 AuditAttribute 实际产生值对齐）
+ *
+ * 数据来源：grep -rn '\[Audit' src/EquipAI.WebAPI/Controllers/
+ * 设计取舍：硬编码列表而非从 API 动态获取，因为后端 action 是有限集（业务定义的）
+ */
+const ACTION_OPTIONS = [
+  // 认证类
+  { value: 'AuthLoginSuccess', label: 'AuthLoginSuccess（登录成功）' },
+  { value: 'AuthLoginFailed', label: 'AuthLoginFailed（登录失败）' },
+  { value: 'Login', label: 'Login' },
+  { value: 'Logout', label: 'Logout' },
+  // CRUD 类（实际触发于设备/工单/告警/用户的增删改）
+  { value: 'Create', label: 'Create' },
+  { value: 'Update', label: 'Update' },
+  { value: 'Delete', label: 'Delete' },
+  // 业务类
+  { value: 'Acknowledge', label: 'Acknowledge（确认告警）' },
+  { value: 'Resolve', label: 'Resolve（解决告警）' },
+  { value: 'RecalculateHealth', label: 'RecalculateHealth（重算健康度）' },
+  { value: 'SlaCheck', label: 'SlaCheck（SLA 检查）' },
+  { value: 'GenerateReport', label: 'GenerateReport（生成报表）' },
+];
+
+/**
+ * 筛选下拉框的 resourceType 选项
+ * 数据来源：各 Controller 的 [Audit(action, resourceType)] 调用
+ */
+const RESOURCE_OPTIONS = [
+  'User',
+  'Device',
+  'Alert',
+  'AlertRule',
+  'WorkOrder',
+  'Report',
+];
 
 export default function AuditLogsPage() {
   const { t } = useTranslation();
@@ -68,11 +116,9 @@ export default function AuditLogsPage() {
             onChange={(e) => { setActionFilter(e.target.value || undefined); setPage(1); }}
           >
             <option value="">{t('audit.allActions', '全部动作')}</option>
-            <option value="Create">Create</option>
-            <option value="Update">Update</option>
-            <option value="Delete">Delete</option>
-            <option value="Login">Login</option>
-            <option value="Logout">Logout</option>
+            {ACTION_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
           <select
             className="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
@@ -80,11 +126,9 @@ export default function AuditLogsPage() {
             onChange={(e) => { setResourceFilter(e.target.value || undefined); setPage(1); }}
           >
             <option value="">{t('audit.allResources', '全部资源')}</option>
-            <option value="Device">Device</option>
-            <option value="WorkOrder">WorkOrder</option>
-            <option value="Alert">Alert</option>
-            <option value="User">User</option>
-            <option value="AlertRule">AlertRule</option>
+            {RESOURCE_OPTIONS.map(r => (
+              <option key={r} value={r}>{r}</option>
+            ))}
           </select>
         </CardContent>
       </Card>

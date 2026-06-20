@@ -12,6 +12,7 @@
     "search": "搜索",
     "filter": "筛选",
     "export": "导出",
+    "exportTip": "最多导出 10000 条",
     "confirm": "确认",
     "actions": "操作",
     "status": "状态",
