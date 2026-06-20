@@ -258,3 +258,70 @@ cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/cert.pem
 cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/key.pem
 docker compose -f docker/docker-compose.yml restart frontend
 ```
+
+---
+
+## v1.3+ 安全与数据准确性部署要求
+
+### HttpOnly Cookie + SameSite=Strict（v1.3.0）
+
+v1.3.0 起，认证 Token 完全通过 HttpOnly + SameSite=Strict + Secure Cookie 传递。**部署时必须满足**：
+
+1. **前后端必须同站点**（同源或同子域）
+   - 推荐用 Nginx 反代：前端走 `/`，API 走 `/api/`，SignalR 走 `/hubs/`
+   - 跨域部署（如前端 `app.example.com` + 后端 `api.example.com`）需要把 Cookie 的 Domain 设为 `.example.com`，并接受 SameSite=Lax（牺牲部分 CSRF 防护）
+   - 当前实现是 SameSite=Strict，跨域部署需要修改 `AuthController.SetAuthCookies`
+
+2. **必须 HTTPS**（生产环境）
+   - Cookie 的 Secure=true 仅在 HTTPS 下传输
+   - HTTP 部署会让浏览器拒绝设置 Secure Cookie（用户无法登录）
+
+3. **Nginx 必须转发 `X-Forwarded-Proto`**
+   - 后端通过这个 header 判断原始协议是 HTTPS
+   - 不转发会导致后端把 Cookie 设为非 Secure
+   - `docker/nginx.conf` 已正确配置
+
+4. **XSS 防护收益**
+   - sessionStorage 不再存储 token（仅 user 信息）
+   - JavaScript 完全无法读取 token 字符串
+   - XSS 即使能执行任意代码，也无法偷走 token 离线使用
+
+### 租户时区字段（v1.4.0）
+
+v1.4.0 起，`tenants.TimeZone` 字段（IANA 时区 ID）影响 Dashboard 趋势聚合：
+- 留空或 "UTC" 时，趋势按 UTC 当天分组（v1.3 行为）
+- 设为 "Asia/Shanghai" 等，趋势按本地当天分组（修复跨时区用户看到的趋势错位一天）
+
+**部署后建议**：
+```sql
+-- 把现有租户的时区更新为实际所在时区
+UPDATE tenants SET time_zone = 'Asia/Shanghai' WHERE slug = 'your-tenant-slug';
+
+-- 新租户注册时由前端选择时区（SettingsPage 可加配置项）
+```
+
+### PostgreSQL 连接池（v1.3.0+）
+
+`docker-compose.yml` 已设置 `max_connections=200`（TimescaleDB 容器默认只有 25）。
+后端 Npgsql 连接池默认 `Maximum Pool Size=100`。
+
+**生产监控**：
+- 若出现 `53300: sorry, too many clients already`，说明连接被打满
+- 检查是否有 long-running transaction 持有连接：
+  ```bash
+  docker exec equipai-postgres psql -U postgres -c \
+    "SELECT pid, state, query_start FROM pg_stat_activity WHERE state != 'idle'"
+  ```
+- 必要时调高 `max_connections`（同时按 25% 比例调高 `shared_buffers`）
+
+### 备份脚本依赖（v1.3.0+）
+
+`docker/backup.sh` 已改为通过 `docker exec equipai-postgres pg_dump` 在容器内执行备份。
+**主机不需要安装 PostgreSQL 客户端工具**，只需要 Docker 访问权限。
+
+定时备份（推荐每天凌晨 2 点）：
+```bash
+crontab -e
+# 加入：
+0 2 * * * cd /path/to/EquipSense/docker && ./backup.sh >> /var/log/equipsense-backup.log 2>&1
+```
