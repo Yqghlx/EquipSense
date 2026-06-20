@@ -13,6 +13,8 @@ using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using AlertEntity = EquipAI.Core.Entities.Alert;
+using WorkOrderEntity = EquipAI.Core.Entities.WorkOrder;
 
 namespace EquipAI.Tests.Integration.Controllers;
 
@@ -297,6 +299,235 @@ public class TenantIsolationTests
         // 验证能看到其他租户（跨租户可见性）
         result.Items.Should().Contain(t => t.Name == "额外测试租户",
             "system_admin 应能看到所有租户，包括新创建的租户");
+    }
+
+    /// <summary>
+    /// v1.4 安全回归：跨租户 IDOR（Insecure Direct Object Reference）防护
+    ///
+    /// 攻击场景：租户 A 用户通过 GET /api/v1/devices/{tenant_B_device_id} 直接访问
+    ///           其他租户的资源。EF Core 全局查询过滤器必须拦截此类请求。
+    ///
+    /// 期望：返回 404 Not Found（而不是 403，避免泄漏资源存在性）
+    /// </summary>
+    [Fact]
+    public async Task CrossTenant_DirectAccess_ToOtherTenantDevice_Returns404()
+    {
+        // Arrange: 创建两个租户，租户 B 拥有 1 个设备
+        var tenantAId = Guid.NewGuid();
+        var tenantBId = Guid.NewGuid();
+        var userAId = Guid.NewGuid();
+        var tenantBDeviceId = Guid.NewGuid();
+
+        await _factory.CreateClientWithSeedAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantAId, Name = "租户A-IDOR", Slug = $"t-a-{tenantAId:N}",
+                Plan = TenantPlan.Basic, Status = TenantStatus.Active, IsActive = true,
+                MaxDevices = 50, MaxUsers = 20, DataRetentionDays = 90
+            });
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantBId, Name = "租户B-IDOR", Slug = $"t-b-{tenantBId:N}",
+                Plan = TenantPlan.Basic, Status = TenantStatus.Active, IsActive = true,
+                MaxDevices = 50, MaxUsers = 20, DataRetentionDays = 90
+            });
+            db.Users.Add(new User
+            {
+                Id = userAId, TenantId = tenantAId,
+                Username = $"idor-a-{userAId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "IDOR-租户A", Role = UserRole.Operator, IsActive = true
+            });
+            db.Devices.Add(new Device
+            {
+                Id = tenantBDeviceId, TenantId = tenantBId,
+                DeviceCode = $"B-SECRET-{tenantBDeviceId:N}".Substring(0, 20),
+                Name = "租户B-机密设备", Type = "电机"
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Act: 租户 A 用户直接访问租户 B 的设备 ID
+        var clientA = await CreateAuthenticatedClientAsync(userAId, tenantAId, UserRole.Operator);
+        var response = await clientA.GetAsync($"/api/v1/devices/{tenantBDeviceId}");
+
+        // Assert: 必须返回 404（不能 200，也不能 403 泄漏存在性）
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "跨租户访问资源必须返回 404，不能泄漏资源存在性（防 IDOR）");
+    }
+
+    /// <summary>
+    /// v1.4 安全回归：告警列表跨租户隔离
+    ///
+    /// 攻击场景：租户 A 拥有 0 个告警，租户 B 拥有 N 个告警。
+    ///           租户 A 调用 GET /api/v1/alerts 应只看到自己租户的告警（0 条）。
+    ///
+    /// 这与 DeviceList 测试互补：验证告警表（alerts）的 EF Core 过滤器也正确生效。
+    /// </summary>
+    [Fact]
+    public async Task AlertsList_TenantA_CannotSee_TenantB_Alerts()
+    {
+        // Arrange
+        var tenantAId = Guid.NewGuid();
+        var tenantBId = Guid.NewGuid();
+        var userAId = Guid.NewGuid();
+        var tenantBDeviceId = Guid.NewGuid();
+
+        await _factory.CreateClientWithSeedAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantAId, Name = "租户A-告警", Slug = $"t-a-{tenantAId:N}",
+                Plan = TenantPlan.Basic, Status = TenantStatus.Active, IsActive = true,
+                MaxDevices = 50, MaxUsers = 20, DataRetentionDays = 90
+            });
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantBId, Name = "租户B-告警", Slug = $"t-b-{tenantBId:N}",
+                Plan = TenantPlan.Basic, Status = TenantStatus.Active, IsActive = true,
+                MaxDevices = 50, MaxUsers = 20, DataRetentionDays = 90
+            });
+            db.Users.Add(new User
+            {
+                Id = userAId, TenantId = tenantAId,
+                Username = $"alert-a-{userAId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "告警-租户A", Role = UserRole.Operator, IsActive = true
+            });
+            db.Devices.Add(new Device
+            {
+                Id = tenantBDeviceId, TenantId = tenantBId,
+                DeviceCode = $"B-ALERT-{tenantBDeviceId:N}".Substring(0, 20),
+                Name = "租户B-告警源设备", Type = "电机"
+            });
+            // 租户 B 拥有 3 条活跃告警
+            for (var i = 0; i < 3; i++)
+            {
+                db.Alerts.Add(new AlertEntity
+                {
+                    Id = Guid.NewGuid(),
+                    AlertCode = $"ALT-B-{Guid.NewGuid():N}".Substring(0, 20),
+                    TenantId = tenantBId,
+                    DeviceId = tenantBDeviceId,
+                    RuleId = Guid.NewGuid(),
+                    Metric = "temperature",
+                    Severity = AlertSeverity.High,
+                    Status = AlertStatus.Active,
+                    Message = $"租户B-告警-{i}",
+                    Value = 95,
+                    Threshold = 90,
+                    OccurredAt = DateTime.UtcNow
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        // Act: 租户 A 查询告警列表
+        var clientA = await CreateAuthenticatedClientAsync(userAId, tenantAId, UserRole.Operator);
+        var response = await clientA.GetAsync("/api/v1/alerts?page=1&pageSize=100");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<object>>();
+        result.Should().NotBeNull();
+        result!.Items.Should().BeEmpty("租户 A 不应看到租户 B 的告警（EF Core 全局过滤器必须生效）");
+    }
+
+    /// <summary>
+    /// v1.4 安全回归：工单列表跨租户隔离
+    ///
+    /// 与告警/设备测试互补：覆盖工单表（work_orders）的隔离。
+    /// 工单含敏感信息（负责人、维修记录、成本），跨租户泄漏会引发合规问题。
+    /// </summary>
+    [Fact]
+    public async Task WorkOrdersList_TenantA_CannotSee_TenantB_WorkOrders()
+    {
+        // Arrange
+        var tenantAId = Guid.NewGuid();
+        var tenantBId = Guid.NewGuid();
+        var userAId = Guid.NewGuid();
+        var tenantBDeviceId = Guid.NewGuid();
+        var tenantBUserId = Guid.NewGuid();
+
+        await _factory.CreateClientWithSeedAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantAId, Name = "租户A-工单", Slug = $"t-a-{tenantAId:N}",
+                Plan = TenantPlan.Basic, Status = TenantStatus.Active, IsActive = true,
+                MaxDevices = 50, MaxUsers = 20, DataRetentionDays = 90
+            });
+            db.Tenants.Add(new Core.Entities.Tenant
+            {
+                Id = tenantBId, Name = "租户B-工单", Slug = $"t-b-{tenantBId:N}",
+                Plan = TenantPlan.Basic, Status = TenantStatus.Active, IsActive = true,
+                MaxDevices = 50, MaxUsers = 20, DataRetentionDays = 90
+            });
+            db.Users.Add(new User
+            {
+                Id = userAId, TenantId = tenantAId,
+                Username = $"wo-a-{userAId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "工单-租户A", Role = UserRole.Operator, IsActive = true
+            });
+            db.Users.Add(new User
+            {
+                Id = tenantBUserId, TenantId = tenantBId,
+                Username = $"wo-b-{tenantBUserId:N}",
+                PasswordHash = PasswordHasher.HashPassword("Test@123"),
+                DisplayName = "工单-租户B-工程师", Role = UserRole.Technician, IsActive = true
+            });
+            db.Devices.Add(new Device
+            {
+                Id = tenantBDeviceId, TenantId = tenantBId,
+                DeviceCode = $"B-WO-{tenantBDeviceId:N}".Substring(0, 20),
+                Name = "租户B-工单关联设备", Type = "电机"
+            });
+            // 租户 B 拥有 2 条工单
+            db.WorkOrders.Add(new WorkOrderEntity
+            {
+                Id = Guid.NewGuid(), TenantId = tenantBId,
+                WorkOrderCode = $"WO-B-{Guid.NewGuid():N}".Substring(0, 20),
+                DeviceId = tenantBDeviceId, CreatedBy = tenantBUserId,
+                AssignedTo = tenantBUserId,
+                Title = "租户B-机密工单-001",
+                RootCause = "包含维修成本和 SLA 信息",
+                Type = WorkOrderType.Corrective,
+                Priority = WorkOrderPriority.High,
+                Status = WorkOrderStatus.PendingDispatch
+            });
+            db.WorkOrders.Add(new WorkOrderEntity
+            {
+                Id = Guid.NewGuid(), TenantId = tenantBId,
+                WorkOrderCode = $"WO-B-{Guid.NewGuid():N}".Substring(0, 20),
+                DeviceId = tenantBDeviceId, CreatedBy = tenantBUserId,
+                AssignedTo = tenantBUserId,
+                Title = "租户B-机密工单-002",
+                RootCause = "包含维修成本和 SLA 信息",
+                Type = WorkOrderType.Corrective,
+                Priority = WorkOrderPriority.Medium,
+                Status = WorkOrderStatus.InProgress
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Act: 租户 A 查询工单列表
+        var clientA = await CreateAuthenticatedClientAsync(userAId, tenantAId, UserRole.Operator);
+        var response = await clientA.GetAsync("/api/v1/work-orders?page=1&pageSize=100");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<object>>();
+        result.Should().NotBeNull();
+        result!.Items.Should().BeEmpty("租户 A 不应看到租户 B 的工单（工单含维修成本/SLA 等敏感数据）");
     }
 
     /// <summary>

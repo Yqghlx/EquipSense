@@ -41,17 +41,24 @@ public class SecurityHeadersMiddleware
         // 禁止跨域策略文件
         context.Response.Headers.Append("X-Permitted-Cross-Domain-Policies", "none");
         // 内容安全策略：限制资源加载来源，防御 XSS 和数据注入攻击
-        // unsafe-inline/eval：前端使用 TailwindCSS 内联样式和 ECharts 动态脚本，后续可逐步收紧
+        // 收紧策略（v1.4）：
+        //   - script-src 移除 'unsafe-inline'：React 构建产物无内联 script，验证后移除
+        //   - script-src 保留 'unsafe-eval'：ECharts 内部用 new Function() 动态生成 formatter
+        //   - style-src 'unsafe-inline'：TailwindCSS/shadcn 用内联 style，无法移除
+        //   - object-src 'none'：禁止 Flash/Java 插件
+        //   - upgrade-insecure-requests：自动升级 HTTP 到 HTTPS
         context.Response.Headers.Append("Content-Security-Policy",
             "default-src 'self'; " +
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+            "script-src 'self' 'unsafe-eval'; " +
             "style-src 'self' 'unsafe-inline'; " +
             "img-src 'self' data: blob:; " +
             "font-src 'self' data:; " +
             "connect-src 'self' wss: https:; " +
+            "object-src 'none'; " +
             "frame-ancestors 'none'; " +
             "base-uri 'self'; " +
-            "form-action 'self'");
+            "form-action 'self'; " +
+            "upgrade-insecure-requests");
         // HTTP 严格传输安全：强制浏览器在 1 年内只使用 HTTPS 访问（含子域名）
         context.Response.Headers.Append("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
 
