@@ -37,12 +37,20 @@ public class DashboardStatsService
     /// <param name="tenantId">租户 ID（实际过滤由 EF 全局查询过滤器完成，保留参数为可读性 + 未来支持跨租户查询）</param>
     public async Task<DashboardStats> GetStatsAsync(Guid tenantId, CancellationToken ct = default)
     {
+        // 一次 DB 查询拿到租户时区，趋势聚合按本地日期分组（v1.4 修复跨时区错位）
+        var tenantTimeZone = await _db.Tenants
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == tenantId)
+            .Select(t => new { t.TimeZone })
+            .FirstOrDefaultAsync(ct);
+        var timeZone = SafeResolveTimeZone(tenantTimeZone?.TimeZone);
+
         // 顺序执行所有统计查询（EF Core DbContext 不支持并发操作）
         var deviceStats = await GetDeviceStatsAsync(tenantId, ct);
         var alertStats = await GetAlertStatsAsync(tenantId, ct);
         var workOrderStats = await GetWorkOrderStatsAsync(tenantId, ct);
-        var alertTrend = await GetAlertTrendAsync(tenantId, ct);
-        var workOrderTrend = await GetWorkOrderTrendAsync(tenantId, ct);
+        var alertTrend = await GetAlertTrendAsync(tenantId, timeZone, ct);
+        var workOrderTrend = await GetWorkOrderTrendAsync(tenantId, timeZone, ct);
 
         return new DashboardStats
         {
@@ -59,6 +67,28 @@ public class DashboardStatsService
             AlertTrend = alertTrend,
             WorkOrderTrend = workOrderTrend,
         };
+    }
+
+    /// <summary>
+    /// 解析 IANA 时区 ID 为 TimeZoneInfo，失败时降级为 UTC
+    ///
+    /// 降级原因：租户可能填了无效时区 ID（如笔误），不应让仪表盘查询崩溃。
+    /// 监控应记录失败情况以便运维介入。
+    /// </summary>
+    private TimeZoneInfo SafeResolveTimeZone(string? timeZoneId)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId) || timeZoneId.Equals("UTC", StringComparison.OrdinalIgnoreCase))
+            return TimeZoneInfo.Utc;
+
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "租户时区 {TimeZoneId} 无效，降级为 UTC", timeZoneId);
+            return TimeZoneInfo.Utc;
+        }
     }
 
     /// <summary>
@@ -116,40 +146,51 @@ public class DashboardStatsService
     /// <summary>
     /// 告警趋势：最近 7 天每天新增告警数
     /// 先查询原始数据再在内存中分组，兼容 InMemory 数据库
+    ///
+    /// 时区处理（v1.4 修复）：
+    ///   - 查询窗口用租户时区当天 0:00 起算的过去 7 天（转 UTC 后过滤 OccurredAt）
+    ///   - 分组键用告警时间转租户时区后的 .Date（之前用 UTC .Date 会让跨时区用户看到错位一天）
     /// </summary>
-    private async Task<List<TrendPoint>> GetAlertTrendAsync(Guid tenantId, CancellationToken ct)
+    private async Task<List<TrendPoint>> GetAlertTrendAsync(Guid tenantId, TimeZoneInfo timeZone, CancellationToken ct)
     {
-        var startDate = DateTime.UtcNow.Date.AddDays(-6);
+        // 租户时区的"今天 0:00"（本地）→ 转 UTC 作为查询窗口起点
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone).Date;
+        var startLocal = todayLocal.AddDays(-6);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
 
         var alerts = await _db.Alerts
-            .Where(a => a.OccurredAt >= startDate)
+            .Where(a => a.OccurredAt >= startUtc)
             .Select(a => new { a.OccurredAt })
             .ToListAsync(ct);
 
+        // 按租户时区的日期分组（之前按 UTC，跨时区用户看到的"今天"会错位）
         var dailyCounts = alerts
-            .GroupBy(a => a.OccurredAt.Date)
+            .GroupBy(a => TimeZoneInfo.ConvertTimeFromUtc(a.OccurredAt, timeZone).Date)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        return BuildTrend(startDate, dailyCounts);
+        return BuildTrend(startLocal, dailyCounts);
     }
 
     /// <summary>
     /// 工单趋势：最近 7 天每天创建工单数
+    /// 时区处理同 GetAlertTrendAsync
     /// </summary>
-    private async Task<List<TrendPoint>> GetWorkOrderTrendAsync(Guid tenantId, CancellationToken ct)
+    private async Task<List<TrendPoint>> GetWorkOrderTrendAsync(Guid tenantId, TimeZoneInfo timeZone, CancellationToken ct)
     {
-        var startDate = DateTime.UtcNow.Date.AddDays(-6);
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone).Date;
+        var startLocal = todayLocal.AddDays(-6);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
 
         var workOrders = await _db.WorkOrders
-            .Where(w => w.CreatedAt >= startDate)
+            .Where(w => w.CreatedAt >= startUtc)
             .Select(w => new { w.CreatedAt })
             .ToListAsync(ct);
 
         var dailyCounts = workOrders
-            .GroupBy(w => w.CreatedAt.Date)
+            .GroupBy(w => TimeZoneInfo.ConvertTimeFromUtc(w.CreatedAt, timeZone).Date)
             .ToDictionary(g => g.Key, g => g.Count());
 
-        return BuildTrend(startDate, dailyCounts);
+        return BuildTrend(startLocal, dailyCounts);
     }
 
     /// <summary>

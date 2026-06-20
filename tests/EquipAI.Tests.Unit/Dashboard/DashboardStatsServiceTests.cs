@@ -180,6 +180,69 @@ public class DashboardStatsServiceTests : IDisposable
         result.AlertsBySeverity.Should().NotContainKey("Low", "Resolved 不应出现");
     }
 
+    /// <summary>
+    /// v1.4 修复测试：跨时区用户的趋势图按租户时区分组，不再按 UTC
+    ///
+    /// 场景：租户时区 Asia/Shanghai（UTC+8）
+    ///   - 告警发生在 UTC 17:00（北京时间次日 01:00）
+    ///   - 用户期望该告警算在"次日"，但 v1.3 之前按 UTC 当天分组
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_跨时区告警应按租户时区分组()
+    {
+        // 1. 先建租户（时区设为 Asia/Shanghai）
+        _db.Tenants.Add(new Tenant
+        {
+            Id = _tenantId,
+            Name = "测试租户",
+            Slug = "test-tenant",
+            TimeZone = "Asia/Shanghai",
+        });
+
+        var deviceId = Guid.NewGuid();
+        var todayUtc = DateTime.UtcNow.Date;
+
+        // 2. 在 UTC 当天 17:00 添加一条告警（北京时间为次日 01:00）
+        _db.Alerts.Add(new Core.Entities.Alert
+        {
+            DeviceId = deviceId, TenantId = _tenantId, Metric = "temp", Severity = AlertSeverity.High,
+            Value = 100, Threshold = 80,
+            Status = AlertStatus.Active,
+            OccurredAt = todayUtc.AddHours(17),  // UTC 17:00 = 北京时间次日 01:00
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await _service.GetStatsAsync(_tenantId, CancellationToken.None);
+
+        // 趋势应该有 7 天
+        result.AlertTrend.Should().HaveCount(7);
+        // 该告警应算在"明天"（趋势图最后一个点是租户时区的"今天"，但 17:00 UTC = 次日 01:00 本地）
+        // 所以这条告警不应该出现在趋势图的最后一个点（今天），而是该天的下一个点（不存在，被截断）
+        // 实际上：UTC 17:00 转北京时间为次日 01:00，超出"今天"窗口，但仍在 7 天内（如果今天 = 当前本地日期）
+        // 验证关键点：当天（最后一个点）的 count 应该为 0（因为告警"跨"到了明天）
+        result.AlertTrend[6].Count.Should().Be(0, "UTC 17:00 在上海时区是次日 01:00，不应算在今天");
+    }
+
+    /// <summary>
+    /// 时区字段无效时应降级为 UTC，不抛异常
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_无效时区应降级为UTC()
+    {
+        _db.Tenants.Add(new Tenant
+        {
+            Id = _tenantId,
+            Name = "无效时区租户",
+            Slug = "bad-tz",
+            TimeZone = "Invalid/NotReal",
+        });
+        await _db.SaveChangesAsync();
+
+        // 不应抛异常，应正常返回（降级 UTC）
+        var result = await _service.GetStatsAsync(_tenantId, CancellationToken.None);
+        result.AlertTrend.Should().HaveCount(7);
+    }
+
     // =========================================================================
     // 工单统计
     // =========================================================================

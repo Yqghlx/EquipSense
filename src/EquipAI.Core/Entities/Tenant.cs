@@ -53,6 +53,15 @@ public class Tenant : BaseEntity
     public string Settings { get; set; } = "{}";
 
     /// <summary>
+    /// 租户时区（IANA 时区 ID，如 "Asia/Shanghai" / "America/New_York"）
+    ///
+    /// 用于 Dashboard 趋势聚合按本地日期分组（避免 UTC 跨日错位）
+    /// 默认 "UTC"，新租户注册时可由前端选择
+    /// v1.4 加入，详见 DashboardStatsService.GetAlertTrendAsync / GetWorkOrderTrendAsync
+    /// </summary>
+    public string TimeZone { get; set; } = "UTC";
+
+    /// <summary>
     /// 是否启用
     /// </summary>
     public bool IsActive { get; set; } = true;
