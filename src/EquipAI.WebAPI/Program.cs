@@ -103,20 +103,53 @@ try
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
     });
 
-    // OpenTelemetry 分布式链路追踪 — 自动 instrument ASP.NET Core 请求 + HttpClient 出站调用
-    // 开发环境用 Console exporter（日志可见 trace），生产环境应换 OTLP + Jaeger
+    // OpenTelemetry 分布式链路追踪 — 自动 instrument：
+    //   - ASP.NET Core 入站请求（每个 HTTP 请求一个根 span）
+    //   - HttpClient 出站调用（LLM API / Webhook 推送等）
+    //   - EF Core 数据库查询（Npgsql 自动埋点，定位慢 SQL）
+    //
+    // Exporter 策略：
+    //   - 开发环境（OTEL_EXPORTER 未配置）：Console exporter，trace 直接打到日志
+    //   - 生产环境（OTEL_EXPORTER=otlp）：OTLP exporter 推送到 Jaeger/Tempo
+    var otllEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
     builder.Services.AddOpenTelemetry()
-        .WithTracing(tracing => tracing
-            .AddAspNetCoreInstrumentation(opts =>
-            {
-                opts.RecordException = true;
-                opts.EnrichWithHttpRequest = (activity, request) =>
+        .WithTracing(tracing =>
+        {
+            tracing
+                .AddAspNetCoreInstrumentation(opts =>
                 {
-                    activity.SetTag("http.user_agent", request.Headers.UserAgent.ToString());
-                };
-            })
-            .AddHttpClientInstrumentation()
-            .AddConsoleExporter());
+                    opts.RecordException = true;
+                    opts.EnrichWithHttpRequest = (activity, request) =>
+                    {
+                        activity.SetTag("http.user_agent", request.Headers.UserAgent.ToString());
+                    };
+                })
+                .AddHttpClientInstrumentation()
+                // EF Core instrumentation：每次 DB 查询生成 span，含 SQL 文本和耗时
+                // 用于定位慢查询（如 N+1 问题、缺索引的全表扫描等）
+                .AddEntityFrameworkCoreInstrumentation(opts =>
+                {
+                    opts.SetDbStatementForText = true;  // 记录 SQL 文本（注意 PII）
+                    opts.SetDbStatementForStoredProcedure = true;
+                });
+
+            if (!string.IsNullOrEmpty(otllEndpoint))
+            {
+                // 生产：OTLP gRPC 推送到 Jaeger / Tempo / OTel Collector
+                tracing.AddOtlpExporter(opts =>
+                {
+                    opts.Endpoint = new Uri(otllEndpoint);
+                    // 默认协议 gRPC（兼容 Jaeger 4317）
+                });
+                Console.WriteLine($"[OTel] OTLP exporter 已启用 → {otllEndpoint}");
+            }
+            else
+            {
+                // 开发：Console 输出，trace 直接可见
+                tracing.AddConsoleExporter();
+                Console.WriteLine("[OTel] Console exporter 已启用（开发模式）");
+            }
+        });
 
     // 健康检查：三级探针 — startup(仅DB) / liveness(DB+Redis) / ready(全部)
     builder.Services.AddHealthChecks()
