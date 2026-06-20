@@ -20,6 +20,18 @@ inhibit_rules:
       category: business|performance
     equal: ['category']
 
+  # MQTT 断开时，抑制"遥测处理延迟"告警（根因是数据没进来）
+  - source_match:
+      alertname: MqttDisconnected
+    target_match:
+      alertname: HighTelemetryProcessingLatency
+
+  # HTTP 错误率高时，抑制"AI 分析停滞"等业务告警（根因是 HTTP 层故障）
+  - source_match:
+      alertname: HighErrorRate
+    target_match_re:
+      alertname: AnalysisStalled|HighAnalysisLatency
+
 route:
   # 默认分组等待时间
   group_by: ['alertname', 'category']

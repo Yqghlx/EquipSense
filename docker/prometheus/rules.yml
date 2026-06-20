@@ -1,5 +1,11 @@
-# Prometheus 告警规则 — 基础设施异常检测
+# Prometheus 告警规则 — 基础设施 + 业务异常检测
+#
 # 配合 AlertManager 实现主动告警通知（此前仅展示不通知）
+# 设计原则：
+#   1. 关键告警（critical）立即触发，warning/info 给 5-10 分钟窗口避免抖动
+#   2. 错误率/延迟类用 ratio + histogram_quantile 表达式，避免单次毛刺
+#   3. 业务类（告警激增、工单积压）用绝对值阈值
+#   4. 所有 labels 含 category（infrastructure / performance / business）方便 AlertManager 路由
 
 groups:
   # ============================================================
@@ -39,27 +45,128 @@ groups:
         annotations:
           summary: "Prometheus 自身不可达"
 
+      # MQTT broker 连接断开 — 遥测采集链路中断
+      - alert: MqttDisconnected
+        expr: equipai_mqtt_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "MQTT broker 连接断开"
+          description: "后端与 MQTT broker 已断开超过 2 分钟，所有遥测数据无法接收"
+
   # ============================================================
-  # 后端应用健康告警
+  # HTTP 应用健康告警（基于 prometheus-net.AspNetCore 默认指标）
+  # ============================================================
+  - name: http-health
+    rules:
+      # HTTP 5xx 错误率 > 5% — 业务接口或基础设施异常
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_received_total{job="equipai-backend",code=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_received_total{job="equipai-backend"}[5m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "HTTP 5xx 错误率 > 5%"
+          description: "过去 5 分钟内 5xx 错误比例超过 5%，需检查后端日志和依赖服务"
+
+      # HTTP P95 延迟 > 1 秒 — 用户感知卡顿
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_requests_duration_seconds_bucket{job="equipai-backend"}[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "HTTP P95 延迟 > 1s"
+          description: "后端 HTTP 请求 P95 耗时 {{ $value | humanizeDuration }}，可能存在 DB 查询或外部依赖瓶颈"
+
+      # 单个 API 错误率激增（按 path 维度，定位具体故障接口）
+      - alert: HighErrorRateByRoute
+        expr: |
+          sum(rate(http_requests_received_total{job="equipai-backend",code=~"5.."}[5m])) by (action)
+          /
+          sum(rate(http_requests_received_total{job="equipai-backend"}[5m])) by (action)
+          > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "接口 {{ $labels.action }} 错误率 > 20%"
+          description: "接口 {{ $labels.action }} 在过去 10 分钟 5xx 错误率超过 20%"
+
+  # ============================================================
+  # 后端进程资源告警（基于 prometheus-net 默认 process_* 指标）
+  # ============================================================
+  - name: process-resources
+    rules:
+      # 进程内存 > 1.5GB — 可能存在内存泄漏
+      - alert: HighMemoryUsage
+        expr: process_working_set_bytes{job="equipai-backend"} > 1.5 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "后端进程内存 > 1.5GB"
+          description: "后端工作集内存 {{ $value | humanize1024 }}，持续超过 10 分钟，需排查内存泄漏"
+
+      # CPU 使用率 > 80%（基于 process_cpu_time_seconds_total 的速率）
+      - alert: HighCpuUsage
+        expr: rate(process_cpu_time_seconds_total{job="equipai-backend"}[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "后端 CPU 使用率 > 80%"
+          description: "后端进程 CPU 持续高占用，可能存在性能瓶颈或被恶意请求"
+
+      # GC 堆内存 > 1GB（说明 GC 压力大，可能频繁 Full GC）
+      - alert: HighGcHeap
+        expr: process_gc_heap_bytes{job="equipai-backend"} > 1 * 1024 * 1024 * 1024
+        for: 15m
+        labels:
+          severity: info
+          category: infrastructure
+        annotations:
+          summary: "GC 堆内存 > 1GB"
+          description: ".NET GC 堆内存 {{ $value | humanize1024 }}，可能触发频繁 Full GC 影响延迟"
+
+  # ============================================================
+  # 业务核心管线告警
   # ============================================================
   - name: backend-health
     rules:
       # 告警评估耗时过高（>2 秒说明规则匹配或 DB 查询有性能问题）
       - alert: HighAlertEvaluationDuration
-        expr: histogram_quantile(0.95, rate(alert_evaluation_duration_seconds_bucket[5m])) > 2
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(equipai_alert_evaluation_duration_ms_bucket[5m])) by (le)
+          ) > 2000
         for: 5m
         labels:
           severity: warning
           category: performance
         annotations:
           summary: "告警评估耗时异常（P95 > 2s）"
-          description: "告警引擎评估单条规则耗时 P95 达 {{ $value }}s，可能存在规则匹配性能瓶颈"
+          description: "告警引擎评估单条规则耗时 P95 达 {{ $value | humanize }} ms，可能存在规则匹配性能瓶颈"
 
       # 告警静默率过高（>50% 持续 10 分钟，说明告警风暴被聚合器大量抑制）
       - alert: HighAlertSuppressionRate
         expr: |
-          sum(rate(alerts_evaluated_total{result="suppressed"}[5m])) /
-          sum(rate(alerts_evaluated_total[5m])) > 0.5
+          sum(rate(equipai_alerts_evaluated_total{result="suppressed"}[5m])) /
+          sum(rate(equipai_alerts_evaluated_total[5m])) > 0.5
         for: 10m
         labels:
           severity: warning
@@ -70,7 +177,7 @@ groups:
 
       # AI 分析请求积压（5 分钟内无任何分析请求完成）
       - alert: AnalysisStalled
-        expr: sum(rate(analysis_requests_total[5m])) == 0
+        expr: sum(rate(equipai_analysis_requests_total[5m])) == 0
         for: 5m
         labels:
           severity: info
@@ -78,3 +185,64 @@ groups:
         annotations:
           summary: "AI 分析请求停滞"
           description: "过去 5 分钟无 AI 分析请求，可能是告警未触发或分析服务卡死"
+
+      # AI 分析 P95 耗时 > 30 秒 — LLM API 慢或降级路径异常
+      - alert: HighAnalysisLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(equipai_analysis_duration_ms_bucket[5m])) by (le, level)
+          ) > 30000
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "AI 分析 P95 耗时 > 30s"
+          description: "{{ $labels.level }} 级分析 P95 耗时 {{ $value | humanize }} ms，可能 LLM API 超时或降级路径阻塞"
+
+      # 遥测处理 P95 耗时 > 500ms — 入库或事件总线堵塞
+      - alert: HighTelemetryProcessingLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(equipai_telemetry_processing_duration_ms_bucket[5m])) by (le, step)
+          ) > 500
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "遥测处理 P95 耗时 > 500ms"
+          description: "遥测处理步骤 {{ $labels.step }} P95 耗时 {{ $value | humanize }} ms，可能 DB 写入或事件总线堵塞"
+
+      # 活跃 Critical 告警 > 50（异常风暴）
+      - alert: CriticalAlertsSurge
+        expr: equipai_active_alerts{severity="critical"} > 50
+        for: 5m
+        labels:
+          severity: critical
+          category: business
+        annotations:
+          summary: "Critical 告警数 > 50"
+          description: "当前 Critical 级别活跃告警 {{ $value }} 条，存在系统性故障风险"
+
+      # 待处理工单 > 100（积压）
+      - alert: WorkOrderBacklog
+        expr: equipai_workorders_by_status{status="pending"} > 100
+        for: 15m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "待处理工单 > 100"
+          description: "当前待处理工单 {{ $value }} 条，维保团队可能人手不足"
+
+      # SignalR 单租户连接数 > 500（异常，可能客户端重连风暴）
+      - alert: SignalRConnectionSpike
+        expr: equipai_signalr_connections > 500
+        for: 5m
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "SignalR 单租户连接数 > 500"
+          description: "租户 {{ $labels.tenant_id }} 的 SignalR 连接数 {{ $value }}，可能存在客户端重连风暴"
