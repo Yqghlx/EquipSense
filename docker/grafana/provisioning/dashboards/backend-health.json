@@ -1,0 +1,258 @@
+{
+  "title": "EquipSense 后端健康度",
+  "uid": "backend-health",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["equipsense", "backend", "v1.4"],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "description": "v1.4 新增：与 prometheus/rules.yml 中 18 条告警规则一一对应的可视化。当某面板接近告警阈值时，对应告警会触发。便于定位告警根因。",
+  "panels": [
+    {
+      "title": "进程内存使用（告警阈值 1.5GB）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "process_working_set_bytes{job=\"equipai-backend\"}",
+          "legendFormat": "工作集内存",
+          "refId": "A"
+        },
+        {
+          "expr": "process_private_memory_bytes{job=\"equipai-backend\"}",
+          "legendFormat": "私有内存",
+          "refId": "B"
+        },
+        {
+          "expr": "1.5 * 1024 * 1024 * 1024",
+          "legendFormat": "告警阈值（1.5GB）",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1073741824 },
+              { "color": "red", "value": 1610612736 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "CPU 使用率（告警阈值 80%）",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_time_seconds_total{job=\"equipai-backend\"}[5m]) * 100",
+          "legendFormat": "CPU %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "orange", "value": 80 },
+              { "color": "red", "value": 95 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": ".NET GC 堆内存（告警阈值 1GB）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        {
+          "expr": "process_gc_heap_bytes{job=\"equipai-backend\"}",
+          "legendFormat": "GC 堆",
+          "refId": "A"
+        },
+        {
+          "expr": "1 * 1024 * 1024 * 1024",
+          "legendFormat": "告警阈值（1GB）",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "title": "告警静默率（防风暴聚合器，告警阈值 >50%）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "sum(rate(equipai_alerts_evaluated_total{result=\"suppressed\"}[5m])) / sum(rate(equipai_alerts_evaluated_total[5m])) * 100",
+          "legendFormat": "静默率 %",
+          "refId": "A"
+        },
+        {
+          "expr": "50",
+          "legendFormat": "告警阈值（50%）",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "活跃 Critical 告警数（告警阈值 >50）",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "expr": "equipai_active_alerts{severity=\"critical\"}",
+          "legendFormat": "Critical",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "orange", "value": 30 },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "待处理工单数（告警阈值 >100）",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "targets": [
+        {
+          "expr": "equipai_workorders_by_status{status=\"pending\"}",
+          "legendFormat": "Pending",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "orange", "value": 80 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "SignalR 单租户连接数 TOP 10（告警阈值 >500）",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "topk(10, equipai_signalr_connections)",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 200 },
+              { "color": "orange", "value": 500 },
+              { "color": "red", "value": 800 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "AI 分析 P95 耗时（按级别，告警阈值 30s）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(equipai_analysis_duration_ms_bucket[5m])) by (le, level))",
+          "legendFormat": "{{level}} P95",
+          "refId": "A"
+        },
+        {
+          "expr": "30000",
+          "legendFormat": "告警阈值（30s）",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    },
+    {
+      "title": "遥测处理 P95 耗时（按步骤，告警阈值 500ms）",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(equipai_telemetry_processing_duration_ms_bucket[5m])) by (le, step))",
+          "legendFormat": "{{step}} P95",
+          "refId": "A"
+        },
+        {
+          "expr": "500",
+          "legendFormat": "告警阈值（500ms）",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "palette-classic" }
+        }
+      }
+    }
+  ]
+}
