@@ -392,8 +392,8 @@ Docker Compose 生产环境包含完整监控栈：
 
 - **数据准确性回归**：模拟器跑真实数据流，验证 Dashboard 聚合（设备可用率、OEE、SLA、告警级别分布）在真实流量下是否正确
 - **真实协议联调**：用真实 PLC/OPC UA 服务器对接 `OpcUaAdapter`，验证协议适配器在工业现场可用
-- **压力测试**：`tests/load/` 下 k6 脚本（API 读、MQTT 发布、遥测写入）跑真实压测，找出吞吐瓶颈
-- **CI 自动化**：当前 `.github/workflows/ci.yml` 仅 `workflow_dispatch` 手动触发，可考虑打开 push/PR 自动触发
+- **压力测试**：`tests/load/` 下 k6 脚本（API 读、MQTT 发布、遥测写入）跑真实压测，找出吞吐瓶颈（v1.4 已跑完基线，详见 `tests/load/PERF_BASELINE.md`）
+- **CI 自动化**：v1.4 起已打开 push/PR 自动触发（paths 过滤避免文档变更白跑测试），4 job 完整流水线
 
 ## RBAC 权限矩阵
 
@@ -452,7 +452,7 @@ dotnet run --project tools/EquipAI.Simulator -- \
 
 ## CI/CD 流水线
 
-GitHub Actions 流水线（`.github/workflows/ci.yml`）**当前仅 `workflow_dispatch` 手动触发**（自动触发已注释）：
+GitHub Actions 流水线（`.github/workflows/ci.yml`）**自动触发：push 到 main/develop 分支或针对它们的 PR**（paths 过滤避免纯文档变更白跑测试），同时保留 `workflow_dispatch` 用于紧急手动触发：
 
 1. **backend**：dotnet restore + build Release + 单元测试 + 集成测试
 2. **frontend**：npm ci + TypeScript 类型检查 + ESLint（最多 1 个警告）+ Vitest + 构建

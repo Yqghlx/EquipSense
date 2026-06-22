@@ -65,7 +65,7 @@ public class AlertWindow
     /// 递增告警计数，如果窗口超过 30 分钟则自动重置
     /// </summary>
     /// <returns>当前窗口内的告警次数</returns>
-    public int Increment()
+    internal int Increment()
     {
         lock (_lock)
         {

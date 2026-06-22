@@ -31,9 +31,9 @@ public class NotificationPreferences
     public ChannelPreference System { get; set; } = new();
 
     /// <summary>
-    /// 获取指定通知类型的渠道偏好
+    /// 获取指定通知类型的渠道偏好（仅服务内部使用，外部消费者应通过 IsEnabledAsync 判断）
     /// </summary>
-    public ChannelPreference GetByType(string notificationType) => notificationType.ToLowerInvariant() switch
+    internal ChannelPreference GetByType(string notificationType) => notificationType.ToLowerInvariant() switch
     {
         "alert" => Alert,
         "workorder" or "work_order" => WorkOrder,
