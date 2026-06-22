@@ -11,6 +11,7 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
+import { SlaCountdown } from '../components/workorder/SlaCountdown';
 import { ApprovalProgressPanel } from '../components/workorder/ApprovalProgressPanel';
 import { OfflineSyncPanel } from '../components/workorder/OfflineSyncPanel';
 import AttachmentUpload from '../components/workorder/AttachmentUpload';
@@ -97,7 +98,7 @@ export default function WorkOrderDetailPage() {
             <Badge variant="outline">{statusLabels[workOrder.status]}</Badge>
           </div>
           <div><p className="text-sm text-muted-foreground">{t('workorder.assignedTo')}</p><p className="font-medium">{workOrder.assignedTo ?? '-'}</p></div>
-          <div><p className="text-sm text-muted-foreground">{t('workorder.dueDate')}</p><p className="font-medium">{workOrder.dueDate ?? '-'}</p></div>
+          <div><p className="text-sm text-muted-foreground">{t('workorder.dueDate')}</p><div className="font-medium"><SlaCountdown dueDate={workOrder.dueDate} createdAt={workOrder.createdAt} status={workOrder.status} showRawDateWhenTerminal /></div></div>
           <div><p className="text-sm text-muted-foreground">{t('common.createdAt')}</p><p className="font-medium">{new Date(workOrder.createdAt).toLocaleString()}</p></div>
           {workOrder.completedAt && (
             <div><p className="text-sm text-muted-foreground">{t('workorder.completedAt')}</p><p className="font-medium">{new Date(workOrder.completedAt).toLocaleString()}</p></div>

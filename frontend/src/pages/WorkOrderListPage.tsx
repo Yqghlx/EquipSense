@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Badge } from '../components/ui/badge';
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
+import { SlaCountdown } from '../components/workorder/SlaCountdown';
 import { WorkOrderForm } from '../components/workorder/WorkOrderForm';
 import { useWorkOrders, useCreateWorkOrder, exportWorkOrdersCsv } from '../hooks/useWorkOrders';
 import { useDevices } from '../hooks/useDevices';
@@ -123,7 +124,7 @@ export default function WorkOrderListPage() {
                     <TableCell><Badge variant="outline">{statusLabels[wo.status] ?? wo.status}</Badge></TableCell>
                     <TableCell><PriorityBadge priority={wo.priority} /></TableCell>
                     <TableCell className="text-sm text-muted-foreground">{new Date(wo.createdAt).toLocaleString()}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{wo.dueDate ?? '-'}</TableCell>
+                    <TableCell><SlaCountdown dueDate={wo.dueDate} createdAt={wo.createdAt} status={wo.status} /></TableCell>
                   </TableRow>
                 ))
               )}
