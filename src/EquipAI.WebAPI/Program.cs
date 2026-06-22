@@ -1,6 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using OpenTelemetry;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using EquipAI.Application.Alerts.Handlers;
 using EquipAI.Application.Analysis.Handlers;
@@ -103,14 +104,19 @@ try
         options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
     });
 
-    // OpenTelemetry 分布式链路追踪 — 自动 instrument：
+    // OpenTelemetry 分布式链路追踪 + 指标 — 自动 instrument：
     //   - ASP.NET Core 入站请求（每个 HTTP 请求一个根 span）
     //   - HttpClient 出站调用（LLM API / Webhook 推送等）
     //   - EF Core 数据库查询（Npgsql 自动埋点，定位慢 SQL）
+    //   - .NET Runtime（GC / ThreadPool / 内存 / CPU）— 补充 prometheus-net 未覆盖的运行时维度
     //
     // Exporter 策略：
-    //   - 开发环境（OTEL_EXPORTER 未配置）：Console exporter，trace 直接打到日志
-    //   - 生产环境（OTEL_EXPORTER=otlp）：OTLP exporter 推送到 Jaeger/Tempo
+    //   - 开发环境（OTEL_EXPORTER 未配置）：Console exporter，trace/metric 直接打到日志
+    //   - 生产环境（OTEL_EXPORTER=otlp）：OTLP exporter 推送到 Jaeger/Tempo/Prometheus
+    //
+    // 与 prometheus-net 的关系：
+    //   - prometheus-net 暴露 /metrics（HTTP pull），覆盖业务指标（设备/告警/工单计数）+ HTTP 请求时长
+    //   - OTel Metrics 通过 OTLP push，补充 .NET Runtime 指标（GC / ThreadPool），与 trace 关联可在 Jaeger 中查看
     var otllEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
     builder.Services.AddOpenTelemetry()
         .WithTracing(tracing =>
@@ -141,13 +147,43 @@ try
                     opts.Endpoint = new Uri(otllEndpoint);
                     // 默认协议 gRPC（兼容 Jaeger 4317）
                 });
-                Console.WriteLine($"[OTel] OTLP exporter 已启用 → {otllEndpoint}");
+                Console.WriteLine($"[OTel] Trace OTLP exporter 已启用 → {otllEndpoint}");
             }
             else
             {
                 // 开发：Console 输出，trace 直接可见
                 tracing.AddConsoleExporter();
-                Console.WriteLine("[OTel] Console exporter 已启用（开发模式）");
+                Console.WriteLine("[OTel] Trace Console exporter 已启用（开发模式）");
+            }
+        })
+        .WithMetrics(metrics =>
+        {
+            // .NET Runtime 自动指标：process.runtime.dotnet.*
+            // 包含 GC heap / Gen0-2 collections / ThreadPool queue length / JIT / Loader 堆等
+            // 用于排查内存泄漏、ThreadPool 饥饿、GC 停顿等运行时问题
+            metrics.AddRuntimeInstrumentation();
+
+            // ASP.NET Core / HttpClient 的指标由 .NET 8 内置 System.Diagnostics.Metrics 自动产生
+            // （http.server.request.duration / http.client.request.duration），
+            // OTel SDK 会自动捕获，无需手动 AddInstrumentation
+
+            // 自定义 Meter（业务侧用 System.Diagnostics.Metrics 埋点的指标会自动采集）
+            // 当前业务指标通过 prometheus-net 暴露，未走 OTel Meter；后续可逐步迁移
+            // metrics.AddMeter("EquipAI.Business");
+
+            if (!string.IsNullOrEmpty(otllEndpoint))
+            {
+                metrics.AddOtlpExporter(opts =>
+                {
+                    opts.Endpoint = new Uri(otllEndpoint);
+                });
+                Console.WriteLine($"[OTel] Metrics OTLP exporter 已启用 → {otllEndpoint}");
+            }
+            else
+            {
+                // 开发环境：用 Console 看运行时指标（默认 10 秒导出一次）
+                metrics.AddConsoleExporter();
+                Console.WriteLine("[OTel] Metrics Console exporter 已启用（开发模式，仅运行时指标）");
             }
         });
 
