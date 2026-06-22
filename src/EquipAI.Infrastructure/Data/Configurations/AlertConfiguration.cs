@@ -35,6 +35,13 @@ public class AlertConfiguration : IEntityTypeConfiguration<Alert>
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
 
         builder.HasIndex(e => new { e.TenantId, e.Status, e.OccurredAt });
+
+        // v1.5 性能加固：告警评估路径专用索引
+        // 命中 AlertEvaluationService.UpdateExistingAlertAsync / TryAutoResolveAsync 的高频查询：
+        //   WHERE tenant_id = ? AND device_id = ? AND metric = ? AND status = ? ORDER BY occurred_at DESC
+        // 之前仅 (tenant_id, status, occurred_at) 索引，需回表过滤 device_id + metric，10k+ 告警下半表扫描
+        builder.HasIndex(e => new { e.TenantId, e.DeviceId, e.Metric, e.Status, e.OccurredAt });
+
         builder.HasIndex(e => e.AlertCode).IsUnique();
     }
 }

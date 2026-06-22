@@ -31,5 +31,11 @@ public class AlertRuleConfiguration : IEntityTypeConfiguration<AlertRule>
         builder.Property(e => e.CreatedAt).HasColumnName("created_at").IsRequired();
 
         builder.HasIndex(e => new { e.TenantId, e.Enabled });
+
+        // v1.5 性能加固：告警评估时按指标筛选规则的索引
+        // 命中 AlertEvaluationService.EvaluateAsync 的查询：
+        //   WHERE tenant_id = ? AND enabled = true AND metric = ?
+        // 之前 (tenant_id, enabled) 不含 metric，规则多时需回表过滤
+        builder.HasIndex(e => new { e.TenantId, e.Enabled, e.Metric });
     }
 }

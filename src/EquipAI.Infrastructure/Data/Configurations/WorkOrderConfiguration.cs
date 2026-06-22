@@ -36,5 +36,11 @@ public class WorkOrderConfiguration : IEntityTypeConfiguration<WorkOrder>
         builder.HasIndex(e => e.WorkOrderCode).IsUnique();
         builder.HasIndex(e => new { e.TenantId, e.Status });
         builder.HasIndex(e => new { e.TenantId, e.DeviceId });
+
+        // v1.5 性能加固：工单列表分页排序索引
+        // 命中 WorkOrderService.GetWorkOrdersAsync 的高频查询：
+        //   WHERE tenant_id = ? [AND status = ?] ORDER BY created_at DESC LIMIT ? OFFSET ?
+        // 之前 (tenant_id, status) 不含 created_at，10k+ 工单下排序溢出（filesort）
+        builder.HasIndex(e => new { e.TenantId, e.Status, e.CreatedAt });
     }
 }

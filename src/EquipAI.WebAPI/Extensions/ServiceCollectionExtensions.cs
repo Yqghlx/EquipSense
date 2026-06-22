@@ -120,8 +120,16 @@ public static class ServiceCollectionExtensions
         services.AddScoped<TimescaleDbSetup>();
         services.AddScoped<DataSeeder>();
 
-        // IP 限流 — 使用 ASP.NET Core 8 内置 RateLimiter
-        // 固定窗口策略：每 IP 每分钟最多 60 次请求
+        // 多租户分层限流（v1.5 安全加固）— 使用 ASP.NET Core 8 内置 RateLimiter
+        //
+        // 三层防护（GlobalLimiter 与 Policy 叠加生效）：
+        //   1. GlobalLimiter — 业务请求主防线
+        //      - 已认证用户：按 tenant_id 分区，每租户每分钟 1000 次（防单租户拖垮系统）
+        //      - 未认证请求：按 RemoteIpAddress 分区，每 IP 每分钟 60 次（防恶意扫描）
+        //   2. AddPolicy("auth") — 登录端点专用，按 IP 每分钟 10 次（防暴力破解）
+        //
+        // Why per-tenant：工业客户常共享 NAT 出口，单租户的多客户端可能从同一 IP 出来，
+        //   按 IP 限流会误伤；按 tenant_id 限流更贴合多租户"按订阅配额"的模型。
         //
         // 自动按环境区分：
         // - Production：强制开启限流（忽略 DISABLE_RATE_LIMITING，防暴力破解）
@@ -144,6 +152,36 @@ public static class ServiceCollectionExtensions
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            // GlobalLimiter — 业务请求主防线（自动应用到所有未被 [EnableRateLimiting] 覆盖的请求）
+            // 已认证 → 按 tenant_id 分区（1000/min）；未认证 → 按 IP 分区（60/min）
+            options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+            {
+                // 优先用 JWT 中的 tenant_id（认证后的业务请求）
+                var tenantClaim = httpContext.User.FindFirst("tenant_id")?.Value;
+                if (!string.IsNullOrEmpty(tenantClaim))
+                {
+                    return RateLimitPartition.GetFixedWindowLimiter(tenantClaim, _ =>
+                        new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = 1000,             // 单租户每分钟 1000 次（约 16 QPS）
+                            Window = TimeSpan.FromMinutes(1),
+                            QueueLimit = 0,                  // 超限立即拒绝，不排队（避免请求堆积）
+                        });
+                }
+
+                // 未认证请求（如 /health、/swagger、未携带 token 的 GET）按 IP 限流
+                var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return RateLimitPartition.GetFixedWindowLimiter(ip, _ =>
+                    new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = 60,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    });
+            });
+
+            // 兼容旧策略名（部分 Controller 仍引用 "fixed"）— 行为等价于 GlobalLimiter 的 IP 分支
             options.AddFixedWindowLimiter("fixed", opt =>
             {
                 opt.PermitLimit = 60;
