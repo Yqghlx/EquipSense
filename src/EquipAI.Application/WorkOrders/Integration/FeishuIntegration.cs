@@ -26,6 +26,12 @@ public class FeishuIntegration : IWorkOrderIntegration
     /// </summary>
     private const string TokenEndpoint = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal";
 
+    /// <summary>
+    /// 飞书开放平台发送消息接口地址（应用模式使用）
+    /// 通过 receive_id_type=chat_id 指定按群聊 ID 投递
+    /// </summary>
+    private const string MessageEndpoint = "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id";
+
     public string IntegrationType => "feishu";
 
     public FeishuIntegration(IHttpClientFactory httpClientFactory, ILogger<FeishuIntegration> logger)
@@ -139,7 +145,7 @@ public class FeishuIntegration : IWorkOrderIntegration
             // 应用模式：先获取 TenantAccessToken，再通过 API 发送
             if (!string.IsNullOrEmpty(config.AppId) && !string.IsNullOrEmpty(config.AppSecret))
             {
-                return await SendViaAppAsync(config.AppId, config.AppSecret, card, ct);
+                return await SendViaAppAsync(config, card, ct);
             }
 
             _logger.LogWarning("飞书配置不完整，缺少 WebhookUrl 或 AppId/AppSecret");
@@ -166,16 +172,27 @@ public class FeishuIntegration : IWorkOrderIntegration
     }
 
     /// <summary>
-    /// 应用模式：通过 AppId + AppSecret 获取 TenantAccessToken 后发送消息
-    /// 适用于需要向指定用户/群聊发送消息的场景
+    /// 应用模式：通过 AppId + AppSecret 获取 TenantAccessToken 后发送消息到群聊
+    ///
+    /// 关键修复：原代码第 199 行拿 token 后只记日志不发消息，客户配置应用模式后
+    /// 永远收不到工单通知，日志却说"Token 获取成功"，极具迷惑性。
+    /// 现在真实调用 /im/v1/messages API 发送消息卡片到 ChatId 指定的群聊。
     /// </summary>
-    private async Task<string?> SendViaAppAsync(string appId, string appSecret, object card, CancellationToken ct)
+    private async Task<string?> SendViaAppAsync(FeishuConfig config, object card, CancellationToken ct)
     {
+        // 接收群聊 ID 必须配置，否则即使拿到 token 也无处可发
+        if (string.IsNullOrEmpty(config.ChatId))
+        {
+            _logger.LogWarning(
+                "飞书应用模式缺少 ChatId 配置，无法发送消息。请配置接收群聊的 chat_id（获取方式：群设置 → 群机器人 → 查看群信息）");
+            return null;
+        }
+
         // 第一步：获取 TenantAccessToken
         var tokenResponse = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(TokenEndpoint, new
         {
-            app_id = appId,
-            app_secret = appSecret
+            app_id = config.AppId,
+            app_secret = config.AppSecret
         }, ct);
 
         if (!tokenResponse.IsSuccessStatusCode)
@@ -186,18 +203,57 @@ public class FeishuIntegration : IWorkOrderIntegration
 
         var tokenBody = await tokenResponse.Content.ReadAsStringAsync(ct);
         using var tokenDoc = JsonDocument.Parse(tokenBody);
-        var token = tokenDoc.RootElement.GetProperty("tenant_access_token").GetString();
-
-        if (string.IsNullOrEmpty(token))
+        if (!tokenDoc.RootElement.TryGetProperty("tenant_access_token", out var tokenEl) || string.IsNullOrEmpty(tokenEl.GetString()))
         {
-            _logger.LogWarning("飞书 TenantAccessToken 为空");
+            _logger.LogWarning("飞书 TenantAccessToken 为空。响应：{Body}", tokenBody);
+            return null;
+        }
+        var token = tokenEl.GetString();
+
+        // 第二步：调用 /im/v1/messages 发送消息卡片到群聊
+        // 飞书 API 要求 content 字段是 JSON 字符串（不是嵌套对象）
+        var cardJson = JsonSerializer.Serialize(card);
+        var messagePayload = new
+        {
+            receive_id = config.ChatId,
+            msg_type = "interactive",
+            content = cardJson
+        };
+
+        var client = _httpClientFactory.CreateClient("WorkOrderIntegration");
+        var msgRequest = new HttpRequestMessage(HttpMethod.Post, MessageEndpoint)
+        {
+            Headers = { { "Authorization", $"Bearer {token}" } },
+            Content = JsonContent.Create(messagePayload)
+        };
+
+        var msgResponse = await client.SendAsync(msgRequest, ct);
+        var msgBody = await msgResponse.Content.ReadAsStringAsync(ct);
+
+        if (!msgResponse.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("飞书应用模式发送消息失败: Status={Status}, Body={Body}", msgResponse.StatusCode, msgBody);
             return null;
         }
 
-        // 第二步：发送消息卡片（此处仅记录 Token 获取成功，实际发送需要指定接收者）
-        // 当前简化版不实现完整的应用模式消息推送，仅记录日志
-        _logger.LogInformation("飞书应用模式 Token 获取成功，简化版暂不执行发送操作");
-        return tokenBody;
+        // 从响应中提取 message_id 作为外部 ID，便于后续状态变更追踪
+        try
+        {
+            using var msgDoc = JsonDocument.Parse(msgBody);
+            if (msgDoc.RootElement.TryGetProperty("data", out var data)
+                && data.TryGetProperty("message_id", out var msgId))
+            {
+                _logger.LogInformation("飞书应用模式消息发送成功：message_id={MessageId}", msgId.GetString());
+                return msgId.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // 响应解析失败不影响推送本身，返回原始 body
+        }
+
+        _logger.LogInformation("飞书应用模式消息发送成功，但响应未包含 message_id");
+        return msgBody;
     }
 
     /// <summary>

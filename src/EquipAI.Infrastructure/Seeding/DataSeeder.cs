@@ -192,24 +192,30 @@ public class DataSeeder
 
     /// <summary>
     /// 创建超级管理员账户及其他角色用户
-    /// 默认用户名 admin，密码 Admin@123，归属默认租户
+    /// 默认用户名 admin，归属默认租户
     /// 同时创建维保主管、技术员、操作员、观察者四种角色的测试用户
-    /// 首次登录后必须修改密码（MustChangePassword = true）
+    ///
+    /// 密码来源（按优先级）：
+    /// 1. 环境变量 SEED_{USERNAME}_PASSWORD（生产环境强烈推荐设置，避免默认密码被公开）
+    /// 2. 内置默认密码（仅用于开发/演示）
+    ///
+    /// 所有种子用户首次登录后必须修改密码（MustChangePassword = true），强制客户重置为强密码。
     /// </summary>
     private async Task SeedAdminUserAsync()
     {
         var defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
-        // 定义种子用户列表
+        // 定义种子用户列表（Password 字段为开发环境默认值，生产环境应通过环境变量覆盖）
         var seedUsers = new[]
         {
-            new { Username = "admin", Password = "Admin@123", DisplayName = "系统管理员", Role = UserRole.SystemAdmin },
-            new { Username = "lead", Password = "Lead@123", DisplayName = "维保主管", Role = UserRole.MaintenanceLead },
-            new { Username = "tech", Password = "Tech@123", DisplayName = "技术员", Role = UserRole.Technician },
-            new { Username = "operator", Password = "Operator@123", DisplayName = "操作员", Role = UserRole.Operator },
-            new { Username = "viewer", Password = "Viewer@123", DisplayName = "观察者", Role = UserRole.Viewer }
+            new { Username = "admin", DefaultPassword = "Admin@123", EnvVar = "SEED_ADMIN_PASSWORD", DisplayName = "系统管理员", Role = UserRole.SystemAdmin },
+            new { Username = "lead", DefaultPassword = "Lead@123", EnvVar = "SEED_LEAD_PASSWORD", DisplayName = "维保主管", Role = UserRole.MaintenanceLead },
+            new { Username = "tech", DefaultPassword = "Tech@123", EnvVar = "SEED_TECH_PASSWORD", DisplayName = "技术员", Role = UserRole.Technician },
+            new { Username = "operator", DefaultPassword = "Operator@123", EnvVar = "SEED_OPERATOR_PASSWORD", DisplayName = "操作员", Role = UserRole.Operator },
+            new { Username = "viewer", DefaultPassword = "Viewer@123", EnvVar = "SEED_VIEWER_PASSWORD", DisplayName = "观察者", Role = UserRole.Viewer }
         };
 
+        var usingDefaultPassword = false;
         foreach (var seedUser in seedUsers)
         {
             var userExists = await _dbContext.Users
@@ -218,16 +224,25 @@ public class DataSeeder
 
             if (!userExists)
             {
+                // 密码来源：环境变量优先（生产部署应配置），否则使用内置默认密码
+                var password = Environment.GetEnvironmentVariable(seedUser.EnvVar);
+                if (string.IsNullOrEmpty(password))
+                {
+                    password = seedUser.DefaultPassword;
+                    usingDefaultPassword = true;
+                }
+
                 var user = new User
                 {
                     TenantId = defaultTenantId,
                     Username = seedUser.Username,
-                    PasswordHash = PasswordHasher.HashPassword(seedUser.Password),
+                    PasswordHash = PasswordHasher.HashPassword(password),
                     DisplayName = seedUser.DisplayName,
                     Role = seedUser.Role,
                     IsActive = true,
-                    // 首次登录后必须修改密码，提升安全性
-                    MustChangePassword = seedUser.Username == "admin",
+                    // 关键修复：所有种子用户都必须改密码（原代码只强制 admin），
+                    // 避免客户拿到系统后 lead/tech/operator/viewer 仍用公开默认密码登录。
+                    MustChangePassword = true,
                     Language = "zh-CN"
                 };
 
@@ -236,9 +251,20 @@ public class DataSeeder
             }
         }
 
+        // 一次性警告：有种子用户使用了默认密码（非环境变量），生产环境有泄露风险
+        if (usingDefaultPassword)
+        {
+            _logger.LogWarning(
+                "种子用户使用了内置默认密码（未设置 SEED_*_PASSWORD 环境变量）。" +
+                "生产环境请通过环境变量覆盖所有种子用户密码，避免公开仓库中的默认密码被攻击者利用。" +
+                "所有用户首次登录后强制修改密码（MustChangePassword=true）。");
+        }
+
         await _dbContext.SaveChangesAsync();
 
         // 第二租户的 admin 用户（用于 E2E 跨租户隔离测试）
+        // 注意：此账户不强制改密码，因为自动化 E2E 测试需要稳定凭据。
+        // 生产环境如不需要跨租户测试，应在启动后手动删除此账户。
         var secondTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var tenant2AdminExists = await _dbContext.Users
             .IgnoreQueryFilters()
@@ -246,11 +272,13 @@ public class DataSeeder
 
         if (!tenant2AdminExists)
         {
+            var tenant2Password = Environment.GetEnvironmentVariable("SEED_TENANT2_PASSWORD")
+                ?? "Tenant2@123";
             var tenant2Admin = new User
             {
                 TenantId = secondTenantId,
                 Username = "tenant2admin",
-                PasswordHash = PasswordHasher.HashPassword("Tenant2@123"),
+                PasswordHash = PasswordHasher.HashPassword(tenant2Password),
                 DisplayName = "租户B管理员",
                 Role = UserRole.SystemAdmin,
                 IsActive = true,
@@ -316,7 +344,15 @@ public class DataSeeder
                         new { name = "power_consumption", displayName = "功率消耗", unit = "kW", range = new { min = 0, max = 30 } }
                     }
                 }),
-                DefaultAlarmRules = "[]",
+                // 关键修复：原 DefaultAlarmRules="[]"，导致客户用 CNC 模板创建设备后告警永远不触发。
+                // 阈值依据：模板 metric range 上限的 90-95%（接近上限即预警）+ ISO 10816 振动标准。
+                DefaultAlarmRules = JsonSerializer.Serialize(new object[]
+                {
+                    new { name = "主轴转速超限", metric = "spindle_speed", ruleType = "threshold", @operator = "gt", threshold = 14500.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "冷却液温度过高", metric = "coolant_temperature", ruleType = "threshold", @operator = "gt", threshold = 50.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "振动超标", metric = "vibration", ruleType = "threshold", @operator = "gt", threshold = 7.0, severity = "Critical", cooldownSeconds = 600, enabled = true, autoCreateWorkorder = true },
+                    new { name = "功率消耗过高", metric = "power_consumption", ruleType = "threshold", @operator = "gt", threshold = 28.0, severity = "Medium", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false }
+                }),
                 DefaultDiagnosisRules = "[]"
             },
             new DeviceTypeTemplate
@@ -335,7 +371,16 @@ public class DataSeeder
                         new { name = "clamping_force", displayName = "锁模力", unit = "kN", range = new { min = 0, max = 5000 } }
                     }
                 }),
-                DefaultAlarmRules = "[]",
+                // 关键修复：原 DefaultAlarmRules="[]"，客户用注塑机模板创建设备后告警永远不触发。
+                // 阈值依据：模板 metric range 上限的 90-95%（接近上限即预警）+ 注塑机工艺安全规范。
+                DefaultAlarmRules = JsonSerializer.Serialize(new object[]
+                {
+                    new { name = "注射压力过高", metric = "injection_pressure", ruleType = "threshold", @operator = "gt", threshold = 180.0, severity = "Critical", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = true },
+                    new { name = "熔体温度过高", metric = "melt_temperature", ruleType = "threshold", @operator = "gt", threshold = 340.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "模具温度过高", metric = "mold_temperature", ruleType = "threshold", @operator = "gt", threshold = 160.0, severity = "Medium", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
+                    new { name = "成型周期过长", metric = "cycle_time", ruleType = "threshold", @operator = "gt", threshold = 110.0, severity = "Low", cooldownSeconds = 600, enabled = true, autoCreateWorkorder = false },
+                    new { name = "锁模力过高", metric = "clamping_force", ruleType = "threshold", @operator = "gt", threshold = 4500.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false }
+                }),
                 DefaultDiagnosisRules = "[]"
             },
             new DeviceTypeTemplate
@@ -411,43 +456,66 @@ public class DataSeeder
             await _dbContext.SaveChangesAsync();
         }
 
-        // 2. 提取空压机模板的 DefaultAlarmRules 到 alert_rules 表（若尚无通用告警规则）
-        // 注意：种子规则 DeviceType=null（通用），按 metric 维度去重即可
-        var hasAirCompressorRules = await _dbContext.AlertRules
+        // 2. 提取所有模板的 DefaultAlarmRules 到 alert_rules 表（若尚无通用告警规则）
+        // 注意：种子规则 DeviceType=null（通用），按 metric 维度去重（同一 metric 只保留第一条）
+        //
+        // 关键修复：原代码只提取空压机模板，导致 CNC / 注塑机模板即使配了规则也不生效。
+        // 客户用 CNC 模板创建设备后告警永远不触发（振动/温度/功率异常全部漏报）。
+        // 现在改为遍历所有行业模板，metric 去重后写入 alert_rules 作为通用规则。
+        var hasGenericRules = await _dbContext.AlertRules
             .IgnoreQueryFilters()
             .AnyAsync(r => r.TenantId == DefaultTenantId && r.DeviceType == null);
 
-        if (hasAirCompressorRules)
+        if (hasGenericRules)
             return;
 
-        // 查询系统租户的空压机模板
-        var template = await _dbContext.DeviceTypeTemplates
+        var templates = await _dbContext.DeviceTypeTemplates
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(t => t.TenantId == SystemConstants.SystemTenantId && t.Name == "空压机");
+            .Where(t => t.TenantId == SystemConstants.SystemTenantId)
+            .ToListAsync();
 
-        if (template == null || string.IsNullOrWhiteSpace(template.DefaultAlarmRules))
+        if (templates.Count == 0)
         {
-            _logger.LogWarning("空压机模板未找到或无 DefaultAlarmRules，跳过告警规则种子");
+            _logger.LogWarning("未找到任何行业模板，跳过告警规则种子");
             return;
         }
 
-        // 解析模板 JSON 并创建 AlertRule 记录
-        try
-        {
-            using var doc = JsonDocument.Parse(template.DefaultAlarmRules);
-            foreach (var element in doc.RootElement.EnumerateArray())
-            {
-                var rule = ParseAlarmRuleElement(element);
-                if (rule != null)
-                    _dbContext.AlertRules.Add(rule);
-            }
+        // 按 metric 去重：不同模板可能定义同名 metric（如 vibration 同时出现在空压机和 CNC 中）
+        // 取第一个出现的定义（模板顺序：空压机 → CNC → 注塑机）
+        var seenMetrics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var addedCount = 0;
 
-            _logger.LogInformation("已为空压机提取 {Count} 条默认告警规则到 alert_rules 表", doc.RootElement.GetArrayLength());
-            await _dbContext.SaveChangesAsync();
-        }
-        catch (JsonException ex)
+        foreach (var template in templates)
         {
-            _logger.LogError(ex, "解析空压机模板 DefaultAlarmRules 失败");
+            if (string.IsNullOrWhiteSpace(template.DefaultAlarmRules))
+                continue;
+
+            try
+            {
+                using var doc = JsonDocument.Parse(template.DefaultAlarmRules);
+                foreach (var element in doc.RootElement.EnumerateArray())
+                {
+                    var rule = ParseAlarmRuleElement(element);
+                    if (rule == null) continue;
+
+                    if (!seenMetrics.Add(rule.Metric.ToLowerInvariant()))
+                        continue;  // 该 metric 已有规则，跳过
+
+                    _dbContext.AlertRules.Add(rule);
+                    addedCount++;
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "解析模板 {TemplateName} 的 DefaultAlarmRules 失败", template.Name);
+            }
+        }
+
+        if (addedCount > 0)
+        {
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("已为 {Count} 个模板提取 {RuleCount} 条默认告警规则到 alert_rules 表（按 metric 去重）",
+                templates.Count, addedCount);
         }
     }
 
