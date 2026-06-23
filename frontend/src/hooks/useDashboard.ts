@@ -52,6 +52,12 @@ export interface OeeData {
   onlineDevices: number;
   /** 评估时间（UTC ISO） */
   evaluatedAt: string;
+  /** 是否为近似估算值（本系统用代理指标简化计算，非严格工业 OEE） */
+  isApproximate?: boolean;
+  /** 是否数据不足（无 air_flow 遥测或无设备时为 true，OEE 各维度降级为 0） */
+  hasInsufficientData?: boolean;
+  /** 各维度的近似说明，供 tooltip 展示 */
+  approximationNotes?: Record<string, string>;
 }
 
 /**

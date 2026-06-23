@@ -51,7 +51,7 @@ public class OeeService
         var availability = totalDevices > 0 ? (double)onlineDevices / totalDevices : 0;
 
         // 维度二：Performance — 平均 air_flow 达标率
-        var performance = await CalculatePerformanceAsync(tenantId, ct);
+        var (performance, recentFlowCount) = await CalculatePerformanceAsync(tenantId, ct);
 
         // 维度三：Quality — 无 Critical 活跃告警的设备占比
         // 修复历史（v1.3.0）：原代码用 IgnoreQueryFilters() 绕过租户过滤器，
@@ -77,6 +77,17 @@ public class OeeService
             TotalDevices = totalDevices,
             OnlineDevices = onlineDevices,
             EvaluatedAt = DateTime.UtcNow,
+            // 关键修复：标记为近似值，避免客户误把简化版 OEE 当作严格工业指标用于 KPI 考核
+            IsApproximate = true,
+            ApproximationNotes = new()
+            {
+                ["availability"] = "瞬时在线设备比例（非真实计划运行时间）",
+                ["performance"] = recentFlowCount > 0
+                    ? $"最近 {recentFlowCount} 条 air_flow 均值 / 标称产能"
+                    : "无 air_flow 遥测数据，Performance 显示为 0",
+                ["quality"] = "无 Critical 活跃告警设备占比（非真实良品率）",
+            },
+            HasInsufficientData = recentFlowCount == 0 || totalDevices == 0,
         };
     }
 
@@ -88,8 +99,10 @@ public class OeeService
     ///   原代码无遥测时返回 1.0（满性能），这是误导性的"乐观假设"，
     ///   会让用户以为设备性能正常但其实根本没数据。
     ///   现在改为：无遥测时返回 0，让前端展示"数据不足"提示。
+    ///
+    /// 返回值元组：(性能比率, 用于计算的样本数量)。样本数量供上层判断是否数据不足。
     /// </summary>
-    private async Task<double> CalculatePerformanceAsync(Guid tenantId, CancellationToken ct)
+    private async Task<(double performance, int sampleCount)> CalculatePerformanceAsync(Guid tenantId, CancellationToken ct)
     {
         try
         {
@@ -104,17 +117,17 @@ public class OeeService
             if (recentFlows.Count == 0)
             {
                 _logger.LogDebug("租户 {TenantId} 无 air_flow 遥测，Performance 返回 0", tenantId);
-                return 0;
+                return (0, 0);
             }
 
             var avgFlow = recentFlows.Average();
-            return Math.Clamp(avgFlow / NominalAirFlow, 0, 1.0);
+            return (Math.Clamp(avgFlow / NominalAirFlow, 0, 1.0), recentFlows.Count);
         }
         catch (Exception ex)
         {
             // TimescaleDB 在测试环境可能不可用，降级为 0（保守值）
             _logger.LogWarning(ex, "air_flow 遥测查询失败，租户 {TenantId} Performance 降级为 0", tenantId);
-            return 0;
+            return (0, 0);
         }
     }
 }
@@ -142,4 +155,28 @@ public sealed class OeeResult
 
     /// <summary>评估时间（UTC）</summary>
     public DateTime EvaluatedAt { get; set; }
+
+    /// <summary>
+    /// 是否为近似估算值
+    ///
+    /// 关键修复：本系统的 OEE 是"简化版"，三维度均用代理指标（不是严格工业 OEE）：
+    /// - Availability：瞬时在线设备比例（非真实计划运行时间）
+    /// - Performance：最近 air_flow 均值 / 标称产能（非真实节拍）
+    /// - Quality：无 Critical 告警设备占比（非真实良品率）
+    ///
+    /// 前端展示时必须基于此字段提示"近似估算"，避免客户把它当作严格 KPI 用于考核。
+    /// </summary>
+    public bool IsApproximate { get; set; }
+
+    /// <summary>
+    /// 是否数据不足（Performance 无遥测或无设备）
+    /// 数据不足时 OEE 各维度会降级为 0，客户应理解为"未接入完整数据"而非"效率极低"。
+    /// </summary>
+    public bool HasInsufficientData { get; set; }
+
+    /// <summary>
+    /// 各维度的近似说明（key: availability/performance/quality, value: 中文说明）
+    /// 供前端 tooltip 展示，让客户理解每个维度的算法局限性。
+    /// </summary>
+    public Dictionary<string, string> ApproximationNotes { get; set; } = new();
 }

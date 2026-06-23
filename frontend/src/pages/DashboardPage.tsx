@@ -148,7 +148,23 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-semibold">{t('dashboard.oee.title', '设备综合效率 (OEE)')}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-semibold">{t('dashboard.oee.title', '设备综合效率 (OEE)')}</h3>
+                {oee.isApproximate && (
+                  <Badge variant="outline" className="text-amber-600 border-amber-300 bg-amber-50" title={
+                    oee.approximationNotes
+                      ? Object.entries(oee.approximationNotes).map(([k, v]) => `${k}: ${v}`).join('\n')
+                      : t('dashboard.oee.approximateHint', '基于实时状态的近似估算')
+                  }>
+                    {t('dashboard.oee.approximate', '近似估算')}
+                  </Badge>
+                )}
+                {oee.hasInsufficientData && (
+                  <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50">
+                    {t('dashboard.oee.insufficientData', '数据不足')}
+                  </Badge>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">
                 {t('dashboard.oee.formula', 'OEE = 可用率 × 性能 × 质量')}
               </p>
