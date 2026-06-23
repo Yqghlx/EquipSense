@@ -163,6 +163,26 @@ public class SignalRNotificationService : ISignalRNotificationService
     }
 
     /// <inheritdoc />
+    public async Task SendWorkOrderAnalysisUpdatedAsync(Guid tenantId, Guid workOrderId)
+    {
+        // 仅 SignalR 推送（轻量）：分析完成是工单详情页的实时更新，非紧急打扰事项，无需持久化通知/Web Push。
+        // SignalR 推送用 try/catch 隔离：推送失败仅记录警告，不影响已写入 DB 的分析结果（用户手动刷新仍可看到）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnWorkOrderAnalysisUpdated", new
+                {
+                    workOrderId,
+                    updatedAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 工单分析更新推送失败: WorkOrderId={WorkOrderId}", workOrderId);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SendWorkOrderEscalatedAsync(Guid tenantId, Guid workOrderId,
         string workOrderCode, string title, string oldPriority, string newPriority)
     {

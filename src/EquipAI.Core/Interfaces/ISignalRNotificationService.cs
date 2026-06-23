@@ -35,6 +35,16 @@ public interface ISignalRNotificationService
         string oldStatus, string newStatus);
 
     /// <summary>
+    /// 推送工单 AI 根因分析完成事件到租户组
+    ///
+    /// 业务意义：告警自动建单后异步触发 AI 根因分析（L1-L4 降级），分析完成后工单详情页须实时
+    /// 展示根因与建议。若不推送，用户停留在工单详情页时根因区域一直空白/旧值，必须手动刷新——
+    /// 对「告警→自动建单→跳转详情页→等分析」的核心流程体验极差（AI 根因是产品核心卖点）。
+    /// 轻量推送：仅 SignalR（在线刷新详情页），不持久化通知/不发 Web Push（分析结果非紧急打扰事项）。
+    /// </summary>
+    Task SendWorkOrderAnalysisUpdatedAsync(Guid tenantId, Guid workOrderId);
+
+    /// <summary>
     /// 推送工单 SLA 超时升级事件到租户组
     ///
     /// 业务意义：SLA 超时后系统自动升级优先级，但如果不通知，主管完全不知情。

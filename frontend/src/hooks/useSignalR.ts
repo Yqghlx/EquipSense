@@ -59,6 +59,14 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       });
 
+      // AI 根因分析完成：后端 WorkOrderAnalysisHandler 更新工单 RootCause 后推送，前端须监听以精准
+      // invalidate 该工单详情页（queryKey ['work-orders', id]），让停留在详情页的用户实时看到根因与建议。
+      // 后端分析是异步的（告警→自动建单→分析），不推送/不监听则用户必须手动刷新——AI 根因是产品核心卖点，
+      // 分析完成却不展示严重降低可信度。只 invalidate 该工单详情（不刷新整个列表，分析结果不影响列表展示）。
+      conn.on('OnWorkOrderAnalysisUpdated', (data: { workOrderId: string }) => {
+        queryClient.invalidateQueries({ queryKey: ['work-orders', data.workOrderId] });
+      });
+
       // SLA 超时升级是工业场景最紧急事件之一（设备停机威胁），须即时通知主管并刷新工单列表/Dashboard。
       // 后端 CheckAndEscalateAsync 只改 Priority 不改 Status、不发 WorkOrderStatusChangedEvent，
       // 故必须显式监听 OnWorkOrderEscalated，否则主管看到的还是旧优先级（直到手动刷新页面）。

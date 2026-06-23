@@ -57,5 +57,16 @@ public class WorkOrderAnalysisHandler : IEventHandler<AnalysisCompletedEvent>
         _logger.LogInformation(
             "已更新工单分析结果: WorkOrderId={WorkOrderId}, AnalysisId={AnalysisId}, Confidence={Confidence}",
             workOrder.Id, @event.AnalysisId, @event.Confidence);
+
+        // 推送分析更新到前端，让停留在工单详情页的用户实时看到 AI 根因与建议（回归 #249）。
+        // 原实现只更新 DB 不推送，前端工单详情页（useWorkOrder(id) queryKey ['work-orders', id]）不被
+        // invalidate → 用户必须手动刷新才能看到根因。AI 根因分析是「告警→自动建单→异步分析」流程的
+        // 核心价值点，分析完成却不展示严重降低产品可信度。
+        // 从 scope 解析推送服务（Scoped，与 AppDbContext 同 scope）；解析失败则降级（DB 已更新，手动刷新仍可见）。
+        var notificationService = scope.ServiceProvider.GetService<ISignalRNotificationService>();
+        if (notificationService is not null)
+        {
+            await notificationService.SendWorkOrderAnalysisUpdatedAsync(@event.TenantId, workOrder.Id);
+        }
     }
 }
