@@ -1,3 +1,4 @@
+using EquipAI.Application.Services;
 using EquipAI.Core.Enums;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -43,7 +44,7 @@ public class DashboardStatsService
             .Where(t => t.Id == tenantId)
             .Select(t => new { t.TimeZone })
             .FirstOrDefaultAsync(ct);
-        var timeZone = SafeResolveTimeZone(tenantTimeZone?.TimeZone);
+        var timeZone = TimeZoneResolver.Resolve(tenantTimeZone?.TimeZone, _logger);
 
         // 顺序执行所有统计查询（EF Core DbContext 不支持并发操作）
         var deviceStats = await GetDeviceStatsAsync(tenantId, ct);
@@ -67,28 +68,6 @@ public class DashboardStatsService
             AlertTrend = alertTrend,
             WorkOrderTrend = workOrderTrend,
         };
-    }
-
-    /// <summary>
-    /// 解析 IANA 时区 ID 为 TimeZoneInfo，失败时降级为 UTC
-    ///
-    /// 降级原因：租户可能填了无效时区 ID（如笔误），不应让仪表盘查询崩溃。
-    /// 监控应记录失败情况以便运维介入。
-    /// </summary>
-    private TimeZoneInfo SafeResolveTimeZone(string? timeZoneId)
-    {
-        if (string.IsNullOrWhiteSpace(timeZoneId) || timeZoneId.Equals("UTC", StringComparison.OrdinalIgnoreCase))
-            return TimeZoneInfo.Utc;
-
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "租户时区 {TimeZoneId} 无效，降级为 UTC", timeZoneId);
-            return TimeZoneInfo.Utc;
-        }
     }
 
     /// <summary>

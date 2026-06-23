@@ -175,6 +175,44 @@ public class WorkOrderStatisticsServiceTests : IAsyncDisposable
         stats.CreatedTrend.Select(p => p.Date).Should().BeInAscendingOrder();
     }
 
+    /// <summary>
+    /// 趋势应按租户本地时区分组，而非 UTC（跨时区对称遗漏，与 DashboardStatsService #204 一致）
+    ///
+    /// Why：UTC+8 工业客户在本地早 8 点（UTC 0 点）看日报，按 UTC 分组会把本地「今天凌晨」的工单
+    /// 错归到 UTC 昨天，日报/月报日期边界偏移，影响 SLA 审计合规。修复后按租户本地时区分组。
+    /// </summary>
+    [Fact]
+    public async Task GetStatisticsAsync_趋势应按租户本地时区分组非UTC()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        // 租户 UTC+8（Asia/Shanghai）
+        db.Tenants.Add(new Tenant { Id = _tenantId, Name = "测试租户", TimeZone = "Asia/Shanghai" });
+
+        // 构造「本地日期 ≠ UTC 日期」的工单：本地昨天 04:00(UTC+8) = UTC 前天 20:00
+        var timeZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Shanghai");
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone).Date;
+        var localYesterday4am = todayLocal.AddDays(-1).AddHours(4);
+        var createdAtUtc = TimeZoneInfo.ConvertTimeToUtc(localYesterday4am, timeZone);
+
+        db.WorkOrders.Add(CreateWorkOrder(WorkOrderStatus.Closed, WorkOrderType.Corrective,
+            WorkOrderPriority.High, createdAtUtc, tenantId: _tenantId));
+        await db.SaveChangesAsync();
+
+        var stats = await service.GetStatisticsAsync(_tenantId, periodDays: 7);
+
+        var localYesterdayStr = todayLocal.AddDays(-1).ToString("yyyy-MM-dd");
+        var utcDateStr = createdAtUtc.Date.ToString("yyyy-MM-dd");
+
+        // 修复前（UTC 分组）：工单归 UTC 前天（utcDateStr）→ 本地昨天的 count=0，断言失败
+        // 修复后（本地分组）：工单归本地昨天（localYesterdayStr）→ count=1
+        stats.CreatedTrend.First(p => p.Date == localYesterdayStr).Count
+            .Should().Be(1, "本地昨天 04:00(UTC+8) 应归本地昨天，而非 UTC 前天");
+        (stats.CreatedTrend.FirstOrDefault(p => p.Date == utcDateStr)?.Count ?? 0)
+            .Should().Be(0, "UTC 前天 20:00 = 本地昨天 04:00，不应归 UTC 前天");
+    }
+
     // =========================================================================
     // 平均完成时长 — 按优先级分组
     // =========================================================================
