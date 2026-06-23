@@ -73,6 +73,22 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       });
 
+      // 设备离线是工业监控基本告警（通信中断=设备/网络/网关故障）。后端 DeviceStatusMonitor 检测到
+      // 超时无遥测即标记 Offline，但设备离线不产生遥测→不触发阈值告警，故必须监听此事件刷新
+      // 设备列表/Dashboard + 弹通知，否则运维完全不知情（直到手动刷新）。
+      conn.on('OnDeviceStatusChanged', (data: { deviceCode: string; deviceName: string; status: string }) => {
+        if (data.status === 'Offline') {
+          push({
+            type: 'alert',
+            title: i18n.t('notification.deviceOfflineTitle', { code: data.deviceCode }),
+            message: i18n.t('notification.deviceOfflineMessage', { name: data.deviceName, code: data.deviceCode }),
+            link: `/devices`,
+          });
+        }
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['devices'] });
+      });
+
       conn.on('OnTelemetryUpdate', (deviceId: string) => {
         queryClient.invalidateQueries({ queryKey: ['telemetry', deviceId] });
       });

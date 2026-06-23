@@ -44,4 +44,13 @@ public interface ISignalRNotificationService
     /// <param name="newPriority">升级后优先级</param>
     Task SendWorkOrderEscalatedAsync(Guid tenantId, Guid workOrderId, string workOrderCode,
         string title, string oldPriority, string newPriority);
+
+    /// <summary>
+    /// 推送设备离线事件到租户组
+    ///
+    /// 业务意义：设备超过阈值无遥测即视为通信中断（设备故障/网络故障/网关故障），
+    /// 是工业监控的基本告警。若不通知，运维完全不知情——设备离线不产生遥测，
+    /// 不触发阈值告警，故必须有独立离线通知。此方法确保运维收到推送 + 持久化通知 + Web Push。
+    /// </summary>
+    Task SendDeviceOfflineAsync(Guid tenantId, Guid deviceId, string deviceCode, string deviceName);
 }

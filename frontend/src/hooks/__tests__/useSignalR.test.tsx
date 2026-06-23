@@ -93,6 +93,9 @@ describe('useSignalR', () => {
       expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderCreated', expect.any(Function));
       expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderStatusChanged', expect.any(Function));
       expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderEscalated', expect.any(Function));
+      // 设备离线事件必须监听：设备离线不触发阈值告警（无遥测），不监听 OnDeviceStatusChanged
+      // 则运维完全不知情（通信中断/故障无人知晓），设备列表/Dashboard 也不刷新
+      expect(mockConnection.on).toHaveBeenCalledWith('OnDeviceStatusChanged', expect.any(Function));
     });
   });
 

@@ -115,7 +115,9 @@
     "alertTitle": "告警：{{metric}}",
     "alertMessage": "{{metric}} = {{value}}（{{severity}}）",
     "workOrderEscalatedTitle": "SLA 超时升级：{{code}}",
-    "workOrderEscalatedMessage": "工单《{{title}}》SLA 已超时，优先级升级为 {{priority}}，请尽快处理"
+    "workOrderEscalatedMessage": "工单《{{title}}》SLA 已超时，优先级升级为 {{priority}}，请尽快处理",
+    "deviceOfflineTitle": "设备离线：{{code}}",
+    "deviceOfflineMessage": "设备《{{name}}》（{{code}}）通信中断，请检查"
   },
   "dashboard": {
     "title": "仪表盘",

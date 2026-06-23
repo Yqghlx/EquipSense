@@ -115,7 +115,9 @@
     "alertTitle": "Alert: {{metric}}",
     "alertMessage": "{{metric}} = {{value}} ({{severity}})",
     "workOrderEscalatedTitle": "SLA Overdue Escalation: {{code}}",
-    "workOrderEscalatedMessage": "Work order \"{{title}}\" is overdue; priority escalated to {{priority}}. Please handle promptly."
+    "workOrderEscalatedMessage": "Work order \"{{title}}\" is overdue; priority escalated to {{priority}}. Please handle promptly.",
+    "deviceOfflineTitle": "Device Offline: {{code}}",
+    "deviceOfflineMessage": "Device \"{{name}}\" ({{code}}) lost communication. Please check."
   },
   "dashboard": {
     "title": "Dashboard",

@@ -1,4 +1,5 @@
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -76,18 +77,46 @@ public class DeviceStatusMonitor : BackgroundService
 
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 在检查 scope 内解析通知服务（而非构造注入），避免 Singleton HostedService 捕获 Scoped 依赖
+        // （ISignalRNotificationService 内部持有 Scoped AppDbContext，构造注入会导致 captive dependency）
+        var notifications = scope.ServiceProvider.GetRequiredService<ISignalRNotificationService>();
 
-        // IgnoreQueryFilters：跨所有租户全局巡检（见上方 remarks）。一次 UPDATE 完成，无需加载实体到内存。
-        var affected = await dbContext.Devices
+        // IgnoreQueryFilters：跨所有租户全局巡检（见上方 remarks）。先查出超时设备（含 TenantId/标识，
+        // 用于按租户推送离线通知），再批量更新状态，最后逐个推送。相比原 ExecuteUpdateAsync（只返回行数），
+        // 这里需加载设备标识以支持实时离线通知——运维必须知道哪台设备离线了。
+        var offlineDevices = await dbContext.Devices
             .IgnoreQueryFilters()
             .Where(d => d.Status == DeviceStatus.Online && (d.LastSeenAt == null || d.LastSeenAt < cutoff))
+            .Select(d => new { d.Id, d.TenantId, d.DeviceCode, d.Name })
+            .ToListAsync(ct);
+
+        if (offlineDevices.Count == 0)
+            return 0;
+
+        var offlineIds = offlineDevices.Select(d => d.Id).ToList();
+        var affected = await dbContext.Devices
+            .IgnoreQueryFilters()
+            .Where(d => offlineIds.Contains(d.Id))
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DeviceStatus.Offline), ct);
 
-        if (affected > 0)
+        // 逐设备推送离线通知（按租户隔离 + 持久化通知 + Web Push），让运维实时感知设备通信中断。
+        // 原实现只改状态不发通知，且设备离线不产生遥测故不触发阈值告警 → 运维完全不知情。
+        // 单设备通知失败不阻塞其他设备（catch 仅告警）。
+        foreach (var device in offlineDevices)
         {
-            _logger.LogInformation("已将 {Count} 个超时无遥测的设备标记为 Offline（阈值 {Timeout}s）",
-                affected, timeoutSeconds);
+            try
+            {
+                await notifications.SendDeviceOfflineAsync(
+                    device.TenantId, device.Id, device.DeviceCode, device.Name ?? device.DeviceCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "设备离线通知推送失败: DeviceId={DeviceId}", device.Id);
+            }
         }
+
+        _logger.LogInformation("已将 {Count} 个超时无遥测的设备标记为 Offline 并通知运维（阈值 {Timeout}s）",
+            affected, timeoutSeconds);
 
         return affected;
     }

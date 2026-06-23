@@ -185,4 +185,45 @@ public class SignalRNotificationService : ISignalRNotificationService
 
         await _db.SaveChangesAsync();
     }
+
+    /// <inheritdoc />
+    public async Task SendDeviceOfflineAsync(Guid tenantId, Guid deviceId, string deviceCode, string deviceName)
+    {
+        // 设备离线（超阈值无遥测）是工业监控基本告警：通信中断可能源于设备故障/网络故障/网关故障。
+        // 原实现只更新状态不发通知，运维完全不知情；且设备离线不产生遥测，不触发阈值告警，
+        // 故必须有独立离线通知。补齐 SignalR + 持久化 + Web Push 三路通知。
+        await _hubContext.Clients.Group($"tenant:{tenantId}")
+            .SendAsync("OnDeviceStatusChanged", new
+            {
+                deviceId,
+                deviceCode,
+                deviceName,
+                status = "Offline",
+                changedAt = DateTime.UtcNow
+            });
+
+        var notifyTitle = $"⚠️ 设备离线: {deviceCode}";
+        var notifyContent = $"设备《{deviceName}》（{deviceCode}）已超过阈值无遥测，可能通信中断，请检查";
+
+        _db.Notifications.Add(new Notification
+        {
+            TenantId = tenantId,
+            Type = "device_offline",
+            Title = notifyTitle,
+            Content = notifyContent,
+            RelatedId = deviceId,
+            Link = "/devices",
+        });
+
+        try
+        {
+            await _pushService.SendToTenantAsync(tenantId, notifyTitle, notifyContent, "/devices");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Web Push 推送失败（设备离线），设备 ID: {DeviceId}", deviceId);
+        }
+
+        await _db.SaveChangesAsync();
+    }
 }

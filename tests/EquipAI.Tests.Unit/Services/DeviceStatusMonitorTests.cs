@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Moq;
 using Xunit;
 
 namespace EquipAI.Tests.Unit.Services;
@@ -33,9 +34,11 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
 {
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
+    private Mock<ISignalRNotificationService> _notifications = null!;
 
     public async Task InitializeAsync()
     {
+        _notifications = new Mock<ISignalRNotificationService>();
         _connection = new SqliteConnection("DataSource=:memory:");
         await _connection.OpenAsync();
 
@@ -43,6 +46,8 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
         // 复刻后台 HostedService scope：ITenantContext 回退为空租户（Guid.Empty）
         services.AddScoped<ITenantContext>(_ => new BackgroundTenantContext());
+        // 注册通知服务 mock：DeviceStatusMonitor 在检查 scope 内解析它，推送设备离线通知
+        services.AddScoped<ISignalRNotificationService>(_ => _notifications.Object);
         services.AddLogging();
         _sp = services.BuildServiceProvider();
 
@@ -124,6 +129,41 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
         var affected = await monitor.CheckDeviceStatusAsync(CancellationToken.None);
 
         affected.Should().Be(2, "跨租户的全局巡检必须覆盖所有租户，后台 scope 的 Guid.Empty 过滤器不得吞掉真实租户设备");
+    }
+
+    [Fact]
+    public async Task CheckDeviceStatusAsync_超时设备离线_应推送离线通知给运维()
+    {
+        // 设备离线（通信中断/故障）是工业监控基本告警。原实现只改状态不发通知，运维完全不知情；
+        // 且设备离线不产生遥测故不触发阈值告警 → 必须有独立离线通知（SignalR + 持久化 + Web Push）。
+        var tenantA = Guid.NewGuid();
+        var deviceOffline = Guid.NewGuid(); // 超时应被标记 Offline 并通知
+        var deviceOnline = Guid.NewGuid();  // 阈值内保持 Online，不应通知
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(MakeTenant(tenantA));
+            db.Devices.Add(MakeDevice(deviceOffline, tenantA, DeviceStatus.Online, DateTime.UtcNow.AddMinutes(-5)));
+            db.Devices.Add(MakeDevice(deviceOnline, tenantA, DeviceStatus.Online, DateTime.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        var config = new ConfigurationBuilder().Build();
+        var monitor = new DeviceStatusMonitor(
+            _sp.GetRequiredService<IServiceScopeFactory>(),
+            config,
+            _sp.GetRequiredService<ILogger<DeviceStatusMonitor>>());
+
+        await monitor.CheckDeviceStatusAsync(CancellationToken.None);
+
+        // 验证：超时设备被标记 Offline 后，应按租户推送离线通知（含设备标识），阈值内设备不通知
+        _notifications.Verify(
+            n => n.SendDeviceOfflineAsync(tenantA, deviceOffline, It.IsAny<string>(), It.IsAny<string>()),
+            Times.Once, "设备离线必须推送通知给运维，否则通信中断无人知晓（设备离线不触发阈值告警）");
+        _notifications.Verify(
+            n => n.SendDeviceOfflineAsync(tenantA, deviceOnline, It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never, "阈值内的在线设备不应被误判离线，不应推送离线通知");
     }
 
     /// <summary>构造租户（最小必填字段）</summary>
