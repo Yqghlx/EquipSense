@@ -1,3 +1,4 @@
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,14 +15,17 @@ namespace EquipAI.WebAPI.Controllers;
 public class DeviceConfigController : ControllerBase
 {
     private readonly AppDbContext _dbContext;
+    private readonly ITenantContext _tenantContext;
 
     /// <summary>
     /// 初始化设备配置向导控制器
     /// </summary>
     /// <param name="dbContext">数据库上下文</param>
-    public DeviceConfigController(AppDbContext dbContext)
+    /// <param name="tenantContext">租户上下文（JWT 权威）：设备及告警规则必须归属当前登录租户，禁止信任请求体里的 TenantId</param>
+    public DeviceConfigController(AppDbContext dbContext, ITenantContext tenantContext)
     {
         _dbContext = dbContext;
+        _tenantContext = tenantContext;
     }
 
     /// <summary>
@@ -53,7 +57,12 @@ public class DeviceConfigController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> QuickRegister([FromBody] QuickRegisterRequest request)
     {
-        // 检查设备编码是否重复
+        // 租户身份以 JWT 为权威：设备及告警规则必须归属当前登录租户，禁止信任请求体里的 TenantId。
+        // 历史缺陷：原代码用 request.TenantId，租户 A 传 B 的 TenantId 即可在 B 名下创建设备 →
+        // 跨租户注入（污染 B 的设备列表 / 触发 B 的告警 / 占用 B 的配额），同时因不维护计数还会超卖。
+        var tenantId = _tenantContext.TenantId;
+
+        // 检查设备编码是否重复（全局过滤器已自动限制当前租户范围）
         var exists = await _dbContext.Devices
             .AnyAsync(d => d.DeviceCode == request.DeviceCode);
         if (exists)
@@ -61,7 +70,7 @@ public class DeviceConfigController : ControllerBase
 
         var device = new Core.Entities.Device
         {
-            TenantId = request.TenantId,
+            TenantId = tenantId,
             DeviceCode = request.DeviceCode,
             Name = request.Name ?? request.DeviceCode,
             Type = request.DeviceType ?? "通用设备",
@@ -70,14 +79,14 @@ public class DeviceConfigController : ControllerBase
         };
         _dbContext.Devices.Add(device);
 
-        // 如果请求中包含默认告警规则，一并创建
+        // 如果请求中包含默认告警规则，一并创建（同样归属当前租户）
         if (request.DefaultAlertRules is { Count: > 0 })
         {
             foreach (var rule in request.DefaultAlertRules)
             {
                 _dbContext.AlertRules.Add(new Core.Entities.AlertRule
                 {
-                    TenantId = request.TenantId,
+                    TenantId = tenantId,
                     DeviceId = device.Id,
                     Name = $"{device.Name} - {rule.Metric} 告警",
                     Metric = rule.Metric,
@@ -89,6 +98,16 @@ public class DeviceConfigController : ControllerBase
                     AutoCreateWorkorder = true
                 });
             }
+        }
+
+        // 维护租户 CurrentDeviceCount（与 DeviceService.CreateDeviceAsync 一致）。
+        // 遗漏此步会导致配额漂移：通过本端点创建的设备不计入 CurrentDeviceCount →
+        // 中间件配额检查（CurrentDeviceCount < MaxDevices）错误放行 → 超卖。
+        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+            .FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant != null)
+        {
+            tenant.CurrentDeviceCount++;
         }
 
         await _dbContext.SaveChangesAsync();
