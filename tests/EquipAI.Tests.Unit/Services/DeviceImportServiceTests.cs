@@ -137,6 +137,56 @@ public class DeviceImportServiceTests
             e.Message.Contains("pump-001", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// 回归：被拒的无效行不得"占用"其设备编码，否则后续有效的同名行被误报重复而丢弃。
+    ///
+    /// 历史缺陷：ValidateRow 在判断 name/type 等其余字段之前，就先把 device_code 加入 seenCodes，
+    /// 导致即便该行因缺 name 被拒，编码也已被"占用"。随后真正完整的同名行命中 seenCodes，
+    /// 被误报"文件内设备编码重复"并跳过。对批量上线（数百台设备）的客户，CSV 中一处笔误会连锁误杀
+    /// 有效行，且报错信息（"重复"）完全误导——客户看到编码只出现一次却报重复，无法理解。
+    /// </summary>
+    [Fact]
+    public void PreviewImport_当无效行与后续有效行编码相同时_不应误报重复()
+    {
+        // Arrange — 第一数据行 PUMP-001 缺 name（无效），第二数据行 PUMP-001 完整有效
+        var csv = "device_code,name,type\nPUMP-001,,泵\nPUMP-001,一号泵,泵\n";
+
+        // Act
+        var result = _sut.PreviewImport(csv, "devices.csv");
+
+        // Assert — 无效行照常报缺 name，但有效的第二行必须被接受，不得误判重复
+        result.ValidCount.Should().Be(1, "被拒的无效行不应占用编码，后续有效同名行应被接受");
+        result.ValidItems[0].DeviceCode.Should().Be("PUMP-001");
+        result.ValidItems[0].Name.Should().Be("一号泵");
+        result.Errors.Should().NotContain(e => e.Message.Contains("重复"),
+            "有效的同名行不应因前序无效行占用编码而被误报为重复");
+        result.Errors.Should().Contain(e => e.RowNumber == 2 && e.Message.Contains("name"),
+            "第一行缺 name 应照常报错");
+    }
+
+    /// <summary>
+    /// JSON 导入路径与 CSV 共用 ValidateRow，须同样不误杀（防止修复只覆盖 CSV 路径）。
+    /// </summary>
+    [Fact]
+    public void PreviewImport_当JSON无效项与后续有效项编码相同时_不应误报重复()
+    {
+        // Arrange — 第一项缺 name（无效），第二项完整有效，编码相同
+        var json = """
+                   [
+                     { "device_code": "PUMP-001", "name": "", "type": "泵" },
+                     { "device_code": "PUMP-001", "name": "一号泵", "type": "泵" }
+                   ]
+                   """;
+
+        // Act
+        var result = _sut.PreviewImport(json, "devices.json");
+
+        // Assert
+        result.ValidCount.Should().Be(1);
+        result.ValidItems[0].Name.Should().Be("一号泵");
+        result.Errors.Should().NotContain(e => e.Message.Contains("重复"));
+    }
+
     [Fact]
     public void PreviewImport_当含BOM和CRLF时_应正常解析()
     {

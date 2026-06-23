@@ -599,15 +599,11 @@ public class DeviceImportService
         else if (type.Length > MaxTypeLength)
             errors.Add($"设备类型长度超出限制（最大 {MaxTypeLength} 字符）");
 
-        // 编码去重（不区分大小写）
-        if (!string.IsNullOrWhiteSpace(deviceCode) && !seenCodes.Contains(deviceCode.ToLowerInvariant()))
-        {
-            if (!seenCodes.Add(deviceCode.ToLowerInvariant()))
-            {
-                errors.Add($"文件内设备编码重复: {deviceCode}");
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(deviceCode) && seenCodes.Contains(deviceCode.ToLowerInvariant()))
+        // 编码去重（不区分大小写）：仅读取 seenCodes，由调用方在校验全部通过后才写入。
+        // 关键约束：本方法不得修改 seenCodes。否则一个因缺 name/type 被拒的无效行会先把 device_code
+        // 占位进集合，导致后续真正完整的同名有效行被误判为"重复"而丢弃——批量上线数百台设备时，
+        // CSV 中一处笔误就会连锁误杀有效行，且报错信息（"重复"）完全误导（客户见编码只出现一次却报重复）。
+        if (!string.IsNullOrWhiteSpace(deviceCode) && seenCodes.Contains(deviceCode.ToLowerInvariant()))
         {
             errors.Add($"文件内设备编码重复: {deviceCode}");
         }
