@@ -141,4 +141,48 @@ public class SignalRNotificationService : ISignalRNotificationService
                 changedAt = DateTime.UtcNow
             });
     }
+
+    /// <inheritdoc />
+    public async Task SendWorkOrderEscalatedAsync(Guid tenantId, Guid workOrderId,
+        string workOrderCode, string title, string oldPriority, string newPriority)
+    {
+        // 关键修复：原 SLA 超时升级只更新数据库 Priority 字段，没有通知主管，
+        // 导致 Critical 工单超时后主管完全不知情。现在补齐 SignalR + 持久化 + Web Push 三路通知。
+        await _hubContext.Clients.Group($"tenant:{tenantId}")
+            .SendAsync("OnWorkOrderEscalated", new
+            {
+                workOrderId,
+                workOrderCode,
+                title,
+                oldPriority,
+                newPriority,
+                escalatedAt = DateTime.UtcNow
+            });
+
+        // 持久化通知（让主管登录后看到待处理事项）
+        var notifyTitle = $"⚠️ SLA 超时升级: {workOrderCode}";
+        var notifyContent = $"工单《{title}》SLA 已超时，优先级由 {oldPriority} 升级为 {newPriority}，请尽快处理";
+
+        _db.Notifications.Add(new Notification
+        {
+            TenantId = tenantId,
+            Type = "workorder_escalated",
+            Title = notifyTitle,
+            Content = notifyContent,
+            RelatedId = workOrderId,
+            Link = $"/work-orders/{workOrderId}",
+        });
+
+        // Web Push 推送（离线主管也能收到）
+        try
+        {
+            await _pushService.SendToTenantAsync(tenantId, notifyTitle, notifyContent, $"/work-orders/{workOrderId}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Web Push 推送失败（SLA 升级），工单 ID: {WorkOrderId}", workOrderId);
+        }
+
+        await _db.SaveChangesAsync();
+    }
 }

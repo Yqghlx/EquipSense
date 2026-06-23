@@ -33,4 +33,15 @@ public interface ISignalRNotificationService
     /// </summary>
     Task SendWorkOrderStatusChangedAsync(Guid tenantId, Guid workOrderId,
         string oldStatus, string newStatus);
+
+    /// <summary>
+    /// 推送工单 SLA 超时升级事件到租户组
+    ///
+    /// 业务意义：SLA 超时后系统自动升级优先级，但如果不通知，主管完全不知情。
+    /// 此方法确保主管收到推送 + 持久化通知 + Web Push（即使离线也能看到）。
+    /// </summary>
+    /// <param name="oldPriority">升级前优先级</param>
+    /// <param name="newPriority">升级后优先级</param>
+    Task SendWorkOrderEscalatedAsync(Guid tenantId, Guid workOrderId, string workOrderCode,
+        string title, string oldPriority, string newPriority);
 }

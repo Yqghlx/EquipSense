@@ -1,3 +1,5 @@
+using EquipAI.Core.Enums;
+
 namespace EquipAI.Application.WorkOrders;
 
 /// <summary>
@@ -8,14 +10,24 @@ public static class SlaTracker
 {
     /// <summary>
     /// 各优先级对应的 SLA 响应时长（小时）
+    ///
+    /// 关键不变量：这是全系统 SLA 时限的**单一来源**。
+    /// SlaManagementService（后端超时扫描）必须引用此字典，
+    /// 否则会出现前端倒计时显示 2h、后端判定 4h 才超时的矛盾。
     /// </summary>
-    private static readonly Dictionary<string, int> SlaHours = new(StringComparer.OrdinalIgnoreCase)
+    public static readonly Dictionary<string, int> SlaHours = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Critical"] = 2,
         ["High"] = 8,
         ["Medium"] = 24,
         ["Low"] = 72
     };
+
+    /// <summary>
+    /// 按枚举查询 SLA 时限（供 SlaManagementService 使用）
+    /// </summary>
+    public static int GetHours(WorkOrderPriority priority)
+        => SlaHours.TryGetValue(priority.ToString(), out var h) ? h : 24;
 
     /// <summary>
     /// 根据优先级计算工单到期时间

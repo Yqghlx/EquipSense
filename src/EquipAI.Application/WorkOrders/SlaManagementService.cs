@@ -23,15 +23,7 @@ public class SlaManagementService
 {
     private readonly AppDbContext _db;
     private readonly ILogger<SlaManagementService> _logger;
-
-    /// <summary>各优先级的 SLA 时限（小时）</summary>
-    private static readonly Dictionary<WorkOrderPriority, int> SlaHours = new()
-    {
-        { WorkOrderPriority.Critical, 4 },
-        { WorkOrderPriority.High, 8 },
-        { WorkOrderPriority.Medium, 24 },
-        { WorkOrderPriority.Low, 72 },
-    };
+    private readonly ISignalRNotificationService? _notifications;
 
     /// <summary>即将超时阈值（剩余时间 < SLA 的 20%）</summary>
     private const double WarningThreshold = 0.2;
@@ -40,6 +32,20 @@ public class SlaManagementService
     {
         _db = db;
         _logger = logger;
+        _notifications = null;  // 兼容老调用点（无通知能力）
+    }
+
+    /// <summary>
+    /// 注入通知服务的构造函数（生产环境推荐使用）
+    /// </summary>
+    public SlaManagementService(
+        AppDbContext db,
+        ILogger<SlaManagementService> logger,
+        ISignalRNotificationService notifications)
+    {
+        _db = db;
+        _logger = logger;
+        _notifications = notifications;
     }
 
     /// <summary>
@@ -51,7 +57,10 @@ public class SlaManagementService
         if (workOrder.Status is WorkOrderStatus.Closed or WorkOrderStatus.Cancelled)
             return SlaStatus.Completed;
 
-        var slaHours = SlaHours.GetValueOrDefault(workOrder.Priority, 24);
+        // 关键修复：原代码本类内独立定义了 SlaHours 字典（Critical=4h），
+        // 与 SlaTracker.SlaHours（Critical=2h）不一致，导致前端倒计时显示
+        // "已逾期"但后端判定"未超时"的矛盾。改为引用 SlaTracker 作为单一来源。
+        var slaHours = SlaTracker.GetHours(workOrder.Priority);
         var slaDeadline = workOrder.CreatedAt.AddHours(slaHours);
         var now = DateTime.UtcNow;
 
@@ -70,7 +79,7 @@ public class SlaManagementService
     /// </summary>
     public static DateTime GetSlaDeadline(Core.Entities.WorkOrder workOrder)
     {
-        var slaHours = SlaHours.GetValueOrDefault(workOrder.Priority, 24);
+        var slaHours = SlaTracker.GetHours(workOrder.Priority);
         return workOrder.CreatedAt.AddHours(slaHours);
     }
 
@@ -92,6 +101,7 @@ public class SlaManagementService
             .ToListAsync(ct);
 
         var escalated = 0;
+        var escalatedWos = new List<(Core.Entities.WorkOrder Wo, WorkOrderPriority OldPriority)>();
         foreach (var wo in workOrders)
         {
             var status = GetSlaStatus(wo);
@@ -103,8 +113,10 @@ public class SlaManagementService
                 // 原代码 "< Critical" 永远 false（因 Critical 是最小值），自动升级实际失效。
                 if (wo.Priority > WorkOrderPriority.Critical)
                 {
+                    var oldPriority = wo.Priority;
                     wo.Priority = wo.Priority - 1;
                     escalated++;
+                    escalatedWos.Add((wo, oldPriority));
                     _logger.LogInformation("工单 {Code} SLA 超时，优先级升级为 {Priority}", wo.WorkOrderCode, wo.Priority);
                 }
             }
@@ -114,6 +126,26 @@ public class SlaManagementService
         {
             await _db.SaveChangesAsync(ct);
             _logger.LogInformation("SLA 检查完成: {Count} 个工单已自动升级", escalated);
+
+            // 关键修复：升级后必须通知主管（原代码只升级不通知，主管完全不知情，
+            // 工单继续无人处理）。逐条推送 SignalR + 持久化 + Web Push。
+            if (_notifications != null)
+            {
+                foreach (var (wo, oldPriority) in escalatedWos)
+                {
+                    try
+                    {
+                        await _notifications.SendWorkOrderEscalatedAsync(
+                            tenantId, wo.Id, wo.WorkOrderCode, wo.Title,
+                            oldPriority.ToString(), wo.Priority.ToString());
+                    }
+                    catch (Exception ex)
+                    {
+                        // 单条通知失败不应阻塞整体流程（其他工单仍需处理）
+                        _logger.LogError(ex, "SLA 升级通知推送失败，工单 {Code}", wo.WorkOrderCode);
+                    }
+                }
+            }
         }
 
         return escalated;

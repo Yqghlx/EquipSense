@@ -123,26 +123,51 @@ public class MqttClientService
 
         if (e.ClientWasConnected)
         {
-            _logger.LogWarning("MQTT 连接断开，{Seconds} 秒后尝试重连", _options.ReconnectDelaySeconds);
+            _logger.LogWarning("MQTT 连接断开，开始尝试重连（指数退避，上限 5 分钟）");
+        }
+        else
+        {
+            _logger.LogWarning("MQTT 首次连接失败，开始尝试重连（指数退避，上限 5 分钟）");
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(_options.ReconnectDelaySeconds));
-
-        // Delay 期间可能已收到停机信号，再次检查
-        if (_isStopping) return;
-
-        try
+        // 关键修复：原实现只重连一次，broker 重启超过 30 秒+1 次连接超时即永久失联。
+        // 改为循环重试 + 指数退避（30s → 60s → 120s → 240s → 300s 封顶），
+        // 直到成功或应用停机。MQTTnet 3.x 推荐在 Disconnected 事件中循环重连。
+        var attempt = 0;
+        while (!_isStopping)
         {
-            if (_client != null && _clientOptions != null)
+            attempt++;
+            // 指数退避：base * 2^(attempt-1)，封顶 5 分钟
+            var delaySeconds = Math.Min(
+                _options.ReconnectDelaySeconds * Math.Pow(2, attempt - 1),
+                300);
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+
+            // Delay 期间可能已收到停机信号，再次检查
+            if (_isStopping) return;
+
+            try
             {
-                await _client.ConnectAsync(_clientOptions);
-                BusinessMetrics.MqttConnected.Set(1);
-                _logger.LogInformation("MQTT 重连成功");
+                if (_client != null && _clientOptions != null)
+                {
+                    // 重连前确保旧连接已清理（MQTTnet 在某些异常状态下 IsConnected 可能不准）
+                    if (_client.IsConnected)
+                    {
+                        try { await _client.DisconnectAsync(); } catch { /* 忽略清理失败 */ }
+                    }
+
+                    await _client.ConnectAsync(_clientOptions);
+                    BusinessMetrics.MqttConnected.Set(1);
+                    _logger.LogInformation("MQTT 第 {Attempt} 次重连成功", attempt);
+                    return;  // 成功则退出循环
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "MQTT 重连失败");
+            catch (Exception ex)
+            {
+                BusinessMetrics.MqttConnected.Set(0);
+                _logger.LogError(ex, "MQTT 第 {Attempt} 次重连失败，{Delay}s 后重试", attempt, (int)delaySeconds);
+                // 继续循环，直到成功或停机
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Moq;
 
 namespace EquipAI.Tests.Unit.WorkOrders;
 
@@ -51,6 +52,20 @@ public class SlaManagementServiceTests : IAsyncDisposable
     {
         var logger = _sp.GetRequiredService<ILogger<SlaManagementService>>();
         return new SlaManagementService(db, logger);
+    }
+
+    /// <summary>
+    /// 构造带通知 Mock 的 Service（用于验证升级通知的副作用）
+    /// </summary>
+    private static SlaManagementService CreateServiceWithNotifications(
+        AppDbContext db,
+        Mock<ISignalRNotificationService> notifyMock)
+    {
+        var logger = new ServiceCollection()
+            .AddLogging()
+            .BuildServiceProvider()
+            .GetRequiredService<ILogger<SlaManagementService>>();
+        return new SlaManagementService(db, logger, notifyMock.Object);
     }
 
     /// <summary>构造工单（CreatedAt 控制用来模拟时间过去多久）</summary>
@@ -106,31 +121,53 @@ public class SlaManagementServiceTests : IAsyncDisposable
     /// <summary>
     /// Warning：剩余时间 < SLA×20%
     ///
-    /// 构造：Critical 工单创建 3.5 小时前（SLA 4h，剩余 0.5h = 12.5% < 20%）
+    /// 构造：Critical 工单创建 1.8 小时前（SLA 2h，剩余 0.2h = 10% < 20%）
     /// </summary>
     [Fact]
     public void GetSlaStatus_剩余时间低于20percent_返回Warning()
     {
         var wo = CreateWorkOrder(WorkOrderPriority.Critical, WorkOrderStatus.Assigned,
-            DateTime.UtcNow.AddHours(-3.5));  // 已过 3.5h，剩 0.5h（12.5% < 20%）
+            DateTime.UtcNow.AddHours(-1.8));  // 已过 1.8h，剩 0.2h（10% < 20%）
 
         SlaManagementService.GetSlaStatus(wo).Should().Be(SlaStatus.Warning,
-            "Critical SLA 4h，剩 0.5h（12.5%）低于 20% 阈值应预警");
+            "Critical SLA 2h，剩 0.2h（10%）低于 20% 阈值应预警");
     }
 
     /// <summary>
     /// Overdue：当前时间已超过 SLA 截止时间
     ///
-    /// 构造：Critical 工单创建 5 小时前（SLA 4h，已超 1h）
+    /// 构造：Critical 工单创建 3 小时前（SLA 2h，已超 1h）
     /// </summary>
     [Fact]
     public void GetSlaStatus_已超过SLA截止时间_返回Overdue()
     {
         var wo = CreateWorkOrder(WorkOrderPriority.Critical, WorkOrderStatus.Assigned,
-            DateTime.UtcNow.AddHours(-5));  // 已过 5h，SLA 是 4h
+            DateTime.UtcNow.AddHours(-3));  // 已过 3h，SLA 是 2h
 
         SlaManagementService.GetSlaStatus(wo).Should().Be(SlaStatus.Overdue,
-            "Critical SLA 4h，已过 5h 应判定超时");
+            "Critical SLA 2h，已过 3h 应判定超时");
+    }
+
+    /// <summary>
+    /// 关键不变量：SlaManagementService 与 SlaTracker 必须使用同一份 SLA 时限字典
+    ///
+    /// Why：历史上两处独立定义（Critical 4h vs 2h），导致前端倒计时显示"已逾期"
+    /// 但后端判定"未超时"的矛盾。现在改为引用 SlaTracker.SlaHours 作为单一来源。
+    /// 此测试锁定该不变量，防止后续重构再次分叉。
+    /// </summary>
+    [Fact]
+    public void GetSlaDeadline_与SlaTracker时限一致_不出现分叉()
+    {
+        foreach (WorkOrderPriority priority in Enum.GetValues(typeof(WorkOrderPriority)))
+        {
+            var wo = CreateWorkOrder(priority, WorkOrderStatus.Assigned, DateTime.UtcNow);
+
+            var serviceDeadline = SlaManagementService.GetSlaDeadline(wo);
+            var trackerDeadline = SlaTracker.CalculateDueDate(priority.ToString(), wo.CreatedAt);
+
+            serviceDeadline.Should().Be(trackerDeadline,
+                $"{priority} 时限在 SlaManagementService 和 SlaTracker 中必须一致");
+        }
     }
 
     // =========================================================================
@@ -144,7 +181,7 @@ public class SlaManagementServiceTests : IAsyncDisposable
     /// 客户承诺的 SLA 会失效，违约风险。锁定为：Critical 4 / High 8 / Medium 24 / Low 72 小时。
     /// </summary>
     [Theory]
-    [InlineData(WorkOrderPriority.Critical, 4)]
+    [InlineData(WorkOrderPriority.Critical, 2)]
     [InlineData(WorkOrderPriority.High, 8)]
     [InlineData(WorkOrderPriority.Medium, 24)]
     [InlineData(WorkOrderPriority.Low, 72)]
@@ -260,6 +297,160 @@ public class SlaManagementServiceTests : IAsyncDisposable
 
         count.Should().Be(0, "已关闭工单不应被升级");
         closed.Priority.Should().Be(WorkOrderPriority.Low, "已关闭工单的优先级不应被修改");
+    }
+
+    // =========================================================================
+    // 通知副作用 — 升级时必须通知主管（关键修复）
+    // =========================================================================
+
+    /// <summary>
+    /// 关键修复验证：超时升级必须通知主管（原 bug 只升级不通知，主管完全不知情）
+    ///
+    /// Why：这是审计发现的真实客户痛点 — 工单超时升级后，主管看不到任何提示，
+    /// 工单继续无人处理。修复方案：升级后通过 SignalR + 持久化 + Web Push 三路通知。
+    /// 此测试锁定该行为，防止未来重构再次丢失通知。
+    /// </summary>
+    [Fact]
+    public async Task CheckAndEscalateAsync_升级时_发送通知()
+    {
+        var db = GetDb();
+        var notifyMock = new Mock<ISignalRNotificationService>();
+        var service = CreateServiceWithNotifications(db, notifyMock);
+
+        var low = CreateWorkOrder(WorkOrderPriority.Low, WorkOrderStatus.Assigned,
+            DateTime.UtcNow.AddHours(-73));  // Low SLA 72h，超时 1h
+        low.TenantId = _tenantId;
+        db.WorkOrders.Add(low);
+        await db.SaveChangesAsync();
+
+        var count = await service.CheckAndEscalateAsync(_tenantId);
+
+        count.Should().Be(1, "Low 工单应升级为 Medium");
+        low.Priority.Should().Be(WorkOrderPriority.Medium);
+
+        // 验证通知调用：参数必须完整且正确
+        notifyMock.Verify(
+            x => x.SendWorkOrderEscalatedAsync(
+                _tenantId,
+                low.Id,
+                low.WorkOrderCode,
+                low.Title,
+                WorkOrderPriority.Low.ToString(),     // 升级前优先级
+                WorkOrderPriority.Medium.ToString()), // 升级后优先级
+            Times.Once,
+            "升级后必须调用 SendWorkOrderEscalatedAsync，通知主管处理");
+    }
+
+    /// <summary>
+    /// 多个工单同时超时：每个工单各发一条通知（不应批量合并或只发第一条）
+    /// </summary>
+    [Fact]
+    public async Task CheckAndEscalateAsync_多个工单超时_各发一条通知()
+    {
+        var db = GetDb();
+        var notifyMock = new Mock<ISignalRNotificationService>();
+        var service = CreateServiceWithNotifications(db, notifyMock);
+
+        var low1 = CreateWorkOrder(WorkOrderPriority.Low, WorkOrderStatus.Assigned, DateTime.UtcNow.AddHours(-73));
+        var low2 = CreateWorkOrder(WorkOrderPriority.Low, WorkOrderStatus.InProgress, DateTime.UtcNow.AddHours(-100));
+        var high = CreateWorkOrder(WorkOrderPriority.High, WorkOrderStatus.Assigned, DateTime.UtcNow.AddHours(-9));
+        foreach (var wo in new[] { low1, low2, high })
+            wo.TenantId = _tenantId;
+        db.WorkOrders.AddRange(low1, low2, high);
+        await db.SaveChangesAsync();
+
+        var count = await service.CheckAndEscalateAsync(_tenantId);
+
+        count.Should().Be(3, "三个超时工单都应升级");
+        notifyMock.Verify(
+            x => x.SendWorkOrderEscalatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>()),
+            Times.Exactly(3),
+            "每个升级工单各发一条通知，不能合并");
+    }
+
+    /// <summary>
+    /// 无工单升级时（Critical 超时已是最高 / 未超时）：通知不应被调用
+    /// </summary>
+    [Fact]
+    public async Task CheckAndEscalateAsync_无升级时_不发送通知()
+    {
+        var db = GetDb();
+        var notifyMock = new Mock<ISignalRNotificationService>();
+        var service = CreateServiceWithNotifications(db, notifyMock);
+
+        var critical = CreateWorkOrder(WorkOrderPriority.Critical, WorkOrderStatus.Assigned,
+            DateTime.UtcNow.AddHours(-10));  // Critical 已是最高，不升级
+        var onTrack = CreateWorkOrder(WorkOrderPriority.Low, WorkOrderStatus.Assigned,
+            DateTime.UtcNow.AddHours(-1));   // 未超时
+        critical.TenantId = _tenantId;
+        onTrack.TenantId = _tenantId;
+        db.WorkOrders.AddRange(critical, onTrack);
+        await db.SaveChangesAsync();
+
+        var count = await service.CheckAndEscalateAsync(_tenantId);
+
+        count.Should().Be(0);
+        notifyMock.Verify(
+            x => x.SendWorkOrderEscalatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "没有升级发生时，不应触发通知");
+    }
+
+    /// <summary>
+    /// 健壮性：单条通知抛异常时不应阻塞整体升级流程
+    ///
+    /// Why：通知服务依赖数据库（Notification 持久化）和 Web Push 网络，
+    /// 任一环节失败都可能导致 SendWorkOrderEscalatedAsync 抛异常。
+    /// 如果不捕获，会阻塞整个 CheckAndEscalateAsync，导致其他工单也无法升级。
+    /// 修复方案：单条通知 try/catch，记日志但不影响其他工单。
+    /// </summary>
+    [Fact]
+    public async Task CheckAndEscalateAsync_单条通知失败_不阻塞整体升级()
+    {
+        var db = GetDb();
+        var notifyMock = new Mock<ISignalRNotificationService>();
+        // 第一条通知抛异常，后续应继续
+        var callCount = 0;
+        notifyMock
+            .Setup(x => x.SendWorkOrderEscalatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(() =>
+            {
+                callCount++;
+                if (callCount == 1)
+                    throw new InvalidOperationException("模拟网络故障");
+                return Task.CompletedTask;
+            });
+
+        var service = CreateServiceWithNotifications(db, notifyMock);
+
+        var low1 = CreateWorkOrder(WorkOrderPriority.Low, WorkOrderStatus.Assigned, DateTime.UtcNow.AddHours(-73));
+        var low2 = CreateWorkOrder(WorkOrderPriority.Low, WorkOrderStatus.InProgress, DateTime.UtcNow.AddHours(-100));
+        low1.TenantId = _tenantId;
+        low2.TenantId = _tenantId;
+        db.WorkOrders.AddRange(low1, low2);
+        await db.SaveChangesAsync();
+
+        // 不应抛异常（被内部 catch 捕获）
+        var act = async () => await service.CheckAndEscalateAsync(_tenantId);
+        await act.Should().NotThrowAsync("单条通知失败不应阻塞整体升级");
+
+        // 两个工单都应升级成功（通知失败不影响 Priority 变更）
+        low1.Priority.Should().Be(WorkOrderPriority.Medium);
+        low2.Priority.Should().Be(WorkOrderPriority.Medium);
+
+        // 通知被调用 2 次（即使第一次抛异常）
+        notifyMock.Verify(
+            x => x.SendWorkOrderEscalatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>()),
+            Times.Exactly(2),
+            "通知失败后仍应继续处理其他工单");
     }
 
     // =========================================================================
