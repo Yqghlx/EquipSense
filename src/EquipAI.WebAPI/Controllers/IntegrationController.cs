@@ -3,6 +3,7 @@ using System.Text.Json;
 using EquipAI.Core.Interfaces;
 using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -56,6 +57,7 @@ public class IntegrationController : ControllerBase
     /// 获取当前租户的所有集成配置
     /// GET /api/v1/settings/integrations
     /// </summary>
+    [RequirePermission("tenant:read")]
     [HttpGet]
     public async Task<ActionResult> GetIntegrations()
     {
@@ -72,6 +74,7 @@ public class IntegrationController : ControllerBase
     /// PUT /api/v1/settings/integrations/{type}
     /// 使用扁平结构：将 config 字段合并到集成节点顶层，保留 enabled 字段
     /// </summary>
+    [RequirePermission("tenant:update")]
     [HttpPut("{type}")]
     public async Task<ActionResult> UpdateIntegration(string type, [FromBody] UpdateIntegrationRequest request)
     {
@@ -152,6 +155,7 @@ public class IntegrationController : ControllerBase
     /// POST /api/v1/settings/integrations/{type}/test
     /// 发送一条测试消息到外部系统，验证配置是否正确
     /// </summary>
+    [RequirePermission("tenant:update")]
     [HttpPost("{type}/test")]
     public async Task<ActionResult<IntegrationTestResult>> TestIntegration(string type)
     {

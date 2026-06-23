@@ -1,6 +1,7 @@
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -81,6 +82,7 @@ public class DispatchController : ControllerBase
     /// </summary>
     /// <param name="userId">用户 ID</param>
     /// <param name="request">技术人员画像数据</param>
+    [RequirePermission("workorder:dispatch")]
     [HttpPut("technicians/{userId:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<ActionResult> UpsertTechnician(

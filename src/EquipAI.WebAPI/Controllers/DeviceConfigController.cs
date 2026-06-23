@@ -1,5 +1,6 @@
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,7 @@ public class DeviceConfigController : ControllerBase
     /// </summary>
     /// <param name="request">快速注册请求</param>
     /// <returns>创建后的设备信息</returns>
+    [RequirePermission("device:create")]
     [HttpPost("quick-register")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
