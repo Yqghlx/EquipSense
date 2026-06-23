@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download } from 'lucide-react';
+import { Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
 import { AlertDetailDrawer } from '../components/alert/AlertDetailDrawer';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
 import { useAlerts, useAcknowledgeAlert, useResolveAlert } from '../hooks/useAlerts';
@@ -40,7 +41,7 @@ export default function AlertCenterPage() {
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const { data, isLoading } = useAlerts(
+  const { data, isLoading, isError, refetch } = useAlerts(
     { page, pageSize: 20 },
     { status: status || undefined, severity: severity || undefined },
   );
@@ -90,9 +91,22 @@ export default function AlertCenterPage() {
         </Select>
       </div>
 
-      {/* 告警列表表格或加载状态 */}
+      {/* 告警列表表格或加载/错误状态 */}
       {isLoading ? (
         <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>
+      ) : isError && !data ? (
+        /* 错误态：首屏加载失败时显式提示并可重试，避免把网络错误误显示为"暂无告警"
+           （告警中心漏看 Critical 告警是安全隐患，必须区分空状态与错误状态） */
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <AlertTriangle className="h-8 w-8 text-amber-500" />
+            <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              {t('common.retry')}
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
           <Table>

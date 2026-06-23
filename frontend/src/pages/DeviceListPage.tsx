@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Pencil, Trash2, Eye, Upload, Download } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Eye, Upload, Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Card, CardContent } from '../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -33,7 +34,7 @@ export default function DeviceListPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data, isLoading } = useDevices({ page, pageSize: 20, status: status || undefined });
+  const { data, isLoading, isError, refetch } = useDevices({ page, pageSize: 20, status: status || undefined });
   const createDevice = useCreateDevice();
   const updateDevice = useUpdateDevice();
   const deleteDevice = useDeleteDevice();
@@ -121,9 +122,21 @@ export default function DeviceListPage() {
         </Select>
       </div>
 
-      {/* 设备列表表格或加载状态 */}
+      {/* 设备列表表格或加载/错误状态 */}
       {isLoading ? (
         <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>
+      ) : isError && !data ? (
+        /* 错误态：首屏加载失败时显式提示并可重试，避免把网络错误误显示为"暂无设备" */
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <AlertTriangle className="h-8 w-8 text-amber-500" />
+            <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              {t('common.retry')}
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
           <Table>
