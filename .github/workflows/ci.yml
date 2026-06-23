@@ -93,6 +93,9 @@ jobs:
       - name: 类型检查
         run: npx tsc -p tsconfig.json --noEmit
 
+      - name: i18n 键覆盖检查
+        run: npm run check:i18n
+
       - name: Lint 检查
         run: npx eslint src/ --max-warnings 1
 
