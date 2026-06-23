@@ -135,6 +135,70 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         (await _db.Notifications.CountAsync(n => n.RelatedId == alertId)).Should().Be(1);
     }
 
+    [Fact]
+    public async Task SendAlertResolvedAsync_SignalR失败时_应仍持久化与WebPush()
+    {
+        // 对称回归 #237：SendAlertResolvedAsync 与 SendAlertTriggeredAsync 同构（SignalR + 持久化 + Web Push），
+        // 须同样隔离 SignalR 单点失败，否则告警解除通知在 Hub 故障时持久化与 Web Push 全丢，
+        // 客户以为告警仍在处理（实际已解除），信息长期不同步。
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateFailingHub();
+        var sut = CreateService(hub, pushMock);
+
+        var alertId = Guid.NewGuid();
+        var act = async () => await sut.SendAlertResolvedAsync(_tenantId, alertId);
+        await act.Should().NotThrowAsync("告警解除的 SignalR 单点失败不得拖垮持久化与 Web Push");
+
+        var notification = await _db.Notifications.FirstOrDefaultAsync(n => n.RelatedId == alertId);
+        notification.Should().NotBeNull("SignalR 失败后站内告警解除通知仍应持久化");
+        pushMock.Verify(
+            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            Times.Once, "Web Push 应独立于 SignalR 执行");
+    }
+
+    [Fact]
+    public async Task SendWorkOrderEscalatedAsync_SignalR失败时_应仍持久化与WebPush()
+    {
+        // 对称回归 #237：SLA 超时升级须通知主管，主管未必在线看 Web，恰恰依赖持久化 + Web Push 兜底。
+        // SignalR 单点失败拖垮它们 = 主管完全不知 SLA 超时（#184/#231 专门补的升级通知形同虚设）。
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateFailingHub();
+        var sut = CreateService(hub, pushMock);
+
+        var workOrderId = Guid.NewGuid();
+        var act = async () => await sut.SendWorkOrderEscalatedAsync(
+            _tenantId, workOrderId, "WO-001", "空压机过热", "High", "Critical");
+        await act.Should().NotThrowAsync("SLA 升级的 SignalR 单点失败不得拖垮持久化与 Web Push");
+
+        var notification = await _db.Notifications.FirstOrDefaultAsync(n => n.RelatedId == workOrderId);
+        notification.Should().NotBeNull("SignalR 失败后 SLA 升级站内通知仍应持久化，主管登录后能看到");
+        notification!.Type.Should().Be("workorder_escalated");
+        pushMock.Verify(
+            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SendDeviceOfflineAsync_SignalR失败时_应仍持久化与WebPush()
+    {
+        // 对称回归 #237：设备离线须通知运维，运维未必在线看 Web，恰恰依赖持久化 + Web Push 兜底。
+        // SignalR 单点失败拖垮它们 = 运维完全错过通信中断（#232 专门补的离线通知形同虚设）。
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateFailingHub();
+        var sut = CreateService(hub, pushMock);
+
+        var deviceId = Guid.NewGuid();
+        var act = async () => await sut.SendDeviceOfflineAsync(_tenantId, deviceId, "DEV-001", "1号空压机");
+        await act.Should().NotThrowAsync("设备离线的 SignalR 单点失败不得拖垮持久化与 Web Push");
+
+        var notification = await _db.Notifications.FirstOrDefaultAsync(n => n.RelatedId == deviceId);
+        notification.Should().NotBeNull("SignalR 失败后设备离线站内通知仍应持久化，运维登录后能看到");
+        notification!.Type.Should().Be("device_offline");
+        pushMock.Verify(
+            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            Times.Once);
+    }
+
     public async ValueTask DisposeAsync() => await _db.DisposeAsync();
 
     /// <summary>测试用租户上下文：使全局租户过滤器与本租户写入的数据匹配</summary>

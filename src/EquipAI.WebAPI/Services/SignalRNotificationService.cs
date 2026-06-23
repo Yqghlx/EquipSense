@@ -93,8 +93,18 @@ public class SignalRNotificationService : ISignalRNotificationService
     /// <inheritdoc />
     public async Task SendAlertResolvedAsync(Guid tenantId, Guid alertId)
     {
-        await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnAlertResolved", alertId);
+        // SignalR 推送用 try/catch 隔离（与 SendAlertTriggeredAsync 一致）：Hub 推送失败不得阻塞
+        // 后续站内通知持久化与 Web Push——告警解除通知同样多渠道冗余，SignalR 单点失败拖垮全部渠道
+        // 会让客户以为告警仍在处理（实际已解除），信息长期不同步。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnAlertResolved", alertId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 告警解除推送失败，继续站内通知与 Web Push: AlertId={AlertId}", alertId);
+        }
 
         // 持久化告警解除通知
         _db.Notifications.Add(new Notification
@@ -158,16 +168,26 @@ public class SignalRNotificationService : ISignalRNotificationService
     {
         // 关键修复：原 SLA 超时升级只更新数据库 Priority 字段，没有通知主管，
         // 导致 Critical 工单超时后主管完全不知情。现在补齐 SignalR + 持久化 + Web Push 三路通知。
-        await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnWorkOrderEscalated", new
-            {
-                workOrderId,
-                workOrderCode,
-                title,
-                oldPriority,
-                newPriority,
-                escalatedAt = DateTime.UtcNow
-            });
+        // SignalR 推送用 try/catch 隔离（与 SendAlertTriggeredAsync 一致）：SLA 超时升级须通知主管，
+        // 主管未必在线看 Web，恰恰依赖站内持久化 + Web Push 兜底，SignalR 单点失败拖垮它们会让
+        // 主管完全不知情（#184/#231 专门补的升级通知形同虚设）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnWorkOrderEscalated", new
+                {
+                    workOrderId,
+                    workOrderCode,
+                    title,
+                    oldPriority,
+                    newPriority,
+                    escalatedAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR SLA 升级推送失败，继续站内通知与 Web Push: WorkOrderId={WorkOrderId}", workOrderId);
+        }
 
         // 持久化通知（让主管登录后看到待处理事项）
         var notifyTitle = $"⚠️ SLA 超时升级: {workOrderCode}";
@@ -202,15 +222,25 @@ public class SignalRNotificationService : ISignalRNotificationService
         // 设备离线（超阈值无遥测）是工业监控基本告警：通信中断可能源于设备故障/网络故障/网关故障。
         // 原实现只更新状态不发通知，运维完全不知情；且设备离线不产生遥测，不触发阈值告警，
         // 故必须有独立离线通知。补齐 SignalR + 持久化 + Web Push 三路通知。
-        await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnDeviceStatusChanged", new
-            {
-                deviceId,
-                deviceCode,
-                deviceName,
-                status = "Offline",
-                changedAt = DateTime.UtcNow
-            });
+        // SignalR 推送用 try/catch 隔离（与 SendAlertTriggeredAsync 一致）：设备离线须通知运维，
+        // 运维未必在线看 Web，恰恰依赖站内持久化 + Web Push 兜底，SignalR 单点失败拖垮它们会让
+        // 运维完全错过通信中断（#232 专门补的离线通知形同虚设）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnDeviceStatusChanged", new
+                {
+                    deviceId,
+                    deviceCode,
+                    deviceName,
+                    status = "Offline",
+                    changedAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 设备离线推送失败，继续站内通知与 Web Push: DeviceId={DeviceId}", deviceId);
+        }
 
         var notifyTitle = $"⚠️ 设备离线: {deviceCode}";
         var notifyContent = $"设备《{deviceName}》（{deviceCode}）已超过阈值无遥测，可能通信中断，请检查";
