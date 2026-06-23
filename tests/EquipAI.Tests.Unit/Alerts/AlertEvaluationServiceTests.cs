@@ -772,6 +772,73 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         alert.Message.Should().Contain("8.50");
     }
 
+    /// <summary>
+    /// 测试：后端重启后聚合器内存态丢失，但 DB 已有活跃告警时，不应重复创建告警
+    ///
+    /// 场景：AlertAggregator 是进程内 Singleton，后端重启后窗口计数归零。设备持续越限时，
+    /// 聚合器会误判为"首次"（shouldCreate=true），但 DB 中该设备该指标已有 Active 告警。
+    /// 若直接创建，会产生重复告警 → 重复 SignalR 推送 + 重复自动建单。
+    /// 修复后：应降级为更新已有告警，不创建新告警，不发布新事件。
+    /// </summary>
+    [Fact]
+    public async Task 重启后聚合器重置_已有活跃告警时_应降级为更新而非重复创建()
+    {
+        // 准备
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId);
+
+        var rule = CreateAlertRule(_tenantId);
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        // 预置一条已存在的活跃告警（模拟"重启前"已创建的告警）
+        var existingAlert = new Alert
+        {
+            TenantId = _tenantId,
+            AlertCode = "ALT-DEV-001-temperature-20240101000000",
+            RuleId = rule.Id,
+            DeviceId = deviceId,
+            Severity = AlertSeverity.High,
+            Status = AlertStatus.Active,
+            Metric = "temperature",
+            Value = 92.0m,
+            Threshold = 90m,
+            Message = "已有告警",
+            OccurredAt = DateTime.UtcNow.AddMinutes(-10),
+            TriggerCount = 1,
+            WindowStartAt = DateTime.UtcNow.AddMinutes(-10),
+        };
+        db.Alerts.Add(existingAlert);
+        await db.SaveChangesAsync();
+
+        // 聚合器返回 shouldCreate=true —— 模拟重启后内存窗口归零的误判
+        var (service, eventBusMock, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+            .Returns((true, false, false));
+
+        var context = new DeviceContext();
+
+        // 执行
+        await service.EvaluateForDeviceAsync(
+            _tenantId, deviceId, "电机",
+            "temperature", 95.0, context);
+
+        // 验证：不应创建重复告警，数据库仍只有 1 条
+        db.Alerts.Should().HaveCount(1);
+
+        // 验证：已有告警被更新（值刷新、计数递增），而非新建
+        var updated = db.Alerts.First();
+        updated.Id.Should().Be(existingAlert.Id);
+        updated.Value.Should().Be(95.0m);
+        updated.TriggerCount.Should().Be(2);
+
+        // 验证：降级为更新时不发布新事件（用户此前已被通知，避免重复推送/建单）
+        eventBusMock.Verify(
+            e => e.PublishAsync(It.IsAny<AlertTriggeredEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // ========================================================================
     // 辅助类型
     // ========================================================================

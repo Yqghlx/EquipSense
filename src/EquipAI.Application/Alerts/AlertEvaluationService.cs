@@ -133,15 +133,34 @@ public class AlertEvaluationService : IAlertEvaluationService
 
             if (shouldCreate)
             {
-                var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context);
-                if (alert != null)
+                // 防重启重复告警：AlertAggregator 是进程内内存态（Singleton），后端重启后窗口计数归零，
+                // 持续越限的设备会被误判为"首次"而进入创建分支。若此时 DB 已有同设备同指标同规则的
+                // 活跃告警，直接创建会产生重复 Active 告警 → 重复 SignalR 推送 + 重复自动建单，淹没用户。
+                // 兜底：创建前按 设备+指标+规则 精确查 DB（不按指标粗查，避免吸收同指标不同规则的告警），
+                // 存在则降级为更新（不发布新事件，因用户此前已被通知）。
+                var hasActive = await dbContext.Alerts
+                    .IgnoreQueryFilters()
+                    .AnyAsync(a => a.TenantId == tenantId && a.DeviceId == deviceId
+                                && a.Metric == metric && a.RuleId == rule.Id
+                                && a.Status == AlertStatus.Active, cancellationToken);
+
+                if (hasActive)
                 {
-                    // 发布告警触发事件，供 SignalR 推送、工单创建等下游模块消费
-                    var evt = new AlertTriggeredEvent(
-                        Guid.NewGuid(), DateTime.UtcNow, tenantId,
-                        alert.Id, deviceId, rule.Id,
-                        metric, value, rule.Severity.ToString());
-                    await _eventBus.PublishAsync(evt);
+                    _logger.LogDebug("已存在活跃告警，降级为更新避免重复（聚合器可能因重启重置计数）: 设备={DeviceId}, 指标={Metric}", deviceId, metric);
+                    await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, metric, value);
+                }
+                else
+                {
+                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context);
+                    if (alert != null)
+                    {
+                        // 发布告警触发事件，供 SignalR 推送、工单创建等下游模块消费
+                        var evt = new AlertTriggeredEvent(
+                            Guid.NewGuid(), DateTime.UtcNow, tenantId,
+                            alert.Id, deviceId, rule.Id,
+                            metric, value, rule.Severity.ToString());
+                        await _eventBus.PublishAsync(evt);
+                    }
                 }
             }
             else if (shouldUpdate)
