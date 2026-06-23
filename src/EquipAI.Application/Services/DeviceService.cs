@@ -206,10 +206,22 @@ public class DeviceService : IDeviceService
             .ToListAsync();
         _dbContext.GatewayDevices.RemoveRange(gatewayLinks);
 
-        // 3. 删除设备本身
+        // 3. 删除该设备绑定的告警规则（避免孤儿规则残留）
+        // 规则分三种粒度：DeviceId 特定（绑定具体设备）/ DeviceType 特定（绑定类型）/ 租户级（全设备）。
+        // 仅清理 DeviceId 绑定本设备的规则；DeviceType/租户级规则不绑定具体设备，保留（仍适用于其他/同类型设备）。
+        // 不清理的后果：删设备后规则残留（DeviceId 指向已删设备）→ 规则管理页显示孤儿规则致困惑；更严重：
+        // 重建同 DeviceCode 设备（返修/更换后新 ID）时旧规则仍绑旧 ID，新设备无告警保护
+        // （温度/振动超限不告警）——告警评估按 r.DeviceId==当前遥测设备过滤，孤儿规则永不匹配（静默失效，不崩溃），
+        // 工业设备返修后失去告警是安全盲区。与归档告警/移除网关关联同为"删设备必须清理的 DeviceId 绑定关联"。
+        var deviceRules = await _dbContext.AlertRules
+            .Where(r => r.DeviceId == deviceId)
+            .ToListAsync();
+        _dbContext.AlertRules.RemoveRange(deviceRules);
+
+        // 4. 删除设备本身
         _dbContext.Devices.Remove(device);
 
-        // 4. 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
+        // 5. 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
         var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
             .FirstOrDefaultAsync(t => t.Id == tenantId);
         if (tenant != null && tenant.CurrentDeviceCount > 0)
@@ -220,7 +232,7 @@ public class DeviceService : IDeviceService
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation(
-            "设备 {DeviceId}（编码：{DeviceCode}）已删除，同时归档 {AlertCount} 条活跃告警，移除 {LinkCount} 个网关关联",
-            deviceId, device.DeviceCode, activeAlerts.Count, gatewayLinks.Count);
+            "设备 {DeviceId}（编码：{DeviceCode}）已删除，同时归档 {AlertCount} 条活跃告警，移除 {LinkCount} 个网关关联，清理 {RuleCount} 条绑定告警规则",
+            deviceId, device.DeviceCode, activeAlerts.Count, gatewayLinks.Count, deviceRules.Count);
     }
 }

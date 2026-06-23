@@ -485,6 +485,53 @@ public class DeviceServiceTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// 关键修复验证：删除设备时，该设备绑定的告警规则应被清理（避免孤儿规则残留）
+    ///
+    /// Why：alert_rules 表无外键约束指向 devices，删除设备后 DeviceId 绑定的规则成为孤儿。
+    /// 告警评估按 r.DeviceId==当前遥测设备过滤（AlertEvaluationService），孤儿规则（DeviceId=已删设备）
+    /// 永不匹配——不崩溃但静默失效。真实危害：工业设备返修/更换后，重建同 DeviceCode 设备得到新 ID，
+    /// 旧规则仍绑旧 ID，新设备无告警保护（温度/振动超限不告警）；规则管理页也显示孤儿规则致困惑。
+    /// 仅清理 DeviceId 绑定规则，保留 DeviceType/租户级规则（不绑定具体设备，仍适用于其他/同类型设备）。
+    /// </summary>
+    [Fact]
+    public async Task DeleteDeviceAsync_应清理该设备绑定的告警规则()
+    {
+        // Arrange
+        await SeedTenantAsync();
+        var device = await SeedDeviceAsync("DEV-RULE", "规则清理测试设备", "电机");
+
+        // 三种粒度的规则：DeviceId 绑定本设备 / DeviceId 绑定他设备 / DeviceType 绑定类型
+        var boundRule = new AlertRule
+        {
+            TenantId = _tenantId, DeviceId = device.Id, Name = "本设备温度规则",
+            Metric = "temperature", RuleType = RuleType.Threshold, Enabled = true,
+        };
+        var otherDeviceRule = new AlertRule
+        {
+            TenantId = _tenantId, DeviceId = Guid.NewGuid(), Name = "他设备温度规则",
+            Metric = "temperature", RuleType = RuleType.Threshold, Enabled = true,
+        };
+        var typeRule = new AlertRule
+        {
+            TenantId = _tenantId, DeviceId = null, DeviceType = "电机", Name = "电机类型规则",
+            Metric = "temperature", RuleType = RuleType.Threshold, Enabled = true,
+        };
+        _db.AlertRules.AddRange(boundRule, otherDeviceRule, typeRule);
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _sut.DeleteDeviceAsync(device.Id, _tenantId);
+
+        // Assert：绑定本设备的规则被清理；他设备规则和类型规则保留（IgnoreQueryFilters 查全部）
+        var remaining = await _db.AlertRules.IgnoreQueryFilters().ToListAsync();
+        remaining.Should().NotContain(r => r.Id == boundRule.Id,
+            "删除设备时必须清理该设备绑定的告警规则，否则重建设备后告警保护丢失");
+        remaining.Should().Contain(r => r.Id == otherDeviceRule.Id, "其他设备绑定的规则不应被误删");
+        remaining.Should().Contain(r => r.Id == typeRule.Id,
+            "设备类型规则/租户级规则不绑定具体设备，应保留（仍适用于其他/同类型设备）");
+    }
+
+    /// <summary>
     /// 综合场景：删除一个有告警 + 网关关联 + 工单的设备，应正确清理且不报错
     /// </summary>
     [Fact]
@@ -504,6 +551,11 @@ public class DeviceServiceTests : IAsyncDisposable
         {
             TenantId = _tenantId, GatewayId = "GW-FULL", DeviceId = device.Id,
         });
+        _db.AlertRules.Add(new AlertRule
+        {
+            TenantId = _tenantId, DeviceId = device.Id, Name = "综合规则",
+            Metric = "temperature", RuleType = RuleType.Threshold, Enabled = true,
+        });
         await _db.SaveChangesAsync();
 
         // Act：不应抛异常
@@ -519,6 +571,9 @@ public class DeviceServiceTests : IAsyncDisposable
 
         var linkCount = await _db.GatewayDevices.CountAsync(gd => gd.DeviceId == device.Id);
         linkCount.Should().Be(0);
+
+        var ruleCount = await _db.AlertRules.CountAsync(r => r.DeviceId == device.Id);
+        ruleCount.Should().Be(0, "该设备绑定的告警规则应被清理");
 
         var tenant = await _db.UnfilteredSet<Tenant>().FirstAsync(t => t.Id == _tenantId);
         tenant.CurrentDeviceCount.Should().Be(0, "设备计数应递减");
