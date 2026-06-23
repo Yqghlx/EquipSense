@@ -155,7 +155,24 @@ public class UserService : IUserService
         var user = await _dbContext.Users.FindAsync(userId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
-        user.IsActive = false;
+        // 仅在用户当前为启用状态时停用并释放席位，避免对同一用户重复停用导致重复扣减计数。
+        // （停用是单向操作——本系统无重新激活路径，停用即等同于软删除。）
+        if (user.IsActive)
+        {
+            user.IsActive = false;
+
+            // 停用用户（软删除）须释放其占用的用户席位（CurrentUserCount--），与 CreateUserAsync
+            // 的 ++ 对称。否则配额只增不减：工业客户员工流动大，停用离职员工后席位不放，配额检查
+            // （CurrentUserCount < MaxUsers）被离职员工永久占满 → 新员工无法建账号（配额卡死）。
+            // 与 DeviceService.DeleteDeviceAsync 维护 CurrentDeviceCount-- 同理。
+            var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                .FirstOrDefaultAsync(t => t.Id == tenantId);
+            if (tenant != null && tenant.CurrentUserCount > 0)
+            {
+                tenant.CurrentUserCount--;
+            }
+        }
+
         await _dbContext.SaveChangesAsync();
 
         _logger.LogInformation("用户 {UserId} 已停用", userId);

@@ -341,6 +341,57 @@ public class UserServiceTests : IAsyncDisposable
         deactivatedUser!.IsActive.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task DeactivateUserAsync_停用用户_应递减CurrentUserCount释放席位()
+    {
+        // 场景：工业客户员工离职，停用其账号（软删除）。期望释放席位（CurrentUserCount--），
+        // 否则配额只增不减——离职员工的席位被永久占用，新员工无法建账号（配额卡死）。
+        // 与 DeviceService.DeleteDeviceAsync 维护 CurrentDeviceCount-- 对称。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await CreateTenantAsync(db, _tenantId);
+        // 创建 1 个用户 → 席位占 1（CreateUserAsync 会 ++）
+        await service.CreateUserAsync(
+            new CreateUserRequest { Username = "leaver", Password = "Password123" }, _tenantId);
+        (await db.UnfilteredSet<Tenant>().FirstAsync(t => t.Id == _tenantId))
+            .CurrentUserCount.Should().Be(1, "前置：创建 1 个用户，席位占 1");
+
+        var user = await db.Users.FirstAsync(u => u.Username == "leaver");
+
+        // Act：停用离职员工
+        await service.DeactivateUserAsync(user.Id, _tenantId);
+
+        // Assert：席位应释放（CurrentUserCount--），用户应被停用
+        var tenantAfter = await db.UnfilteredSet<Tenant>().FirstAsync(t => t.Id == _tenantId);
+        tenantAfter.CurrentUserCount.Should().Be(0,
+            "停用用户须释放席位（CurrentUserCount--），否则新员工无法建账号（配额卡死）");
+        (await db.Users.FindAsync(user.Id))!.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DeactivateUserAsync_重复停用同一用户_不应重复扣减计数()
+    {
+        // 幂等性回归：同一用户重复停用不应重复扣减席位（IsActive 守卫），否则计数被多扣。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await CreateTenantAsync(db, _tenantId);
+        await service.CreateUserAsync(
+            new CreateUserRequest { Username = "dduser", Password = "Password123" }, _tenantId);
+        var user = await db.Users.FirstAsync(u => u.Username == "dduser");
+
+        // Act：连续停用两次（模拟重复调用/误操作）
+        await service.DeactivateUserAsync(user.Id, _tenantId);   // 首次：席位 1 → 0
+        await service.DeactivateUserAsync(user.Id, _tenantId);   // 重复：席位应保持 0
+
+        // Assert：计数不应变为负数（重复扣减）
+        var tenant = await db.UnfilteredSet<Tenant>().FirstAsync(t => t.Id == _tenantId);
+        tenant.CurrentUserCount.Should().Be(0, "重复停用同一用户不应重复扣减席位（IsActive 守卫防重复扣减）");
+    }
+
     // ==================== ChangeUserRoleAsync ====================
 
     [Fact]
