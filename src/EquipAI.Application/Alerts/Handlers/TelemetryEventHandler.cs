@@ -39,7 +39,12 @@ public class TelemetryEventHandler : IEventHandler<TelemetryReceivedEvent>
         // 更新设备状态：收到遥测即视为在线
         // 只在状态非 Online 时写库，避免每条遥测都触发 UPDATE（高频场景下可降低 DB 压力）
         // LastSeenAt 始终更新，作为 DeviceStatusMonitor 判定超时的依据
-        await UpdateDevicePresenceAsync(@event.DeviceId, cancellationToken);
+        // 返回 false 表示设备不存在（野生遥测），直接 return 避免后续评估器对幽灵设备产生无意义调用
+        var deviceFound = await UpdateDevicePresenceAsync(@event.DeviceId, cancellationToken);
+        if (!deviceFound)
+        {
+            return;
+        }
 
         // 构建设备上下文，当前仅包含触发事件的单一指标
         // 后续可扩展为从缓存加载设备全量指标，支持组合规则评估
@@ -63,7 +68,8 @@ public class TelemetryEventHandler : IEventHandler<TelemetryReceivedEvent>
     /// 而当前 ITenantContext 是从 HTTP 请求上下文解析的（事件处理在后台 Channel 消费，无 HTTP 上下文）。
     /// 设备主键 Id 已是全局唯一，按 Id 直接定位即可，不需要租户过滤。
     /// </remarks>
-    private async Task UpdateDevicePresenceAsync(Guid deviceId, CancellationToken ct)
+    /// <returns>true 表示设备存在并已更新；false 表示设备不存在（野生遥测），调用方应跳过后续处理</returns>
+    private async Task<bool> UpdateDevicePresenceAsync(Guid deviceId, CancellationToken ct)
     {
         var device = await _dbContext.Devices
             .IgnoreQueryFilters()
@@ -71,7 +77,7 @@ public class TelemetryEventHandler : IEventHandler<TelemetryReceivedEvent>
         if (device == null)
         {
             _logger.LogWarning("收到未知设备的遥测，跳过状态更新：{DeviceId}", deviceId);
-            return;
+            return false;
         }
 
         var now = DateTime.UtcNow;
@@ -83,5 +89,6 @@ public class TelemetryEventHandler : IEventHandler<TelemetryReceivedEvent>
         }
 
         await _dbContext.SaveChangesAsync(ct);
+        return true;
     }
 }
