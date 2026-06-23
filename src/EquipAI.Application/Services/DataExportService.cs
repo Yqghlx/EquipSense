@@ -244,11 +244,19 @@ public class DataExportService
                 Criticality = d.Criticality.ToString(),
                 CreatedAt = d.CreatedAt,
                 LastDataAt = d.LastDataAt,
+                // 补全导入可录入但导出遗漏的配置字段，保证「导出-备份-迁移」不丢数据（回归 BUG-6）：
+                // location（车间/产线/工位层级，jsonb 存为 JSON 字符串）、gateway_id（网关绑定）、
+                // install_date（安装日期）、downtime_cost_per_hour（停机成本，ROI 分析基础）。
+                // 原导出漏掉这 4 个字段，客户导出 CSV 做备份或报表时丢失关键运维配置。
+                Location = d.Location,
+                GatewayId = d.GatewayId,
+                InstallDate = d.InstallDate,
+                DowntimeCostPerHour = d.DowntimeCostPerHour,
             })
             .ToListAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("设备编码,名称,类型,制造商,型号,序列号,状态,健康度,关键等级,创建时间,最后数据时间");
+        sb.AppendLine("设备编码,名称,类型,制造商,型号,序列号,状态,健康度,关键等级,创建时间,最后数据时间,安装位置,网关ID,安装日期,停机成本(元/小时)");
 
         foreach (var d in devices)
         {
@@ -263,7 +271,12 @@ public class DataExportService
                 d.HealthScore.ToString(CultureInfo.InvariantCulture),
                 Escape(d.Criticality),
                 FormatTime(d.CreatedAt),
-                FormatTime(d.LastDataAt)));
+                FormatTime(d.LastDataAt),
+                // 4 个配置字段（location 是 JSON 字符串，Escape 已处理公式中和 + RFC 4180 转义）
+                Escape(d.Location),
+                Escape(d.GatewayId),
+                d.InstallDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "",
+                d.DowntimeCostPerHour?.ToString(CultureInfo.InvariantCulture) ?? ""));
         }
 
         return ToCsvBytes(sb.ToString());

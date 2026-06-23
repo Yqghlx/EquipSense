@@ -159,6 +159,39 @@ public class DataExportServiceTests
         csv.Should().Contain("WO-REG-001", "按状态过滤应返回匹配的工单，而非静默返回空");
     }
 
+    /// <summary>
+    /// 设备导出必须包含导入可录入的全部配置字段，保证「导出-备份-迁移」工作流不丢数据。
+    /// 回归 BUG-6：导入模板含 location/gateway_id/install_date/downtime_cost_per_hour（导入写入这 4 个字段），
+    /// 但 ExportDevicesAsync 漏掉这 4 个字段 → 导入导出不对称，客户导出 CSV 做备份或报表时丢失
+    /// 车间位置、网关绑定、安装日期、停机成本（ROI 分析基础）等关键运维配置。
+    /// </summary>
+    [Fact]
+    public async Task ExportDevicesAsync_应导出完整配置字段_含位置网关安装日期停机成本()
+    {
+        _db.Devices.Add(new Device
+        {
+            TenantId = _tenantId,
+            DeviceCode = "PUMP-EXPORT-001",
+            Name = "一号循环泵",
+            Type = "泵",
+            Location = "{\"workshop\":\"A\",\"line\":\"1\"}",
+            GatewayId = "gateway-001",
+            InstallDate = new DateOnly(2024, 1, 15),
+            DowntimeCostPerHour = 5000m,
+            Status = DeviceStatus.Online,
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = Encoding.UTF8.GetString(await _sut.ExportDevicesAsync(_tenantId));
+
+        csv.Should().Contain("PUMP-EXPORT-001");
+        // 修复前：导出缺这 4 个配置字段，备份/报表丢失关键运维数据
+        csv.Should().Contain("workshop", "导出应包含 location（车间/产线/工位层级配置）");
+        csv.Should().Contain("gateway-001", "导出应包含 gateway_id（网关绑定）");
+        csv.Should().Contain("2024-01-15", "导出应包含 install_date（安装日期）");
+        csv.Should().Contain("5000", "导出应包含 downtime_cost_per_hour（停机成本，ROI 分析基础）");
+    }
+
     /// <summary>构造一条最小可用告警，便于各测试聚焦于被测字段</summary>
     private Alert MakeAlert(string? message = null)
     {
