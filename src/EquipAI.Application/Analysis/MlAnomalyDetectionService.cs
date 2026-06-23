@@ -58,8 +58,14 @@ public class MlAnomalyDetectionService : IMlAnomalyDetectionService
         var cutoff = DateTime.UtcNow.AddDays(-TrainingWindowDays);
 
         // 查询历史遥测数据，按时间升序排列，最多取 500 条
+        // 关键：本服务注册为 Singleton，由 RootCauseAnalysisEngine（后台事件处理器）调用，运行在独立
+        // scope 中、无 HttpContext，ITenantContext 走回退 → TenantId == Guid.Empty。若沿用默认全局租户
+        // 过滤器，DeviceTelemetry 查询恒为 TenantId == Guid.Empty → 查不到真实租户数据（已实测 HasNoKey
+        // 实体同样被过滤器作用）→ 样本恒不足 → L4 ML 异常检测永不触发。故 IgnoreQueryFilters + 显式按
+        // tenantId 限定（参数由服务端告警管线透传，可信）。
         var historyData = await db.DeviceTelemetry
-            .Where(t => t.DeviceId == deviceId && t.Metric == metric && t.Time >= cutoff)
+            .IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && t.DeviceId == deviceId && t.Metric == metric && t.Time >= cutoff)
             .OrderBy(t => t.Time)
             .Select(t => new { t.Value, t.Time })
             .Take(500)
