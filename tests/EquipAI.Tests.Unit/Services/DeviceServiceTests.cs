@@ -345,6 +345,185 @@ public class DeviceServiceTests : IAsyncDisposable
             .WithMessage($"设备 {notExistId} 不存在");
     }
 
+    // ==================== 孤儿数据清理测试（关键修复 v1.5） ====================
+
+    /// <summary>
+    /// 关键修复验证：删除设备时，该设备的活跃告警应自动归档（标记 Resolved）
+    ///
+    /// Why：alerts 表无外键约束指向 devices，删除设备后活跃告警会成为孤儿，
+    /// 继续污染 Dashboard 的 activeAlerts 统计，且告警列表点击设备链接 404。
+    /// 修复：删除设备时把该设备的活跃告警批量标记为 Resolved。
+    /// </summary>
+    [Fact]
+    public async Task DeleteDeviceAsync_应归档该设备的活跃告警()
+    {
+        // Arrange
+        await SeedTenantAsync();
+        var device = await SeedDeviceAsync("DEV-ORPHAN-1", "孤儿告警测试设备", "电机");
+
+        // 该设备有 2 条活跃告警 + 1 条已解决告警
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId,
+            DeviceId = device.Id,
+            AlertCode = "ALT-ACTIVE-1",
+            Metric = "temperature",
+            Severity = AlertSeverity.High,
+            Status = AlertStatus.Active,
+            Value = 95.0m,
+            OccurredAt = DateTime.UtcNow,
+        });
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId,
+            DeviceId = device.Id,
+            AlertCode = "ALT-ACTIVE-2",
+            Metric = "vibration",
+            Severity = AlertSeverity.Critical,
+            Status = AlertStatus.Active,
+            Value = 8.5m,
+            OccurredAt = DateTime.UtcNow,
+        });
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId,
+            DeviceId = device.Id,
+            AlertCode = "ALT-RESOLVED",
+            Metric = "pressure",
+            Severity = AlertSeverity.Normal,
+            Status = AlertStatus.Resolved,
+            Value = 1.2m,
+            OccurredAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _sut.DeleteDeviceAsync(device.Id, _tenantId);
+
+        // Assert：所有该设备的告警都应是 Resolved（活跃的被归档，已解决的保持）
+        var remainingAlerts = await _db.Alerts
+            .Where(a => a.DeviceId == device.Id)
+            .ToListAsync();
+        remainingAlerts.Should().HaveCount(3, "告警历史应保留，不硬删除");
+        remainingAlerts.Should().OnlyContain(a => a.Status == AlertStatus.Resolved,
+            "删除设备后所有相关告警都应是 Resolved 状态，无活跃孤儿");
+
+        // 被归档的两条应有 Resolution 说明
+        var archivedAlerts = remainingAlerts.Where(a => a.AlertCode.StartsWith("ALT-ACTIVE"));
+        archivedAlerts.Should().OnlyContain(a => a.Resolution == "设备已删除，自动归档活跃告警");
+        archivedAlerts.Should().OnlyContain(a => a.ResolvedAt != null);
+    }
+
+    /// <summary>
+    /// 跨租户隔离：删除 A 租户的设备不应影响 B 租户的告警
+    /// </summary>
+    [Fact]
+    public async Task DeleteDeviceAsync_不应影响其他设备的活跃告警()
+    {
+        // Arrange
+        await SeedTenantAsync();
+        var deviceA = await SeedDeviceAsync("DEV-A", "设备A", "电机");
+        var deviceB = await SeedDeviceAsync("DEV-B", "设备B", "泵");
+
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId, DeviceId = deviceA.Id, AlertCode = "ALT-A",
+            Metric = "temp", Severity = AlertSeverity.High, Status = AlertStatus.Active,
+            Value = 90m, OccurredAt = DateTime.UtcNow,
+        });
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId, DeviceId = deviceB.Id, AlertCode = "ALT-B",
+            Metric = "temp", Severity = AlertSeverity.High, Status = AlertStatus.Active,
+            Value = 95m, OccurredAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        // Act：只删除 deviceA
+        await _sut.DeleteDeviceAsync(deviceA.Id, _tenantId);
+
+        // Assert：deviceB 的告警应保持 Active（未被误归档）
+        var alertB = await _db.Alerts.FirstAsync(a => a.DeviceId == deviceB.Id);
+        alertB.Status.Should().Be(AlertStatus.Active, "其他设备的告警不应受影响");
+    }
+
+    /// <summary>
+    /// 关键修复验证：删除设备时，该设备的网关关联应被移除
+    ///
+    /// Why：gateway_devices 无外键约束，删除设备后网关关联残留，
+    /// 网关会继续向已删除的设备推送数据（幽灵设备），浪费资源且产生无效遥测。
+    /// </summary>
+    [Fact]
+    public async Task DeleteDeviceAsync_应移除该设备的网关关联()
+    {
+        // Arrange
+        await SeedTenantAsync();
+        var device = await SeedDeviceAsync("DEV-GW", "网关关联测试设备", "电机");
+
+        _db.GatewayDevices.Add(new GatewayDevice
+        {
+            TenantId = _tenantId,
+            GatewayId = "GW-001",
+            DeviceId = device.Id,
+        });
+        _db.GatewayDevices.Add(new GatewayDevice
+        {
+            TenantId = _tenantId,
+            GatewayId = "GW-002",
+            DeviceId = device.Id,
+        });
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _sut.DeleteDeviceAsync(device.Id, _tenantId);
+
+        // Assert：该设备的网关关联应全部移除
+        var remainingLinks = await _db.GatewayDevices
+            .Where(gd => gd.DeviceId == device.Id)
+            .ToListAsync();
+        remainingLinks.Should().BeEmpty("删除设备后网关关联必须移除，避免网关继续向幽灵设备推送");
+    }
+
+    /// <summary>
+    /// 综合场景：删除一个有告警 + 网关关联 + 工单的设备，应正确清理且不报错
+    /// </summary>
+    [Fact]
+    public async Task DeleteDeviceAsync_综合场景_告警网关全清理()
+    {
+        // Arrange
+        await SeedTenantAsync(currentDeviceCount: 1);
+        var device = await SeedDeviceAsync("DEV-FULL", "综合测试设备", "电机");
+
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId, DeviceId = device.Id, AlertCode = "ALT-FULL",
+            Metric = "temp", Severity = AlertSeverity.Critical, Status = AlertStatus.Active,
+            Value = 100m, OccurredAt = DateTime.UtcNow,
+        });
+        _db.GatewayDevices.Add(new GatewayDevice
+        {
+            TenantId = _tenantId, GatewayId = "GW-FULL", DeviceId = device.Id,
+        });
+        await _db.SaveChangesAsync();
+
+        // Act：不应抛异常
+        var act = () => _sut.DeleteDeviceAsync(device.Id, _tenantId);
+        await act.Should().NotThrowAsync();
+
+        // Assert：设备已删，告警归档，网关关联移除，计数递减
+        var deviceExists = await _db.Devices.AnyAsync(d => d.Id == device.Id);
+        deviceExists.Should().BeFalse("设备应已删除");
+
+        var alert = await _db.Alerts.FirstAsync(a => a.DeviceId == device.Id);
+        alert.Status.Should().Be(AlertStatus.Resolved);
+
+        var linkCount = await _db.GatewayDevices.CountAsync(gd => gd.DeviceId == device.Id);
+        linkCount.Should().Be(0);
+
+        var tenant = await _db.UnfilteredSet<Tenant>().FirstAsync(t => t.Id == _tenantId);
+        tenant.CurrentDeviceCount.Should().Be(0, "设备计数应递减");
+    }
+
     /// <summary>
     /// 测试用租户上下文，模拟 ITenantContext 接口
     /// 使用指定的租户 ID 构造，用于 InMemory 数据库的多租户过滤器

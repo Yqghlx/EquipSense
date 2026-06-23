@@ -160,9 +160,22 @@ public class DeviceService : IDeviceService
     }
 
     /// <summary>
-    /// 删除设备（硬删除）
-    /// Phase 1 采用硬删除，后续阶段可改为软删除配合审计日志
-    /// 同时维护租户的 CurrentDeviceCount 计数器
+    /// 删除设备（硬删除）+ 清理关联数据，避免孤儿数据污染统计
+    ///
+    /// 关键修复（v1.5 数据完整性）：原代码只 _dbContext.Devices.Remove(device)，
+    /// 但 alerts / work_orders / gateway_devices 都没有指向 devices 的外键约束
+    /// （仅存储 DeviceId 作为普通 Guid 字段）。删除设备后留下孤儿数据：
+    ///   - 活跃告警仍指向已删除设备 → Dashboard activeAlerts 虚高，告警列表点击设备 404
+    ///   - 网关关联仍存在 → 网关继续向幽灵设备推送数据
+    ///   - 工单仍指向已删除设备 → 工单统计/详情显示异常
+    ///
+    /// 修复策略（保留历史 + 消除活跃孤儿）：
+    ///   1. 活跃告警 → 批量标记为 Resolved（保留告警历史，但不再污染活跃统计）
+    ///   2. 网关设备关联 → 删除（停止向幽灵设备推送）
+    ///   3. 工单 → 保留（工单是业务记录，删除设备不应使历史工单失效；
+    ///      WorkOrderService 查询设备名时已做 null 容忍，详情页显示"已删除设备"）
+    ///   4. 遥测 → 保留（工业历史数据，由 TimescaleDB 保留策略自动清理过期数据）
+    ///   5. 维护租户 CurrentDeviceCount 计数器
     /// </summary>
     /// <param name="deviceId">设备 ID</param>
     /// <param name="tenantId">租户 ID</param>
@@ -172,9 +185,31 @@ public class DeviceService : IDeviceService
         var device = await _dbContext.Devices.FindAsync(deviceId)
             ?? throw new KeyNotFoundException($"设备 {deviceId} 不存在");
 
+        // 1. 归档该设备的活跃告警（标记 Resolved，避免孤儿告警污染 Dashboard）
+        // 注意：用传统 foreach 而非 ExecuteUpdateAsync，兼容 InMemory 测试 provider
+        // （ExecuteUpdate/ExecuteDelete 仅关系型数据库支持）。删设备是低频操作，性能不关键。
+        var activeAlerts = await _dbContext.Alerts
+            .Where(a => a.DeviceId == deviceId && a.Status == Core.Enums.AlertStatus.Active)
+            .ToListAsync();
+
+        var now = DateTime.UtcNow;
+        foreach (var alert in activeAlerts)
+        {
+            alert.Status = Core.Enums.AlertStatus.Resolved;
+            alert.ResolvedAt = now;
+            alert.Resolution = "设备已删除，自动归档活跃告警";
+        }
+
+        // 2. 删除该设备的网关关联（停止向幽灵设备推送）
+        var gatewayLinks = await _dbContext.GatewayDevices
+            .Where(gd => gd.DeviceId == deviceId)
+            .ToListAsync();
+        _dbContext.GatewayDevices.RemoveRange(gatewayLinks);
+
+        // 3. 删除设备本身
         _dbContext.Devices.Remove(device);
 
-        // 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
+        // 4. 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
         var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
             .FirstOrDefaultAsync(t => t.Id == tenantId);
         if (tenant != null && tenant.CurrentDeviceCount > 0)
@@ -184,6 +219,8 @@ public class DeviceService : IDeviceService
 
         await _dbContext.SaveChangesAsync();
 
-        _logger.LogInformation("设备 {DeviceId}（编码：{DeviceCode}）已删除", deviceId, device.DeviceCode);
+        _logger.LogInformation(
+            "设备 {DeviceId}（编码：{DeviceCode}）已删除，同时归档 {AlertCount} 条活跃告警，移除 {LinkCount} 个网关关联",
+            deviceId, device.DeviceCode, activeAlerts.Count, gatewayLinks.Count);
     }
 }
