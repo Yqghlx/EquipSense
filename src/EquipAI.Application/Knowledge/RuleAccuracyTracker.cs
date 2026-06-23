@@ -29,7 +29,13 @@ public class RuleAccuracyTracker : IRuleAccuracyTracker
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var rule = await db.KnowledgeRules.FindAsync([ruleId], ct);
+        // 本服务由后台事件处理器（KnowledgeCaptureHandler.TrackRuleAccuracyAsync）调用，运行在独立 scope 中、
+        // 无 HttpContext，ITenantContext 走回退 → TenantId == Guid.Empty。FindAsync 沿用默认全局租户过滤器
+        // （已实测对未追踪实体同样应用）→ 恒查不到真实租户规则 → 抛 KeyNotFoundException 被外层吞掉 →
+        // 规则准确率追踪永久失效。ruleId 为全局唯一 UUID 主键，IgnoreQueryFilters + 按 Id 直接定位即可。
+        var rule = await db.KnowledgeRules
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.Id == ruleId, ct);
         if (rule is null)
             throw new KeyNotFoundException($"规则不存在: {ruleId}");
 

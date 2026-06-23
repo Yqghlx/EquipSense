@@ -116,9 +116,14 @@ public class DataQualityService : IDataQualityService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 查询该设备最近时间窗口内所有不重复的指标名称
+        // 本服务注册为 Singleton，可由后台事件处理器（RootCauseAnalysisEngine）调用，运行在独立 scope 中、
+        // 无 HttpContext，ITenantContext 走回退 → TenantId == Guid.Empty。DeviceTelemetry 若沿用默认全局租户
+        // 过滤器会恒查不到真实租户数据（HasNoKey 实体同样被过滤器作用）→ 数据质量评分恒为 null → 在
+        // AnalyzeAsync 中被强制为 0，导致 L3 统计分析分支（要求 dataQuality>=0.6）永远不成立，且 Analysis
+        // 记录的 DataQualityScore 永久存 0。故 IgnoreQueryFilters + 显式按 tenantId 限定（参数由服务端透传）。
         var metrics = await dbContext.DeviceTelemetry
-            .Where(t => t.DeviceId == deviceId && t.Time >= startTime && t.Time <= endTime)
+            .IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && t.DeviceId == deviceId && t.Time >= startTime && t.Time <= endTime)
             .Select(t => t.Metric)
             .Distinct()
             .ToListAsync(ct);
@@ -144,9 +149,10 @@ public class DataQualityService : IDataQualityService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 查询最近 1 小时的遥测数据，按时间升序排列
+        // 同上：后台 scope 下默认过滤器会吞掉真实租户遥测，IgnoreQueryFilters + 显式 tenantId
         var telemetryData = await dbContext.DeviceTelemetry
-            .Where(t => t.DeviceId == deviceId && t.Metric == metric && t.Time >= startTime && t.Time <= endTime)
+            .IgnoreQueryFilters()
+            .Where(t => t.TenantId == tenantId && t.DeviceId == deviceId && t.Metric == metric && t.Time >= startTime && t.Time <= endTime)
             .OrderBy(t => t.Time)
             .Select(t => new { t.Time, t.Value })
             .ToListAsync(ct);
