@@ -96,7 +96,11 @@ public class SlaManagementService
             WorkOrderStatus.SubmittedForApproval,
         };
 
+        // IgnoreQueryFilters + 显式 tenantId：本方法可由后台 SlaEscalationHostedService 调用（无 HttpContext，
+        // 全局过滤器解析为 Guid.Empty，默认查询与 tenantId 求交集恒为空 → 后台扫描查不到任何工单）。
+        // HTTP（SlaController）路径下 IgnoreQueryFilters + 显式 tenantId 与默认过滤器等价，行为不变。
         var workOrders = await _db.WorkOrders
+            .IgnoreQueryFilters()
             .Where(w => w.TenantId == tenantId && activeStatuses.Contains(w.Status))
             .ToListAsync(ct);
 
@@ -164,7 +168,9 @@ public class SlaManagementService
             WorkOrderStatus.SubmittedForApproval,
         };
 
+        // IgnoreQueryFilters + 显式 tenantId：同 CheckAndEscalateAsync，后台扫描需绕过 Guid.Empty 过滤器
         var workOrders = await _db.WorkOrders
+            .IgnoreQueryFilters()
             .Where(w => w.TenantId == tenantId && activeStatuses.Contains(w.Status))
             .ToListAsync(ct);
 

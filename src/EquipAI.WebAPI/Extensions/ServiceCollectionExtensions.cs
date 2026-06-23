@@ -322,6 +322,9 @@ public static class ServiceCollectionExtensions
         // 遥测数据清理后台服务
         services.AddHostedService<TelemetryCleanupService>();
 
+        // SLA 超时自动升级后台服务 — 每 5 分钟遍历活跃租户，自动升级逾期工单 + 通知主管
+        services.AddHostedService<EquipAI.Application.WorkOrders.SlaEscalationHostedService>();
+
         // 审计日志服务 — 记录系统敏感操作（登录、权限变更、数据修改等）
         services.AddScoped<IAuditLogService, AuditLogService>();
 
