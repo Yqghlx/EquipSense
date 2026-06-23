@@ -51,8 +51,9 @@ public class SubscriptionExpiryService : BackgroundService
 
     /// <summary>
     /// 检查并处理到期的试用和订阅
+    /// 设为 public 以便单元测试直接验证到期处理逻辑（跳过 ExecuteAsync 的 Task.Delay 调度）。
     /// </summary>
-    private async Task CheckAndProcessExpirationsAsync(CancellationToken ct)
+    public async Task CheckAndProcessExpirationsAsync(CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -82,13 +83,21 @@ public class SubscriptionExpiryService : BackgroundService
         foreach (var tenant in expiredSubscriptions)
         {
             var oldPlan = tenant.Plan;
+            // 降级为【可用】试用版：订阅到期后客户仍可用 5 设备免费版（SaaS 留存策略，引导续费）。
+            // ⚠️ Status 必须为 Trial（非 Expired）：
+            //   - CanCreateResourceAsync 对 Expired/Frozen/Closed 直接拒绝创建 → 降级配额 MaxDevices=5 永不生效
+            //   - DeviceHealthRecalculation / SlaEscalation 等 HostedService 都 Where(Status != Expired) 跳过监控
+            //   原代码设 Expired 让降级客户被完全锁死（加不了设备 + 健康度/SLA 监控失效），与「降级可用」矛盾。
+            // ⚠️ TrialEndsAt 必须清空：降级是长期免费版（非限时试用），保留旧 TrialEndsAt（可能已过期）会触发
+            //   CanCreateResourceAsync 的试用过期检查（TrialEndsAt < now）误锁创建。
             tenant.Plan = TenantPlan.Trial;
-            tenant.Status = TenantStatus.Expired;
+            tenant.Status = TenantStatus.Trial;
+            tenant.TrialEndsAt = null;
             tenant.MaxDevices = 5;
             tenant.MaxUsers = 3;
             tenant.DataRetentionDays = 30;
 
-            _logger.LogWarning("租户 {TenantId}({Name}) 订阅已到期（{OldPlan}），降级为 Trial",
+            _logger.LogWarning("租户 {TenantId}({Name}) 订阅已到期（{OldPlan}），降级为可用 Trial（5 设备免费版）",
                 tenant.Id, tenant.Name, oldPlan);
         }
 
