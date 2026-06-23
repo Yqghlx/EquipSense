@@ -124,6 +124,10 @@ public class TelemetryService : ITelemetryService, IDisposable
         var backoffDelays = new[] { 200, 500, 1000 };
         var maxAttempts = backoffDelays.Length + 1;
 
+        // toInsert：每次重试重新去重后的实际待写入集合。提到循环外以便重试耗尽时统计真实丢弃量
+        //（重试期间部分行可能因"模糊成功"已落库被去重排除，此时 toInsert 会小于 validItems）。
+        var toInsert = validItems;
+
         for (var attempt = 0; ; attempt++)
         {
             try
@@ -131,14 +135,27 @@ public class TelemetryService : ITelemetryService, IDisposable
                 using var scope = _scopeFactory.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+                // 去重（批内 + DB 已存在）：见 DedupBatchAsync。放在循环内，覆盖写入重试的"模糊成功"场景
+                // ——上一次 INSERT 已提交落库但响应未送达客户端，重试时的存在性查询会排除已落库行，
+                // 避免重复写入污染基线/触发重复告警。
+                toInsert = await DedupBatchAsync(dbContext, validItems);
+
+                if (toInsert.Count == 0)
+                {
+                    _logger.LogDebug("批次 {Count} 条全部为重复数据（已去重），跳过写入与事件发布",
+                        validItems.Count);
+                    return;
+                }
+
                 // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
                 // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
-                await InsertBatchAsync(dbContext, validItems);
+                await InsertBatchAsync(dbContext, toInsert);
 
-                _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}）",
-                    validItems.Count, attempt + 1, maxAttempts);
+                _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}，去重前 {Before}）",
+                    toInsert.Count, attempt + 1, maxAttempts, validItems.Count);
 
-                foreach (var item in validItems)
+                // 仅为实际写入的新行发布事件，避免重复数据触发重复告警/分析
+                foreach (var item in toInsert)
                 {
                     var evt = new TelemetryReceivedEvent(
                         Guid.NewGuid(), DateTime.UtcNow,
@@ -162,13 +179,93 @@ public class TelemetryService : ITelemetryService, IDisposable
                     continue;
                 }
 
-                // 重试耗尽：记录丢弃指标供运维告警，放弃本批（丢弃的是通过校验的有效数据）
-                BusinessMetrics.TelemetryDropped.Inc(validItems.Count);
+                // 重试耗尽：记录丢弃指标供运维告警，放弃本批。
+                // 用 toInsert.Count（去重后实际待写量）而非 validItems.Count：重试期间被去重排除的行已落库，
+                // 真正丢失的仅是最后一次尝试写入的 toInsert。
+                BusinessMetrics.TelemetryDropped.Inc(toInsert.Count);
                 _logger.LogError(ex, "遥测批量写入重试 {Total} 次仍失败，丢弃 {Count} 条数据",
-                    maxAttempts, validItems.Count);
+                    maxAttempts, toInsert.Count);
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// 批次去重：批内同键折叠 + 排除 DB 中已存在的同键行。
+    ///
+    /// 背景：device_telemetry 无唯一约束、INSERT 无 ON CONFLICT。MQTT QoS1 至少一次投递的重传、边缘网关断线
+    /// 恢复后本地缓冲重放、以及写入重试的"模糊成功"（提交已落库但响应未送达客户端，重试再插一遍）都会产生
+    /// 相同 (tenant, device, metric, time) 的重复行。后果：基线（AVG/STDDEV）被翻倍→告警阈值漂移、
+    /// 数据质量评分失真、L3/L4 分析结果偏差、聚合防风暴被绕过触发重复告警。
+    ///
+    /// 为什么用应用层去重而非 DB 唯一约束 + ON CONFLICT：device_telemetry 是 TimescaleDB hypertable，
+    /// 启用压缩后 compress_segmentby 须覆盖所有唯一约束列，对现有表加唯一约束需迁移验证且无法在单元测试中
+    /// 盲测（InMemory/SQLite 不具备 hypertable 压缩语义）。应用层去重以一次按组 IN 查询兜底，覆盖绝大多数
+    /// 重复来源，并可在 SQLite 上完整回归测试。
+    ///
+    /// 算法：
+    ///   1. 批内去重：同 (tenant, device, metric, timestamp) 只保留首条；
+    ///   2. 跨批去重：按 (tenant, device, metric) 分组，每组一次 time IN (...) 查询
+    ///      （idx_telemetry_tenant_device_metric 索引支持），排除 DB 中已存在的行。
+    /// 放在写入重试循环内（每次尝试都重新查），使"模糊成功"后的重试能排除已落库行，避免重复写入。
+    /// 仅对实际写入的新行发布事件，避免重复数据触发重复告警/分析。
+    /// </summary>
+    /// <param name="dbContext">当前写入作用域的 DbContext（跨租户查询，已 IgnoreQueryFilters）</param>
+    /// <param name="items">已通过设备↔租户校验的有效遥测项</param>
+    /// <returns>去重后实际待写入的遥测项；重复项已计入 TelemetryDeduped 指标与日志</returns>
+    internal async Task<List<TelemetryQueueItem>> DedupBatchAsync(
+        AppDbContext dbContext, List<TelemetryQueueItem> items, CancellationToken ct = default)
+    {
+        // 1. 批内去重（同键保留首条）
+        var distinct = new List<TelemetryQueueItem>(items.Count);
+        var seenKeys = new HashSet<(Guid TenantId, Guid DeviceId, string Metric, DateTime Time)>();
+        var inBatchDupes = 0;
+        foreach (var item in items)
+        {
+            // 时间戳统一为 UTC 作去重键，避免本地/UTC 同一时刻因 Kind 差异被当成两条
+            var key = (item.TenantId, item.DeviceId, item.Metric, item.Timestamp.ToSafeUtc());
+            if (seenKeys.Add(key))
+                distinct.Add(item);
+            else
+                inBatchDupes++;
+        }
+
+        // 2. 跨批去重：排除 DB 中已存在的同键行。IgnoreQueryFilters：flush 处理跨多租户批次、后台无 HttpContext。
+        // 按 (tenant, device, metric) 分组，每组一次 IN 查询摊薄成本（idx_telemetry_tenant_device_metric 支持）。
+        var result = new List<TelemetryQueueItem>(distinct.Count);
+        var crossBatchDupes = 0;
+        foreach (var grp in distinct.GroupBy(i => (i.TenantId, i.DeviceId, i.Metric)))
+        {
+            var times = grp.Select(i => i.Timestamp.ToSafeUtc()).ToList();
+            var existingTimes = await dbContext.DeviceTelemetry
+                .IgnoreQueryFilters()
+                .Where(t => t.TenantId == grp.Key.TenantId
+                         && t.DeviceId == grp.Key.DeviceId
+                         && t.Metric == grp.Key.Metric
+                         && times.Contains(t.Time))
+                .Select(t => t.Time)
+                .ToListAsync(ct);
+            var existingSet = new HashSet<DateTime>(existingTimes);
+
+            foreach (var item in grp)
+            {
+                if (existingSet.Add(item.Timestamp.ToSafeUtc()))
+                    result.Add(item);
+                else
+                    crossBatchDupes++;
+            }
+        }
+
+        var totalDupes = inBatchDupes + crossBatchDupes;
+        if (totalDupes > 0)
+        {
+            BusinessMetrics.TelemetryDeduped.WithLabels("in_batch").Inc(inBatchDupes);
+            BusinessMetrics.TelemetryDeduped.WithLabels("cross_batch").Inc(crossBatchDupes);
+            _logger.LogDebug("遥测去重：批内 {InBatch} 条 + DB 已存在 {CrossBatch} 条，共去除 {Total} 条重复",
+                inBatchDupes, crossBatchDupes, totalDupes);
+        }
+
+        return result;
     }
 
     /// <summary>

@@ -36,6 +36,17 @@ public static class BusinessMetrics
         .CreateCounter("equipai_telemetry_rejected_total", "遥测数据因设备/租户校验被拒绝的总数",
             new CounterConfiguration { LabelNames = new[] { "reason" } });
 
+    /// <summary>
+    /// 遥测数据去重总数（批内重复 + DB 已存在的重复行）
+    /// device_telemetry 无唯一约束、INSERT 无 ON CONFLICT。MQTT QoS1 至少一次投递的重传、边缘网关断线
+    /// 恢复后本地缓冲重放、写入重试的"模糊成功"都会产生相同 (tenant, device, metric, time) 的重复行，
+    /// 污染基线（AVG/STDDEV 翻倍）、扭曲分析、绕过聚合防风暴触发重复告警。入库前应用层去重兜底。
+    /// 正常应有少量（偶发重传）；持续高位表示网关重放风暴或重试逻辑异常，需运维排查。
+    /// </summary>
+    public static readonly Counter TelemetryDeduped = Prometheus.Metrics
+        .CreateCounter("equipai_telemetry_deduped_total", "遥测数据去重总数（批内 + DB 已存在的重复行）",
+            new CounterConfiguration { LabelNames = new[] { "source" } });
+
     /// <summary>遥测数据处理耗时（毫秒）</summary>
     public static readonly Histogram TelemetryProcessingDuration = Prometheus.Metrics
         .CreateHistogram("equipai_telemetry_processing_duration_ms", "遥测数据处理耗时",
