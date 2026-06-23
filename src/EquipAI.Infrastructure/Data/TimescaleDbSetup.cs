@@ -9,6 +9,20 @@ namespace EquipAI.Infrastructure.Data;
 /// </summary>
 public class TimescaleDbSetup
 {
+    /// <summary>
+    /// 全局遥测保留天数（TimescaleDB drop_chunks 兜底策略）。
+    ///
+    /// 必须设置为所有套餐中最大的 DataRetentionDays（须 >= <see cref="EquipAI.Application.Interfaces.SubscriptionService.MaxPlanRetentionDays"/>，
+    /// 当前 Enterprise=365）。
+    ///
+    /// 为什么是"最大值"而非"最小值"：drop_chunks 是超级表级、无差别丢弃超过该阈值的整段数据，无法按租户区分。
+    /// 若设得小于某套餐保留期（历史缺陷：曾硬编码 90 天），则 Enterprise（承诺 365 天）、
+    /// Professional（180 天）的遥测会在 90 天被提前丢弃——按套餐承诺的长期历史趋势分析失效，
+    /// 客户付费的长期数据能力静默失效。设为最大套餐保留期后，全局策略只兜底最长套餐，
+    /// 短保留期套餐（Trial=30/Basic=90/Professional=180）由 TelemetryCleanupService 按租户精细 DELETE。
+    /// </summary>
+    public const int MaxRetentionDays = 365;
+
     private readonly AppDbContext _dbContext;
     private readonly ILogger<TimescaleDbSetup> _logger;
 
@@ -94,9 +108,10 @@ public class TimescaleDbSetup
                 END $$;
                 """, cancellationToken);
 
-            await _dbContext.Database.ExecuteSqlRawAsync(
-                "SELECT add_retention_policy('device_telemetry', INTERVAL '90 days')",
-                cancellationToken);
+            // 全局保留策略（drop_chunks）：必须 >= 最大套餐保留期，详见 MaxRetentionDays 注释。
+            // 用字符串拼接常量（非用户输入，安全），避免 ExecuteSqlInterpolated 把常量包成参数导致 INTERVAL 语法问题。
+            var retentionSql = "SELECT add_retention_policy('device_telemetry', INTERVAL '" + MaxRetentionDays + " days')";
+            await _dbContext.Database.ExecuteSqlRawAsync(retentionSql, cancellationToken);
 
             // 创建 telemetry_hourly 连续聚合视图（幂等）
             await _dbContext.Database.ExecuteSqlRawAsync("""

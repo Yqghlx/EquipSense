@@ -312,7 +312,7 @@ EquipSense/
 - `alert_rules` / `alerts` — 告警规则与告警实例
 - `work_orders` / `work_order_logs` / `work_order_approvals` — 工单、流转日志与审批
 - `knowledge_rules` / `pending_rules` / `knowledge_rule_versions` — 知识库（规则双表 + 版本管理）
-- `device_telemetry`（TimescaleDB 超级表）— 时序窄表，7 天自动压缩，90 天保留
+- `device_telemetry`（TimescaleDB 超级表）— 时序窄表，7 天自动压缩，全局 drop_chunks 兜底 365 天（=最大套餐保留期），短保留期套餐由 `TelemetryCleanupService` 按租户 `DataRetentionDays` 精细 DELETE
 - `telemetry_hourly`（连续聚合）— 小时级统计
 - `analyses` / `fault_cases` — AI 分析记录与故障案例
 - `notifications` / `audit_logs` / `system_configs` / `billing_records` — 通知、审计、配置、计费

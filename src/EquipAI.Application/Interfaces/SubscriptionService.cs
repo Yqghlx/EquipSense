@@ -28,6 +28,16 @@ public class SubscriptionService : ISubscriptionService
     };
 
     /// <summary>
+    /// 所有套餐中最大的数据保留天数（当前 Enterprise=365）。
+    ///
+    /// 用途：TimescaleDB 的全局 drop_chunks 保留策略是超级表级、无差别丢弃超过阈值的整段数据，
+    /// 无法按租户区分。该全局阈值必须 >= 最大套餐保留期，否则长期套餐（如 Enterprise 365 天）
+    /// 的遥测会被提前丢弃。此处暴露最大值，供 TimescaleDbSetup 与回归测试引用，确保二者同步。
+    /// 短保留期套餐（Trial/Basic/Professional）由 TelemetryCleanupService 按租户 DataRetentionDays 精细 DELETE。
+    /// </summary>
+    public static int MaxPlanRetentionDays => PlanLimits.Values.Max(p => p.RetentionDays);
+
+    /// <summary>
     /// 初始化订阅管理服务
     /// </summary>
     /// <param name="scopeFactory">服务作用域工厂</param>
