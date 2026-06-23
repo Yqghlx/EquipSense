@@ -325,6 +325,10 @@ public static class ServiceCollectionExtensions
         // SLA 超时自动升级后台服务 — 每 5 分钟遍历活跃租户，自动升级逾期工单 + 通知主管
         services.AddHostedService<EquipAI.Application.WorkOrders.SlaEscalationHostedService>();
 
+        // 设备健康度定时重算后台服务 — 每 10 分钟遍历活跃租户重算 devices.health_score，
+        // 否则健康度恒为默认 100，DeviceDetailPage/报表恒显示"健康"无视告警与离线
+        services.AddHostedService<EquipAI.Application.Analysis.DeviceHealthRecalculationHostedService>();
+
         // 审计日志服务 — 记录系统敏感操作（登录、权限变更、数据修改等）
         services.AddScoped<IAuditLogService, AuditLogService>();
 

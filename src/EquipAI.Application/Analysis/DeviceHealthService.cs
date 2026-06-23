@@ -42,7 +42,10 @@ public class DeviceHealthService
     public async Task<double?> CalculateHealthScoreAsync(Guid deviceId, CancellationToken ct = default)
     {
         // 维度一：状态分（30%）
+        // IgnoreQueryFilters：本方法可由后台 DeviceHealthRecalculationHostedService 调用（无 HttpContext，
+        // 全局过滤器解析为 Guid.Empty 会吞掉设备查询）。deviceId 是全局唯一 PK，按 Id 定位即安全。
         var device = await _db.Devices
+            .IgnoreQueryFilters()
             .Where(d => d.Id == deviceId)
             .Select(d => new { d.Status })
             .FirstOrDefaultAsync(ct);
@@ -103,8 +106,11 @@ public class DeviceHealthService
         if (score is null)
             return null;
 
-        // 直接修改已跟踪实体的字段并保存（受全局租户过滤器保护，仅能更新本租户设备）
-        var device = await _db.Devices.FirstOrDefaultAsync(d => d.Id == deviceId, ct);
+        // IgnoreQueryFilters：同 CalculateHealthScoreAsync，后台 scope（Guid.Empty）下默认过滤器会吞掉查询。
+        // 安全性由 deviceId 全局唯一 PK 保证（定位到唯一设备），不依赖租户过滤器。
+        var device = await _db.Devices
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(d => d.Id == deviceId, ct);
         if (device is null)
             return null;
 
@@ -119,7 +125,11 @@ public class DeviceHealthService
     /// </summary>
     public async Task<int> UpdateAllHealthScoresAsync(Guid tenantId, CancellationToken ct = default)
     {
+        // IgnoreQueryFilters + 显式 tenantId：本方法由后台 DeviceHealthRecalculationHostedService 调用
+        // （无 HttpContext，默认过滤器解析为 Guid.Empty，与本租户 tenantId 求交集恒为空 → 查不到任何设备，
+        // 重算形同未执行）。显式 tenantId 保证仅重算目标租户设备。
         var deviceIds = await _db.Devices
+            .IgnoreQueryFilters()
             .Where(d => d.TenantId == tenantId)
             .Select(d => d.Id)
             .ToListAsync(ct);
@@ -152,7 +162,9 @@ public class DeviceHealthService
     {
         try
         {
+            // IgnoreQueryFilters：后台 scope 下 Guid.Empty 过滤器会吞掉全部遥测。deviceId 全局唯一，按其过滤即安全。
             var recent = await _db.DeviceTelemetry
+                .IgnoreQueryFilters()
                 .Where(t => t.DeviceId == deviceId)
                 .OrderByDescending(t => t.Time)
                 .Take(RecentTelemetrySampleSize)
