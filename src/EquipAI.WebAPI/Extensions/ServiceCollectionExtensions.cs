@@ -322,6 +322,10 @@ public static class ServiceCollectionExtensions
         // 遥测数据清理后台服务
         services.AddHostedService<TelemetryCleanupService>();
 
+        // 日志保留期清理后台服务 — 清理过期 audit_logs/notifications（高频增长的全局日志型表），
+        // 防长期运行磁盘满 → PG 崩溃。保留期从 Retention 配置读（审计 365 天 / 通知 90 天）。
+        services.AddHostedService<EquipAI.Application.Retention.LogRetentionCleanupService>();
+
         // SLA 超时自动升级后台服务 — 每 5 分钟遍历活跃租户，自动升级逾期工单 + 通知主管
         services.AddHostedService<EquipAI.Application.WorkOrders.SlaEscalationHostedService>();
 
