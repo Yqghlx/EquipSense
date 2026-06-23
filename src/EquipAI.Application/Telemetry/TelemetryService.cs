@@ -108,6 +108,18 @@ public class TelemetryService : ITelemetryService, IDisposable
         if (items.Count == 0)
             return;
 
+        // 多租户纵深防御：校验每条遥测的设备存在且归属租户与上报租户一致。
+        // 校验独立于写入重试（只做一次）：设备归属在写入重试窗口内不会变化。
+        List<TelemetryQueueItem> validItems;
+        using (var validateScope = _scopeFactory.CreateScope())
+        {
+            var validateDb = validateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            validItems = await ValidateItemsAsync(validateDb, items);
+        }
+
+        if (validItems.Count == 0)
+            return; // 全部被拒（未知设备/租户不符），无数据可写
+
         // 退避序列：首次失败后 200ms、500ms、1s 各重试一次，共 4 次尝试
         var backoffDelays = new[] { 200, 500, 1000 };
         var maxAttempts = backoffDelays.Length + 1;
@@ -121,12 +133,12 @@ public class TelemetryService : ITelemetryService, IDisposable
 
                 // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
                 // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
-                await InsertBatchAsync(dbContext, items);
+                await InsertBatchAsync(dbContext, validItems);
 
                 _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}）",
-                    items.Count, attempt + 1, maxAttempts);
+                    validItems.Count, attempt + 1, maxAttempts);
 
-                foreach (var item in items)
+                foreach (var item in validItems)
                 {
                     var evt = new TelemetryReceivedEvent(
                         Guid.NewGuid(), DateTime.UtcNow,
@@ -150,13 +162,66 @@ public class TelemetryService : ITelemetryService, IDisposable
                     continue;
                 }
 
-                // 重试耗尽：记录丢弃指标供运维告警，放弃本批
-                BusinessMetrics.TelemetryDropped.Inc(items.Count);
+                // 重试耗尽：记录丢弃指标供运维告警，放弃本批（丢弃的是通过校验的有效数据）
+                BusinessMetrics.TelemetryDropped.Inc(validItems.Count);
                 _logger.LogError(ex, "遥测批量写入重试 {Total} 次仍失败，丢弃 {Count} 条数据",
-                    maxAttempts, items.Count);
+                    maxAttempts, validItems.Count);
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// 校验批次内每条遥测的设备归属：设备必须存在，且其 tenant_id 与上报的 tenantId 一致。
+    ///
+    /// 安全背景：MQTT 主题 factory/{tenantId}/telemetry/{deviceId} 中的 tenantId 由发布方填写、不可信。
+    /// 若匿名/共享 broker 下有客户端伪造主题，可向其他租户注入遥测（跨租户污染）。此处按设备实际归属
+    /// 租户（devices.tenant_id，DB 权威）校验，拒绝未知设备与租户不匹配项——顺带阻止对已删除设备
+    /// 的遥测写入（避免孤儿时序数据）。在 flush 层校验，覆盖 MQTT 与 HTTP 所有入口，且按批一次 IN
+    /// 查询摊薄成本（一批 100 条仅 1 次查询）。
+    /// </summary>
+    /// <returns>通过校验的遥测项；未通过的已计入 TelemetryRejected 指标与日志</returns>
+    internal async Task<List<TelemetryQueueItem>> ValidateItemsAsync(
+        AppDbContext dbContext, List<TelemetryQueueItem> items)
+    {
+        var deviceIds = items.Select(i => i.DeviceId).Distinct().ToList();
+        // IgnoreQueryFilters：flush 处理跨多租户的批次，后台无 HttpContext 租户上下文
+        var deviceTenants = await dbContext.Devices
+            .IgnoreQueryFilters()
+            .Where(d => deviceIds.Contains(d.Id))
+            .Select(d => new { d.Id, d.TenantId })
+            .ToDictionaryAsync(d => d.Id, d => d.TenantId);
+
+        var valid = new List<TelemetryQueueItem>(items.Count);
+        var unknown = 0;
+        var mismatch = 0;
+        foreach (var item in items)
+        {
+            if (!deviceTenants.TryGetValue(item.DeviceId, out var deviceTenant))
+            {
+                unknown++;
+                continue;
+            }
+            if (deviceTenant != item.TenantId)
+            {
+                mismatch++;
+                continue;
+            }
+            valid.Add(item);
+        }
+
+        if (unknown > 0)
+        {
+            BusinessMetrics.TelemetryRejected.WithLabels("unknown_device").Inc(unknown);
+            _logger.LogWarning("拒绝 {Count} 条遥测：设备未注册（可能误配置或伪造主题）", unknown);
+        }
+        if (mismatch > 0)
+        {
+            BusinessMetrics.TelemetryRejected.WithLabels("tenant_mismatch").Inc(mismatch);
+            _logger.LogWarning("拒绝 {Count} 条遥测：设备归属租户与上报租户不符（跨租户注入企图）", mismatch);
+        }
+
+        return valid;
     }
 
     public void Dispose()

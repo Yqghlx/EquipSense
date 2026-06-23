@@ -26,6 +26,16 @@ public static class BusinessMetrics
     public static readonly Counter TelemetryDropped = Prometheus.Metrics
         .CreateCounter("equipai_telemetry_dropped_total", "遥测数据写入失败丢弃总数（重试耗尽后）");
 
+    /// <summary>
+    /// 遥测数据因设备/租户校验被拒绝的总数
+    /// 多租户纵深防御：MQTT 主题中的 tenantId 不可信，入库前按设备实际归属租户校验。
+    /// reason=unknown_device：设备不存在（误配置或攻击）；reason=tenant_mismatch：设备归属租户
+    /// 与上报租户不符（跨租户注入企图）。正常应为 0；持续 &gt; 0 需排查网关配置或安全事件。
+    /// </summary>
+    public static readonly Counter TelemetryRejected = Prometheus.Metrics
+        .CreateCounter("equipai_telemetry_rejected_total", "遥测数据因设备/租户校验被拒绝的总数",
+            new CounterConfiguration { LabelNames = new[] { "reason" } });
+
     /// <summary>遥测数据处理耗时（毫秒）</summary>
     public static readonly Histogram TelemetryProcessingDuration = Prometheus.Metrics
         .CreateHistogram("equipai_telemetry_processing_duration_ms", "遥测数据处理耗时",
