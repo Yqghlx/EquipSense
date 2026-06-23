@@ -664,6 +664,115 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
     }
 
     // ========================================================================
+    // 告警消息可读性 — 关键修复验证
+    // ========================================================================
+
+    /// <summary>
+    /// 关键修复验证：告警消息必须包含规则名（人类可读），不再是机器语言
+    ///
+    /// Why：原消息格式 "指标 oil_temperature 当前值 95.00 > 阈值 90" 是机器语言：
+    ///   - metric 是英文，工业现场用户看不懂
+    ///   - ">" 是编程符号，不直观
+    ///   - 没有规则名（"油温过高"这种人类可读的标识被丢弃）
+    ///
+    /// 修复后格式：「{规则名}」指标 {metric} 当前 {value}，已超过阈值 {threshold}（超出 {diff}）
+    /// </summary>
+    [Fact]
+    public async Task 告警消息_应包含规则名_中文动作_超出幅度()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId);
+
+        var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+            .Returns((true, false, false));
+
+        // 规则名为 "油温过高"（中文人类可读），阈值 90，触发值 95.5
+        var rule = CreateAlertRule(_tenantId);
+        rule.Name = "油温过高";
+        rule.Threshold = 90m;
+        rule.Operator = ">";
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        await service.EvaluateForDeviceAsync(
+            _tenantId, deviceId, "电机",
+            "temperature", 95.5, new DeviceContext());
+
+        var alert = db.Alerts.Should().HaveCount(1).And.Subject.First();
+        alert.Message.Should().Contain("油温过高", "消息必须包含规则名（人类可读标识）");
+        alert.Message.Should().Contain("temperature", "消息应保留 metric 技术字段");
+        alert.Message.Should().Contain("95.50", "消息应显示当前值（2 位小数）");
+        alert.Message.Should().Contain("超过", "操作符应翻译为中文（不再是 >）");
+        alert.Message.Should().Contain("超出", "消息应显示超出幅度（让客户感知严重性）");
+        alert.Message.Should().NotContain(">", "消息中不应出现原始操作符符号");
+    }
+
+    /// <summary>
+    /// 低于阈值场景：操作符翻译为"低于"，幅度显示"低 X"
+    /// </summary>
+    [Fact]
+    public async Task 告警消息_低于阈值_显示低于幅度()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId);
+
+        var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, "pressure"))
+            .Returns((true, false, false));
+
+        var rule = CreateAlertRule(_tenantId);
+        rule.Name = "排气压力过低";
+        rule.Metric = "pressure";
+        rule.Threshold = 0.5m;
+        rule.Operator = "<";
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        await service.EvaluateForDeviceAsync(
+            _tenantId, deviceId, "空压机",
+            "pressure", 0.3, new DeviceContext());
+
+        var alert = db.Alerts.First();
+        alert.Message.Should().Contain("排气压力过低");
+        alert.Message.Should().Contain("低于");
+        alert.Message.Should().Contain("低 0.20", "低于场景应显示『低 X』");
+    }
+
+    /// <summary>
+    /// 非阈值类型（组合/基线）告警：仍应包含规则名作为人类可读标识
+    /// </summary>
+    [Fact]
+    public async Task 告警消息_组合规则_仍包含规则名()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId);
+
+        var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Combined, true));
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, "vibration"))
+            .Returns((true, false, false));
+
+        var rule = CreateAlertRule(_tenantId, ruleType: RuleType.Combined);
+        rule.Name = "振动+温度组合异常";
+        rule.Metric = "vibration";
+        rule.Operator = null;
+        rule.Threshold = null;
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        await service.EvaluateForDeviceAsync(
+            _tenantId, deviceId, "电机",
+            "vibration", 8.5, new DeviceContext());
+
+        var alert = db.Alerts.First();
+        alert.Message.Should().Contain("振动+温度组合异常", "组合规则消息也应包含规则名");
+        alert.Message.Should().Contain("8.50");
+    }
+
+    // ========================================================================
     // 辅助类型
     // ========================================================================
 

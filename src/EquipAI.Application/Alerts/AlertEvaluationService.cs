@@ -257,14 +257,45 @@ public class AlertEvaluationService : IAlertEvaluationService
 
     /// <summary>
     /// 生成告警消息文本
-    /// 阈值类型显示操作符和阈值，组合类型显示规则名称
+    ///
+    /// 关键修复：原消息 "指标 oil_temperature 当前值 95.00 > 阈值 90.0" 是机器语言：
+    ///   1. metric 是英文内部名，客户看不懂
+    ///   2. ">" 是编程符号，工业现场用户不直观
+    ///   3. 没有显示超出幅度，客户不知道严重程度
+    ///
+    /// 改进后的消息：将规则名（中文人类可读）作为前缀，翻译操作符为中文，
+    /// 显示超出/低于的幅度，让现场运维一眼看出问题严重性。
     /// </summary>
     private static string GenerateMessage(string metric, double value, AlertRule rule)
     {
         if (rule.RuleType == RuleType.Threshold && rule.Operator != null && rule.Threshold != null)
         {
-            return $"指标 {metric} 当前值 {value:F2} {rule.Operator} 阈值 {rule.Threshold}";
+            var threshold = rule.Threshold.Value;
+            var opText = TranslateOperator(rule.Operator);
+            var diff = Math.Abs((decimal)value - threshold);
+
+            // 显示超出/低于的幅度，让客户直观判断严重性
+            // 例：阈值 90，实际 95.5 → "（超出 5.50）"；阈值 0.5，实际 0.3 → "（低 0.20）"
+            var isLower = rule.Operator is "<" or "lt" or "<=" or "lte";
+            var diffText = isLower ? $"（低 {diff:F2}）" : $"（超出 {diff:F2}）";
+
+            return $"「{rule.Name}」指标 {metric} 当前 {value:F2}，已{opText}阈值 {threshold}{diffText}";
         }
-        return $"指标 {metric} 触发告警规则「{rule.Name}」，当前值: {value:F2}";
+        return $"「{rule.Name}」指标 {metric} 触发，当前值 {value:F2}";
     }
+
+    /// <summary>
+    /// 将编程操作符翻译为中文动作描述
+    /// 支持符号（>, <）和关键词（gt, lt）两种形式
+    /// </summary>
+    private static string TranslateOperator(string op) => op switch
+    {
+        ">" or "gt" => "超过",
+        "<" or "lt" => "低于",
+        ">=" or "gte" => "达到或超过",
+        "<=" or "lte" => "降至或低于",
+        "==" or "eq" => "等于",
+        "!=" or "ne" => "不等于",
+        _ => op
+    };
 }
