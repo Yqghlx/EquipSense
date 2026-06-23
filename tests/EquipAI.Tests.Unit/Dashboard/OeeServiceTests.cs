@@ -194,6 +194,46 @@ public class OeeServiceTests : IDisposable
         result.Quality.Should().Be(50.0);
     }
 
+    [Fact]
+    public async Task CalculateAsync_已确认Acknowledged的Critical告警也应降低Quality()
+    {
+        // 业务定义（见 DashboardStatsService.GetAlertStatsAsync）：活跃告警 = Active + Acknowledged，
+        // 「确认」≠「解决」（Resolved 才是真正解决）。
+        //
+        // 对称遗漏 bug：DashboardStatsService 告警统计已修正为 Active||Acknowledged，但 OEE Quality 仍只查 Active，
+        // 导致运维「确认」一条 Critical 告警后 Quality 立即虚高——客户误以为严重故障已解决，实际设备仍带病运行。
+        // 修复前（只 Active）：Acknowledged 不计入 → devicesWithCriticalAlert=0 → Quality=100%（虚高，掩盖未解决 Critical）
+        // 修复后（Active||Acknowledged）：计入 → Quality=50%（正确：确认只是「看到了」，故障仍在）
+
+        var myDevice1 = Guid.NewGuid();
+
+        _db.Devices.Add(new Device
+        {
+            Name = "设备1", Type = "compressor", DeviceCode = "DEV-1",
+            TenantId = _tenantId, Status = DeviceStatus.Online,
+        });
+        _db.Devices.Add(new Device
+        {
+            Name = "设备2", Type = "compressor", DeviceCode = "DEV-2",
+            TenantId = _tenantId, Status = DeviceStatus.Online,
+        });
+        // 设备1 有 Acknowledged 状态的 Critical 告警（运维已确认但未解决）
+        _db.Alerts.Add(new Alert
+        {
+            DeviceId = myDevice1, TenantId = _tenantId,
+            Metric = "temp", Severity = AlertSeverity.Critical,
+            Value = 100, Threshold = 80,
+            Status = AlertStatus.Acknowledged, OccurredAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var service = new OeeService(_db, LoggerFactory.Create(_ => { }).CreateLogger<OeeService>());
+        var result = await service.CalculateAsync(_tenantId, CancellationToken.None);
+
+        // Quality = 1 - 1/2 = 50%（Acknowledged 的 Critical 告警仍应计入）
+        result.Quality.Should().Be(50.0, "确认告警≠解决问题，Acknowledged 的 Critical 应继续降低 Quality（与 DashboardStatsService 活跃告警定义一致）");
+    }
+
     /// <summary>
     /// 测试用租户上下文
     /// </summary>

@@ -53,12 +53,15 @@ public class OeeService
         // 维度二：Performance — 平均 air_flow 达标率
         var (performance, recentFlowCount) = await CalculatePerformanceAsync(tenantId, ct);
 
-        // 维度三：Quality — 无 Critical 活跃告警的设备占比
-        // 修复历史（v1.3.0）：原代码用 IgnoreQueryFilters() 绕过租户过滤器，
-        //   导致租户 A 的 Quality 会被租户 B 的 Critical 告警污染 — 多租户隔离安全漏洞
-        //   现在使用默认过滤器，严格限制在当前租户范围内
+        // 维度三：Quality — 无 Critical 未解决告警的设备占比
+        // 活跃告警定义 = Active（已触发未确认）+ Acknowledged（已确认未解决），与 DashboardStatsService 一致。
+        //   修复历史：
+        //     · v1.3.0：原代码用 IgnoreQueryFilters() 绕过租户过滤器，租户 A 的 Quality 被租户 B 污染 —
+        //       多租户安全漏洞；现使用默认过滤器严格限制在当前租户内。
+        //     · 本次：原代码只查 Active 漏算 Acknowledged，运维「确认」一条 Critical 告警后 Quality 立即虚高
+        //       （误以为故障已解决，实际设备仍带病运行）——与 DashboardStatsService 活跃告警定义不对称。补齐 Active||Acknowledged。
         var devicesWithCriticalAlert = await _db.Alerts
-            .Where(a => a.Status == AlertStatus.Active && a.Severity == AlertSeverity.Critical)
+            .Where(a => (a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged) && a.Severity == AlertSeverity.Critical)
             .Select(a => a.DeviceId)
             .Distinct()
             .CountAsync(ct);
