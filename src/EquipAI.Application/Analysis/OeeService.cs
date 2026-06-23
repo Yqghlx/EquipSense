@@ -39,7 +39,7 @@ public class OeeService
     /// 计算租户整体 OEE
     /// </summary>
     /// <param name="tenantId">租户 ID（EF 全局过滤器已自动附加 WHERE TenantId = @tenantId）</param>
-    public async Task<OeeResult> CalculateAsync(Guid tenantId, CancellationToken ct = default)
+    public virtual async Task<OeeResult> CalculateAsync(Guid tenantId, CancellationToken ct = default)
     {
         // 维度一：Availability — 瞬时在线设备占比（简化版，不是工业可用率）
         // 注意：依赖 EF Core 全局查询过滤器自动加 WHERE TenantId = @current
