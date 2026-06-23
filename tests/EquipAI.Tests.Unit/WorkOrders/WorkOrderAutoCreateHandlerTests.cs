@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Npgsql;
 using Xunit;
 
 namespace EquipAI.Tests.Unit.WorkOrders;
@@ -179,6 +180,91 @@ public class WorkOrderAutoCreateHandlerTests
         eventBus.Verify(
             e => e.PublishAsync(It.IsAny<WorkOrderCreatedEvent>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    /// <summary>
+    /// 回归：工单编码连续 3 次唯一约束冲突时，处理器应优雅返回（不抛异常、不发布事件），
+    /// 而非让最后一次冲突逃逸为未处理异常。
+    ///
+    /// 旧版 catch 守卫 && attempt<2 使第 3 次 attempt（attempt=2）的冲突不被捕获，
+    /// 直接抛出 DbUpdateException，绕过下方"3 次重试后仍失败"的优雅兜底。事件总线虽能
+    /// catch 住不致崩溃，但优雅路径沦为死代码、错误信息失真。修复后应优雅返回。
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_编码连续冲突三次应优雅返回不抛异常且不发布事件()
+    {
+        // 用"保存 WorkOrder 时恒抛唯一约束冲突"的 DbContext 模拟极端并发下的连续冲突
+        var ruleId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"TestConflict_{Guid.NewGuid()}")
+            .Options;
+        var db = new ThrowingOnWorkOrderSaveDbContext(options, new TestTenantContext(_tenantId));
+
+        // 先 seed 规则（seed 时无 WorkOrder，SaveChanges 正常通过，便于走完前置校验）
+        db.AlertRules.Add(new AlertRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "自动创建规则",
+            Metric = "temperature", Conditions = "[]",
+            Severity = AlertSeverity.High, AutoCreateWorkorder = true
+        });
+        await db.SaveChangesAsync();
+
+        var eventBus = new Mock<IEventBus>();
+        eventBus
+            .Setup(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var spMock = new Mock<IServiceProvider>();
+        spMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(spMock.Object);
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+        var logger = LoggerFactory.Create(_ => { }).CreateLogger<WorkOrderAutoCreateHandler>();
+        var handler = new WorkOrderAutoCreateHandler(logger, eventBus.Object, scopeFactoryMock.Object);
+
+        // 关键断言：连续 3 次冲突应优雅兜底，不得抛异常污染事件总线日志
+        var act = async () => await handler.HandleAsync(MakeAlertEvent(ruleId: ruleId), CancellationToken.None);
+        await act.Should().NotThrowAsync();
+        // 工单未创建成功，不应发布 WorkOrderCreatedEvent
+        eventBus.Verify(
+            e => e.PublishAsync(It.IsAny<WorkOrderCreatedEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 测试用 DbContext：当变更跟踪器中有 WorkOrder 处于 Added 状态时，
+    /// SaveChangesAsync 恒抛 PostgreSQL 唯一约束冲突（SQLSTATE 23505），
+    /// 用于模拟极端并发下工单编码连续冲突。其它保存（如 seed 规则）正常通过。
+    /// </summary>
+    /// <remarks>
+    /// 重写 OnModelCreating 且不调用 base：基类用 Expression.Call 反射【私有】方法
+    /// GetCurrentTenantId 构建全局租户过滤器，子类无法继承私有方法，导致模型构建时
+    /// "No method 'GetCurrentTenantId' ... compatible" 绑定失败。本测试被测处理器全程
+    /// IgnoreQueryFilters，无需全局过滤器，故仅应用实体配置、跳过过滤器构建即可。
+    /// </remarks>
+    private sealed class ThrowingOnWorkOrderSaveDbContext : AppDbContext
+    {
+        public ThrowingOnWorkOrderSaveDbContext(DbContextOptions<AppDbContext> options, ITenantContext tenantContext)
+            : base(options, tenantContext) { }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            // 仅应用实体映射配置，跳过基类的全局租户过滤器构建（见类备注）
+            modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        }
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            // 仅当有 WorkOrder 处于 Added 时模拟唯一约束冲突（工单创建场景）；
+            // seed 规则等其它保存无 WorkOrder，走基类正常保存
+            if (ChangeTracker.Entries<WorkOrder>().Any(e => e.State == EntityState.Added))
+            {
+                // 构造真实的 PostgresException（SQLSTATE 23505），让 IsUniqueViolation 正确识别
+                var pgEx = new PostgresException("duplicate key value", "ERROR", "unique_violation", "23505");
+                throw new DbUpdateException("工单编码唯一约束冲突（模拟）", pgEx);
+            }
+            return base.SaveChangesAsync(cancellationToken);
+        }
     }
 
     private class TestTenantContext : ITenantContext

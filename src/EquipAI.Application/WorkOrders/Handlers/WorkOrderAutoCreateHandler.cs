@@ -71,11 +71,12 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
         // 生成工单编码并创建工单（带冲突重试）
         // 并发场景下多个 AlertTriggeredEvent 同时到达，GenerateCodeAsync 可能产出相同序号，
         // 触发 IX_work_orders_workorder_code 唯一约束冲突。重试 3 次以避开竞态。
-        WorkOrder? workOrder = null;
+        // 注意：savedWorkOrder 仅在 SaveChangesAsync 真正成功后才赋值，作为"是否落库"的唯一判据。
+        WorkOrder? savedWorkOrder = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var workOrderCode = await GenerateCodeAsync(dbContext, @event.TenantId, cancellationToken);
-            workOrder = new WorkOrder
+            var workOrder = new WorkOrder
             {
                 TenantId = @event.TenantId,
                 WorkOrderCode = workOrderCode,
@@ -91,18 +92,29 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
             try
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
+                // 仅当真正落库成功才认领该工单实例（与下方 savedWorkOrder is null 判据配套）
+                savedWorkOrder = workOrder;
                 break; // 成功
             }
-            catch (DbUpdateException ex) when (IsUniqueViolation(ex) && attempt < 2)
+            catch (DbUpdateException ex) when (IsUniqueViolation(ex))
             {
-                // 工单编码冲突（并发导致），回滚变更后重试生成新编码
+                // 工单编码冲突（并发），回滚本次变更
+                // 关键：必须捕获【所有】 attempt 的冲突。原守卫 && attempt<2 会让最后一次（attempt=2）
+                // 的冲突逃逸为未处理异常，被事件总线兜底吞掉而非进入下方的优雅失败处理。
                 _logger.LogWarning("工单编码 {Code} 冲突（并发），第 {Attempt} 次重试", workOrderCode, attempt + 2);
                 dbContext.Entry(workOrder).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
-                await Task.Delay(TimeSpan.FromMilliseconds(50 * (attempt + 1)), cancellationToken);
+                // 仅在仍有重试机会时退避；最后一次冲突不退避，直接退出循环交由下方优雅兜底
+                if (attempt < 2)
+                    await Task.Delay(TimeSpan.FromMilliseconds(50 * (attempt + 1)), cancellationToken);
             }
         }
 
-        if (workOrder == null || workOrder.Id == Guid.Empty)
+        // 关键：用显式的"是否成功落库"标志判断，而非依赖 workOrder.Id。
+        // BaseEntity.Id 在构造时即赋 Guid.NewGuid()，永不为 Guid.Empty，
+        // 旧判断 (workOrder.Id == Guid.Empty) 恒为 false → 3 次编码冲突后会把【未落库】的工单
+        // 误判为成功，进而发布 WorkOrderCreatedEvent，触发 WorkOrderNotificationHandler 向
+        // Dashboard 推送一条【数据库里根本不存在】的幽灵工单通知。改为 savedWorkOrder 判据根除该隐患。
+        if (savedWorkOrder is null)
         {
             _logger.LogError("自动建单失败：3 次重试后仍无法生成唯一编码，AlertId={AlertId}", @event.AlertId);
             return;
@@ -110,17 +122,17 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
 
         _logger.LogInformation(
             "已自动创建工单: WorkOrderId={WorkOrderId}, Code={WorkOrderCode}, AlertId={AlertId}",
-            workOrder.Id, workOrder.WorkOrderCode, @event.AlertId);
+            savedWorkOrder.Id, savedWorkOrder.WorkOrderCode, @event.AlertId);
 
         // 发布工单创建事件，供 SignalR 推送等下游模块消费
         await _eventBus.PublishAsync(new WorkOrderCreatedEvent(
             EventId: Guid.NewGuid(),
             OccurredAt: DateTime.UtcNow,
             TenantId: @event.TenantId,
-            WorkOrderId: workOrder.Id,
+            WorkOrderId: savedWorkOrder.Id,
             DeviceId: @event.DeviceId,
-            Title: workOrder.Title,
-            Priority: workOrder.Priority.ToString()
+            Title: savedWorkOrder.Title,
+            Priority: savedWorkOrder.Priority.ToString()
         ), cancellationToken);
     }
 
@@ -160,7 +172,7 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
     /// 判断 EF 保存异常是否为唯一约束冲突（PostgreSQL SQLSTATE 23505）
     /// 用于工单编码并发冲突时识别并触发重试
     /// </summary>
-    private static bool IsUniqueViolation(DbUpdateException ex)
+    internal static bool IsUniqueViolation(DbUpdateException ex)
     {
         for (var inner = (Exception?)ex; inner != null; inner = inner.InnerException)
         {
