@@ -33,7 +33,15 @@
     "submit": "Submit",
     "time": "Time",
     "id": "ID",
-    "testConnection": "Test Connection"
+    "testConnection": "Test Connection",
+    "7days": "Last 7 days",
+    "30days": "Last 30 days",
+    "90days": "Last 90 days",
+    "select": "Select",
+    "selectAll": "Select all",
+    "deselect": "Deselect",
+    "deselectAll": "Deselect all",
+    "download": "Download"
   },
   "realtime": {
     "connected": "Realtime connection healthy",
@@ -76,7 +84,8 @@
     "email": "Email",
     "emailRequired": "Email is required",
     "emailInvalid": "Invalid email format",
-    "passwordMin": "Password must be at least 8 characters"
+    "passwordMin": "Password must be at least 8 characters",
+    "emailPlaceholder": "Enter email you@example.com"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -202,6 +211,31 @@
       "createAndLink": "Create & Link",
       "deviceNamePlaceholder": "e.g. Cooling Pump #1",
       "pollIntervalHint": "Data collection interval, recommended no less than 100ms"
+    },
+    "import": "Import",
+    "importPreview": {
+      "title": "Bulk Import Devices",
+      "description": "Preview file contents, then confirm to import",
+      "supportFormat": "Supports CSV and JSON, max 5MB / 10,000 rows",
+      "startPreview": "Start Preview",
+      "downloadTemplate": "Download Template",
+      "totalRows": "Total rows",
+      "validCount": "Valid",
+      "errorCount": "Errors",
+      "validItems": "Valid items preview",
+      "deviceCode": "Device code",
+      "deviceName": "Device name",
+      "deviceType": "Type",
+      "manufacturer": "Manufacturer",
+      "criticality": "Criticality",
+      "moreItems": "{{count}} more items not shown",
+      "errors": "Validation errors",
+      "errorTitle": "Operation failed",
+      "confirmImport": "Confirm import of {{count}} device(s)",
+      "imported": "Imported",
+      "skipped": "Skipped",
+      "failed": "Failed",
+      "doneDescription": "Import complete"
     }
   },
   "telemetry": {
@@ -343,7 +377,8 @@
       "rejected": "Rejected",
       "closed": "Closed",
       "cancelled": "Cancelled"
-    }
+    },
+    "noTechnicians": "No available technicians"
   },
   "analysis": {
     "title": "AI Analysis",
@@ -561,7 +596,9 @@
       "rollback": "Rollback to this version",
       "rollbackConfirmTitle": "Confirm Rollback",
       "rollbackConfirm": "Are you sure you want to rollback to v{{version}}? The current version will be overwritten."
-    }
+    },
+    "ruleName": "Rule name",
+    "confidence": "Confidence"
   },
   "pendingRules": {
     "title": "Pending Rule Review",
@@ -576,7 +613,11 @@
     "reject": "Reject",
     "rejectReason": "Rejection Reason",
     "rejectReasonPlaceholder": "Enter rejection reason...",
-    "confirmReject": "Confirm Reject"
+    "confirmReject": "Confirm Reject",
+    "addComment": "Add comment",
+    "batchApprove": "Batch Approve ({{count}})",
+    "batchReject": "Batch Reject ({{count}})",
+    "batchCommentPlaceholder": "Batch review comment (optional)"
   },
   "deviceSetup": {
     "title": "Device Setup Wizard",
@@ -634,7 +675,23 @@
     "reviewPollInterval": "Poll interval: {{ms}}ms",
     "reviewDataPoints": "Data Points ({{count}})",
     "reviewDeviceName": "Device Name",
-    "submitCreate": "Confirm & Create"
+    "submitCreate": "Confirm & Create",
+    "opcuaEndpoint": "Endpoint URL",
+    "opcuaSecurity": "Security mode",
+    "securityNone": "None (dev only)",
+    "securitySign": "Sign",
+    "securitySignAndEncrypt": "Sign & Encrypt (recommended)",
+    "opcuaUsername": "Username (optional)",
+    "opcuaPassword": "Password (optional)",
+    "optionalPlaceholder": "optional",
+    "modbusHost": "Host",
+    "modbusPort": "Port",
+    "modbusUnitId": "Unit ID",
+    "rtuPort": "Serial port",
+    "rtuBaudRate": "Baud rate",
+    "rtuDataBits": "Data bits",
+    "rtuStopBits": "Stop bits",
+    "rtuParity": "Parity"
   },
   "gateway": {
     "listTitle": "Gateway Management",
@@ -843,5 +900,23 @@
     "severityRequired": "Severity is required (1-10)",
     "occurrenceRequired": "Occurrence is required (1-10)",
     "detectabilityRequired": "Detectability is required (1-10)"
+  },
+  "workOrders": {
+    "reports": "Work Order Reports",
+    "trend": "Created / Completed Trend",
+    "createdTrend": "Created",
+    "completedTrend": "Completed",
+    "byStatus": "By status",
+    "byType": "By type",
+    "avgCompletion": "Avg. completion time",
+    "totalCount": "Total work orders",
+    "slaRate": "SLA achievement rate",
+    "slaByPriority": "SLA rate (by priority)",
+    "noSlaData": "No SLA data",
+    "attachments": "Attachments",
+    "noAttachments": "No attachments",
+    "dragToUpload": "Drag files here or click to upload",
+    "uploadHint": "Images, PDF, docs, archives. Max 20MB each",
+    "uploading": "Uploading..."
   }
 }

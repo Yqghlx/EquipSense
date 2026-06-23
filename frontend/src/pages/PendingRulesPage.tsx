@@ -157,7 +157,7 @@ export default function PendingRulesPage() {
                   disabled={batchApprove.isPending}
                 >
                   <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                  {t('pendingRules.batchApprove', { defaultValue: `批量批准 (${selectedIds.size})` })}
+                  {t('pendingRules.batchApprove', { count: selectedIds.size })}
                 </Button>
                 <Button
                   size="sm"
@@ -166,7 +166,7 @@ export default function PendingRulesPage() {
                   disabled={batchReject.isPending}
                 >
                   <XCircle className="mr-1.5 h-4 w-4" />
-                  {t('pendingRules.batchReject', { defaultValue: `批量驳回 (${selectedIds.size})` })}
+                  {t('pendingRules.batchReject', { count: selectedIds.size })}
                 </Button>
                 <Button
                   size="sm"
