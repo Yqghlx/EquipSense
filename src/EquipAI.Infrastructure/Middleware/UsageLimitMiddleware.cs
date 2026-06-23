@@ -86,17 +86,27 @@ public class UsageLimitMiddleware
 
     /// <summary>
     /// 根据请求路径判断资源类型
-    /// 目前支持：设备 (/api/v1/devices) 和 用户 (/api/v1/admin/users)
+    /// 目前支持：设备 (POST /api/v1/devices) 和 用户 (POST /api/v1/admin/users)
+    ///
+    /// ⚠️ 必须对"集合根"创建端点精确匹配，不得用 StartsWith。否则所有 POST 子路由都会被
+    /// 误判为资源创建——例如 POST /api/v1/devices/{id}/health-score（重算单设备健康度）、
+    /// /api/v1/devices/health-score/refresh-all（批量重算）、/api/v1/devices/import（导入）。
+    /// 当租户恰好用满配额（CurrentDeviceCount == MaxDevices，即最理想的全量付费客户）时，
+    /// 这些非创建操作会被 403 拦截并要求"升级套餐"——对已达上限的付费客户重算健康度却被要求升级，
+    /// 既错误又荒谬。导入路径由 DeviceImportService 自有按批次配额检查兜底，无需此处重复。
     /// </summary>
     /// <param name="path">请求路径</param>
     /// <returns>资源类型标识，或 null 表示无需配额检查</returns>
     private static string? GetResourceType(string? path)
     {
         if (path == null) return null;
-        if (path.StartsWith("/api/v1/devices", StringComparison.OrdinalIgnoreCase))
-            return "device";
-        if (path.StartsWith("/api/v1/admin/users", StringComparison.OrdinalIgnoreCase))
-            return "user";
-        return null;
+        // 规范化：去除尾部斜杠后小写比较，兼容 /api/v1/devices/ 形态
+        var normalized = path.TrimEnd('/').ToLowerInvariant();
+        return normalized switch
+        {
+            "/api/v1/devices" => "device",
+            "/api/v1/admin/users" => "user",
+            _ => null
+        };
     }
 }

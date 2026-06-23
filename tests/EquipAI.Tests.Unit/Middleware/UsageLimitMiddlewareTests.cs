@@ -260,6 +260,97 @@ public class UsageLimitMiddlewareTests
             "配额超限时不应调用下一个中间件");
     }
 
+    /// <summary>
+    /// 回归：POST 到设备的非创建子路由（重算单设备健康度）不得被配额检查拦截。
+    ///
+    /// 历史缺陷：GetResourceType 用 StartsWith("/api/v1/devices") 匹配，导致所有 POST 子路由——
+    /// /api/v1/devices/{id}/health-score（重算健康度）、/health-score/refresh-all（批量重算）、
+    /// /import（导入，自有按批次配额检查）——都被当作"创建设备"做配额检查。当租户恰好用满配额
+    /// （CurrentDeviceCount == MaxDevices，即最理想的全量付费客户）时，这些非创建操作被 403 拦截，
+    /// 报"已超出设备数量上限，请升级计划"——对已达上限的付费客户，重算健康度却被要求升级套餐，
+    /// 既错误又荒谬。修复：仅对集合根 POST /api/v1/devices 精确匹配，子路由放行。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_重算单设备健康度POST_即使配额已满也不应拦截()
+    {
+        // Arrange — 租户设备配额已满（CanCreateResourceAsync 返回 false，模拟全量付费客户）
+        var mockSubscriptionService = new Mock<ISubscriptionService>();
+        mockSubscriptionService
+            .Setup(s => s.CanCreateResourceAsync(TestTenantId, "device", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var deviceId = Guid.NewGuid();
+        var context = CreateContext("POST", $"/api/v1/devices/{deviceId}/health-score", TestTenantId,
+            subscriptionService: mockSubscriptionService);
+
+        // Act
+        var (processedContext, mockNext) = await ExecuteMiddlewareAsync(context);
+
+        // Assert — 重算健康度非资源创建，必须放行，不得触发配额检查
+        processedContext.Response.StatusCode.Should().Be(200,
+            "重算健康度非创建操作，即使配额已满也不应被拦截");
+        mockNext.Verify(next => next(It.IsAny<HttpContext>()), Times.Once,
+            "非创建子路由应放行给下一个中间件");
+        mockSubscriptionService.Verify(
+            s => s.CanCreateResourceAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "非创建子路由不应触发配额检查");
+    }
+
+    /// <summary>
+    /// 回归：POST /api/v1/devices/health-score/refresh-all（批量重算）同样不得被配额拦截。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_批量重算健康度POST_即使配额已满也不应拦截()
+    {
+        // Arrange — 配额已满
+        var mockSubscriptionService = new Mock<ISubscriptionService>();
+        mockSubscriptionService
+            .Setup(s => s.CanCreateResourceAsync(TestTenantId, "device", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var context = CreateContext("POST", "/api/v1/devices/health-score/refresh-all", TestTenantId,
+            subscriptionService: mockSubscriptionService);
+
+        // Act
+        var (processedContext, mockNext) = await ExecuteMiddlewareAsync(context);
+
+        // Assert
+        processedContext.Response.StatusCode.Should().Be(200,
+            "批量重算健康度非创建操作，不应被配额拦截");
+        mockNext.Verify(next => next(It.IsAny<HttpContext>()), Times.Once);
+        mockSubscriptionService.Verify(
+            s => s.CanCreateResourceAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// 回归保护：设备批量导入 POST /api/v1/devices/import 不应被中间件做单设备配额检查——
+    /// 该路径由 DeviceImportService 自有按批次配额检查兜底（中间件单设备检查过弱且会误拦已满配额租户）。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_设备批量导入POST_不应被中间件单设备配额检查拦截()
+    {
+        // Arrange — 配额已满
+        var mockSubscriptionService = new Mock<ISubscriptionService>();
+        mockSubscriptionService
+            .Setup(s => s.CanCreateResourceAsync(TestTenantId, "device", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var context = CreateContext("POST", "/api/v1/devices/import", TestTenantId,
+            subscriptionService: mockSubscriptionService);
+
+        // Act
+        var (processedContext, mockNext) = await ExecuteMiddlewareAsync(context);
+
+        // Assert — 中间件放行，由导入服务自有按批次配额检查
+        mockNext.Verify(next => next(It.IsAny<HttpContext>()), Times.Once,
+            "导入路径应放行，由 DeviceImportService 自有配额检查兜底");
+        mockSubscriptionService.Verify(
+            s => s.CanCreateResourceAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task InvokeAsync_POST创建设备配额超限_响应体应包含中文错误信息()
     {
