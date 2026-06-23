@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Threading;
 using EquipAI.Core.Events;
 using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Data.Entities;
+using EquipAI.Infrastructure.Metrics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,6 +26,14 @@ public class TelemetryService : ITelemetryService, IDisposable
     private readonly ConcurrentQueue<TelemetryQueueItem> _queue = new();
     private readonly Timer _flushTimer;
     private const int BatchSize = 100;
+
+    /// <summary>
+    /// flush 并发保护标志：0=空闲，1=正在 flush。
+    /// Timer(500ms) 与 EnqueueAsync 满批都会触发 flush；DB 慢时一次 flush 可能跨越多个 tick，
+    /// 不加保护会导致多个 flush 并发重试，对已不堪重负的 DB 形成惊群效应。用 Interlocked 保证
+    /// 同一时刻只有一个 flush 执行，其余跳过（数据留在队列，下次 tick 再处理）。
+    /// </summary>
+    private int _isFlushing;
 
     public TelemetryService(
         IServiceScopeFactory scopeFactory,
@@ -60,6 +70,32 @@ public class TelemetryService : ITelemetryService, IDisposable
 
     public async Task FlushAsync()
     {
+        // 并发保护：见 _isFlushing 注释。CompareExchange 原子地"尝试获取锁"，
+        // 已有 flush 进行中则直接返回（数据留队列，下次 tick 处理）。
+        if (Interlocked.CompareExchange(ref _isFlushing, 1, 0) != 0)
+            return;
+
+        try
+        {
+            await FlushCoreAsync();
+        }
+        finally
+        {
+            _isFlushing = 0;
+        }
+    }
+
+    /// <summary>
+    /// 实际的批量写入逻辑（无并发保护，由 FlushAsync 包装或 Dispose 直接调用）
+    ///
+    /// 关键改进：DB 写入带有限重试。瞬时错误（连接抖动、短暂锁竞争）是遥测落库最常见的失败，
+    /// 原实现直接 catch 丢弃整批，造成数据盲区。现重试至多 4 次（退避 200ms→500ms→1s）覆盖绝大多数
+    /// 瞬时故障；重试耗尽才计入 TelemetryDropped 指标并丢弃。
+    /// 不 re-enqueue 失败批次：DB 长时间不可用时 re-enqueue 会让队列无限增长导致 OOM，
+    /// 宁可丢弃并让运维通过指标告警，由边缘网关 7 天缓冲兜底后续重传。
+    /// </summary>
+    private async Task FlushCoreAsync()
+    {
         if (_queue.IsEmpty)
             return;
 
@@ -72,38 +108,63 @@ public class TelemetryService : ITelemetryService, IDisposable
         if (items.Count == 0)
             return;
 
-        try
+        // 退避序列：首次失败后 200ms、500ms、1s 各重试一次，共 4 次尝试
+        var backoffDelays = new[] { 200, 500, 1000 };
+        var maxAttempts = backoffDelays.Length + 1;
+
+        for (var attempt = 0; ; attempt++)
         {
-            using var scope = _scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-            // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
-            // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
-            await InsertBatchAsync(dbContext, items);
-
-            _logger.LogDebug("已写入 {Count} 条遥测数据", items.Count);
-
-            foreach (var item in items)
+            try
             {
-                var evt = new TelemetryReceivedEvent(
-                    Guid.NewGuid(), DateTime.UtcNow,
-                    item.TenantId, item.DeviceId,
-                    item.Metric, item.Value,
-                    item.Timestamp, item.Quality);
+                using var scope = _scopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                await _eventBus.PublishAsync(evt);
+                // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
+                // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
+                await InsertBatchAsync(dbContext, items);
+
+                _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}）",
+                    items.Count, attempt + 1, maxAttempts);
+
+                foreach (var item in items)
+                {
+                    var evt = new TelemetryReceivedEvent(
+                        Guid.NewGuid(), DateTime.UtcNow,
+                        item.TenantId, item.DeviceId,
+                        item.Metric, item.Value,
+                        item.Timestamp, item.Quality);
+
+                    await _eventBus.PublishAsync(evt);
+                }
+
+                return; // 写入成功，退出重试循环
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "遥测数据批量写入失败，丢弃 {Count} 条数据", items.Count);
+            catch (Exception ex)
+            {
+                if (attempt < backoffDelays.Length)
+                {
+                    // 尚有重试机会：退避后重试（瞬时故障大概率下一次成功）
+                    _logger.LogWarning(ex, "遥测批量写入失败（尝试 {Attempt}/{Total}），{Delay}ms 后重试",
+                        attempt + 1, maxAttempts, backoffDelays[attempt]);
+                    await Task.Delay(backoffDelays[attempt]);
+                    continue;
+                }
+
+                // 重试耗尽：记录丢弃指标供运维告警，放弃本批
+                BusinessMetrics.TelemetryDropped.Inc(items.Count);
+                _logger.LogError(ex, "遥测批量写入重试 {Total} 次仍失败，丢弃 {Count} 条数据",
+                    maxAttempts, items.Count);
+                return;
+            }
         }
     }
 
     public void Dispose()
     {
         _flushTimer.Dispose();
-        FlushAsync().GetAwaiter().GetResult();
+        // 关闭时排空：Timer 已 Dispose 不会再触发新回调，此时直接调 FlushCoreAsync 绕过并发保护，
+        // 确保关闭瞬间队列中残留的数据被写入（若走受保护的 FlushAsync，可能因上一次回调仍在执行而被跳过）。
+        FlushCoreAsync().GetAwaiter().GetResult();
     }
 
     /// <summary>

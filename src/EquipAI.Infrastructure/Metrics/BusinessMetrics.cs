@@ -17,6 +17,15 @@ public static class BusinessMetrics
         .CreateCounter("equipai_telemetry_received_total", "遥测数据接收总数",
             new CounterConfiguration { LabelNames = new[] { "tenant_id", "device_id" } });
 
+    /// <summary>
+    /// 遥测数据写入失败丢弃总数（重试耗尽后）
+    /// 用于监控后端落库失败导致的数据盲区。正常应为 0；持续 &gt; 0 表示 DB 持续不可用，
+    /// 运维需告警排查。与边缘网关的 edgegateway_buffer_dropped_total 互补：
+    /// 后者防"后端不可达"，本指标防"后端收到却没落库"。
+    /// </summary>
+    public static readonly Counter TelemetryDropped = Prometheus.Metrics
+        .CreateCounter("equipai_telemetry_dropped_total", "遥测数据写入失败丢弃总数（重试耗尽后）");
+
     /// <summary>遥测数据处理耗时（毫秒）</summary>
     public static readonly Histogram TelemetryProcessingDuration = Prometheus.Metrics
         .CreateHistogram("equipai_telemetry_processing_duration_ms", "遥测数据处理耗时",
