@@ -181,16 +181,21 @@ public class DashboardStatsServiceTests : IDisposable
     }
 
     /// <summary>
-    /// v1.4 修复测试：跨时区用户的趋势图按租户时区分组，不再按 UTC
+    /// v1.4 修复测试：跨时区用户的趋势图按租户时区分组，不再按 UTC。
     ///
-    /// 场景：租户时区 Asia/Shanghai（UTC+8）
-    ///   - 告警发生在 UTC 17:00（北京时间次日 01:00）
-    ///   - 用户期望该告警算在"次日"，但 v1.3 之前按 UTC 当天分组
+    /// 本测试必须对"当前运行时刻"不变。早期写法用 <c>DateTime.UtcNow.Date</c> 植入 todayUtc+17h 告警
+    /// 并断言它不算在今天——但当 UTC 时间处于 16:00~24:00 时，租户本地(UTC+8)已跨日，"今天本地"翻转，
+    /// 使该告警落入今天桶、断言反转（每天约 1/3 时段失败，CI flaky）。
+    ///
+    /// 修复后写法：一切以"租户本地今天"(todayLocal)为锚点（与生产 GetAlertTrendAsync 计算方式一致），
+    /// 植入一条 UTC 日期与本地日期 deliberately 不同的告警（本地凌晨 04:00 = 前一天 20:00 UTC），
+    /// 断言它按【本地日期】落入对应桶、而非按 UTC 日期。锚点恒为 todayLocal，与当前小时无关。
     /// </summary>
     [Fact]
     public async Task GetStatsAsync_跨时区告警应按租户时区分组()
     {
-        // 1. 先建租户（时区设为 Asia/Shanghai）
+        var tz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Shanghai");
+
         _db.Tenants.Add(new Tenant
         {
             Id = _tenantId,
@@ -199,28 +204,43 @@ public class DashboardStatsServiceTests : IDisposable
             TimeZone = "Asia/Shanghai",
         });
 
-        var deviceId = Guid.NewGuid();
-        var todayUtc = DateTime.UtcNow.Date;
+        // 锚点：租户本地的"今天"（与生产 GetAlertTrendAsync 一致）；窗口为 [todayLocal-6, todayLocal]
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz).Date;
+        var startLocal = todayLocal.AddDays(-6);
 
-        // 2. 在 UTC 当天 17:00 添加一条告警（北京时间为次日 01:00）
+        // 植入一条告警：本地"昨天 04:00"，换算 UTC 为"前天 20:00"。
+        // 即告警的 UTC 日期 = 昨天-1，本地日期 = 昨天——两者不同，正是 v1.4 要覆盖的跨时区分组场景。
+        var targetLocalDate = todayLocal.AddDays(-1);               // 昨天（本地）
+        var occurredLocal = targetLocalDate.AddHours(4);            // 本地 04:00
+        var occurredUtc = TimeZoneInfo.ConvertTimeToUtc(occurredLocal, tz); // UTC = 前一天 20:00
+
         _db.Alerts.Add(new Core.Entities.Alert
         {
-            DeviceId = deviceId, TenantId = _tenantId, Metric = "temp", Severity = AlertSeverity.High,
-            Value = 100, Threshold = 80,
+            DeviceId = Guid.NewGuid(),
+            TenantId = _tenantId,
+            Metric = "temp",
+            Severity = AlertSeverity.High,
+            Value = 100,
+            Threshold = 80,
             Status = AlertStatus.Active,
-            OccurredAt = todayUtc.AddHours(17),  // UTC 17:00 = 北京时间次日 01:00
+            OccurredAt = occurredUtc,
         });
         await _db.SaveChangesAsync();
 
         var result = await _service.GetStatsAsync(_tenantId, CancellationToken.None);
 
-        // 趋势应该有 7 天
         result.AlertTrend.Should().HaveCount(7);
-        // 该告警应算在"明天"（趋势图最后一个点是租户时区的"今天"，但 17:00 UTC = 次日 01:00 本地）
-        // 所以这条告警不应该出现在趋势图的最后一个点（今天），而是该天的下一个点（不存在，被截断）
-        // 实际上：UTC 17:00 转北京时间为次日 01:00，超出"今天"窗口，但仍在 7 天内（如果今天 = 当前本地日期）
-        // 验证关键点：当天（最后一个点）的 count 应该为 0（因为告警"跨"到了明天）
-        result.AlertTrend[6].Count.Should().Be(0, "UTC 17:00 在上海时区是次日 01:00，不应算在今天");
+
+        // 昨天(本地)在 7 天窗口内的下标 = 5
+        var expectedBucket = (int)(targetLocalDate - startLocal).TotalDays;
+
+        // 按本地日期分组：告警应落在"昨天"桶，证明按租户本地日期分组
+        result.AlertTrend[expectedBucket].Count.Should().Be(1,
+            "告警应按租户本地日期(昨天)分组，落在窗口第 {0} 个点", expectedBucket);
+        // 反向佐证：若按 UTC 日期(旧 bug)分组，该告警会落到更早一个点(expectedBucket-1)，那里应为 0
+        result.AlertTrend[expectedBucket - 1].Count.Should().Be(0,
+            "UTC 日期比本地日期早一天——按 UTC 分组才会落此点，应为 0，反向证明按本地分组");
+        result.AlertTrend[6].Count.Should().Be(0, "告警本地日期为昨天，不应计入今天桶");
     }
 
     /// <summary>
