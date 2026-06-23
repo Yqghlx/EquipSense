@@ -294,27 +294,101 @@ public class TenantResolutionMiddlewareTests
     }
 
     // =====================================================================
-    // 测试：X-Tenant-Id 请求头作为备用来源
+    // 测试：X-Tenant-Id 请求头 —— 仅系统管理员可用（防越权改写租户）
     // =====================================================================
 
+    /// <summary>
+    /// 系统管理员 + JWT 无 tenant_id + X-Tenant-Id 头：应使用请求头租户（合法跨租户运维）
+    /// </summary>
     [Fact]
-    public async Task InvokeAsync_JWT中无tenant_id时_应从XTenantId请求头获取()
+    public async Task InvokeAsync_管理员且JWT无tenant_id时_应从XTenantId请求头获取()
     {
-        // Arrange — 已认证但 JWT 中没有 tenant_id，请求头中携带 X-Tenant-Id
+        var context = CreateAuthenticatedContext(
+            tenantId: null,
+            userId: TestUserId,
+            role: UserRole.SystemAdmin.ToString());
+        context.Request.Headers["X-Tenant-Id"] = TestTenantId.ToString();
+
+        var (processedContext, _) = await ExecuteMiddlewareAsync(context);
+
+        var tenantContext = processedContext.Items[TenantResolutionMiddleware.TenantContextKey] as ITenantContext;
+        tenantContext.Should().NotBeNull();
+        tenantContext!.TenantId.Should().Be(TestTenantId,
+            "因为系统管理员可通过 X-Tenant-Id 跨租户运维");
+    }
+
+    /// <summary>
+    /// 系统管理员 + JWT 已含 tenant_id + X-Tenant-Id 头：请求头应覆盖 JWT 租户
+    ///
+    /// 这是"管理员切换到任意租户排查"的核心能力：管理员的家租户在 JWT 里，但运维时可临时切到目标租户。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_管理员发送XTenantId时_应覆盖JWT中的租户()
+    {
+        var jwtTenant = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var context = CreateAuthenticatedContext(
+            tenantId: jwtTenant,
+            userId: TestUserId,
+            role: UserRole.SystemAdmin.ToString());
+        context.Request.Headers["X-Tenant-Id"] = TestTenantId.ToString();
+
+        var (processedContext, _) = await ExecuteMiddlewareAsync(context);
+
+        var tenantContext = processedContext.Items[TenantResolutionMiddleware.TenantContextKey] as ITenantContext;
+        tenantContext.Should().NotBeNull();
+        tenantContext!.TenantId.Should().Be(TestTenantId,
+            "因为管理员的 X-Tenant-Id 应覆盖 JWT 中的家租户");
+        tenantContext.IsSystemAdmin.Should().BeTrue("覆盖租户不应影响管理员标记");
+    }
+
+    /// <summary>
+    /// 【安全】非管理员 + JWT 已含 tenant_id + 伪造 X-Tenant-Id 头：必须忽略头，使用 JWT 租户
+    ///
+    /// 这是防越权的核心测试：普通用户的租户归属完全由 JWT 决定，请求头不可改写。
+    /// 即使该用户构造一个指向其他租户的 X-Tenant-Id，也只能落在自己的 JWT 租户内。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_非管理员伪造XTenantId时_必须忽略头并使用JWT租户()
+    {
+        var jwtTenant = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000000");
+        var forgedTenant = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000000");
+        var context = CreateAuthenticatedContext(
+            tenantId: jwtTenant,
+            userId: TestUserId,
+            role: UserRole.Operator.ToString());
+        // 试图越权切换到另一个租户
+        context.Request.Headers["X-Tenant-Id"] = forgedTenant.ToString();
+
+        var (processedContext, _) = await ExecuteMiddlewareAsync(context);
+
+        var tenantContext = processedContext.Items[TenantResolutionMiddleware.TenantContextKey] as ITenantContext;
+        tenantContext.Should().NotBeNull();
+        tenantContext!.TenantId.Should().Be(jwtTenant,
+            "因为非管理员的 X-Tenant-Id 必须被忽略，租户由 JWT 决定（防越权）");
+        tenantContext.TenantId.Should().NotBe(forgedTenant,
+            "伪造的目标租户绝不能生效");
+    }
+
+    /// <summary>
+    /// 【安全】非管理员 + JWT 无 tenant_id + X-Tenant-Id 头：必须忽略头，不创建租户上下文
+    ///
+    /// 纵深防御：即便未来出现"无 tenant_id 令牌"（平台级账号或令牌签发缺陷），
+    /// 非管理员也无法借此越权 —— 头被忽略，请求因无租户上下文被下游拒绝。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_非管理员且JWT无tenant_id时_必须忽略XTenantId头()
+    {
         var context = CreateAuthenticatedContext(
             tenantId: null,
             userId: TestUserId,
             role: UserRole.Operator.ToString());
         context.Request.Headers["X-Tenant-Id"] = TestTenantId.ToString();
 
-        // Act
         var (processedContext, _) = await ExecuteMiddlewareAsync(context);
 
-        // Assert — 应从请求头中解析 tenant_id 并创建租户上下文
-        var tenantContext = processedContext.Items[TenantResolutionMiddleware.TenantContextKey] as ITenantContext;
-        tenantContext.Should().NotBeNull();
-        tenantContext!.TenantId.Should().Be(TestTenantId,
-            "因为 JWT 中无 tenant_id 时，应回退到 X-Tenant-Id 请求头");
+        processedContext.Items
+            .Should().NotContainKey(TenantResolutionMiddleware.TenantContextKey,
+                "因为非管理员不能用 X-Tenant-Id 头创建租户上下文（防越权改写租户）");
     }
 
     // =====================================================================
