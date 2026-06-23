@@ -34,17 +34,27 @@ public class SignalRNotificationService : ISignalRNotificationService
     public async Task SendAlertTriggeredAsync(Guid tenantId, Guid alertId, string alertCode,
         Guid deviceId, string metric, double value, string severity)
     {
-        await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnAlertTriggered", new
-            {
-                alertId,
-                alertCode,
-                deviceId,
-                metric,
-                value,
-                severity,
-                occurredAt = DateTime.UtcNow
-            });
+        // SignalR 推送用 try/catch 隔离：Hub 推送失败（连接/序列化/底层 WebSocket 错误）不得阻塞后续
+        // 站内通知持久化与 Web Push——告警多渠道冗余，SignalR 单点失败拖垮全部通知渠道会让客户完全
+        // 错过 Critical 故障（在线 Web、离线推送、乃至下游经 DispatchAsync 发的钉钉/飞书全丢）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnAlertTriggered", new
+                {
+                    alertId,
+                    alertCode,
+                    deviceId,
+                    metric,
+                    value,
+                    severity,
+                    occurredAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 告警推送失败，继续站内通知与 Web Push: AlertId={AlertId}", alertId);
+        }
 
         // 持久化通知到数据库（租户级通知，不指定具体用户）
         var title = $"告警触发: {metric}";
