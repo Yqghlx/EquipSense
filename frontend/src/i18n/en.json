@@ -322,6 +322,7 @@
     "assignedTo": "Assigned To",
     "dueDate": "Due Date",
     "completedAt": "Completed At",
+    "actualHours": "Repair Hours",
     "slaRemaining": "{{time}} left",
     "slaOverdue": "{{time}} overdue",
     "slaDays": "{{count}}d",

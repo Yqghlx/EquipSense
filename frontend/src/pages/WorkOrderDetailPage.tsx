@@ -103,6 +103,16 @@ export default function WorkOrderDetailPage() {
           {workOrder.completedAt && (
             <div><p className="text-sm text-muted-foreground">{t('workorder.completedAt')}</p><p className="font-medium">{new Date(workOrder.completedAt).toLocaleString()}</p></div>
           )}
+          {workOrder.actualHours != null && workOrder.actualHours > 0 && (
+            <div>
+              <p className="text-sm text-muted-foreground">{t('workorder.actualHours')}</p>
+              <p className="font-medium">
+                {workOrder.actualHours < 1
+                  ? t('workorder.slaMinutes', { count: Math.round(workOrder.actualHours * 60) })
+                  : t('workorder.slaHours', { count: Math.round(workOrder.actualHours * 10) / 10 })}
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

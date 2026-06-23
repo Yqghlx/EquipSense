@@ -322,6 +322,7 @@
     "assignedTo": "派工人",
     "dueDate": "截止日期",
     "completedAt": "完成时间",
+    "actualHours": "维修工时",
     "slaRemaining": "剩 {{time}}",
     "slaOverdue": "逾期 {{time}}",
     "slaDays": "{{count}} 天",

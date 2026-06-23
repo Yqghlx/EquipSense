@@ -345,6 +345,8 @@ export interface WorkOrder {
   dueDate?: string;
   /** 完成时间（ISO 8601） */
   completedAt?: string;
+  /** 实际维修工时（小时）= 完成时间 - 开始时间；用于维修人工成本核算、MTTR、技师效率评估 */
+  actualHours?: number;
   /** 创建时间（ISO 8601） */
   createdAt: string;
 }

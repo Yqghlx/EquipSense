@@ -19,5 +19,13 @@ public class WorkOrderDto
     public Guid? AssignedTo { get; set; }
     public DateTime? DueDate { get; set; }
     public DateTime? CompletedAt { get; set; }
+
+    /// <summary>
+    /// 实际维修工时（小时）= CompletedAt - StartedAt。
+    /// 核心运维 KPI：维修人工成本核算、MTTR（平均修复时间）、技师效率评估。
+    /// 亦是知识沉淀时长阈值的依据（见 KnowledgeCaptureService）。
+    /// </summary>
+    public double? ActualHours { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }

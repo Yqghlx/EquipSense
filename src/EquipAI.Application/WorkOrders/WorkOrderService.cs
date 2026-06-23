@@ -261,6 +261,8 @@ public class WorkOrderService : IWorkOrderService
         // 记录解决措施和完成时间
         workOrder.Resolution = request.Resolution;
         workOrder.CompletedAt = DateTime.UtcNow;
+        // 计算实际维修工时（CompletedAt - StartedAt），供知识沉淀阈值与 MTTR/KPI 核算（见 ComputeActualHours）
+        ComputeActualHours(workOrder);
 
         await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.StatusChanged,
             oldStatus.ToString(), WorkOrderStatus.Completed.ToString(),
@@ -426,6 +428,9 @@ public class WorkOrderService : IWorkOrderService
         {
             workOrder.CompletedAt = DateTime.UtcNow;
         }
+        // 计算实际维修工时。从 InProgress 直接提交验收时此处首次设 CompletedAt；
+        // 从 Completed 提交时 CompletedAt 已有值，幂等重算结果一致（见 ComputeActualHours）
+        ComputeActualHours(workOrder);
 
         await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.StatusChanged,
             oldStatus.ToString(), "SubmittedForApproval",
@@ -491,6 +496,23 @@ public class WorkOrderService : IWorkOrderService
     /// 写入工单审计日志
     /// 所有工单操作都应调用此方法记录日志，确保操作可追溯
     /// </summary>
+    /// <summary>
+    /// 计算实际维修工时（小时）= CompletedAt - StartedAt，仅在两个时间戳都有值时计算（clamp 到 ≥0）。
+    ///
+    /// 关键不变量：ActualHours 是核心运维 KPI（维修人工成本、MTTR、技师效率），同时是知识沉淀
+    /// 时长阈值的依据——KnowledgeCaptureService.CaptureFromWorkOrderAsync 用
+    /// <c>(wo.ActualHours ?? 0) &lt; MinHoursForCapture</c> 过滤短工单。原实现工单完成时只设
+    /// StartedAt/CompletedAt 却从不计算 ActualHours，导致该字段永远为 null → 知识沉淀阈值恒判
+    /// 「时长不足」跳过所有工单 → 知识库自学习整体失效。本方法在工单完成/提交验收时调用以补齐。
+    /// </summary>
+    private static void ComputeActualHours(WorkOrder workOrder)
+    {
+        if (workOrder.StartedAt.HasValue && workOrder.CompletedAt.HasValue)
+        {
+            workOrder.ActualHours = Math.Max(0, (workOrder.CompletedAt.Value - workOrder.StartedAt.Value).TotalHours);
+        }
+    }
+
     private static async Task WriteLogAsync(
         AppDbContext dbContext, Guid workOrderId, WorkOrderLogAction action,
         string? oldStatus, string? newStatus, Guid? operatorId,
@@ -573,6 +595,7 @@ public class WorkOrderService : IWorkOrderService
             AssignedTo = workOrder.AssignedTo,
             DueDate = workOrder.DueDate,
             CompletedAt = workOrder.CompletedAt,
+            ActualHours = workOrder.ActualHours,
             CreatedAt = workOrder.CreatedAt
         };
     }

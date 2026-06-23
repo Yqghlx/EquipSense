@@ -146,6 +146,34 @@ public class WorkOrderServiceTests
     }
 
     [Fact]
+    public async Task CompleteAsync_应计算实际维修工时ActualHours()
+    {
+        var (db, _, service) = CreateSut();
+
+        // 创建 → 派工 → 开始执行（StartAsync 设 StartedAt）
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
+        await service.AssignAsync(_tenantId, wo.Id,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+        await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid());
+
+        // 把开始时间拉到 2 小时前（StartAsync 设的是 now），制造可测的时间差
+        var entity = await db.WorkOrders.FirstAsync(w => w.Id == wo.Id);
+        entity.StartedAt = DateTime.UtcNow.AddHours(-2);
+        await db.SaveChangesAsync();
+
+        var result = await service.CompleteAsync(
+            _tenantId, wo.Id,
+            new CompleteWorkOrderRequest { Resolution = "已修复" },
+            Guid.NewGuid(), CancellationToken.None);
+
+        // ActualHours = CompletedAt - StartedAt ≈ 2 小时。
+        // 原实现从不计算 ActualHours → 永远 null → 知识沉淀阈值 (ActualHours??0)<0.5 恒成立，
+        // 跳过所有工单的知识沉淀，知识库自学习整体失效；MTTR/维修工时 KPI 也永远为空。
+        result.ActualHours.Should().NotBeNull("完成后必须计算实际维修工时（核心 KPI + 知识沉淀阈值依赖）");
+        result.ActualHours.Should().BeApproximately(2.0, 0.01, "ActualHours = CompletedAt - StartedAt");
+    }
+
+    [Fact]
     public async Task AcceptAsync_应将状态从Completed变更为Accepted()
     {
         var (db, _, service) = CreateSut();
