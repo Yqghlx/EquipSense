@@ -33,6 +33,12 @@
     "id": "ID",
     "testConnection": "测试连接"
   },
+  "realtime": {
+    "connected": "实时连接正常",
+    "connecting": "正在建立实时连接",
+    "reconnecting": "实时连接断开，正在重连…（实时数据可能延迟）",
+    "disconnected": "实时连接已断开，实时推送已停止，请检查网络或刷新页面"
+  },
   "auth": {
     "login": "登录",
     "username": "用户名",

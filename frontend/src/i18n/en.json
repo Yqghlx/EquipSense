@@ -33,6 +33,12 @@
     "id": "ID",
     "testConnection": "Test Connection"
   },
+  "realtime": {
+    "connected": "Realtime connection healthy",
+    "connecting": "Establishing realtime connection",
+    "reconnecting": "Realtime connection lost, reconnecting… (live data may be delayed)",
+    "disconnected": "Realtime connection lost — live updates stopped. Check your network or refresh the page."
+  },
   "auth": {
     "login": "Login",
     "username": "Username",

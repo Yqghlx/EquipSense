@@ -1,4 +1,5 @@
 import { HubConnectionBuilder, HubConnection, LogLevel } from '@microsoft/signalr';
+import { useRealtimeStore } from '../stores/realtimeStore';
 
 let connection: HubConnection | null = null;
 
@@ -16,9 +17,15 @@ export function getConnection(): HubConnection | null {
  *   - 不再使用 accessTokenFactory（HttpOnly Cookie 不可被 JS 读取）
  *
  * 注意：Nginx 将 /hubs/ 代理到后端，浏览器视角为同源，Cookie 自动携带
+ *
+ * 连接状态追踪：注册 onreconnecting/onreconnected/onclose，把状态写入 realtimeStore，
+ * 供 Header 的连接指示器显示（工业场景下实时中断必须有视觉提示）。
  */
 export async function startConnection(): Promise<HubConnection> {
   if (connection) return connection;
+
+  const setStatus = useRealtimeStore.getState().setStatus;
+  setStatus('connecting');
 
   connection = new HubConnectionBuilder()
     .withUrl('/hubs/industrial')
@@ -26,7 +33,15 @@ export async function startConnection(): Promise<HubConnection> {
     .configureLogging(LogLevel.Information)
     .build();
 
+  // 关键修复：暴露连接生命周期状态给 UI
+  // withAutomaticReconnect 在前 4 次重连尝试期间触发 onreconnecting（黄灯），
+  // 成功后触发 onreconnected（绿灯）。若所有重连耗尽则触发 onclose（红灯）。
+  connection.onreconnecting(() => setStatus('reconnecting'));
+  connection.onreconnected(() => setStatus('connected'));
+  connection.onclose(() => setStatus('disconnected'));
+
   await connection.start();
+  setStatus('connected');
   return connection;
 }
 
@@ -35,5 +50,6 @@ export async function stopConnection(): Promise<void> {
   if (connection) {
     await connection.stop();
     connection = null;
+    useRealtimeStore.getState().setStatus('disconnected');
   }
 }

@@ -12,6 +12,7 @@ import {
 import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { RealtimeIndicator } from './RealtimeIndicator';
 import { useState } from 'react';
 
 /**
@@ -55,6 +56,9 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
       </div>
 
       <div className="flex items-center gap-2">
+        {/* 实时连接状态指示器（绿=正常/黄=重连中/灰=断开） */}
+        <RealtimeIndicator />
+
         {/* 通知铃铛 */}
         <DropdownMenu open={showNotifications} onOpenChange={setShowNotifications}>
           <DropdownMenuTrigger className="relative inline-flex items-center justify-center rounded-md h-9 w-9 hover:bg-accent hover:text-accent-foreground">

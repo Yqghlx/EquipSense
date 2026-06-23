@@ -51,8 +51,21 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const data = error.response?.data;
 
+    // 关键修复：网络层错误（无 response）— 浏览器无法到达服务器
+    // 工业现场 WiFi 不稳定是常态，axios 抛 ERR_NETWORK/ECONNABORTED/ECONNREFUSED 时
+    // error.response 为 undefined，原代码所有 status 分支都不命中，操作静默失败。
+    if (!error.response) {
+      const code = error.code;
+      let msg = '网络连接失败，请检查网络后重试';
+      if (code === 'ECONNABORTED') {
+        msg = '请求超时，服务器响应过慢或网络不稳定，请稍后重试';
+      } else if (code === 'ERR_NETWORK') {
+        msg = '无法连接到服务器，请检查网络连接（可能被防火墙拦截或服务器未启动）';
+      }
+      showGlobalError(msg);
+    }
     // 403 权限不足：显示友好提示
-    if (status === 403) {
+    else if (status === 403) {
       const msg = data?.message || '您没有权限执行此操作';
       showGlobalError(msg);
     }
@@ -61,9 +74,17 @@ api.interceptors.response.use(
       const msg = data?.message || '请求的资源不存在';
       showGlobalError(msg);
     }
+    // 429 限流：提示用户稍后再试（后端 IP/租户限流命中）
+    else if (status === 429) {
+      showGlobalError('操作过于频繁，请稍后再试');
+    }
     // 500 服务器错误：显示友好提示
     else if (status === 500) {
       showGlobalError('服务器内部错误，请稍后重试');
+    }
+    // 502/503/504 网关错误：反向代理或后端不可用
+    else if (status === 502 || status === 503 || status === 504) {
+      showGlobalError('服务暂时不可用，可能正在维护或过载，请稍后重试');
     }
 
     const originalRequest = error.config;
