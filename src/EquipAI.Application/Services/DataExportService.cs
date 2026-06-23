@@ -136,12 +136,57 @@ public class DataExportService
         return ToCsvBytes(sb.ToString());
     }
 
-    /// <summary>CSV 字段转义：含逗号/引号/换行时用双引号包裹并转义内部引号</summary>
+    /// <summary>
+    /// CSV 字段转义：先中和公式注入（CWE-1236），再做 RFC 4180 转义。
+    ///
+    /// 顺序很重要：必须先 <see cref="SanitizeFormula"/> 再判定是否需要引号包裹——
+    /// 公式触发符（= + - @）本身不含逗号/引号，若先转义会原样写入，注入仍在。
+    /// </summary>
     private static string Escape(string? field)
     {
         if (string.IsNullOrEmpty(field)) return string.Empty;
-        if (field.Contains(',') || field.Contains('"') || field.Contains('\n') || field.Contains('\r'))
-            return $"\"{field.Replace("\"", "\"\"")}\"";
+
+        // 第一步：中和 CSV 公式注入（详见 SanitizeFormula）
+        var sanitized = SanitizeFormula(field);
+
+        // 第二步：RFC 4180 转义——含逗号/引号/换行时用双引号包裹并转义内部引号
+        if (sanitized.Contains(',') || sanitized.Contains('"') || sanitized.Contains('\n') || sanitized.Contains('\r'))
+            return $"\"{sanitized.Replace("\"", "\"\"")}\"";
+        return sanitized;
+    }
+
+    /// <summary>
+    /// 中和 CSV 公式注入（CWE-1236 / OWASP：CSV Injection）。
+    ///
+    /// 为什么需要：导出的字段（告警消息、工单标题/根因/解决措施、审计日志的请求路径与描述等）
+    /// 部分源自用户或外部输入。攻击者可构造以 <c>=</c> 开头的载荷（如 <c>=cmd|'/c calc'!A1</c>、
+    /// <c>=HYPERLINK("http://evil")</c>）写入这些字段；最现实的向量是审计日志的 RequestPath——
+    /// 攻击者直接探测 <c>GET /=cmd|...</c> 即被记录。管理员随后导出 CSV 并用 Excel/LibreOffice/WPS 打开时，
+    /// 这些单元格会被当作公式求值，触发命令执行或外链钓鱼。
+    ///
+    /// 防护：若单元格首个字符为制表/回车（部分表格软件的 DDE 触发符），或首个非空白字符为
+    /// 公式触发符（<c>=</c> <c>+</c> <c>-</c> <c>@</c>），在内容前前置单引号 <c>'</c>。
+    /// Excel 将前置单引号视为"强制文本"标记：不在界面显示、亦不求值，从而把载荷降级为纯文本。
+    /// 前导空白也要检查，以封堵 <c>" =cmd"</c> 这类绕过。
+    /// </summary>
+    private static string SanitizeFormula(string field)
+    {
+        if (string.IsNullOrEmpty(field)) return field;
+
+        // 首字符为制表/回车——直接前置单引号
+        var first = field[0];
+        if (first == '\t' || first == '\r')
+            return "'" + field;
+
+        // 跳过前导空白后检查首个字符是否为公式触发符（兼容前置空格绕过）
+        var trimmed = field.AsSpan().TrimStart();
+        if (!trimmed.IsEmpty)
+        {
+            var c = trimmed[0];
+            if (c == '=' || c == '+' || c == '-' || c == '@')
+                return "'" + field;
+        }
+
         return field;
     }
 

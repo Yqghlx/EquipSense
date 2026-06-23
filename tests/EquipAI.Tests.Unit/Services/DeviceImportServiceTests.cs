@@ -340,6 +340,74 @@ public class DeviceImportServiceTests
         template.Should().Contain("PUMP-001"); // 示例数据
     }
 
+    // ========================================================================
+    // Location 规范化测试（jsonb 列防崩溃）
+    // ========================================================================
+
+    /// <summary>
+    /// location 列为 jsonb，纯文本会触发 PG 校验失败回滚整批。
+    /// 此缺陷在 InMemory/SQLite 测试库上无法复现（两者不强制 jsonb），仅真实 PostgreSQL 暴露，
+    /// 因此直接断言规范化逻辑产出合法 JSON。
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void NormalizeLocation_当为空或空白时_应返回空对象(string? location)
+    {
+        DeviceImportService.NormalizeLocation(location).Should().Be("{}");
+    }
+
+    [Fact]
+    public void NormalizeLocation_当为纯文本时_应包装为合法JSON且不丢数据()
+    {
+        // 客户最常见场景：不知道 JSON 语法，直接填中文位置
+        var result = DeviceImportService.NormalizeLocation("A厂1车间3工位");
+
+        // 产出必须是合法 JSON（这是 jsonb 列的唯一硬性要求）
+        FluentActions.Invoking(() => System.Text.Json.JsonDocument.Parse(result))
+            .Should().NotThrow("规范化结果必须是合法 JSON，否则 jsonb 列校验失败");
+        // 原始文本不得丢失
+        result.Should().Contain("A厂1车间3工位");
+        result.Should().StartWith("{");
+    }
+
+    [Fact]
+    public void NormalizeLocation_当已是合法JSON时_应原样保留()
+    {
+        // 模板示例形态，JSON 熟练客户不应被改写
+        var json = "{\"workshop\":\"A\",\"line\":\"1\"}";
+        DeviceImportService.NormalizeLocation(json).Should().Be(json);
+    }
+
+    [Fact]
+    public void NormalizeLocation_当文本含特殊字符时_应正确转义产出合法JSON()
+    {
+        // 含引号、反斜杠的文本——必须被 JSON 转义，否则产出非法 JSON
+        var result = DeviceImportService.NormalizeLocation("A\"厂\\1线");
+
+        FluentActions.Invoking(() => System.Text.Json.JsonDocument.Parse(result))
+            .Should().NotThrow("含特殊字符的文本经转义后仍须是合法 JSON");
+    }
+
+    [Fact]
+    public async Task ExecuteImportAsync_当location为纯文本时_应正常导入不崩溃且存为合法JSON()
+    {
+        // 回归：历史上此场景会在真实 PG 上抛 invalid json 并回滚整批；
+        // 修复后位置被规范化为合法 JSON，导入成功。
+        var csv = "device_code,name,type,location\nD-001,设备,泵,A厂1车间\n";
+
+        var result = await _sut.ExecuteImportAsync(csv, "devices.csv", _tenantId, Guid.NewGuid(), default);
+
+        result.Imported.Should().Be(1);
+        result.Failed.Should().Be(0);
+        var device = await _db.Devices.FirstAsync();
+        // 存储值必须是合法 JSON（jsonb 列硬性要求）
+        FluentActions.Invoking(() => System.Text.Json.JsonDocument.Parse(device.Location))
+            .Should().NotThrow();
+        device.Location.Should().Contain("A厂1车间", "纯文本位置不得丢失");
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _db.DisposeAsync();

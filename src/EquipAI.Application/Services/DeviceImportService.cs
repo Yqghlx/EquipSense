@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.Knowledge.DTOs;
@@ -31,6 +32,17 @@ public class DeviceImportService
 
     /// <summary>单次导入最大行数，防止超大文件导致内存溢出</summary>
     private const int MaxImportRows = 10_000;
+
+    /// <summary>
+    /// location 规范化的 JSON 序列化选项：使用宽松编码器，保留中文等 Unicode 字面量。
+    /// 为什么不用默认编码器：默认会把中文转义成 厂 形式，技术上合法但 DB 中不可读，
+    /// 客户/管理员直查 location 列会看到乱码。该 JSON 仅存入 jsonb 列（非 HTML/JS 上下文），
+    /// 无 XSS 风险，故可安全使用宽松编码器。结构性字符（引号、反斜杠、控制符）仍按 JSON 规范转义。
+    /// </summary>
+    private static readonly JsonSerializerOptions LocationJsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     /// <summary>设备编码最大长度</summary>
     private const int MaxDeviceCodeLength = 50;
@@ -206,7 +218,8 @@ public class DeviceImportService
                     Manufacturer = item.Manufacturer,
                     Model = item.Model,
                     SerialNumber = item.SerialNumber,
-                    Location = string.IsNullOrWhiteSpace(item.Location) ? "{}" : item.Location,
+                    // location 为 jsonb 列，必须规范化为合法 JSON，否则 PG 校验失败会回滚整批导入
+                    Location = NormalizeLocation(item.Location),
                     GatewayId = item.GatewayId,
                     Criticality = criticality,
                     InstallDate = installDate,
@@ -269,6 +282,53 @@ public class DeviceImportService
         return DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
             ? date
             : null;
+    }
+
+    /// <summary>
+    /// 规范化安装位置为合法 JSON。
+    ///
+    /// 为什么需要：Device.Location 列映射为 PostgreSQL <c>jsonb</c>（见 DeviceConfiguration），
+    /// 数据库会强制校验 JSON 语法。导入时若直接存原始文本（客户常直接填"A厂1车间"而非 JSON），
+    /// SaveChangesAsync 会抛 <c>invalid input syntax for type json</c>，导致整个导入事务回滚——
+    /// 500 台设备的批量上传可能因 1 行位置文本不规范而全部失败，且报错对客户完全不可读。
+    /// 注意：单元/集成测试使用 InMemory/SQLite，两者都不强制 jsonb 类型，因此该缺陷无法被现有测试捕获，
+    /// 只在真实 PostgreSQL 上暴露（典型的"测试通过、生产崩溃"）。
+    ///
+    /// 规范化策略（保证产出一定是合法 JSON，永不触发 jsonb 校验失败）：
+    /// 1. 空白 → <c>"{}"</c>（与实体默认值一致）；
+    /// 2. 已是合法 JSON（对象/数组/标量）→ 原样保留，兼容模板示例 <c>{"workshop":"A"}</c>；
+    /// 3. 其余纯文本 → 包装为 <c>{"name":"&lt;文本&gt;"}</c>，内部文本经 JSON 转义，不丢数据。
+    /// </summary>
+    internal static string NormalizeLocation(string? location)
+    {
+        if (string.IsNullOrWhiteSpace(location))
+            return "{}";
+
+        var trimmed = location.Trim();
+
+        // 已是合法 JSON 则原样保留
+        if (IsValidJson(trimmed))
+            return trimmed;
+
+        // 纯文本包装为对象；LocationJsonOptions 保留中文字面量，内部引号/反斜杠/控制字符仍按 JSON 规范转义
+        return JsonSerializer.Serialize(new Dictionary<string, string> { ["name"] = trimmed }, LocationJsonOptions);
+    }
+
+    /// <summary>
+    /// 判断字符串是否为合法 JSON（容错解析，仅用于决定是否需要包装）。
+    /// 裸数字、带引号字符串、对象、数组均视为合法——它们本身都是合法的 jsonb 值，不会触发校验失败。
+    /// </summary>
+    private static bool IsValidJson(string value)
+    {
+        try
+        {
+            using var _ = JsonDocument.Parse(value);
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     // ========================================================================
