@@ -421,8 +421,16 @@ public class WorkOrderService : IWorkOrderService
                 $"工单 {workOrder.WorkOrderCode} 当前状态为 {workOrder.Status}，仅支持从 InProgress 或 Completed 状态提交验收");
         }
 
-        // 记录解决措施和完成时间
         var oldStatus = workOrder.Status;
+
+        // 状态流转：SubmitAsync 是状态流转的唯一负责人，无论是否匹配到审批链模板都应将工单
+        // 置为 SubmittedForApproval。原实现把状态流转外包给 ApprovalChainService.CreateApprovalRecordsAsync
+        // 的副作用，导致无审批链模板时工单状态实际未变更（只写了 "SubmittedForApproval" 日志字符串，
+        // 实体 Status 仍是 InProgress/Completed），且不发布事件 → Dashboard/工单列表/详情页不实时刷新
+        // （回归 bug #247）。
+        TransitionStatus(workOrder, WorkOrderStatus.SubmittedForApproval);
+
+        // 记录解决措施和完成时间
         workOrder.Resolution = request.Resolution;
         if (workOrder.CompletedAt == null)
         {
@@ -433,13 +441,12 @@ public class WorkOrderService : IWorkOrderService
         ComputeActualHours(workOrder);
 
         await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.StatusChanged,
-            oldStatus.ToString(), "SubmittedForApproval",
+            oldStatus.ToString(), WorkOrderStatus.SubmittedForApproval.ToString(),
             userId, note: $"提交验收（解决措施: {request.Resolution}）", ct);
 
         await dbContext.SaveChangesAsync(ct);
 
-        // 尝试匹配审批链模板并创建审批记录
-        // CreateApprovalRecordsAsync 内部会匹配模板，若无匹配则不创建审批记录，工单状态不变
+        // 匹配审批链模板并创建审批记录（仅创建记录，状态流转已由本方法完成，单一职责）
         await _approvalChainService.CreateApprovalRecordsAsync(
             tenantId, workOrder.Id, workOrder.Type, workOrder.Priority, ct);
 
@@ -447,8 +454,9 @@ public class WorkOrderService : IWorkOrderService
             "工单 {WorkOrderCode} 已提交验收（解决措施: {Resolution}）",
             workOrder.WorkOrderCode, request.Resolution);
 
-        // 重新加载工单以获取最新状态（CreateApprovalRecordsAsync 可能已更新状态）
-        await dbContext.Entry(workOrder).ReloadAsync(ct);
+        // 发布状态变更事件（与 Assign/Start/Complete/Accept/Reject/Close/Cancel 兄弟方法一致），
+        // 供 SignalR 实时推送 → Dashboard/工单列表/详情页实时刷新
+        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }

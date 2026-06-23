@@ -207,31 +207,14 @@ public class ApprovalChainService : IApprovalChainService
         }
 
         dbContext.WorkOrderApprovals.AddRange(approvals);
+        await dbContext.SaveChangesAsync(ct);
 
-        // 同时更新工单状态为 SubmittedForApproval
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == workOrderId, ct);
-        if (workOrder != null)
-        {
-            var oldStatus = workOrder.Status;
-            workOrder.Status = WorkOrderStatus.SubmittedForApproval;
+        _logger.LogInformation(
+            "工单 {WorkOrderId} 已匹配审批链模板「{TemplateName}」，创建了 {StepCount} 个审批步骤",
+            workOrderId, template.Name, approvals.Count);
 
-            await dbContext.SaveChangesAsync(ct);
-
-            _logger.LogInformation(
-                "工单 {WorkOrderId} 已匹配审批链模板「{TemplateName}」，创建了 {StepCount} 个审批步骤",
-                workOrderId, template.Name, approvals.Count);
-
-            // 发布工单状态变更事件
-            await PublishStatusChangedEvent(tenantId, workOrderId, oldStatus, workOrder.Status, null, ct);
-        }
-        else
-        {
-            await dbContext.SaveChangesAsync(ct);
-
-            _logger.LogInformation(
-                "工单 {WorkOrderId} 已匹配审批链模板「{TemplateName}」，创建了 {StepCount} 个审批步骤（工单不存在，仅创建审批记录）",
-                workOrderId, template.Name, approvals.Count);
-        }
+        // 注意：工单状态流转（→SubmittedForApproval）与状态变更事件发布由调用方 WorkOrderService.SubmitAsync
+        // 统一负责（单一职责），本方法只创建审批记录，不再越权改状态/发事件（回归 bug #247 重构）。
     }
 
     /// <inheritdoc />

@@ -368,21 +368,39 @@ public class WorkOrderServiceTests
     }
 
     [Fact]
-    public async Task SubmitAsync_InProgress状态应允许提交验收()
+    public async Task SubmitAsync_InProgress状态提交验收_应流转状态并发布事件()
     {
-        var (db, _, service) = CreateSut();
+        var (db, eventBus, service) = CreateSut();
         var userId = Guid.NewGuid();
         var woId = await AdvanceToStatus(service, WorkOrderStatus.InProgress);
+
+        // 记录提交验收前已发布的状态变更事件数（AdvanceToStatus 流程已发布多次）
+        var statusChangedBefore = eventBus.Invocations
+            .Count(i => i.Method.Name == nameof(IEventBus.PublishAsync)
+                     && i.Arguments[0] is WorkOrderStatusChangedEvent);
 
         var result = await service.SubmitAsync(_tenantId, woId,
             new CompleteWorkOrderRequest { Resolution = "提交验收" }, userId);
 
-        // SubmitAsync 不直接改变状态，它调用 approvalChainService 处理
-        result.Should().NotBeNull();
+        // 回归 bug #247：SubmitAsync 是 8 个状态变更方法中唯一不发布 WorkOrderStatusChangedEvent 的，
+        // 它把状态流转外包给 ApprovalChainService.CreateApprovalRecordsAsync 的副作用。本测试用 Mock
+        // IApprovalChainService（默认什么都不做 = 无审批链模板场景），导致：(1) 工单状态实际未流转
+        // （只写了 "SubmittedForApproval" 日志字符串，实体 Status 仍是 InProgress），(2) 不发布事件 →
+        // Dashboard/工单列表/详情页不实时刷新，用户提交验收后看不到任何变化。修复后 SubmitAsync 自己
+        // 负责状态流转（→SubmittedForApproval）+ 发布事件，与 7 个兄弟方法（Assign/Start/Complete/
+        // Accept/Reject/Close/Cancel）一致。
+        result.Status.Should().Be("SubmittedForApproval",
+            "提交验收应将工单流转到 SubmittedForApproval（无论有无审批链模板）");
+
+        var statusChangedAfter = eventBus.Invocations
+            .Count(i => i.Method.Name == nameof(IEventBus.PublishAsync)
+                     && i.Arguments[0] is WorkOrderStatusChangedEvent);
+        statusChangedAfter.Should().Be(statusChangedBefore + 1,
+            "提交验收是状态变更，必须发布 1 次 WorkOrderStatusChangedEvent 供 SignalR 实时推送");
     }
 
     [Fact]
-    public async Task SubmitAsync_Completed状态应允许提交验收()
+    public async Task SubmitAsync_Completed状态提交验收_应流转状态为SubmittedForApproval()
     {
         var (db, _, service) = CreateSut();
         var userId = Guid.NewGuid();
@@ -391,7 +409,8 @@ public class WorkOrderServiceTests
         var result = await service.SubmitAsync(_tenantId, woId,
             new CompleteWorkOrderRequest { Resolution = "再次提交" }, userId);
 
-        result.Should().NotBeNull();
+        result.Status.Should().Be("SubmittedForApproval",
+            "从 Completed 提交验收同样应流转到 SubmittedForApproval");
     }
     private async Task<Guid> AdvanceToStatus(WorkOrderService service, WorkOrderStatus targetStatus)
     {
