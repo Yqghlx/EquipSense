@@ -122,6 +122,66 @@ export default function DashboardPage() {
         </Card>
       )}
 
+      {/* 新客户引导：设备/告警/工单全为 0 时显示快速开始卡片 */}
+      {stats && !statsLoading && stats.totalDevices === 0
+        && stats.activeAlerts === 0 && stats.pendingWorkOrders === 0 && (
+        <Card className="border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="rounded-lg bg-primary/15 p-2">
+                <Wrench className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold">
+                  {t('dashboard.welcome.title', '欢迎使用 EquipSense')}
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {t('dashboard.welcome.subtitle', '完成以下三步，开启工业设备智能监控之旅')}
+                </p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <button
+                onClick={() => navigate('/devices')}
+                className="flex flex-col items-start gap-1 rounded-lg border bg-background p-4 text-left transition-colors hover:border-primary hover:bg-accent"
+              >
+                <span className="text-xs font-medium text-primary">1</span>
+                <span className="text-sm font-medium">
+                  {t('dashboard.welcome.step1.title', '添加设备')}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t('dashboard.welcome.step1.desc', '注册 PLC、CNC、空压机等工业设备')}
+                </span>
+              </button>
+              <button
+                onClick={() => navigate('/alert-rules')}
+                className="flex flex-col items-start gap-1 rounded-lg border bg-background p-4 text-left transition-colors hover:border-primary hover:bg-accent"
+              >
+                <span className="text-xs font-medium text-primary">2</span>
+                <span className="text-sm font-medium">
+                  {t('dashboard.welcome.step2.title', '配置告警规则')}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t('dashboard.welcome.step2.desc', '设置阈值、组合、基线三级告警')}
+                </span>
+              </button>
+              <button
+                onClick={() => navigate('/device-setup')}
+                className="flex flex-col items-start gap-1 rounded-lg border bg-background p-4 text-left transition-colors hover:border-primary hover:bg-accent"
+              >
+                <span className="text-xs font-medium text-primary">3</span>
+                <span className="text-sm font-medium">
+                  {t('dashboard.welcome.step3.title', '接入遥测数据')}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t('dashboard.welcome.step3.desc', '通过 MQTT 或边缘网关接入实时数据')}
+                </span>
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 统计卡片（可点击跳转） */}
       <div className="grid gap-4 md:grid-cols-4">
         {statCards.map(({ label, value, icon: Icon, color, bg, link }) => (
