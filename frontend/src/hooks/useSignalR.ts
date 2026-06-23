@@ -59,6 +59,20 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['work-orders'] });
       });
 
+      // SLA 超时升级是工业场景最紧急事件之一（设备停机威胁），须即时通知主管并刷新工单列表/Dashboard。
+      // 后端 CheckAndEscalateAsync 只改 Priority 不改 Status、不发 WorkOrderStatusChangedEvent，
+      // 故必须显式监听 OnWorkOrderEscalated，否则主管看到的还是旧优先级（直到手动刷新页面）。
+      conn.on('OnWorkOrderEscalated', (data: { workOrderCode: string; title: string; newPriority: string }) => {
+        push({
+          type: 'alert',
+          title: i18n.t('notification.workOrderEscalatedTitle', { code: data.workOrderCode }),
+          message: i18n.t('notification.workOrderEscalatedMessage', { title: data.title, priority: data.newPriority }),
+          link: `/work-orders`,
+        });
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['work-orders'] });
+      });
+
       conn.on('OnTelemetryUpdate', (deviceId: string) => {
         queryClient.invalidateQueries({ queryKey: ['telemetry', deviceId] });
       });

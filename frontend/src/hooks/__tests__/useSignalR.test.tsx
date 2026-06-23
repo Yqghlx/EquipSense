@@ -88,6 +88,11 @@ describe('useSignalR', () => {
       expect(mockConnection.on).toHaveBeenCalledWith('OnAlertTriggered', expect.any(Function));
       expect(mockConnection.on).toHaveBeenCalledWith('OnAlertResolved', expect.any(Function));
       expect(mockConnection.on).toHaveBeenCalledWith('OnTelemetryUpdate', expect.any(Function));
+      // 工单事件必须被监听：SLA 升级只改 Priority 不改 Status，若不监听 OnWorkOrderEscalated，
+      // 主管看到的还是旧优先级（直到手动刷新）——工业场景设备停机威胁，延误响应
+      expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderCreated', expect.any(Function));
+      expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderStatusChanged', expect.any(Function));
+      expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderEscalated', expect.any(Function));
     });
   });
 

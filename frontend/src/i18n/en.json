@@ -113,7 +113,9 @@
   "notification": {
     "close": "Close Notification",
     "alertTitle": "Alert: {{metric}}",
-    "alertMessage": "{{metric}} = {{value}} ({{severity}})"
+    "alertMessage": "{{metric}} = {{value}} ({{severity}})",
+    "workOrderEscalatedTitle": "SLA Overdue Escalation: {{code}}",
+    "workOrderEscalatedMessage": "Work order \"{{title}}\" is overdue; priority escalated to {{priority}}. Please handle promptly."
   },
   "dashboard": {
     "title": "Dashboard",

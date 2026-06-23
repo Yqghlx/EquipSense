@@ -113,7 +113,9 @@
   "notification": {
     "close": "关闭通知",
     "alertTitle": "告警：{{metric}}",
-    "alertMessage": "{{metric}} = {{value}}（{{severity}}）"
+    "alertMessage": "{{metric}} = {{value}}（{{severity}}）",
+    "workOrderEscalatedTitle": "SLA 超时升级：{{code}}",
+    "workOrderEscalatedMessage": "工单《{{title}}》SLA 已超时，优先级升级为 {{priority}}，请尽快处理"
   },
   "dashboard": {
     "title": "仪表盘",
