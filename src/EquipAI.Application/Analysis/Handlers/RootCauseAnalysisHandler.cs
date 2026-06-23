@@ -49,12 +49,21 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
         try
         {
             // 查询该设备指标的历史基线数据，用于 L3 统计分析
+            // 关键：本处理器运行在后台事件管线（无 HttpContext），从 scope 解析出的 ITenantContext 走
+            // DI 回退分支 → TenantId == Guid.Empty。若沿用默认全局租户过滤器，查询恒为
+            // TenantId == Guid.Empty，查不到任何真实租户的基线 → baseline 恒为 null →
+            // 根因分析四级降级链中的 L3 统计分析永不触发，且 L1 LLM 诊断失去历史基线上下文。
+            // 故必须 IgnoreQueryFilters 绕过失效的过滤器，并显式按事件载荷中的租户限定
+            // （@event.TenantId 由服务端告警管线产生，可信）。
             MetricBaselineEntity? baseline;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 baseline = await dbContext.MetricBaselines
-                    .Where(b => b.DeviceId == @event.DeviceId && b.Metric == @event.Metric)
+                    .IgnoreQueryFilters()
+                    .Where(b => b.TenantId == @event.TenantId
+                        && b.DeviceId == @event.DeviceId
+                        && b.Metric == @event.Metric)
                     .OrderByDescending(b => b.PeriodEnd)
                     .FirstOrDefaultAsync(cancellationToken);
             }

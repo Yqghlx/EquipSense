@@ -194,7 +194,9 @@ public class RootCauseAnalysisHandlerTests
         var deviceId = Guid.NewGuid();
         db.MetricBaselines.Add(new MetricBaseline
         {
-            DeviceId = deviceId, Metric = "temperature",
+            // 必须设置与事件一致的 TenantId：处理器按事件租户显式过滤基线
+            // （后台无 HttpContext，需 IgnoreQueryFilters + 显式 TenantId 限定）
+            TenantId = _tenantId, DeviceId = deviceId, Metric = "temperature",
             AvgValue = 45.0, StdDev = 5.0, SampleCount = 100,
             PeriodStart = DateTime.UtcNow.AddDays(-7), PeriodEnd = DateTime.UtcNow
         });
