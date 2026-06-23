@@ -80,14 +80,18 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
     /// Why：DeviceTelemetry 配置了 HasNoKey（见 DeviceTelemetryConfiguration.cs:11），
     /// EF Core ChangeTracker 拒绝追踪无主键实体。生产环境通过 ExecuteSqlRawAsync
     /// 多值 INSERT 写入（TelemetryService.cs:112），测试必须用同样方式绕过追踪器。
+    ///
+    /// 注意：时间必须用 SpecifyKind(Utc) — SQLite provider 在写入时根据 Kind 决定
+    /// 存储格式，如果不一致会让字符串比较错位，进而让"最近 N 小时"过滤失效。
     /// </summary>
     private static async Task InsertTelemetryAsync(AppDbContext db, Guid deviceId, Guid tenantId,
         string metric, DateTime time, double value, string quality = "good")
     {
+        var utcTime = DateTime.SpecifyKind(time.ToUniversalTime(), DateTimeKind.Utc);
         await db.Database.ExecuteSqlRawAsync(
             "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) " +
             "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6})",
-            time.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"), tenantId, deviceId, metric, value, quality, "test");
+            utcTime, tenantId, deviceId, metric, value, quality, "test");
     }
 
     /// <summary>
