@@ -53,4 +53,14 @@ public interface ISignalRNotificationService
     /// 不触发阈值告警，故必须有独立离线通知。此方法确保运维收到推送 + 持久化通知 + Web Push。
     /// </summary>
     Task SendDeviceOfflineAsync(Guid tenantId, Guid deviceId, string deviceCode, string deviceName);
+
+    /// <summary>
+    /// 推送网关离线事件到租户组
+    ///
+    /// 业务意义：网关是数据采集入口，离线=该网关下所有设备数据断，是 P0 工业事件（比单设备离线更严重，
+    /// 影响整条产线/整个车间）。GatewayHeartbeatMonitor 检测到心跳超时即标记 offline，但若不通知，
+    /// 运维完全不知情（直到手动查看网关列表）——数据采集已断而无人响应。此方法确保运维收到推送 +
+    /// 持久化通知 + Web Push（与设备离线 #232 对称）。
+    /// </summary>
+    Task SendGatewayOfflineAsync(Guid tenantId, Guid gatewayId, string gatewayCode, string gatewayName);
 }

@@ -1,3 +1,4 @@
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -43,13 +44,18 @@ public class GatewayHeartbeatMonitor : BackgroundService
         }
     }
 
-    /** 检查所有网关的心跳状态 */
-    private async Task CheckHeartbeatsAsync(CancellationToken ct)
+    /// <summary>
+    /// 检查所有网关的心跳状态。public 便于单元测试直接验证（跳过 ExecuteAsync 的 Task.Delay 调度）。
+    /// </summary>
+    public async Task CheckHeartbeatsAsync(CancellationToken ct = default)
     {
         var timeoutSeconds = _configuration.GetValue("Gateway:HeartbeatTimeoutSeconds", 90);
 
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 通过 scope 解析 Scoped 通知服务，避免 Singleton HostedService 直接构造注入 ISignalRNotificationService
+        // 导致的 captive dependency（Scoped 服务被 Singleton 捕获，跨请求共享错误生命周期）。
+        var signalR = scope.ServiceProvider.GetRequiredService<ISignalRNotificationService>();
 
         var threshold = DateTime.UtcNow.AddSeconds(-timeoutSeconds);
 
@@ -64,6 +70,18 @@ public class GatewayHeartbeatMonitor : BackgroundService
         {
             gateway.Status = "offline";
             _logger.LogInformation("网关 {GatewayId}（{Name}）心跳超时，标记为 offline", gateway.GatewayId, gateway.Name);
+
+            // 推送网关离线通知（P0 工业：网关是数据采集入口，离线=该网关下设备数据断，运维需立即知晓）。
+            // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强），
+            // 且与持久化通知/Web Push 解耦（推送服务的隔离由 SendGatewayOfflineAsync 内部保证）。
+            try
+            {
+                await signalR.SendGatewayOfflineAsync(gateway.TenantId, gateway.Id, gateway.GatewayId, gateway.Name);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "网关离线通知推送失败，不影响离线标记: GatewayId={GatewayId}", gateway.GatewayId);
+            }
         }
 
         await dbContext.SaveChangesAsync(ct);

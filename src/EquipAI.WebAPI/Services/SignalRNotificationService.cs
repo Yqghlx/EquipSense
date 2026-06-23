@@ -266,4 +266,53 @@ public class SignalRNotificationService : ISignalRNotificationService
 
         await _db.SaveChangesAsync();
     }
+
+    /// <inheritdoc />
+    public async Task SendGatewayOfflineAsync(Guid tenantId, Guid gatewayId, string gatewayCode, string gatewayName)
+    {
+        // 网关离线（心跳超时）是 P0 工业事件：网关是数据采集入口，离线=该网关下所有设备数据断，
+        // 影响整条产线/整个车间。原 GatewayHeartbeatMonitor 只改 Status+日志，运维完全不知情，直到手动查看
+        // 网关列表才发现。补齐 SignalR + 持久化 + Web Push 三路通知（与设备离线 #232 对称，网关离线更严重）。
+        // SignalR 推送用 try/catch 隔离：网关离线须通知运维，运维未必在线看 Web，依赖站内持久化 + Web Push 兜底，
+        // SignalR 单点失败不得拖垮它们（与 SendAlertTriggeredAsync 一致）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnGatewayOffline", new
+                {
+                    gatewayId,
+                    gatewayCode,
+                    gatewayName,
+                    changedAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 网关离线推送失败，继续站内通知与 Web Push: GatewayId={GatewayId}", gatewayId);
+        }
+
+        var notifyTitle = $"⚠️ 网关离线: {gatewayCode}";
+        var notifyContent = $"网关《{gatewayName}》（{gatewayCode}）心跳超时，该网关下设备数据采集已中断，请立即检查";
+
+        _db.Notifications.Add(new Notification
+        {
+            TenantId = tenantId,
+            Type = "gateway_offline",
+            Title = notifyTitle,
+            Content = notifyContent,
+            RelatedId = gatewayId,
+            Link = "/gateways",
+        });
+
+        try
+        {
+            await _pushService.SendToTenantAsync(tenantId, notifyTitle, notifyContent, "/gateways");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Web Push 推送失败（网关离线），网关 ID: {GatewayId}", gatewayId);
+        }
+
+        await _db.SaveChangesAsync();
+    }
 }

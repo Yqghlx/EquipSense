@@ -117,7 +117,9 @@
     "workOrderEscalatedTitle": "SLA 超时升级：{{code}}",
     "workOrderEscalatedMessage": "工单《{{title}}》SLA 已超时，优先级升级为 {{priority}}，请尽快处理",
     "deviceOfflineTitle": "设备离线：{{code}}",
-    "deviceOfflineMessage": "设备《{{name}}》（{{code}}）通信中断，请检查"
+    "deviceOfflineMessage": "设备《{{name}}》（{{code}}）通信中断，请检查",
+    "gatewayOfflineTitle": "网关离线：{{code}}",
+    "gatewayOfflineMessage": "网关《{{name}}》（{{code}}）心跳超时，该网关下设备数据采集已中断，请立即检查"
   },
   "dashboard": {
     "title": "仪表盘",

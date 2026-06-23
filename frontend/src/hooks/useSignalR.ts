@@ -89,6 +89,20 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['devices'] });
       });
 
+      // 网关离线是 P0 工业事件：网关是数据采集入口，离线=该网关下所有设备数据断（影响整条产线），
+      // 比单设备离线更严重。后端 GatewayHeartbeatMonitor 心跳超时即标记 offline 并推送 OnGatewayOffline，
+      // 前端必须监听以刷新网关列表/Dashboard + 弹通知，否则运维不知情（直到手动查看网关列表）。
+      conn.on('OnGatewayOffline', (data: { gatewayCode: string; gatewayName: string }) => {
+        push({
+          type: 'alert',
+          title: i18n.t('notification.gatewayOfflineTitle', { code: data.gatewayCode }),
+          message: i18n.t('notification.gatewayOfflineMessage', { name: data.gatewayName, code: data.gatewayCode }),
+          link: `/gateways`,
+        });
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['gateways'] });
+      });
+
       conn.on('OnTelemetryUpdate', (deviceId: string) => {
         queryClient.invalidateQueries({ queryKey: ['telemetry', deviceId] });
       });
