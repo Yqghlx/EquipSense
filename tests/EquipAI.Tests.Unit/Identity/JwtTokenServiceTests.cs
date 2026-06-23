@@ -173,4 +173,66 @@ public class JwtTokenServiceTests
         claims.Should().ContainKey("token_version");
         claims["token_version"].Should().Be(user.TokenVersion.ToString());
     }
+
+    // ========================================================================
+    // 访问令牌有效期测试（默认 15 分钟，可配置，钳制 [10,1440]）
+    // 安全回归：原实现硬编码 24h，登出/改密后旧令牌仍可用 24h，泄漏暴露面过大
+    // ========================================================================
+
+    /// <summary>
+    /// 辅助方法：用指定配置构建 JwtTokenService
+    /// </summary>
+    private static JwtTokenService CreateWithConfig(int? accessTokenMinutes = null)
+    {
+        var dict = new Dictionary<string, string?>
+        {
+            ["Jwt:Secret"] = new string('x', 32),
+            ["Jwt:Issuer"] = "TestIssuer",
+            ["Jwt:Audience"] = "TestAudience",
+        };
+        if (accessTokenMinutes.HasValue)
+        {
+            dict["Jwt:AccessTokenMinutes"] = accessTokenMinutes.Value.ToString();
+        }
+        return new JwtTokenService(new ConfigurationBuilder().AddInMemoryCollection(dict).Build());
+    }
+
+    [Fact]
+    public void AccessTokenMinutes_未配置时_应默认为15分钟()
+    {
+        var sut = CreateWithConfig(accessTokenMinutes: null);
+        sut.AccessTokenMinutes.Should().Be(15,
+            "因为未配置时应采用默认值 15 分钟（原 24h 过长，缩小令牌泄漏暴露面）");
+    }
+
+    [Theory]
+    [InlineData(0, 10)]     // 低于下限 → 钳制到 10（保证前端 5min 预刷新窗口）
+    [InlineData(5, 10)]     // 低于下限 → 钳制到 10
+    [InlineData(30, 30)]    // 区间内 → 原值
+    [InlineData(1440, 1440)]// 上限 → 原值（24h）
+    [InlineData(9999, 1440)]// 超上限 → 钳制到 1440（防误配超长有效期）
+    public void AccessTokenMinutes_应钳制到合法区间(int configured, int expected)
+    {
+        var sut = CreateWithConfig(accessTokenMinutes: configured);
+        sut.AccessTokenMinutes.Should().Be(expected);
+    }
+
+    [Fact]
+    public void GenerateAccessToken_过期时间应基于AccessTokenMinutes而非24小时()
+    {
+        // Arrange — 配置 20 分钟有效期
+        var sut = CreateWithConfig(accessTokenMinutes: 20);
+        var user = MakeUser();
+        var before = DateTimeOffset.UtcNow;
+
+        // Act
+        var token = new JwtSecurityTokenHandler().ReadJwtToken(sut.GenerateAccessToken(user));
+        var after = DateTimeOffset.UtcNow;
+
+        // Assert — exp 应在 [19, 21] 分钟区间内，绝不可能是 24 小时
+        var validFor = token.ValidTo - before;
+        validFor.TotalMinutes.Should().BeGreaterThan(19);
+        validFor.TotalMinutes.Should().BeLessThan(21);
+        (after - before).TotalMinutes.Should().BeLessThan(1, "测试本身应在 1 分钟内完成");
+    }
 }

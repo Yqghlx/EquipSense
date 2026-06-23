@@ -230,6 +230,8 @@ public class AuthService : IAuthService
         {
             AccessToken = accessToken,
             RefreshToken = refreshToken,
+            // 与 JWT exp 同源，前端据此调度主动刷新；Cookie MaxAge 也取此值
+            ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
             UserInfo = _mapper.Map<UserDto>(user)!
         };
     }
@@ -290,6 +292,7 @@ public class AuthService : IAuthService
         {
             AccessToken = newAccessToken,
             RefreshToken = newRefreshToken,
+            ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
             UserInfo = _mapper.Map<UserDto>(matchedUser)!
         };
     }
@@ -351,6 +354,7 @@ public class AuthService : IAuthService
         {
             AccessToken = accessToken,
             RefreshToken = refreshToken,
+            ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
             UserInfo = _mapper.Map<UserDto>(user)!,
         };
     }
@@ -479,7 +483,9 @@ public class AuthService : IAuthService
         // 更新密码哈希
         user.PasswordHash = PasswordHasher.HashPassword(request.NewPassword);
 
-        // 递增 TokenVersion，使已颁发的 JWT 在下次验证时因版本不匹配而失效
+        // 递增 TokenVersion：保留作为令牌版本号（未来可在请求管线做 per-request 校验实现即时吊销）。
+        // 即时吊销当前由两道防线达成：（1）下方移除 refresh token 使旧会话无法续期；
+        // （2）access token 短有效期（默认 15min）——旧 access token 最迟 15 分钟后自然失效。
         user.TokenVersion++;
 
         // 密码修改成功后清除强制改密标记
@@ -578,7 +584,7 @@ public class AuthService : IAuthService
 
         // 更新密码
         user.PasswordHash = PasswordHasher.HashPassword(newPassword);
-        user.TokenVersion++;          // 使已颁发的 JWT 失效
+        user.TokenVersion++;          // 令牌版本号（即时吊销见 refresh 移除 + 短有效期，见 ChangePasswordAsync 注释）
         user.MustChangePassword = false;
         user.AccessFailedCount = 0;   // 清除登录失败计数
         user.LockoutEnd = null;       // 解除锁定
@@ -702,6 +708,7 @@ public class AuthService : IAuthService
         {
             AccessToken = accessToken,
             RefreshToken = refreshToken,
+            ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
             UserInfo = _mapper.Map<UserDto>(adminUser)!
         };
     }

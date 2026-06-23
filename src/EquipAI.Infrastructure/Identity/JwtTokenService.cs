@@ -10,7 +10,7 @@ namespace EquipAI.Infrastructure.Identity;
 
 /// <summary>
 /// JWT 令牌服务，负责访问令牌的颁发、刷新令牌的生成以及令牌解析
-/// 使用 HMAC-SHA256 签名，令牌有效期为 24 小时
+/// 使用 HMAC-SHA256 签名，访问令牌有效期默认 15 分钟（见 <see cref="AccessTokenMinutes"/>）
 /// </summary>
 public class JwtTokenService
 {
@@ -25,7 +25,18 @@ public class JwtTokenService
         public const string Secret = "Jwt:Secret";
         public const string Issuer = "Jwt:Issuer";
         public const string Audience = "Jwt:Audience";
+        /// <summary>访问令牌有效期（分钟），未配置时取 <see cref="DefaultAccessTokenMinutes"/></summary>
+        public const string AccessTokenMinutesKey = "Jwt:AccessTokenMinutes";
     }
+
+    /// <summary>访问令牌默认有效期（分钟）。24h 过长——登出/改密后旧令牌仍可用，泄漏暴露面过大</summary>
+    public const int DefaultAccessTokenMinutes = 15;
+
+    /// <summary>访问令牌有效期下限（分钟）。低于此值则前端"过期前 5 分钟主动刷新"窗口无空间</summary>
+    private const int MinAccessTokenMinutes = 10;
+
+    /// <summary>访问令牌有效期上限（分钟）= 24 小时，防止误配超长有效期放大泄漏风险</summary>
+    private const int MaxAccessTokenMinutes = 1440;
 
     /// <summary>
     /// 初始化 JWT 令牌服务
@@ -34,7 +45,21 @@ public class JwtTokenService
     public JwtTokenService(IConfiguration configuration)
     {
         _configuration = configuration;
+
+        // 访问令牌有效期：可配置，钳制到 [Min, Max]。
+        // 默认 15 分钟：access token 是无状态 JWT，登出/改密无法即时吊销，只能靠短有效期收敛暴露面。
+        // 下限 10 分钟保证前端 useTokenRefresh"过期前 5 分钟主动刷新"窗口有空间（避免刷新死循环）。
+        var configured = _configuration[JwtSettingsKeys.AccessTokenMinutesKey];
+        AccessTokenMinutes = int.TryParse(configured, out var minutes)
+            ? Math.Clamp(minutes, MinAccessTokenMinutes, MaxAccessTokenMinutes)
+            : DefaultAccessTokenMinutes;
     }
+
+    /// <summary>
+    /// 访问令牌有效期（分钟），已钳制到 [10, 1440]。AuthService 据此填充 AuthResponse.ExpiresIn，
+    /// 保证 JWT exp、Cookie MaxAge、前端主动刷新调度三处共用同一真相源。
+    /// </summary>
+    public int AccessTokenMinutes { get; }
 
     /// <summary>
     /// 为指定用户生成 JWT 访问令牌
@@ -69,7 +94,7 @@ public class JwtTokenService
             issuer: issuer,
             audience: audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(24),
+            expires: DateTime.UtcNow.AddMinutes(AccessTokenMinutes),
             signingCredentials: credentials
         );
 

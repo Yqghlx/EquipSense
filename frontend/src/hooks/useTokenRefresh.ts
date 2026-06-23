@@ -25,8 +25,9 @@ const REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // 5 分钟
 /** sessionStorage 中存 expiresIn 的键名（数字，不含敏感信息） */
 const EXPIRES_IN_KEY = 'expires_in_seconds';
 
-/** 默认 token 有效期（秒），后端默认 86400 = 24h */
-const DEFAULT_EXPIRES_IN_SECONDS = 86400;
+/** 默认 token 有效期（秒），后端默认 900 = 15min（见 JwtTokenService.AccessTokenMinutes）。
+ *  仅在后端未返回 expiresIn 时兜底；正常流程后端始终返回实际值。 */
+const DEFAULT_EXPIRES_IN_SECONDS = 900;
 
 /**
  * 从 sessionStorage 读取 expiresIn（响应体返回的剩余有效秒数）

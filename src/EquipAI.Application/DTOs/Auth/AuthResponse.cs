@@ -26,9 +26,9 @@ public class AuthResponse
 
     /// <summary>
     /// 访问令牌剩余有效时间（秒），前端据此主动续期
-    /// 默认 24 小时 = 86400 秒
+    /// 默认 15 分钟 = 900 秒（与 JwtTokenService.AccessTokenMinutes 同源，AuthService 颁发时覆盖）
     /// </summary>
-    public int ExpiresIn { get; set; } = 86400;
+    public int ExpiresIn { get; set; } = 900;
 
     /// <summary>
     /// 刷新令牌，用于续期 Access Token
