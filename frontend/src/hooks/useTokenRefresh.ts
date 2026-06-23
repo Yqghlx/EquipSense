@@ -7,9 +7,16 @@
  * v1.3.0 关键变化：
  *   - 不再从 sessionStorage 读 token 字符串（token 已不在 JS 可访问范围）
  *   - 改用 expiresIn（响应体返回）调度刷新
- *   - sessionStorage 只存 expiresIn（无害数字，XSS 偷到也没用）
+ *   - sessionStorage 只存【绝对过期时间戳】（无害数字，XSS 偷到也没用）
  *   - 刷新请求：axios 直接调用，浏览器自动携带 refresh_token Cookie
  *   - 刷新失败：由 api.ts 的 401 响应拦截器兜底处理登出
+ *
+ * 存【绝对过期时间戳】而非 expiresIn 时长：
+ *   - 页面刷新后用 Date.now() 减该时间戳即得真实剩余时间。
+ *   - 旧版存时长 + 用 performance.timeOrigin 近似"签发时间"是错的——刷新后
+ *     timeOrigin 是【刷新时刻】而非【签发时刻】，会把"已用掉大半的 token"
+ *     误判为"刚签发的满额 token"，导致主动刷新被排到真实过期之后，
+ *     在过期到下次刷新的窗口内所有请求吃 401。
  */
 /* eslint-disable react-hooks/exhaustive-deps, react-hooks/preserve-manual-memoization, react-hooks/immutability */
 // 上面的规则在 Token 刷新场景下不适用：
@@ -18,42 +25,14 @@
 import { useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { useAuthStore } from '../stores/authStore';
+import {
+  DEFAULT_EXPIRES_IN_SECONDS,
+  readRemainingMs,
+  persistTokenExpiry,
+} from '../lib/tokenExpiry';
 
 /** 提前续期的时间窗口（毫秒），距过期不足此值时立即刷新 */
 const REFRESH_THRESHOLD_MS = 5 * 60 * 1000; // 5 分钟
-
-/** sessionStorage 中存 expiresIn 的键名（数字，不含敏感信息） */
-const EXPIRES_IN_KEY = 'expires_in_seconds';
-
-/** 默认 token 有效期（秒），后端默认 900 = 15min（见 JwtTokenService.AccessTokenMinutes）。
- *  仅在后端未返回 expiresIn 时兜底；正常流程后端始终返回实际值。 */
-const DEFAULT_EXPIRES_IN_SECONDS = 900;
-
-/**
- * 从 sessionStorage 读取 expiresIn（响应体返回的剩余有效秒数）
- * 用于初次页面恢复时调度定时器（替代旧版从 JWT 解析 exp）
- */
-function readExpiresInFromStorage(): number {
-  const raw = sessionStorage.getItem(EXPIRES_IN_KEY);
-  const n = typeof raw === 'string' ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_EXPIRES_IN_SECONDS;
-}
-
-/**
- * 保存 expiresIn 到 sessionStorage（登录 / 刷新成功后调用）
- */
-export function persistExpiresIn(expiresInSeconds: number): void {
-  if (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0) {
-    sessionStorage.setItem(EXPIRES_IN_KEY, String(expiresInSeconds));
-  }
-}
-
-/**
- * 清除 sessionStorage 中的 expiresIn（登出时调用）
- */
-export function clearExpiresIn(): void {
-  sessionStorage.removeItem(EXPIRES_IN_KEY);
-}
 
 export default function useTokenRefresh() {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -90,9 +69,9 @@ export default function useTokenRefresh() {
       const response = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
       const { expiresIn, userInfo } = response.data;
 
-      // 保存 expiresIn 到 sessionStorage（用于页面恢复后调度）
+      // 保存【绝对过期时间戳】到 sessionStorage（用于页面恢复后计算真实剩余时间）
       const expiresInSeconds = typeof expiresIn === 'number' ? expiresIn : DEFAULT_EXPIRES_IN_SECONDS;
-      persistExpiresIn(expiresInSeconds);
+      persistTokenExpiry(expiresInSeconds);
       expiresAtRef.current = Date.now() + expiresInSeconds * 1000;
 
       // 同步更新 authStore（用户信息可能在每次刷新时变化，如角色 / 状态）
@@ -129,12 +108,12 @@ export default function useTokenRefresh() {
   }, [clearTimer, refreshToken]);
 
   /**
-   * 初次登录 / 页面恢复时，从 sessionStorage 读 expiresIn 调度刷新
+   * 初次登录 / 页面恢复时，从 sessionStorage 读【绝对过期时间戳】计算真实剩余时间并调度刷新。
+   * 无记录（如旧版残留或异常）时用默认有效期兜底，首次刷新后即被持久化的真实值修正。
    */
   const scheduleFromStorage = useCallback(() => {
     clearTimer();
-    const expiresInSeconds = readExpiresInFromStorage();
-    const remainingMs = expiresInSeconds * 1000 - (Date.now() - getSessionStartMs());
+    const remainingMs = readRemainingMs() ?? DEFAULT_EXPIRES_IN_SECONDS * 1000;
     expiresAtRef.current = Date.now() + remainingMs;
 
     if (remainingMs <= REFRESH_THRESHOLD_MS) {
@@ -182,17 +161,4 @@ export default function useTokenRefresh() {
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [refreshToken, scheduleRefreshFromNow]);
-}
-
-/**
- * 获取会话开始时间（用于计算 token 剩余有效期）
- *
- * 简化方案：用页面加载时间作为近似值。
- * 精确方案需要存登录时的绝对时间戳，但当前设计已足够（误差 < 1s）。
- */
-function getSessionStartMs(): number {
-  if (typeof performance !== 'undefined' && performance.timeOrigin) {
-    return performance.timeOrigin;
-  }
-  return Date.now();
 }

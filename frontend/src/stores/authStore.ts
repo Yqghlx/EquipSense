@@ -14,6 +14,7 @@
  */
 import { create } from 'zustand';
 import type { UserInfo } from '../types';
+import { clearTokenExpiry } from '../lib/tokenExpiry';
 
 interface AuthState {
   /** 当前登录用户（不含 token，token 在 HttpOnly Cookie 里） */
@@ -60,6 +61,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   logout: () => {
     sessionStorage.removeItem('user');
+    // 清除主动刷新用的过期时间戳：登出后不再调度刷新，且避免残留值在异常路径下误导下次会话
+    clearTokenExpiry();
     set({ user: null, isAuthenticated: false });
   },
 

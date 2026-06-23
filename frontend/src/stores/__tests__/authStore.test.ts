@@ -95,6 +95,16 @@ describe('authStore', () => {
 
       expect(sessionStorage.getItem('user')).toBeNull();
     });
+
+    it('调用 logout 后应清除主动刷新用的令牌过期时间戳', () => {
+      // 先登录并写入过期时间戳（模拟登录后 useTokenRefresh 的持久化）
+      useAuthStore.getState().setAuth(mockUser);
+      sessionStorage.setItem('token_expires_at_ms', String(Date.now() + 900_000));
+
+      useAuthStore.getState().logout();
+
+      expect(sessionStorage.getItem('token_expires_at_ms')).toBeNull();
+    });
   });
 
   describe('loadFromStorage（从存储恢复）', () => {

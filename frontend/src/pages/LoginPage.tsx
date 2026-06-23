@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../co
 import { ChangePasswordDialog } from '../components/auth/ChangePasswordDialog';
 import api from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
+import { persistTokenExpiry } from '../lib/tokenExpiry';
 import type { AuthResponse } from '../types';
 
 /** 登录表单数据类型 */
@@ -90,6 +91,10 @@ export default function LoginPage() {
 
       // 无需 MFA，直接完成登录
       setAuth(response.data.userInfo);
+      // 持久化令牌【绝对过期时间戳】，供 useTokenRefresh 计算主动刷新时机。
+      // 必须使用后端实际返回的 expiresIn（受 #200 可配置 AccessTokenMinutes 影响，10~1440s），
+      // 不能用前端默认值，否则主动刷新被排到错误时刻。
+      persistTokenExpiry(response.data.expiresIn);
       // 认证 Cookie 由后端登录响应自动设置
       if (response.data.userInfo.mustChangePassword) {
         setMustChangePassword(true);
@@ -115,6 +120,8 @@ export default function LoginPage() {
         totpCode: data.totpCode,
       });
       setAuth(response.data.userInfo);
+      // 持久化令牌过期时间戳（与密码登录路径一致），供 useTokenRefresh 主动刷新
+      persistTokenExpiry(response.data.expiresIn);
       const from = (location.state as { from?: string })?.from || '/dashboard';
       navigate(from, { replace: true });
     } catch {
