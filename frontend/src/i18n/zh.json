@@ -20,6 +20,8 @@
     "noData": "暂无数据",
     "success": "操作成功",
     "error": "操作失败",
+    "loadFailed": "数据加载失败，请检查网络后重试",
+    "retry": "重试",
     "all": "全部",
     "name": "名称",
     "type": "类型",
@@ -659,7 +661,18 @@
     "skillScore": "技能",
     "loadScore": "空闲",
     "activeWork": "进行中",
-    "assign": "派工"
+    "assign": "派工",
+    "assigning": "派工中...",
+    "assignSuccess": "派工成功",
+    "assignFailed": "派工失败，请重试",
+    "generatingRecs": "正在生成推荐...",
+    "loadRecsFailed": "生成推荐失败，请重新选择工单",
+    "selectedOrder": "已选工单",
+    "slaDue": "SLA 截止",
+    "noSla": "未设截止",
+    "topMatch": "最佳匹配",
+    "overdue": "已超期",
+    "pendingHint": "告警触发的工单会自动出现在此处等待派工"
   },
   "register": {
     "title": "注册新租户",

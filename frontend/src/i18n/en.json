@@ -20,6 +20,8 @@
     "noData": "No data",
     "success": "Success",
     "error": "Error",
+    "loadFailed": "Failed to load data. Please check your network and retry.",
+    "retry": "Retry",
     "all": "All",
     "name": "Name",
     "type": "Type",
@@ -659,7 +661,18 @@
     "skillScore": "Skill",
     "loadScore": "Available",
     "activeWork": "Active",
-    "assign": "Assign"
+    "assign": "Assign",
+    "assigning": "Assigning...",
+    "assignSuccess": "Assigned successfully",
+    "assignFailed": "Assignment failed, please retry",
+    "generatingRecs": "Generating recommendations...",
+    "loadRecsFailed": "Failed to generate recommendations, please reselect the work order",
+    "selectedOrder": "Selected order",
+    "slaDue": "SLA due",
+    "noSla": "No deadline",
+    "topMatch": "Best match",
+    "overdue": "Overdue",
+    "pendingHint": "Work orders triggered by alarms appear here automatically awaiting dispatch"
   },
   "register": {
     "title": "Register New Tenant",
