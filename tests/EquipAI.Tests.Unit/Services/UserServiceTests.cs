@@ -37,6 +37,8 @@ public class UserServiceTests : IAsyncDisposable
         services.AddAutoMapper(typeof(MappingProfile));
 
         services.AddLogging();
+        // 审计日志服务（真实实现，写入同一 InMemory db，便于断言审计记录）
+        services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<IUserService, UserService>();
 
         _sp = services.BuildServiceProvider();
@@ -412,6 +414,55 @@ public class UserServiceTests : IAsyncDisposable
         // Assert：角色应更新为 Technician
         var updatedUser = await db.Users.FindAsync(user.Id);
         updatedUser!.Role.Should().Be(UserRole.Technician);
+    }
+
+    [Fact]
+    public async Task ChangeUserRoleAsync_应记录审计日志含变更前后角色()
+    {
+        // 角色变更（提权/降权）是最高风险安全操作，必须留痕审计：记录变更前后角色，
+        // 以便追溯"谁在何时把谁提权为 SystemAdmin"等内部威胁（ISO 27001 / IEC 62443 可审计性）。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await CreateTenantAsync(db, _tenantId);
+        var user = CreateTestUser("roleaudit", _tenantId, role: UserRole.Operator);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act：把操作员提权为维保主管
+        await service.ChangeUserRoleAsync(user.Id, _tenantId, "MaintenanceLead");
+
+        // Assert：审计日志应记录角色变更，含变更前后角色（断言用新 scope 避免 ChangeTracker 干扰）
+        using var assertScope = _sp.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var audit = await assertDb.UnfilteredSet<AuditLog>()
+            .FirstOrDefaultAsync(a => a.ResourceId == user.Id.ToString() && a.Action == "RoleChange");
+        audit.Should().NotBeNull("角色变更必须留痕审计，否则提权等内部威胁不可追溯");
+        audit!.Description.Should().Contain("Operator", "审计须记录变更前角色");
+        audit.Description.Should().Contain("MaintenanceLead", "审计须记录变更后角色");
+    }
+
+    [Fact]
+    public async Task DeactivateUserAsync_应记录审计日志()
+    {
+        // 停用用户属安全敏感操作，必须留痕审计（谁在何时停用了哪个用户）。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await CreateTenantAsync(db, _tenantId);
+        var user = CreateTestUser("deactaudit", _tenantId);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        await service.DeactivateUserAsync(user.Id, _tenantId);
+
+        using var assertScope = _sp.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var audit = await assertDb.UnfilteredSet<AuditLog>()
+            .FirstOrDefaultAsync(a => a.ResourceId == user.Id.ToString() && a.Action == "Deactivate");
+        audit.Should().NotBeNull("停用用户必须留痕审计");
     }
 
     [Fact]

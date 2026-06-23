@@ -4,6 +4,7 @@ using EquipAI.Core.Models;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -21,18 +22,22 @@ public class UserService : IUserService
     private readonly AppDbContext _dbContext;
     private readonly IMapper _mapper;
     private readonly ILogger<UserService> _logger;
+    private readonly IAuditLogService _auditLogService;
 
     /// <summary>
     /// 初始化用户管理服务
     /// </summary>
+    /// <param name="auditLogService">审计日志服务：用户创建/停用/角色变更等安全敏感操作必须留痕（可审计性）</param>
     public UserService(
         AppDbContext dbContext,
         IMapper mapper,
-        ILogger<UserService> logger)
+        ILogger<UserService> logger,
+        IAuditLogService auditLogService)
     {
         _dbContext = dbContext;
         _mapper = mapper;
         _logger = logger;
+        _auditLogService = auditLogService;
     }
 
     /// <summary>
@@ -116,6 +121,10 @@ public class UserService : IUserService
 
         await _dbContext.SaveChangesAsync();
 
+        // 用户创建属安全敏感操作，留痕审计（谁在何时创建了哪个用户），满足可审计性要求
+        await _auditLogService.LogAsync(tenantId, "Create", "User",
+            user.Id.ToString(), $"创建用户 {user.Username}", default);
+
         _logger.LogInformation("用户 {Username} 创建成功（租户：{TenantId}）", user.Username, tenantId);
 
         return _mapper.Map<UserDto>(user)!;
@@ -175,6 +184,10 @@ public class UserService : IUserService
 
         await _dbContext.SaveChangesAsync();
 
+        // 停用用户属安全敏感操作，留痕审计（谁在何时停用了哪个用户）
+        await _auditLogService.LogAsync(tenantId, "Deactivate", "User",
+            userId.ToString(), $"停用用户 {user.Username}", default);
+
         _logger.LogInformation("用户 {UserId} 已停用", userId);
     }
 
@@ -197,8 +210,14 @@ public class UserService : IUserService
             throw new ArgumentException($"无效的角色名称: '{newRole}'");
         }
 
+        // 角色变更（提权/降权）是最高风险的安全操作，必须留痕审计：记录变更前后的角色，
+        // 以便追溯"谁在何时把谁提权为 SystemAdmin"等内部威胁（ISO 27001 / IEC 62443 可审计性要求）
+        var oldRole = user.Role;
         user.Role = role;
         await _dbContext.SaveChangesAsync();
+
+        await _auditLogService.LogAsync(tenantId, "RoleChange", "User",
+            userId.ToString(), $"角色变更：{oldRole} → {role}（用户 {user.Username}）", default);
 
         _logger.LogInformation("用户 {UserId} 角色已变更为 {Role}", userId, role);
     }
