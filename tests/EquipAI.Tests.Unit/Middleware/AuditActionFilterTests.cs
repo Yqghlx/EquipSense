@@ -202,6 +202,34 @@ public class AuditActionFilterTests
     }
 
     [Fact]
+    public async Task Create_Operation_Should_Extract_ResourceId_From_Response()
+    {
+        // 创建操作（POST /resources）既无路由 id，方法参数又是 [FromBody] request（不以 Id 结尾），
+        // 传统两步取不到 resourceId。修复后从响应结果（ObjectResult.Value 的 DTO）反射 Id 字段，
+        // 使创建审计可追溯具体创建了哪个资源（否则审计只记"Create Device — 成功"而无 resourceId）。
+        var (executing, executed) = CreateContext(
+            "POST", "Devices", "CreateDevice",
+            typeof(DevicesController),
+            typeof(DevicesController).GetMethod(nameof(DevicesController.CreateDevice))!);
+
+        // 模拟 Controller 返回新创建资源的 DTO（含 Id），如 CreatedAtAction(dto)
+        var newDeviceId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        executed.Result = new ObjectResult(new { Id = newDeviceId });
+
+        string? capturedId = null;
+        _auditMock.Setup(x => x.LogFromContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, string?, string?, CancellationToken>((_, _, id, _, _) => capturedId = id)
+            .Returns(Task.CompletedTask);
+
+        await _filter.OnActionExecutionAsync(executing, () => Task.FromResult(executed));
+
+        capturedId.Should().Be(newDeviceId.ToString(),
+            "创建操作必须从响应 DTO 提取新资源 Id 填充 resourceId，否则审计无法追溯具体创建了哪个资源");
+    }
+
+    [Fact]
     public async Task Description_Should_Indicate_Failure_With_Status_Code()
     {
         var (executing, executed) = CreateContext(

@@ -13,7 +13,7 @@ namespace EquipAI.WebAPI.Middleware;
 /// 自动拦截所有非 GET 写操作（POST/PUT/PATCH/DELETE），在响应后记录审计日志：
 /// - 资源类型：优先取 [Audit] 特性，否则从 Controller 名推断（DevicesController → Device）
 /// - 动作类型：优先取 [Audit] 特性，否则从 HTTP 方法推断（POST→Create, PUT→Update, DELETE→Delete）
-/// - 资源 ID：从路由值取 id / {xxx}Id，无法获取时为 null
+/// - 资源 ID：三步回退 — 路由 id → 方法参数 *Id → 创建操作从响应 DTO 反射 Id（修复创建类审计 resourceId 缺失）
 /// - 描述：包含 HTTP 状态码，便于区分成功/失败
 ///
 /// 标注 [SkipAudit] 可跳过特定操作（如高频心跳、登录刷新）
@@ -47,7 +47,7 @@ public sealed class AuditActionFilter : IAsyncActionFilter, IOrderedFilter
             if (resourceType is null)
                 return;
 
-            var resourceId = ResolveResourceId(context);
+            var resourceId = ResolveResourceId(context, executedContext);
             var statusCode = executedContext.HttpContext.Response.StatusCode;
             var isSuccess = statusCode is >= 200 and < 400;
 
@@ -130,21 +130,38 @@ public sealed class AuditActionFilter : IAsyncActionFilter, IOrderedFilter
         return controllerName.Length > 0 ? controllerName : null;
     }
 
-    /// <summary>从路由值解析资源 ID（id / deviceId / workOrderId 等常见命名）</summary>
-    private static string? ResolveResourceId(ActionExecutingContext context)
+    /// <summary>
+    /// 解析资源 ID，三步回退：
+    /// 1. 路由 id（Update/Delete/{id} 等带主键的端点）
+    /// 2. 方法参数 *Id 命名的 Guid（如 deviceId、workOrderId）
+    /// 3. 创建操作（POST）：从响应结果（ObjectResult.Value 的 DTO）反射 Id 字段
+    ///
+    /// 第 3 步修复创建类审计的 resourceId 缺失：POST /resources 既无路由 id，方法参数又是
+    /// [FromBody] request（不以 Id 结尾），传统两步取不到。创建类端点（CreateDevice/CreateAlertRule/
+    /// CreateWorkOrder 等）的响应体含新资源 DTO（Id 已生成），反射提取以追溯具体创建了哪个资源，
+    /// 否则审计只记"Create Device — 成功"而无 resourceId，无法定位是哪台设备/工单/规则。
+    /// </summary>
+    private static string? ResolveResourceId(ActionExecutingContext context, ActionExecutedContext executedContext)
     {
-        var routeValues = context.ActionDescriptor.RouteValues;
         var httpRoute = context.HttpContext.GetRouteData().Values;
 
-        // 优先取路由中的 id 参数
+        // 1. 路由 id（Update/Delete 等带主键的端点）
         if (httpRoute.TryGetValue("id", out var id) && id is not null)
             return id.ToString();
 
-        // 取方法参数中的 *Id 命名的 Guid
+        // 2. 方法参数 *Id 命名的 Guid
         foreach (var (key, value) in context.ActionArguments)
         {
             if (key.EndsWith("Id", StringComparison.OrdinalIgnoreCase) && value is not null)
                 return value.ToString();
+        }
+
+        // 3. 创建操作（POST）：从响应结果反射新资源 Id
+        if (executedContext.Result is ObjectResult { Value: { } resultValue })
+        {
+            var idProp = resultValue.GetType().GetProperty("Id");
+            if (idProp?.GetValue(resultValue) is { } createdId)
+                return createdId.ToString();
         }
 
         return null;
