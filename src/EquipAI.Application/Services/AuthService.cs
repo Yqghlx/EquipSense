@@ -512,6 +512,12 @@ public class AuthService : IAuthService
 
         await _dbContext.SaveChangesAsync();
 
+        // 改密码是认证系统最高敏感操作之一（修改哈希 + 吊销全部会话 + TokenVersion++），必须留痕审计：
+        // 追溯"谁在何时改了密码"。同 AuthService 内密码重置（ResetPasswordAsync）已记 PasswordReset，
+        // 改密码（ChangePasswordAsync）同为密码变更却历史缺审计 → 不可追溯（ISO 27001 / IEC 62443 可审计性）。
+        await _auditLogService.LogAsync(user.TenantId, "ChangePassword", "User",
+            user.Id.ToString(), $"用户 {user.Username} 修改密码", default);
+
         _logger.LogInformation("用户 {UserId} 密码修改成功", userId);
     }
 

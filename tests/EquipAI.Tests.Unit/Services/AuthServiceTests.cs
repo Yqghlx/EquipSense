@@ -642,6 +642,35 @@ public class AuthServiceTests : IAsyncDisposable
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    [Fact]
+    public async Task ChangePasswordAsync_正确密码_应记录审计日志()
+    {
+        // 改密码是认证系统最高敏感操作之一（改哈希 + 吊销全部会话 + TokenVersion++），必须留痕审计。
+        // 同 AuthService 内密码重置已记 PasswordReset，改密码同为密码变更却历史缺审计 → 不可追溯。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>() as StubAuditLogService;
+
+        var currentPassword = "OldPassword123";
+        var user = CreateTestUser("chgpwdaudit", _tenantId, currentPassword);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var request = new ChangePasswordRequest
+        {
+            CurrentPassword = currentPassword,
+            NewPassword = "NewPassword456"
+        };
+
+        // Act
+        await service.ChangePasswordAsync(user.Id, request);
+
+        // Assert：改密码必须留痕审计，否则"谁在何时改了密码"不可追溯（ISO 27001 / IEC 62443）
+        audit!.LoggedActions.Should().Contain("ChangePassword",
+            "改密码是高敏感认证操作，必须留痕审计（同 AuthService 已审计密码重置，改密码不可遗漏）");
+    }
+
     // ==================== RequestPasswordResetAsync / ResetPasswordAsync ====================
 
     [Fact]
