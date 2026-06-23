@@ -166,7 +166,25 @@ public class AlertEvaluationService : IAlertEvaluationService
             }
             else if (shouldUpdate)
             {
-                await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value);
+                var updated = await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value);
+                if (!updated)
+                {
+                    // 防丢失：shouldUpdate 但无活跃告警可更新——常见于指标在阈值附近震荡：首次越限创建告警 →
+                    // 短暂回落触发 TryAutoResolveAsync 自动恢复（Active→Resolved）→ 再次越限时聚合器窗口计数仍 >1
+                    // （shouldUpdate），但已无 Active 告警可更新。若不兜底创建，该复发越限会被静默丢弃——
+                    // 运维此前收到"已恢复"通知后误以为问题解决，实际复发却不再告警/通知。对在阈值附近波动的
+                    // 工业指标（温度/振动/压力）是严重监控盲区。降级为创建新告警 + 发布事件（复发是新事件，需重新通知）。
+                    // 仍受聚合器防风暴约束（窗口内至多创建/更新 3 次，超过即静默），不会因震荡产生告警风暴。
+                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context);
+                    if (alert != null)
+                    {
+                        await _eventBus.PublishAsync(new AlertTriggeredEvent(
+                            Guid.NewGuid(), DateTime.UtcNow, tenantId,
+                            alert.Id, deviceId, rule.Id,
+                            metric, value, rule.Severity.ToString()));
+                    }
+                    BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
+                }
             }
         }
     }
@@ -215,7 +233,8 @@ public class AlertEvaluationService : IAlertEvaluationService
     /// 更新已有活跃告警的值和时间戳（聚合防风暴场景下的第 2-3 次）
     /// </summary>
     /// <param name="ruleId">按规则精确匹配，避免同指标不同规则的告警被互相更新（吞并）</param>
-    private async Task UpdateExistingAlertAsync(AppDbContext dbContext, Guid tenantId,
+    /// <returns>true 表示找到并更新了活跃告警；false 表示无活跃告警可更新（调用方应降级为创建新告警）</returns>
+    private async Task<bool> UpdateExistingAlertAsync(AppDbContext dbContext, Guid tenantId,
         Guid deviceId, Guid ruleId, string metric, double value)
     {
         // IgnoreQueryFilters: 同 CreateAlertAsync，后台处理器需绕过全局租户过滤器
@@ -230,7 +249,7 @@ public class AlertEvaluationService : IAlertEvaluationService
             .FirstOrDefaultAsync();
 
         if (existingAlert == null)
-            return;
+            return false;
 
         existingAlert.Value = (decimal)value;
         existingAlert.OccurredAt = DateTime.UtcNow;
@@ -239,6 +258,7 @@ public class AlertEvaluationService : IAlertEvaluationService
         await dbContext.SaveChangesAsync();
 
         _logger.LogDebug("告警已更新: {AlertCode}（新值: {Value}）", existingAlert.AlertCode, value);
+        return true;
     }
 
     /// <summary>

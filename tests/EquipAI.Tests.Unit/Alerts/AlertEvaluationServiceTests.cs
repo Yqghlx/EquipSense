@@ -1,4 +1,5 @@
 using EquipAI.Application.Alerts;
+using EquipAI.Application.Alerts.Evaluators;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
@@ -895,6 +896,70 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         eventBusMock.Verify(
             e => e.PublishAsync(It.IsAny<AlertTriggeredEvent>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+    }
+
+    /// <summary>
+    /// 回归：指标在阈值附近震荡（越限→短暂回落自动恢复→再次越限）时，复发告警不得被静默丢弃。
+    ///
+    /// 缺陷根因：TryAutoResolveAsync 在指标回落时把 Active 告警标记为 Resolved，但 AlertAggregator 的内存
+    /// 窗口计数不随恢复重置。于是再次越限时聚合器返回 shouldUpdate（计数仍 >1），而 UpdateExistingAlertAsync
+    /// 按 Status=Active 查找已查不到（刚被自动恢复）→ 直接返回 → 复发越限被静默丢弃。运维收到"已恢复"
+    /// 通知后误以为问题解决，但实际复发却不再告警/通知——对在阈值附近波动的工业指标（温度/振动/压力）
+    /// 是严重监控盲区。
+    ///
+    /// 此测试用【真实】AlertAggregator +【真实】ThresholdEvaluator 端到端暴露缺陷：Mock 聚合器无法复刻
+    /// 跨评估的窗口计数持久性，且 TryAutoResolveAsync 与聚合器/更新分支的交互需连续三次真实评估才触发。
+    /// </summary>
+    [Fact]
+    public async Task 自动恢复后再次越限_应创建新告警不得静默丢弃()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId);
+
+        var rule = CreateAlertRule(_tenantId, "temperature", RuleType.Threshold, AlertSeverity.High);
+        rule.Threshold = 90m;
+        rule.Operator = ">";
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        // 真实 AlertAggregator（跨评估保持窗口计数）+ 真实 ThresholdEvaluator（value > 90）
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+        var eventBusMock = new Mock<IEventBus>();
+        var loggerMock = new Mock<ILogger<AlertEvaluationService>>();
+
+        var service = new AlertEvaluationService(
+            scopeFactoryMock.Object, eventBusMock.Object, new AlertAggregator(),
+            new IAlertRuleEvaluator[] { new ThresholdEvaluator() }, loggerMock.Object);
+
+        // 1. 首次越限（95 > 90）→ 创建告警 A，发布事件
+        await service.EvaluateForDeviceAsync(_tenantId, deviceId, "电机", "temperature", 95.0, new DeviceContext());
+        db.Alerts.Should().HaveCount(1);
+        db.Alerts.First().Status.Should().Be(AlertStatus.Active);
+
+        // 2. 回落到阈值内（50 < 90）→ TryAutoResolveAsync 自动恢复告警 A（Active→Resolved）
+        await service.EvaluateForDeviceAsync(_tenantId, deviceId, "电机", "temperature", 50.0, new DeviceContext());
+        db.Alerts.Should().HaveCount(1);
+        db.Alerts.First().Status.Should().Be(AlertStatus.Resolved, "指标回落应触发自动恢复");
+
+        // 3. 再次越限（95 > 90）—— 此时聚合器窗口计数=2（shouldUpdate），但已无 Active 告警可更新
+        await service.EvaluateForDeviceAsync(_tenantId, deviceId, "电机", "temperature", 95.0, new DeviceContext());
+
+        // 修复后：复发越限应创建新告警 B（而非静默丢弃）
+        db.Alerts.Should().HaveCount(2, "自动恢复后再次越限应创建新告警，不得因聚合器 shouldUpdate 静默丢弃");
+        db.Alerts.Count(a => a.Status == AlertStatus.Active).Should().Be(1, "复发创建的新告警 B 应为 Active");
+        db.Alerts.Count(a => a.Status == AlertStatus.Resolved).Should().Be(1, "原告警 A 保持 Resolved");
+
+        // 复发是新事件，应重新发布通知（运维此前收到的是"已恢复"，复发需再次通知）
+        eventBusMock.Verify(
+            e => e.PublishAsync(It.IsAny<AlertTriggeredEvent>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2), "首次越限 + 复发越限各发布一次事件");
     }
 
     // ========================================================================
