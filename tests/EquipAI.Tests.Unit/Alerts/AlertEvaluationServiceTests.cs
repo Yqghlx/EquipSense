@@ -189,7 +189,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         db.Alerts.Should().BeEmpty();
 
         // 验证：聚合器不应被调用（评估器返回 false 时跳过聚合）
-        aggregatorMock.Verify(a => a.Evaluate(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        aggregatorMock.Verify(a => a.Evaluate(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
     }
 
     /// <summary>
@@ -206,7 +206,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
 
         // 聚合器返回 (shouldCreate=true, shouldUpdate=false, silenced=false)
         var aggregatorMock = new Mock<IAlertAggregator>();
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var serviceProviderMock = new Mock<IServiceProvider>();
@@ -263,7 +263,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await AddDeviceAsync(db, _tenantId, deviceId);
 
         var (service, eventBusMock, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var rule = CreateAlertRule(_tenantId);
@@ -296,7 +296,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
 
         var (service, eventBusMock, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
         // 聚合器返回 silenced=true
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((false, false, true));
 
         var rule = CreateAlertRule(_tenantId);
@@ -353,7 +353,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
 
         // 聚合器返回 shouldUpdate=true（第 2 次触发）
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((false, true, false));
 
         var context = new DeviceContext();
@@ -395,7 +395,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
             db,
             (RuleType.Threshold, true),
             (RuleType.Combined, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var context = new DeviceContext();
@@ -438,7 +438,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var context = new DeviceContext();
@@ -472,7 +472,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var context = new DeviceContext();
@@ -499,7 +499,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await AddDeviceAsync(db, _tenantId, deviceId, "MOTOR-001");
 
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var rule = CreateAlertRule(_tenantId, "temperature");
@@ -635,7 +635,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
 
         var eventBusMock = new Mock<IEventBus>();
         var aggregatorMock = new Mock<IAlertAggregator>();
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
         var loggerMock = new Mock<ILogger<AlertEvaluationService>>();
 
@@ -685,7 +685,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await AddDeviceAsync(db, _tenantId, deviceId);
 
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         // 规则名为 "油温过高"（中文人类可读），阈值 90，触发值 95.5
@@ -720,7 +720,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await AddDeviceAsync(db, _tenantId, deviceId);
 
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "pressure"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "pressure"))
             .Returns((true, false, false));
 
         var rule = CreateAlertRule(_tenantId);
@@ -752,7 +752,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         await AddDeviceAsync(db, _tenantId, deviceId);
 
         var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Combined, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "vibration"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "vibration"))
             .Returns((true, false, false));
 
         var rule = CreateAlertRule(_tenantId, ruleType: RuleType.Combined);
@@ -814,7 +814,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
 
         // 聚合器返回 shouldCreate=true —— 模拟重启后内存窗口归零的误判
         var (service, eventBusMock, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
-        aggregatorMock.Setup(a => a.Evaluate(deviceId, "temperature"))
+        aggregatorMock.Setup(a => a.Evaluate(deviceId, It.IsAny<Guid>(), "temperature"))
             .Returns((true, false, false));
 
         var context = new DeviceContext();
@@ -837,6 +837,64 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         eventBusMock.Verify(
             e => e.PublishAsync(It.IsAny<AlertTriggeredEvent>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    /// <summary>
+    /// 回归：同设备同指标的【多条规则】（如分层阈值：温度>80 告警 + 温度>90 严重）必须各自独立创建告警，
+    /// 不得互相吞并。
+    ///
+    /// 缺陷根因：AlertAggregator 的窗口键只按 设备+指标，不含 ruleId；UpdateExistingAlertAsync 也不按
+    /// ruleId 过滤。于是第二条规则触发时聚合器返回 shouldUpdate，把第二条规则的触发合并进第一条规则的告警——
+    /// 严重告警被静默吞并、不建单、不推送，客户漏掉关键预警。
+    /// 此测试用【真实】AlertAggregator（非 Mock）暴露该缺陷——既有"多规则匹配"测试因 Mock 聚合器
+    /// 恒返回 shouldCreate 而未能覆盖。
+    /// </summary>
+    [Fact]
+    public async Task 同指标多规则_应各自独立创建告警_不得互相吞并()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId);
+
+        // 两条同指标、不同严重等级的阈值规则（工业常见的分层阈值配置）
+        var ruleWarn = CreateAlertRule(_tenantId, "temperature", RuleType.Threshold, AlertSeverity.High);
+        var ruleCrit = CreateAlertRule(_tenantId, "temperature", RuleType.Threshold, AlertSeverity.Critical);
+        db.AlertRules.AddRange(ruleWarn, ruleCrit);
+        await db.SaveChangesAsync();
+
+        // 用【真实】AlertAggregator 暴露窗口键缺陷；两个阈值评估器均返回触发
+        var serviceProviderMock = new Mock<IServiceProvider>();
+        serviceProviderMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+
+        var evaluatorMock = new Mock<IAlertRuleEvaluator>();
+        evaluatorMock.SetupGet(e => e.RuleType).Returns(RuleType.Threshold);
+        evaluatorMock.Setup(e => e.Evaluate(It.IsAny<double>(), It.IsAny<AlertRule>(), It.IsAny<DeviceContext>()))
+            .Returns(true);
+
+        var eventBusMock = new Mock<IEventBus>();
+        var loggerMock = new Mock<ILogger<AlertEvaluationService>>();
+
+        var service = new AlertEvaluationService(
+            scopeFactoryMock.Object, eventBusMock.Object, new AlertAggregator(),
+            new[] { evaluatorMock.Object }, loggerMock.Object);
+
+        await service.EvaluateForDeviceAsync(
+            _tenantId, deviceId, "电机",
+            "temperature", 95.0, new DeviceContext());
+
+        // 两条规则应各自创建独立告警
+        db.Alerts.Should().HaveCount(2, "同指标的不同规则应各自创建告警，不得互相吞并");
+        db.Alerts.Select(a => a.RuleId).Should().BeEquivalentTo(new[] { ruleWarn.Id, ruleCrit.Id });
+        db.Alerts.Should().Contain(a => a.Severity == AlertSeverity.Critical, "严重规则的告警不得被吞并");
+
+        // 两条告警都应发布事件（各自触发 SignalR 推送 + 自动建单）
+        eventBusMock.Verify(
+            e => e.PublishAsync(It.IsAny<AlertTriggeredEvent>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
     }
 
     // ========================================================================

@@ -112,8 +112,9 @@ public class AlertEvaluationService : IAlertEvaluationService
             _logger.LogInformation("告警规则 {RuleName} 已触发（设备: {DeviceId}, 指标: {Metric}, 值: {Value}）",
                 rule.Name, deviceId, metric, value);
 
-            // 通过聚合器判断告警处理策略（防风暴）
-            var (shouldCreate, shouldUpdate, silenced) = _aggregator.Evaluate(deviceId, metric);
+            // 通过聚合器判断告警处理策略（防风暴）。窗口按 设备+规则+指标 维度，
+            // 避免同指标的多条规则（分层阈值）共享窗口互相吞并。
+            var (shouldCreate, shouldUpdate, silenced) = _aggregator.Evaluate(deviceId, rule.Id, metric);
 
             if (silenced)
             {
@@ -147,7 +148,7 @@ public class AlertEvaluationService : IAlertEvaluationService
                 if (hasActive)
                 {
                     _logger.LogDebug("已存在活跃告警，降级为更新避免重复（聚合器可能因重启重置计数）: 设备={DeviceId}, 指标={Metric}", deviceId, metric);
-                    await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, metric, value);
+                    await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value);
                 }
                 else
                 {
@@ -165,7 +166,7 @@ public class AlertEvaluationService : IAlertEvaluationService
             }
             else if (shouldUpdate)
             {
-                await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, metric, value);
+                await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value);
             }
         }
     }
@@ -213,13 +214,17 @@ public class AlertEvaluationService : IAlertEvaluationService
     /// <summary>
     /// 更新已有活跃告警的值和时间戳（聚合防风暴场景下的第 2-3 次）
     /// </summary>
+    /// <param name="ruleId">按规则精确匹配，避免同指标不同规则的告警被互相更新（吞并）</param>
     private async Task UpdateExistingAlertAsync(AppDbContext dbContext, Guid tenantId,
-        Guid deviceId, string metric, double value)
+        Guid deviceId, Guid ruleId, string metric, double value)
     {
         // IgnoreQueryFilters: 同 CreateAlertAsync，后台处理器需绕过全局租户过滤器
+        // 按 设备+规则+指标 精确匹配（与聚合器窗口键维度一致），不得仅按 设备+指标，
+        // 否则同指标的第二条规则触发会更新第一条规则的告警、把严重告警吞并进告警级告警。
         var existingAlert = await dbContext.Alerts
             .IgnoreQueryFilters()
             .Where(a => a.TenantId == tenantId && a.DeviceId == deviceId
+                     && a.RuleId == ruleId
                      && a.Metric == metric && a.Status == AlertStatus.Active)
             .OrderByDescending(a => a.OccurredAt)
             .FirstOrDefaultAsync();

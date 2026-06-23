@@ -5,7 +5,7 @@ namespace EquipAI.Application.Alerts;
 
 /// <summary>
 /// 告警聚合器，实现 30 分钟窗口防风暴机制
-/// 30 分钟窗口内，同设备同指标：
+/// 30 分钟窗口内，同设备同指标同规则：
 /// - 第 1 次：立即创建新告警
 /// - 第 2-3 次：更新已有告警（追加 AggregatedFrom）
 /// - 超过 3 次：静默，不处理
@@ -16,10 +16,11 @@ public class AlertAggregator : IAlertAggregator
     private DateTime _lastCleanup = DateTime.UtcNow;
 
     public (bool ShouldCreate, bool ShouldUpdate, bool Silenced) Evaluate(
-        Guid deviceId, string metric)
+        Guid deviceId, Guid ruleId, string metric)
     {
         CleanupStaleWindows();
-        var key = $"{deviceId}:{metric}";
+        // 窗口键含 ruleId：隔离同设备同指标的不同规则（分层阈值场景），避免互相吞并。
+        var key = $"{deviceId}:{ruleId}:{metric}";
         var window = _windows.GetOrAdd(key, _ => new AlertWindow());
         var count = window.Increment();
 
