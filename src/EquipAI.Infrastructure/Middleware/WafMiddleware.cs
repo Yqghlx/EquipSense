@@ -90,8 +90,12 @@ public partial class WafMiddleware
     /// - DROP/DELETE/UPDATE + TABLE/DATABASE（破坏性语句）
     /// - xp_cmdshell（SQL Server 命令执行）
     /// </summary>
+    /// <remarks>
+    /// UPDATE 模式说明：合法 SQL 是 "UPDATE 表名 SET"，所以正则需要 "UPDATE 单词 SET"
+    /// 中间允许表名（\w+）+ 空白。早期版本写成 "UPDATE SET" 永远匹配不到合法 SQL。
+    /// </remarks>
     [GeneratedRegex(
-        @"union\s+select|or\s+1\s*=\s*1|and\s+1\s*=\s*1|--\s|;\s*drop\s+|;\s*delete\s+from|;\s*update\s+set|xp_cmdshell|information_schema|sleep\s*\(|benchmark\s*\(",
+        @"union\s+select|or\s+1\s*=\s*1|and\s+1\s*=\s*1|--\s|;\s*drop\s+|;\s*delete\s+from|;\s*update\s+\w+\s+set|xp_cmdshell|information_schema|sleep\s*\(|benchmark\s*\(",
         RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex SqlInjectionPattern();
 
