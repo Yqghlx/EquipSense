@@ -152,6 +152,56 @@ public class AlertNotificationServiceTests
         n.Title.Should().Contain("oil_temperature");
     }
 
+    /// <summary>
+    /// 验证站内通知内容展示设备友好标识（编码+名称）而非原始 UUID
+    ///
+    /// 背景：历史 PersistInAppNotificationAsync 直接拼 alert.DeviceId（UUID）到 Content，
+    /// 而同一告警的钉钉/飞书卡片却查询并展示 deviceLabel。结果 NotificationsPage 直接渲染 content，
+    /// 运维人员在站内通知里看到不可读的设备 GUID（与机器人卡片不一致），降低工业产品专业度。
+    /// </summary>
+    [Fact]
+    public async Task Notification_Content_Should_Show_Device_Label_Not_Raw_Uuid()
+    {
+        var tenantId = Guid.Empty;
+        var alertId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+
+        var (db, svc) = await CreateAsync(async ctx =>
+        {
+            await ctx.Users.AddAsync(new User
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Role = UserRole.SystemAdmin,
+                Username = "a", DisplayName = "A", PasswordHash = "x",
+            });
+            // 注册设备：编码 PUMP-001 + 名称 一号泵（站内通知应展示此友好标识）
+            await ctx.Devices.AddAsync(new Device
+            {
+                Id = deviceId, TenantId = tenantId,
+                DeviceCode = "PUMP-001", Name = "一号泵", Type = "泵",
+            });
+            await ctx.SaveChangesAsync();
+        });
+
+        // 事件与告警的 DeviceId 指向已注册设备
+        var evt = new AlertTriggeredEvent(
+            EventId: Guid.NewGuid(), OccurredAt: DateTime.UtcNow,
+            TenantId: tenantId, AlertId: alertId, DeviceId: deviceId,
+            RuleId: null, Metric: "oil_temperature", Value: 95.0, Severity: "High");
+        var alert = new Alert
+        {
+            Id = alertId, TenantId = tenantId, DeviceId = deviceId,
+            Severity = AlertSeverity.High, Status = AlertStatus.Active,
+            Metric = "oil_temperature", AlertCode = "ALT-001", OccurredAt = DateTime.UtcNow,
+        };
+
+        await svc.DispatchAsync(evt, alert);
+
+        var n = await db.Notifications.FirstAsync();
+        n.Content.Should().Contain("PUMP-001", "站内通知应展示设备编码而非原始 UUID");
+        n.Content.Should().NotContain(deviceId.ToString(),
+            "不应在通知内容中展示不可读的设备 GUID（应显示 PUMP-001（一号泵））");
+    }
+
     private sealed class TestTenantContext : ITenantContext
     {
         public TestTenantContext(Guid tenantId) { TenantId = tenantId; }

@@ -62,22 +62,27 @@ public class AlertNotificationService
     public async Task DispatchAsync(
         AlertTriggeredEvent @event, Alert alert, CancellationToken ct = default)
     {
-        // 1. 持久化站内通知（所有级别都记）
-        await PersistInAppNotificationAsync(@event, alert, ct);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // 查询设备友好标识（编码+名称），站内通知内容与机器人卡片共用——
+        // 关键修复：历史站内通知 Content 直接拼 alert.DeviceId（原始 UUID），运维在通知列表看到的是
+        // 不可读的 GUID，而同一告警的钉钉/飞书卡片却显示友好标识，体验不一致且不专业。
+        // 此处统一查询一次 deviceLabel，站内通知与机器人推送共用，消除重复查询。
+        // UnfilteredSet + DeviceId 全局唯一 PK：后台事件处理器无 HttpContext，须绕过 Guid.Empty 过滤器。
+        var deviceLabel = await db.UnfilteredSet<Core.Entities.Device>()
+            .Where(d => d.Id == @event.DeviceId)
+            .Select(d => d.DeviceCode + (string.IsNullOrEmpty(d.Name) ? "" : $"（{d.Name}）"))
+            .FirstOrDefaultAsync(ct) ?? @event.DeviceId.ToString();
+
+        // 1. 持久化站内通知（所有级别都记，内容含设备友好标识而非 UUID）
+        await PersistInAppNotificationAsync(@event, alert, deviceLabel, ct);
 
         // 2. 钉钉/飞书机器人推送（仅 Critical/High，避免低级别刷屏）
         if (!BotPushSeverities.Contains(@event.Severity))
             return;
 
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var configs = await GetIntegrationConfigsAsync(db, @event.TenantId, ct);
-
-        // 查询设备编码/名称，卡片里显示友好的设备标识而非 UUID
-        var deviceLabel = await db.UnfilteredSet<Core.Entities.Device>()
-            .Where(d => d.Id == @event.DeviceId)
-            .Select(d => d.DeviceCode + (string.IsNullOrEmpty(d.Name) ? "" : $"（{d.Name}）"))
-            .FirstOrDefaultAsync(ct) ?? @event.DeviceId.ToString();
 
         foreach (var (type, enabled, config) in configs)
         {
@@ -98,7 +103,9 @@ public class AlertNotificationService
     }
 
     /// <summary>持久化站内通知记录到 notifications 表</summary>
-    private async Task PersistInAppNotificationAsync(AlertTriggeredEvent @event, Alert alert, CancellationToken ct)
+    /// <param name="deviceLabel">设备友好标识（编码+名称），由 DispatchAsync 统一查询后传入，避免重复查询</param>
+    private async Task PersistInAppNotificationAsync(
+        AlertTriggeredEvent @event, Alert alert, string deviceLabel, CancellationToken ct)
     {
         try
         {
@@ -130,7 +137,7 @@ public class AlertNotificationService
                     UserId = userId,
                     Type = "alert",
                     Title = $"[{severityText}] 设备告警：{@event.Metric} 异常",
-                    Content = $"设备 {alert.DeviceId} 的指标 {@event.Metric} 当前值 {@event.Value}，触发 {@event.Severity} 级别告警。",
+                    Content = $"设备 {deviceLabel} 的指标 {@event.Metric} 当前值 {@event.Value}，触发 {@event.Severity} 级别告警。",
                     RelatedId = alert.Id,
                     Link = $"/alerts?alertId={alert.Id}",
                 });
