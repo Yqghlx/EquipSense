@@ -189,6 +189,23 @@ public class ApprovalChainService : IApprovalChainService
             })
             .ToList();
 
+        // 重新提交（驳回返工后再次提交验收）时，必须先作废上一轮的审批记录。
+        // 否则上一轮的记录（含被驳回的 Rejected）会与本轮新记录共存，ApproveAsync 的"全部步骤通过"
+        // 判定（allApprovals.All(a => a.Action == Approved)）会被上一轮的 Rejected 永久判定为 false，
+        // 工单即使本轮全部通过也无法进入 Accepted → 永久卡在审批中，维修闭环（派工执行）被阻断。
+        // 安全性：WorkOrderApproval 无外键被其他表引用，审批人/意见的审计由 WorkOrderLog
+        // 状态变更日志保留，删除上一轮作废记录不丢审计。
+        var previousApprovals = await dbContext.WorkOrderApprovals
+            .Where(a => a.WorkOrderId == workOrderId)
+            .ToListAsync(ct);
+        if (previousApprovals.Count > 0)
+        {
+            dbContext.WorkOrderApprovals.RemoveRange(previousApprovals);
+            _logger.LogInformation(
+                "工单 {WorkOrderId} 重新提交验收，作废上一轮 {Count} 条审批记录",
+                workOrderId, previousApprovals.Count);
+        }
+
         dbContext.WorkOrderApprovals.AddRange(approvals);
 
         // 同时更新工单状态为 SubmittedForApproval

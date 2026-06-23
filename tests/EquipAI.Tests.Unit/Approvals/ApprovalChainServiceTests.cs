@@ -343,6 +343,71 @@ public class ApprovalChainServiceTests : IAsyncDisposable
     }
 
     // ===================================================================
+    // 驳回返工后重新提交：旧审批记录不得阻塞新一轮审批
+    // ===================================================================
+
+    [Fact]
+    public async Task CreateApprovalRecordsAsync_驳回返工后重新提交_应作废旧记录且工单可再次通过审批()
+    {
+        // 回归 bug：工单"提交验收 → 部分审批 → 驳回（回 InProgress）→ 返工后重新提交验收"时，
+        // CreateApprovalRecordsAsync 会再创建一批审批记录，但此前不清理由 RejectAsync 留下的旧记录
+        // （含 Rejected）。两批记录共存后，ApproveAsync 的"全部步骤通过"判定（allApprovals.All(Approved)）
+        // 会被上一轮的 Rejected 永久判定为 false → 工单即使新一轮全部通过也无法进入 Accepted，
+        // 永久卡在审批中，维修闭环（派工执行）被阻断。
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+        _tenantContext.SetTenantId(tenantId);
+
+        // 审批模板：2 步（维护主管 + 系统管理员）
+        db.ApprovalChainTemplates.Add(CreateTemplate(tenantId, "纠正性默认", WorkOrderType.Corrective, null,
+            isDefault: true,
+            new ApprovalStep { StepOrder = 1, Role = "maintenance_lead" },
+            new ApprovalStep { StepOrder = 2, Role = "system_admin" }));
+
+        var workOrderId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId, TenantId = tenantId,
+            Title = "返工测试工单", Status = WorkOrderStatus.Completed,
+            Type = WorkOrderType.Corrective, Priority = WorkOrderPriority.High,
+            DeviceId = Guid.NewGuid()
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+
+        // 第一次提交验收：创建 2 个 Pending 步骤
+        await service.CreateApprovalRecordsAsync(tenantId, workOrderId, WorkOrderType.Corrective, WorkOrderPriority.High);
+        (await db.WorkOrderApprovals.AsNoTracking().CountAsync(a => a.WorkOrderId == workOrderId))
+            .Should().Be(2);
+
+        // 第 1 步通过，第 2 步驳回 → 工单回 InProgress（返工）
+        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "同意");
+        await service.RejectAsync(tenantId, workOrderId, Guid.NewGuid(), "需返工");
+        (await db.WorkOrders.AsNoTracking().FirstAsync(w => w.Id == workOrderId)).Status
+            .Should().Be(WorkOrderStatus.InProgress);
+
+        // 返工后重新提交验收（WorkOrderService.SubmitAsync 会再次调用 CreateApprovalRecordsAsync）
+        await service.CreateApprovalRecordsAsync(tenantId, workOrderId, WorkOrderType.Corrective, WorkOrderPriority.High);
+
+        // 关键断言 1：重新提交应作废上一轮审批记录，只保留新一轮的 2 个步骤（而非累计 4 个）
+        var approvalsAfterResubmit = await db.WorkOrderApprovals.AsNoTracking()
+            .Where(a => a.WorkOrderId == workOrderId).ToListAsync();
+        approvalsAfterResubmit.Should().HaveCount(2,
+            "重新提交应作废上一轮审批记录，不应让旧记录（含 Rejected）与新记录共存");
+
+        // 走完新一轮 2 步审批
+        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "同意");
+        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "同意");
+
+        // 关键断言 2：新一轮全部通过后，工单应进入 Accepted（派工执行），不被上一轮 Rejected 永久阻塞
+        var woFinal = await db.WorkOrders.AsNoTracking().FirstAsync(w => w.Id == workOrderId);
+        woFinal.Status.Should().Be(WorkOrderStatus.Accepted,
+            "驳回返工后重新提交的工单，只要新一轮审批全部通过，就应进入 Accepted");
+    }
+
+    // ===================================================================
     // 辅助方法
     // ===================================================================
 
