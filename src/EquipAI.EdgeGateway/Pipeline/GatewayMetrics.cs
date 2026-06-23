@@ -21,6 +21,8 @@ public class GatewayMetrics
         public const string UploadSuccessTotal = "edgegateway_upload_success_total";
         public const string UploadFailTotal = "edgegateway_upload_fail_total";
         public const string ReplayMessagesTotal = "edgegateway_replay_messages_total";
+        /// <summary>缓冲队列满时被丢弃的消息数（关键风险指标，应尽可能接近 0）</summary>
+        public const string BufferDroppedTotal = "edgegateway_buffer_dropped_total";
     }
 
     /// <summary>网关启动时间</summary>
@@ -84,6 +86,7 @@ public class GatewayMetrics
         Names.UploadSuccessTotal => "Total number of successful uploads",
         Names.UploadFailTotal => "Total number of failed uploads",
         Names.ReplayMessagesTotal => "Total number of replayed messages",
+        Names.BufferDroppedTotal => "Total number of messages dropped (queue overflow or SQLite failure)",
         _ => metricName
     };
 }

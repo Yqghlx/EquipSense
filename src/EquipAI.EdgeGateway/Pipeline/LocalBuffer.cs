@@ -32,19 +32,45 @@ public class LocalBuffer : IAsyncDisposable
     public int Count => _queue.Count;
 
     /// <summary>
-    /// 入队一条消息。超出容量时丢弃最早的消息。
+    /// 入队一条消息。
+    ///
+    /// 容量超限处理（关键修复）：
+    /// 原代码直接 TryDequeue(out _) 丢弃最早的消息，但是被丢弃的消息**没有先持久化到 SQLite**，
+    /// 导致长时间断网时内存队列溢出后，最早的数据（可能是关键故障前的征兆）被永久丢失。
+    ///
+    /// 修复策略：被驱逐的消息先尝试存到 SQLite（如果配置了 offlineStore），
+    /// 只有 SQLite 不可用或未配置时才真正丢弃。这样在断网场景下数据进入 SQLite
+    /// 7 天缓存窗口，重连后 CloudUploader 可以重新上传。
     /// </summary>
-    public Task EnqueueAsync(string topic, byte[] payload)
+    public async Task EnqueueAsync(string topic, byte[] payload)
     {
-        // 如果超出容量，丢弃最早的消息
         while (_queue.Count >= _capacity)
         {
-            _queue.TryDequeue(out _);
+            if (_queue.TryDequeue(out var evicted))
+            {
+                if (_offlineStore is not null)
+                {
+                    try
+                    {
+                        await _offlineStore.StoreAsync(evicted.Topic, evicted.Payload);
+                    }
+                    catch (Exception)
+                    {
+                        // SQLite 持久化失败（如磁盘满），只能放弃这条消息。
+                        // 记录到 metrics 让运维感知到数据丢失风险。
+                        _metrics?.Increment(GatewayMetrics.Names.BufferDroppedTotal);
+                    }
+                }
+                else
+                {
+                    // 未配置 offlineStore，内存缓冲是唯一存储，丢弃即永久丢失。
+                    _metrics?.Increment(GatewayMetrics.Names.BufferDroppedTotal);
+                }
+            }
         }
 
         _queue.Enqueue(new BufferEntry(topic, payload));
         _metrics?.SetGauge(GatewayMetrics.Names.BufferQueueDepth, _queue.Count);
-        return Task.CompletedTask;
     }
 
     /// <summary>

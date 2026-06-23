@@ -65,7 +65,8 @@ public class SqliteBufferStore : IAsyncDisposable
     /// </summary>
     /// <param name="topic">消息主题（如 MQTT topic）</param>
     /// <param name="payload">消息二进制负载</param>
-    public async Task StoreAsync(string topic, byte[] payload)
+    /// <remarks>标记为 virtual 以便单元测试模拟 SQLite 故障（如磁盘满场景）</remarks>
+    public virtual async Task StoreAsync(string topic, byte[] payload)
     {
         var cmd = _connection.CreateCommand();
         cmd.CommandText = "INSERT INTO buffer_messages (topic, payload) VALUES (@topic, @payload)";
