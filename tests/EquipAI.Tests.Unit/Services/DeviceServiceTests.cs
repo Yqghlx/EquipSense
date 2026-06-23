@@ -9,6 +9,7 @@ using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 
 namespace EquipAI.Tests.Unit.Services;
@@ -22,6 +23,7 @@ public class DeviceServiceTests : IAsyncDisposable
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly AppDbContext _db;
     private readonly DeviceService _sut;
+    private readonly StubAuditLogService _audit = new();
 
     public DeviceServiceTests()
     {
@@ -35,7 +37,9 @@ public class DeviceServiceTests : IAsyncDisposable
         var mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile<MappingProfile>());
         var mapper = mapperConfig.CreateMapper();
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<DeviceService>();
-        _sut = new DeviceService(_db, mapper, logger);
+        // 传入桩件审计服务：验证 DeviceService 是否正确触发审计调用契约
+        // （AuditLogService 本身的 DB 写入由其自身测试覆盖）
+        _sut = new DeviceService(_db, mapper, logger, _audit);
     }
 
     /// <summary>
@@ -579,6 +583,73 @@ public class DeviceServiceTests : IAsyncDisposable
         tenant.CurrentDeviceCount.Should().Be(0, "设备计数应递减");
     }
 
+    // ==================== 审计日志测试（创建/更新/删除设备须留痕）====================
+
+    /// <summary>
+    /// 安全合规验证：创建设备必须记录审计日志
+    ///
+    /// Why：设备是工业资产，新增/变更/删除设备不可追溯则无法核对资产清单（ISO 55000 资产管理 /
+    /// IEC 62443 安全合规）。原 DeviceService 全程零审计（全仓仅 UserService/AuthService 有审计），
+    /// 设备写操作"谁在何时改了哪台设备"完全无记录——误删/恶意删设备无法溯源（内部威胁盲区）。
+    /// </summary>
+    [Fact]
+    public async Task CreateDeviceAsync_应记录创建审计日志()
+    {
+        // Arrange
+        await SeedTenantAsync();
+        var request = new CreateDeviceRequest
+        {
+            DeviceCode = "DEV-AUDIT-C", Name = "审计测试设备", Type = "电机",
+        };
+
+        // Act
+        await _sut.CreateDeviceAsync(request, _tenantId);
+
+        // Assert：创建后应记录 DeviceCreate 审计（含租户/资源类型/资源 ID）
+        _audit.Logged.Should().ContainSingle(a => a.Action == "DeviceCreate",
+            "创建设备必须留痕审计，否则资产登记不可追溯");
+        var entry = _audit.Logged.Single(a => a.Action == "DeviceCreate");
+        entry.TenantId.Should().Be(_tenantId, "审计须归属正确租户");
+        entry.ResourceType.Should().Be("Device");
+        entry.ResourceId.Should().NotBeNullOrEmpty("审计须记录资源 ID 以定位具体设备");
+        entry.Description.Should().Contain("DEV-AUDIT-C", "描述须含设备编码便于追溯");
+    }
+
+    [Fact]
+    public async Task UpdateDeviceAsync_应记录更新审计日志()
+    {
+        // Arrange
+        await SeedTenantAsync();
+        var device = await SeedDeviceAsync("DEV-AUDIT-U", "待更新设备", "电机");
+
+        // Act
+        await _sut.UpdateDeviceAsync(device.Id, _tenantId, new UpdateDeviceRequest { Name = "更新后" });
+
+        // Assert：更新后应记录 DeviceUpdate 审计
+        _audit.Logged.Should().ContainSingle(a => a.Action == "DeviceUpdate",
+            "更新设备信息必须留痕审计（影响告警规则匹配/SLA/派工优先级）");
+        var entry = _audit.Logged.Single(a => a.Action == "DeviceUpdate");
+        entry.ResourceId.Should().Be(device.Id.ToString(), "审计须记录被更新的设备 ID");
+    }
+
+    [Fact]
+    public async Task DeleteDeviceAsync_应记录删除审计日志()
+    {
+        // Arrange：删除是不可逆资产处置，最须审计
+        await SeedTenantAsync();
+        var device = await SeedDeviceAsync("DEV-AUDIT-D", "待删除设备", "电机");
+
+        // Act
+        await _sut.DeleteDeviceAsync(device.Id, _tenantId);
+
+        // Assert：删除后应记录 DeviceDelete 审计（含设备编码，即使设备已删审计仍可追溯）
+        _audit.Logged.Should().ContainSingle(a => a.Action == "DeviceDelete",
+            "删除设备（不可逆资产处置）必须留痕审计，否则误删/恶意删设备无法溯源");
+        var entry = _audit.Logged.Single(a => a.Action == "DeviceDelete");
+        entry.ResourceId.Should().Be(device.Id.ToString());
+        entry.Description.Should().Contain("DEV-AUDIT-D", "描述须含设备编码，设备删除后仍可凭审计追溯");
+    }
+
     /// <summary>
     /// 测试用租户上下文，模拟 ITenantContext 接口
     /// 使用指定的租户 ID 构造，用于 InMemory 数据库的多租户过滤器
@@ -590,6 +661,29 @@ public class DeviceServiceTests : IAsyncDisposable
         public string IsolationMode { get; } = "Shared";
         public bool IsSystemAdmin { get; } = false;
         public Guid UserId { get; } = Guid.Empty;
+    }
+
+    /// <summary>
+    /// 桩件审计服务：记录 LogAsync 调用，验证 DeviceService 是否正确触发审计
+    /// （AuditLogService 本身的 DB 写入正确性由其自身测试覆盖，此处只验证调用契约）
+    /// </summary>
+    private sealed class StubAuditLogService : IAuditLogService
+    {
+        public List<(Guid TenantId, string Action, string ResourceType, string? ResourceId, string? Description)> Logged { get; } = new();
+
+        public Task LogAsync(Guid tenantId, string action, string resourceType,
+            string? resourceId = null, string? description = null, CancellationToken ct = default)
+        {
+            Logged.Add((tenantId, action, resourceType, resourceId, description));
+            return Task.CompletedTask;
+        }
+
+        public Task LogFromContextAsync(string action, string resourceType, string? resourceId = null,
+            string? description = null, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException("桩件不支持查询");
     }
 
     public async ValueTask DisposeAsync()

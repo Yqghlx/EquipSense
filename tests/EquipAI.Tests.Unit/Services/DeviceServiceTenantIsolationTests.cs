@@ -5,6 +5,7 @@ using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -50,6 +51,9 @@ public class DeviceServiceTenantIsolationTests : IAsyncLifetime
         services.AddSingleton<ITenantContext>(new FixedTenantContext(_tenantA));
         services.AddSingleton<IMapper>(_ => new Mapper(new MapperConfiguration(c => c.AddProfile<MappingProfile>())));
         services.AddLogging();
+        // 注册空实现审计服务：DeleteDeviceAsync 在跨租户拒绝路径（FindAsync 失败抛 KeyNotFound）先于审计执行，
+        // 审计不会被实际调用，此处仅满足 DeviceService 构造签名
+        services.AddSingleton<IAuditLogService, NoopAuditLogService>();
         _sp = services.BuildServiceProvider();
 
         using var seedScope = _sp.CreateScope();
@@ -102,7 +106,8 @@ public class DeviceServiceTenantIsolationTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var mapper = scope.ServiceProvider.GetRequiredService<IMapper>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<DeviceService>>();
-        return new DeviceService(db, mapper, logger);
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>();
+        return new DeviceService(db, mapper, logger, audit);
     }
 
     [Fact]
@@ -177,5 +182,19 @@ public class DeviceServiceTenantIsolationTests : IAsyncLifetime
         public string IsolationMode => "Shared";
         public bool IsSystemAdmin => false;
         public Guid UserId => Guid.Empty;
+    }
+
+    /// <summary>
+    /// 空实现审计服务：本测试聚焦租户隔离，DeleteDeviceAsync 在跨租户拒绝路径先于审计执行，
+    /// 审计不会被实际调用，此类仅满足 DeviceService 构造签名。
+    /// </summary>
+    private sealed class NoopAuditLogService : IAuditLogService
+    {
+        public Task LogAsync(Guid tenantId, string action, string resourceType, string? resourceId = null,
+            string? description = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task LogFromContextAsync(string action, string resourceType, string? resourceId = null,
+            string? description = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
+            CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

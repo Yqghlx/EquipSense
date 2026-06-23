@@ -4,6 +4,7 @@ using EquipAI.Core.Models;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public class DeviceService : IDeviceService
     private readonly AppDbContext _dbContext;
     private readonly IMapper _mapper;
     private readonly ILogger<DeviceService> _logger;
+    private readonly IAuditLogService _auditLogService;
 
     /// <summary>
     /// 初始化设备管理服务
@@ -26,11 +28,13 @@ public class DeviceService : IDeviceService
     public DeviceService(
         AppDbContext dbContext,
         IMapper mapper,
-        ILogger<DeviceService> logger)
+        ILogger<DeviceService> logger,
+        IAuditLogService auditLogService)
     {
         _dbContext = dbContext;
         _mapper = mapper;
         _logger = logger;
+        _auditLogService = auditLogService;
     }
 
     /// <summary>
@@ -129,6 +133,11 @@ public class DeviceService : IDeviceService
 
         await _dbContext.SaveChangesAsync();
 
+        // 设备创建（资产登记）必须留痕审计：工业资产台账是 ISO 55000 资产管理 / IEC 62443 安全合规的基础，
+        // 新增设备不可追溯则无法核对资产清单（是否有未经登记的设备接入监控）。
+        await _auditLogService.LogAsync(tenantId, "DeviceCreate", "Device",
+            device.Id.ToString(), $"创建设备：{device.DeviceCode}（{device.Name}）", default);
+
         _logger.LogInformation("设备 {DeviceCode}（名称：{Name}）创建成功（租户：{TenantId}）",
             device.DeviceCode, device.Name, tenantId);
 
@@ -153,6 +162,12 @@ public class DeviceService : IDeviceService
         device.UpdatedAt = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync();
+
+        // 设备信息变更（名称/位置/关键等级/参数等）影响告警规则匹配与运维识别，必须留痕审计：
+        // 关键等级(Criticality)变更影响 SLA/派工优先级，参数变更影响告警阈值——这些变更不可追溯
+        // 则无法定位"谁改了设备配置导致告警失效/误派工"。
+        await _auditLogService.LogAsync(tenantId, "DeviceUpdate", "Device",
+            deviceId.ToString(), $"更新设备信息：{device.DeviceCode}（{device.Name}）", default);
 
         _logger.LogInformation("设备 {DeviceId} 信息已更新", deviceId);
 
@@ -230,6 +245,12 @@ public class DeviceService : IDeviceService
         }
 
         await _dbContext.SaveChangesAsync();
+
+        // 设备删除是不可逆的资产处置（硬删除 + 级联清理告警/规则/网关关联），必须留痕审计：
+        // 工业资产报废/拆除是重大事件，删除不可追溯则无法核查"谁在何时删除了哪台设备"
+        // （误删/恶意删设备的内部威胁，ISO 27001 / IEC 62443 可审计性要求）。
+        await _auditLogService.LogAsync(tenantId, "DeviceDelete", "Device",
+            deviceId.ToString(), $"删除设备：{device.DeviceCode}（{device.Name}）", default);
 
         _logger.LogInformation(
             "设备 {DeviceId}（编码：{DeviceCode}）已删除，同时归档 {AlertCount} 条活跃告警，移除 {LinkCount} 个网关关联，清理 {RuleCount} 条绑定告警规则",
