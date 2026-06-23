@@ -98,9 +98,12 @@ public class SlaManagementService
             if (status == SlaStatus.Overdue)
             {
                 // 自动升级优先级（Low→Medium→High→Critical，最高不再升）
-                if (wo.Priority < WorkOrderPriority.Critical)
+                // 注意：枚举顺序是 Critical=0 < High < Medium < Low=3，
+                // 升级方向 = Priority 值减小。所以判断条件是 "> Critical" 且升级用 -1。
+                // 原代码 "< Critical" 永远 false（因 Critical 是最小值），自动升级实际失效。
+                if (wo.Priority > WorkOrderPriority.Critical)
                 {
-                    wo.Priority = wo.Priority + 1;
+                    wo.Priority = wo.Priority - 1;
                     escalated++;
                     _logger.LogInformation("工单 {Code} SLA 超时，优先级升级为 {Priority}", wo.WorkOrderCode, wo.Priority);
                 }
