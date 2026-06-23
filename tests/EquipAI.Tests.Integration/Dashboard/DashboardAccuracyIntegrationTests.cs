@@ -330,6 +330,185 @@ public class DashboardAccuracyIntegrationTests : IDisposable
     }
 
     // =========================================================================
+    // 设备多状态混合 — 可用率只计 Online，其他状态（Offline/Maintenance/Warning）一律不计
+    // =========================================================================
+
+    /// <summary>
+    /// 边界场景：5 台设备混合 4 种状态（2 Online + 1 Offline + 1 Maintenance + 1 Warning）
+    ///
+    /// 业务定义：DashboardStatsService.Availability 是"瞬时在线比例"（Online/Total）。
+    /// 维护主管可能误以为"维护中"也算可用，但代码层面只有 Online 计入。
+    /// 此测试锁定该行为，避免后续重构时误把 Maintenance/Warning 也算进去导致数字虚高。
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_设备多状态混合时只计Online入可用率()
+    {
+        SetCurrentTenant(_tenantAId);
+        var deviceId = Guid.NewGuid();
+
+        // 2 Online + 1 Offline + 1 Maintenance + 1 Warning = 5 台总数，2 台在线
+        _db.Devices.AddRange(
+            new Device { Name = "D-Online-1", Type = "pump", DeviceCode = "MIX-OL-1", TenantId = _tenantAId, Status = DeviceStatus.Online },
+            new Device { Name = "D-Online-2", Type = "pump", DeviceCode = "MIX-OL-2", TenantId = _tenantAId, Status = DeviceStatus.Online },
+            new Device { Name = "D-Offline", Type = "pump", DeviceCode = "MIX-OFF", TenantId = _tenantAId, Status = DeviceStatus.Offline },
+            new Device { Name = "D-Maint", Type = "pump", DeviceCode = "MIX-MNT", TenantId = _tenantAId, Status = DeviceStatus.Maintenance },
+            new Device { Name = "D-Warning", Type = "pump", DeviceCode = "MIX-WRN", TenantId = _tenantAId, Status = DeviceStatus.Warning }
+        );
+        await _db.SaveChangesAsync();
+
+        var stats = await _service.GetStatsAsync(_tenantAId);
+
+        stats.TotalDevices.Should().Be(5);
+        stats.OnlineDevices.Should().Be(2, "只有 Online 状态计入，Maintenance/Warning/Offline 都不算");
+        stats.Availability.Should().Be(40.0, "2/5 = 40.0%");
+    }
+
+    /// <summary>
+    /// 边界场景：租户没有任何设备时，Availability 应为 0 而非抛 DivideByZero
+    ///
+    /// Why：DashboardStatsService.GetStatsAsync 内部用 Total > 0 判空，
+    /// 此测试锁定该防御逻辑，避免后续重构时回归到除零异常。
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_零设备时可用率返回零不抛异常()
+    {
+        SetCurrentTenant(_tenantAId);
+        // 故意不播种任何设备
+
+        // 0 设备是合法状态，不应抛 DivideByZero
+        var act = async () => await _service.GetStatsAsync(_tenantAId);
+        await act.Should().NotThrowAsync();
+
+        var stats = await _service.GetStatsAsync(_tenantAId);
+        stats.TotalDevices.Should().Be(0);
+        stats.OnlineDevices.Should().Be(0);
+        stats.Availability.Should().Be(0, "分母为 0 时应返回 0 而非 NaN 或抛异常");
+    }
+
+    // =========================================================================
+    // 告警级别分布精确性 — 混合配比严格匹配
+    // =========================================================================
+
+    /// <summary>
+    /// 边界场景：100 条活跃告警 = 70 Critical + 20 High + 10 Normal
+    ///
+    /// Why：真实场景中告警级别分布是排班和资源调配的关键依据。
+    /// 如果某一级被漏统计（例如枚举 ToString 翻译问题），主管看到的分布比例就错了。
+    /// 此测试用 100 条混合告警验证分布严格匹配预期，且总和等于 ActiveAlerts。
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_告警级别分布严格匹配混合配比()
+    {
+        SetCurrentTenant(_tenantAId);
+        var deviceId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        // 70 Critical + 20 High + 10 Normal，全部 Active（无 Resolved，避免混淆）
+        AddAlerts(deviceId, _tenantAId, AlertSeverity.Critical, 70, now);
+        AddAlerts(deviceId, _tenantAId, AlertSeverity.High, 20, now);
+        AddAlerts(deviceId, _tenantAId, AlertSeverity.Normal, 10, now);
+        await _db.SaveChangesAsync();
+
+        var stats = await _service.GetStatsAsync(_tenantAId);
+
+        stats.ActiveAlerts.Should().Be(100);
+        stats.AlertsBySeverity.Should().ContainKey("Critical").WhoseValue.Should().Be(70);
+        stats.AlertsBySeverity.Should().ContainKey("High").WhoseValue.Should().Be(20);
+        stats.AlertsBySeverity.Should().ContainKey("Normal").WhoseValue.Should().Be(10);
+        stats.AlertsBySeverity.Should().NotContainKey("Low", "未播种 Low 级别告警");
+
+        // 关键不变量：各级别之和必须等于 ActiveAlerts（防止漏统计或重复计数）
+        stats.AlertsBySeverity.Values.Sum().Should().Be(stats.ActiveAlerts,
+            "各级别告警数之和必须等于活跃告警总数，否则有漏统计或重复计数");
+    }
+
+    // =========================================================================
+    // 工单状态分布全面性 — 9 个状态独立计数 + PendingWorkOrders 与 ByStatus 一致
+    // =========================================================================
+
+    /// <summary>
+    /// 边界场景：播种全部 9 个 WorkOrderStatus 各若干条，验证：
+    /// 1. WorkOrdersByStatus 字典每个状态都正确计数
+    /// 2. PendingWorkOrders == WorkOrdersByStatus["PendingDispatch"]（同一字段的两个出口必须一致）
+    ///
+    /// Why：PendingWorkOrders 来自 byStatus.TryGetValue("PendingDispatch")，
+    /// 如果 TryGetValue 失败（如字典 key 大小写不一致）会返回 0，但 ByStatus 字典里仍可能有值。
+    /// 此测试锁定两出口的一致性，防止前端显示矛盾（顶部卡片显示 0，分布图里却显示 5）。
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_工单状态分布含9个状态时准确计数()
+    {
+        SetCurrentTenant(_tenantAId);
+        var deviceId = Guid.NewGuid();
+
+        // 各状态独立播种：PendingDispatch=5, Assigned=3, InProgress=2, Completed=4,
+        // Accepted=2, Rejected=1, SubmittedForApproval=2, Closed=1, Cancelled=1
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.PendingDispatch, 5);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.Assigned, 3);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.InProgress, 2);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.Completed, 4);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.Accepted, 2);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.Rejected, 1);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.SubmittedForApproval, 2);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.Closed, 1);
+        AddWorkOrders(deviceId, _tenantAId, WorkOrderStatus.Cancelled, 1);
+        await _db.SaveChangesAsync();
+
+        var stats = await _service.GetStatsAsync(_tenantAId);
+
+        // 9 个状态全部独立校验
+        stats.WorkOrdersByStatus["PendingDispatch"].Should().Be(5);
+        stats.WorkOrdersByStatus["Assigned"].Should().Be(3);
+        stats.WorkOrdersByStatus["InProgress"].Should().Be(2);
+        stats.WorkOrdersByStatus["Completed"].Should().Be(4);
+        stats.WorkOrdersByStatus["Accepted"].Should().Be(2);
+        stats.WorkOrdersByStatus["Rejected"].Should().Be(1);
+        stats.WorkOrdersByStatus["SubmittedForApproval"].Should().Be(2);
+        stats.WorkOrdersByStatus["Closed"].Should().Be(1);
+        stats.WorkOrdersByStatus["Cancelled"].Should().Be(1);
+
+        // 关键一致性：顶部 PendingWorkOrders 必须等于 ByStatus["PendingDispatch"]
+        stats.PendingWorkOrders.Should().Be(5);
+        stats.PendingWorkOrders.Should().Be(stats.WorkOrdersByStatus["PendingDispatch"],
+            "PendingWorkOrders 是 ByStatus['PendingDispatch'] 的快捷出口，两者必须始终一致");
+    }
+
+    // =========================================================================
+    // 趋势补零 — 无数据时返回 7 个零点（非空列表）
+    // =========================================================================
+
+    /// <summary>
+    /// 边界场景：租户没有任何告警历史时，AlertTrend 应返回 7 个零点而非空列表
+    ///
+    /// Why：前端 ECharts 趋势图依赖固定的 7 个数据点画图。
+    /// 如果后端返回空列表，前端会渲染空白图（不是 7 天全零的直线），
+    /// 用户会误以为"图表坏了"而非"过去 7 天确实没告警"。
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_7天无告警时趋势为7个零点()
+    {
+        SetCurrentTenant(_tenantAId);
+        // 故意不播种任何告警
+
+        var stats = await _service.GetStatsAsync(_tenantAId);
+
+        stats.AlertTrend.Should().NotBeEmpty("无告警时应返回 7 个零点，而非空列表");
+        stats.AlertTrend.Should().HaveCount(7);
+        stats.AlertTrend.Should().AllSatisfy(p => p.Count.Should().Be(0), "无告警时所有点应为零");
+
+        // 同理工单趋势
+        stats.WorkOrderTrend.Should().NotBeEmpty();
+        stats.WorkOrderTrend.Should().HaveCount(7);
+        stats.WorkOrderTrend.Should().AllSatisfy(p => p.Count.Should().Be(0));
+
+        // 7 个日期连续且首日为 6 天前（按租户时区）
+        var tz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Shanghai");
+        var expectedFirst = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz).Date.AddDays(-6);
+        stats.AlertTrend[0].Date.Should().Be(expectedFirst.ToString("yyyy-MM-dd"));
+        stats.AlertTrend[6].Date.Should().Be(expectedFirst.AddDays(6).ToString("yyyy-MM-dd"));
+    }
+
+    // =========================================================================
     // 辅助播种方法 — 直接绕过租户过滤器写入
     // =========================================================================
 
@@ -347,6 +526,52 @@ public class DashboardAccuracyIntegrationTests : IDisposable
             });
         }
         _db.SaveChanges();
+    }
+
+    /// <summary>
+    /// 批量播种 N 条同级别活跃告警（绕过租户过滤器直接写入指定租户）
+    /// AlertCode 全局唯一（截断到 20 字符以满足实体约束），用 GUID 避免跨测试冲突
+    /// </summary>
+    private void AddAlerts(Guid deviceId, Guid tenantId, AlertSeverity severity, int count, DateTime occurredAt)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            _db.Alerts.Add(new Alert
+            {
+                DeviceId = deviceId,
+                TenantId = tenantId,
+                Metric = $"metric-{severity}-{i}",
+                Severity = severity,
+                Value = 90 + (i % 10),
+                Threshold = 80,
+                Status = AlertStatus.Active,
+                OccurredAt = occurredAt,
+                AlertCode = $"ALT-{severity}-{Guid.NewGuid():N}".Substring(0, 20),
+            });
+        }
+    }
+
+    /// <summary>
+    /// 批量播种 N 条同状态工单（绕过租户过滤器直接写入指定租户）
+    /// WorkOrderCode 用 GUID 前 8 字符保证唯一性
+    /// （最长组合：WO-SubmittedForApproval-{8 字符 GUID} = 32 字符，远小于 50 字符限制）
+    /// </summary>
+    private void AddWorkOrders(Guid deviceId, Guid tenantId, WorkOrderStatus status, int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var guidSuffix = Guid.NewGuid().ToString("N").Substring(0, 8);
+            _db.WorkOrders.Add(new WorkOrder
+            {
+                Title = $"WO-{status}-{i}",
+                WorkOrderCode = $"WO-{status}-{guidSuffix}",
+                Status = status,
+                Priority = WorkOrderPriority.Medium,
+                DeviceId = deviceId,
+                TenantId = tenantId,
+                Type = WorkOrderType.Corrective,
+            });
+        }
     }
 
     private void SeedAlertsForTenant(Guid tenantId, int count, AlertSeverity severity)
