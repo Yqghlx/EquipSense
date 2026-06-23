@@ -119,7 +119,26 @@
       "performance": "性能",
       "performanceHint": "产能达标率",
       "quality": "质量",
-      "qualityHint": "无严重故障占比"
+      "qualityHint": "无严重故障占比",
+      "approximate": "近似估算",
+      "approximateHint": "基于实时状态的近似估算，非严格工业 OEE",
+      "insufficientData": "数据不足"
+    },
+    "welcome": {
+      "title": "欢迎使用 EquipSense",
+      "subtitle": "完成以下三步，开启工业设备智能监控之旅",
+      "step1": {
+        "title": "添加设备",
+        "desc": "注册 PLC、CNC、空压机等工业设备"
+      },
+      "step2": {
+        "title": "配置告警规则",
+        "desc": "设置阈值、组合、基线三级告警"
+      },
+      "step3": {
+        "title": "接入遥测数据",
+        "desc": "通过 MQTT 或边缘网关接入实时数据"
+      }
     }
   },
   "device": {

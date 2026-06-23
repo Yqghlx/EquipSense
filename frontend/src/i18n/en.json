@@ -119,7 +119,26 @@
       "performance": "Performance",
       "performanceHint": "Output ratio",
       "quality": "Quality",
-      "qualityHint": "No-critical-fault ratio"
+      "qualityHint": "No-critical-fault ratio",
+      "approximate": "Approximate",
+      "approximateHint": "Approximate estimate based on real-time state, not strict industrial OEE",
+      "insufficientData": "Insufficient data"
+    },
+    "welcome": {
+      "title": "Welcome to EquipSense",
+      "subtitle": "Complete these three steps to start industrial equipment monitoring",
+      "step1": {
+        "title": "Add devices",
+        "desc": "Register PLC, CNC, air compressor and other industrial equipment"
+      },
+      "step2": {
+        "title": "Configure alert rules",
+        "desc": "Set up threshold, combined, and baseline alert rules"
+      },
+      "step3": {
+        "title": "Connect telemetry",
+        "desc": "Stream real-time data via MQTT or edge gateway"
+      }
     }
   },
   "device": {
