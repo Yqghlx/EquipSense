@@ -283,10 +283,21 @@ public class DataExportService
     {
         var query = _db.WorkOrders.AsQueryable();
 
-        if (!string.IsNullOrWhiteSpace(status))
-            query = query.Where(w => w.Status.ToString() == status);
-        if (!string.IsNullOrWhiteSpace(priority))
-            query = query.Where(w => w.Priority.ToString() == priority);
+        // status/priority 字符串先在客户端解析为枚举，再在查询内做枚举比较（可翻译为 SQL 整数比较）。
+        // 不可用 w.Status.ToString() == status：枚举以 int 存储（无 HasConversion），
+        // 查询内 ToString() 既无法翻译（抛 InvalidOperationException）、即使能翻译得到的也是数值字符串而非枚举名。
+        // 与 ExportDevicesAsync 的 status 处理保持一致。
+        WorkOrderStatus? statusEnum = null;
+        if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<WorkOrderStatus>(status, ignoreCase: true, out var parsedStatus))
+            statusEnum = parsedStatus;
+        WorkOrderPriority? priorityEnum = null;
+        if (!string.IsNullOrWhiteSpace(priority) && Enum.TryParse<WorkOrderPriority>(priority, ignoreCase: true, out var parsedPriority))
+            priorityEnum = parsedPriority;
+
+        if (statusEnum.HasValue)
+            query = query.Where(w => w.Status == statusEnum.Value);
+        if (priorityEnum.HasValue)
+            query = query.Where(w => w.Priority == priorityEnum.Value);
         if (deviceId.HasValue)
             query = query.Where(w => w.DeviceId == deviceId.Value);
 

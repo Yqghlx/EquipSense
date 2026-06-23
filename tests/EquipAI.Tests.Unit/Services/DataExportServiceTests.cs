@@ -5,6 +5,7 @@ using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
@@ -120,6 +121,42 @@ public class DataExportServiceTests
 
         csv.Should().Contain("温度超过阈值90度");
         csv.Should().NotContain("'温度", "不以公式触发符开头的普通文本不应被前置单引号");
+    }
+
+    /// <summary>
+    /// 工单按状态过滤导出——必须用关系型提供程序（SQLite）验证。
+    /// 工单状态/优先级枚举以 int 存储（无 HasConversion），导出代码用 w.Status.ToString() == status 在查询内比较，
+    /// SQL 端得到的是数值字符串 "0" 而非枚举名 "PendingDispatch"，故在真实 PG/SQLite 上要么抛翻译异常、要么静默返回空。
+    /// InMemory 提供程序客户端求值会让该比较在内存里成立，掩盖此缺陷（又一处测试提供程序盲点）。
+    /// </summary>
+    [Fact]
+    public async Task ExportWorkOrdersAsync_当按状态过滤时_应返回匹配工单()
+    {
+        // 用 SQLite 内存库强制 SQL 翻译（关系型），而非 InMemory（客户端求值会掩盖缺陷）
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        await db.Database.EnsureCreatedAsync();
+
+        db.WorkOrders.Add(new WorkOrder
+        {
+            TenantId = _tenantId,
+            WorkOrderCode = "WO-REG-001",
+            Title = "回归测试工单",
+            Type = WorkOrderType.Corrective,
+            Status = WorkOrderStatus.PendingDispatch,
+            Priority = WorkOrderPriority.Medium,
+            DeviceId = Guid.NewGuid(),
+        });
+        await db.SaveChangesAsync();
+
+        var sqliteSut = new DataExportService(db);
+        var csv = Encoding.UTF8.GetString(await sqliteSut.ExportWorkOrdersAsync(_tenantId, status: "PendingDispatch"));
+
+        csv.Should().Contain("WO-REG-001", "按状态过滤应返回匹配的工单，而非静默返回空");
     }
 
     /// <summary>构造一条最小可用告警，便于各测试聚焦于被测字段</summary>
