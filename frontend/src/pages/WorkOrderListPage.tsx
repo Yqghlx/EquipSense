@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Download } from 'lucide-react';
+import { Plus, Search, Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Card, CardContent } from '../components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -37,7 +38,7 @@ export default function WorkOrderListPage() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const { data, isLoading } = useWorkOrders({ page, pageSize: 20 }, { status: status || undefined });
+  const { data, isLoading, isError, refetch } = useWorkOrders({ page, pageSize: 20 }, { status: status || undefined });
   const createWorkOrder = useCreateWorkOrder();
   const { data: devicesData } = useDevices({ page: 1, pageSize: 100 });
 
@@ -95,9 +96,21 @@ export default function WorkOrderListPage() {
         </Select>
       </div>
 
-      {/* 工单表格 */}
+      {/* 工单表格或加载/错误状态 */}
       {isLoading ? (
         <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>
+      ) : isError && !data ? (
+        /* 错误态：首屏加载失败时显式提示并可重试，避免把网络错误误显示为"暂无工单" */
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <AlertTriangle className="h-8 w-8 text-amber-500" />
+            <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              {t('common.retry')}
+            </Button>
+          </CardContent>
+        </Card>
       ) : (
         <>
           <Table>
