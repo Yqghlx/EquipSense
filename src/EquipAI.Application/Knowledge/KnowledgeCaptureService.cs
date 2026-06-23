@@ -54,9 +54,14 @@ public class KnowledgeCaptureService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        // 本服务由后台事件处理器（KnowledgeCaptureHandler）调用，运行在独立 DI scope 中，无 HttpContext，
+        // ITenantContext 走回退分支 → TenantId == Guid.Empty。若沿用默认全局租户过滤器，下列查询恒为
+        // TenantId == Guid.Empty 而查不到真实租户的数据（FindAsync/FirstOrDefaultAsync 均应用过滤器），
+        // 知识沉淀将整体失效。故必须 IgnoreQueryFilters 并按事件载荷中的 tenantId 显式限定（服务端可信）。
         // 查询工单（需要关联设备信息获取设备类型）
         var wo = await db.WorkOrders
-            .FirstOrDefaultAsync(wo => wo.Id == workOrderId, ct);
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(wo => wo.Id == workOrderId && wo.TenantId == tenantId, ct);
 
         if (wo is null)
         {
@@ -71,8 +76,10 @@ public class KnowledgeCaptureService
             return;
         }
 
-        // 查询关联设备（WorkOrder 没有导航属性，需手动查询）
-        var device = await db.Devices.FindAsync([wo.DeviceId], ct);
+        // 查询关联设备（WorkOrder 没有导航属性，需手动查询；IgnoreQueryFilters + 显式租户）
+        var device = await db.Devices
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(d => d.Id == wo.DeviceId && d.TenantId == tenantId, ct);
         var deviceType = device?.Type ?? "未知";
 
         // 1. 创建故障案例
@@ -93,11 +100,13 @@ public class KnowledgeCaptureService
 
         db.FaultCases.Add(faultCase);
 
-        // 2. 查询关联的分析结果（工单有 AnalysisId 直接属性）
+        // 2. 查询关联的分析结果（工单有 AnalysisId 直接属性；IgnoreQueryFilters + 显式租户）
         Core.Entities.Analysis? analysis = null;
         if (wo.AnalysisId.HasValue)
         {
-            analysis = await db.Analyses.FindAsync([wo.AnalysisId.Value], ct);
+            analysis = await db.Analyses
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(a => a.Id == wo.AnalysisId.Value && a.TenantId == tenantId, ct);
         }
 
         // 3. 高置信度 -> 尝试通过 LLM 生成候选规则

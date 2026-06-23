@@ -1,6 +1,7 @@
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -50,25 +51,33 @@ public class KnowledgeCaptureHandler : IEventHandler<WorkOrderStatusChangedEvent
         }
 
         // 规则准确率追踪：工单关闭后检查关联分析使用的规则是否准确
-        await TrackRuleAccuracyAsync(@event.WorkOrderId, ct);
+        await TrackRuleAccuracyAsync(@event.TenantId, @event.WorkOrderId, ct);
     }
 
     /// <summary>
     /// 追踪规则准确率 — 根据工单是否填写了根因和解决措施来判断规则诊断是否准确
     /// </summary>
+    /// <param name="tenantId">租户 ID（来自事件载荷，后台 scope 无 HttpContext，用于显式过滤）</param>
     /// <param name="workOrderId">工单 ID</param>
     /// <param name="ct">取消令牌</param>
-    private async Task TrackRuleAccuracyAsync(Guid workOrderId, CancellationToken ct)
+    private async Task TrackRuleAccuracyAsync(Guid tenantId, Guid workOrderId, CancellationToken ct)
     {
         try
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            var wo = await db.WorkOrders.FindAsync([workOrderId], ct);
+            // 后台 scope 无 HttpContext，ITenantContext 走回退 → TenantId == Guid.Empty，
+            // 默认过滤器会让 FindAsync 查不到真实租户的工单 → 准确率追踪永久失效。
+            // 故 IgnoreQueryFilters + 显式按事件 tenantId 限定。
+            var wo = await db.WorkOrders
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(x => x.Id == workOrderId && x.TenantId == tenantId, ct);
             if (wo?.AnalysisId is not null)
             {
-                var analysis = await db.Analyses.FindAsync([wo.AnalysisId.Value], ct);
+                var analysis = await db.Analyses
+                    .IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(a => a.Id == wo.AnalysisId.Value && a.TenantId == tenantId, ct);
                 if (analysis?.RuleId.HasValue == true)
                 {
                     // 工单填写了根因和解决措施，说明规则诊断有一定参考价值
