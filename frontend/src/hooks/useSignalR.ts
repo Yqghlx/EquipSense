@@ -95,8 +95,12 @@ export function useSignalR() {
     };
 
     startConnection().then((conn) => {
+      // 仅在首次连接注册处理器。单例 HubConnection + withAutomaticReconnect 重连后 handlers 保留
+      //（_methods 存在实例上，reconnect 只重建底层 transport；源码确认 _methods 仅构造函数初始化一次）。
+      // 切勿在 onreconnected 重新注册：registerHandlers 每次创建新闭包，@microsoft/signalr 的 .on()
+      // 用 indexOf 去重依赖相同函数引用，新闭包引用不同 → 去重失效 → handler 累积，重连 N 次后每个
+      // 事件触发 N+1 次（重复弹告警通知、重复 invalidate 触发 N+1 倍请求，工业网络抖动下加剧）。
       registerHandlers(conn);
-      conn.onreconnected(() => registerHandlers(conn));
     }).catch(console.error);
 
     // 不在组件卸载时断开连接 — SignalR 连接跨路由保持

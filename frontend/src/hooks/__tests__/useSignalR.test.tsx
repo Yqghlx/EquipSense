@@ -9,24 +9,38 @@ import type { ReactNode } from 'react';
  * 验证 SignalR 连接管理的正确性：
  * - 认证后自动建立连接并注册事件处理器
  * - 未认证时调用 stopConnection 断开
+ * - 【回归 #238】重连后不得重复注册处理器（避免事件触发 N+1 次）
  *
  * 使用 vi.hoisted() 确保 mock 对象在 vi.mock 提升时也可访问。
  * 每个测试通过 vi.resetModules() 重置模块缓存，避免 started ref 泄漏。
  */
 
-const { mockConnection, mockAuthStore, mockPush, mockStart, mockStop } = vi.hoisted(() => {
+const { mockConnection, mockAuthStore, mockPush, mockStart, mockStop, reconnectedCbs, handlers } = vi.hoisted(() => {
+  // 累积态：记录每个事件的 handler，模拟 @microsoft/signalr .on() 的 indexOf 去重语义
+  // （相同函数引用跳过）—— 这是 #238 bug 复现的关键：registerHandlers 每次新闭包引用不同，
+  // 去重失效，重连重新注册会累积。
+  const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+  const reconnectedCbs: Array<() => void> = [];
   const conn = {
-    on: vi.fn(),
+    on: vi.fn((method: string, handler: (...args: unknown[]) => void) => {
+      const key = method.toLowerCase();
+      if (!handlers[key]) handlers[key] = [];
+      if (!handlers[key].includes(handler)) handlers[key].push(handler);
+    }),
     invoke: vi.fn(),
     stop: vi.fn(),
-    onreconnected: vi.fn(),
+    onreconnected: vi.fn((cb: () => void) => {
+      reconnectedCbs.push(cb);
+    }),
   };
   return {
     mockConnection: conn,
     mockAuthStore: vi.fn(),
     mockPush: vi.fn(),
-    mockStart: vi.fn().mockResolvedValue(conn),
-    mockStop: vi.fn().mockResolvedValue(undefined),
+    mockStart: vi.fn(),
+    mockStop: vi.fn(),
+    reconnectedCbs,
+    handlers,
   };
 });
 
@@ -62,6 +76,9 @@ describe('useSignalR', () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    // 清空累积态（普通数组/对象，clearAllMocks 不影响），避免测试间相互污染
+    reconnectedCbs.length = 0;
+    for (const k of Object.keys(handlers)) delete handlers[k];
     mockStart.mockResolvedValue(mockConnection);
 
     mockAuthStore.mockReturnValue({
@@ -124,5 +141,26 @@ describe('useSignalR', () => {
     await waitFor(() => {
       expect(mockStop).toHaveBeenCalled();
     });
+  });
+
+  it('【回归】重连后不得重复注册处理器（避免事件触发 N+1 次）', async () => {
+    // 旧 BUG：onreconnected(() => registerHandlers(conn)) 每次重连重新注册处理器，
+    // 但 registerHandlers 每次创建新闭包（不同函数引用），@microsoft/signalr 的 .on() 用
+    // indexOf 去重依赖相同引用 → 去重失效 → handler 累积。单例 HubConnection 重连保留 _methods
+    // （源码确认 _methods 仅构造函数初始化），故重连 N 次后每个事件触发 N+1 次
+    // （重复弹告警通知、invalidateQueries 触发 N+1 倍请求）。工业网络抖动下加剧。
+    renderHook(() => useSignalR(), { wrapper: createWrapper() });
+    await waitFor(() => expect(handlers['onalerttriggered']).toHaveLength(1));
+
+    // 模拟网络抖动重连 3 次：每次真实重连触发一次 onreconnected（调用全部已注册回调）
+    for (let i = 0; i < 3; i++) {
+      reconnectedCbs.forEach((cb) => cb());
+    }
+
+    // 修复后重连不重新注册 → 每个事件仍 1 个处理器。
+    // 旧代码会累积到 4（首次 1 + 重连 3 × 新闭包），事件触发 4 次。
+    expect(handlers['onalerttriggered']).toHaveLength(1);
+    expect(handlers['onworkorderescalated']).toHaveLength(1);
+    expect(handlers['ondevicestatuschanged']).toHaveLength(1);
   });
 });
