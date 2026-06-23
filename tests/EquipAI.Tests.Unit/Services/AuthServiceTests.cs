@@ -387,6 +387,107 @@ public class AuthServiceTests : IAsyncDisposable
         storedToken.Should().Be(result.RefreshToken);
     }
 
+    /// <summary>
+    /// 【安全】轮换后被取代的旧 token 再次提交——应识别为重放，立即吊销整个会话并记审计告警。
+    ///
+    /// 场景：令牌 T1 被合法刷新轮换为 T2（T1 转为墓碑）。若 T1 再次出现，说明同一令牌被两方持有
+    /// （典型失窃：攻击者与合法用户各持一份）。按 OAuth 2.0 BCP，吊销该用户全部刷新令牌，
+    /// 使攻击者持有的当前 token T2 一并失效，强制重新登录。
+    /// </summary>
+    [Fact]
+    public async Task RefreshTokenAsync_轮换后旧token再次提交_应识别为重用并吊销会话()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>() as StubAuditLogService;
+
+        var user = CreateTestUser("reuseuser", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        const string t1 = "token-t1-reused";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, t1, TimeSpan.FromDays(7));
+
+        // 第一次：合法刷新 T1 → 轮换为 T2（T1 变为墓碑）
+        var first = await service.RefreshTokenAsync(t1);
+        first.RefreshToken.Should().NotBe(t1);
+        _stubRedis.GetStoredRefreshToken(user.Id).Should().Be(first.RefreshToken, "新令牌 T2 已生效");
+
+        // 第二次：重放 T1 —— 应抛异常并吊销会话
+        var act = () => service.RefreshTokenAsync(t1);
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        // 会话被吊销：正向索引清空，攻击者持有的 T2 也无法再用
+        _stubRedis.GetStoredRefreshToken(user.Id).Should().BeNull("重用检测应吊销该用户全部刷新令牌");
+
+        // 安全事件应记审计，供运维发现令牌失窃
+        audit!.LoggedActions.Should().Contain("AuthRefreshTokenReused");
+    }
+
+    /// <summary>
+    /// 连续正常刷新链（每次都用当前 token）不应误报重用。
+    /// 保证墓碑机制只对"被取代后再次出现"的令牌触发，不影响合法的连续续期。
+    /// </summary>
+    [Fact]
+    public async Task RefreshTokenAsync_连续正常刷新链_不应误报重用()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("chainuser", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var current = "chain-token-1";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, current, TimeSpan.FromDays(7));
+
+        // 连续刷新 3 次，每次用上一次返回的新令牌（合法链）
+        for (var i = 0; i < 3; i++)
+        {
+            var refreshed = await service.RefreshTokenAsync(current);
+            refreshed.RefreshToken.Should().NotBe(current, "每次刷新都应轮换令牌");
+            current = refreshed.RefreshToken;
+        }
+
+        // 链路未被误吊销，最新令牌仍生效
+        _stubRedis.GetStoredRefreshToken(user.Id).Should().Be(current);
+    }
+
+    /// <summary>
+    /// 重用吊销后，重用前刚刚轮换出的"当前 token"也应失效（攻击者持有的令牌被一并杀死）。
+    ///
+    /// 场景：T1→T2 合法轮换；攻击者重放 T1 触发吊销；此时攻击者持有的 T2（重用前的当前令牌）
+    /// 必须不能再用于刷新，否则吊销形同虚设。
+    /// </summary>
+    [Fact]
+    public async Task RefreshTokenAsync_重用吊销后_当前token也应失效()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("revokeduser", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        const string t1 = "token-revoke-1";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, t1, TimeSpan.FromDays(7));
+
+        // T1 → T2（攻击者可能持有 T2）
+        var t2 = (await service.RefreshTokenAsync(t1)).RefreshToken;
+        t2.Should().NotBe(t1);
+
+        // 重放 T1 触发会话吊销
+        await service.Invoking(s => s.RefreshTokenAsync(t1)).Should().ThrowAsync<UnauthorizedAccessException>();
+
+        // 攻击者持有的 T2 现在也必须无法刷新
+        var act = () => service.RefreshTokenAsync(t2);
+        await act.Should().ThrowAsync<UnauthorizedAccessException>(
+            "因为会话已被吊销，T2 作为会话内的当前令牌应随之失效");
+    }
+
     // ==================== LogoutAsync ====================
 
     [Fact]
@@ -853,16 +954,34 @@ public class AuthServiceTests : IAsyncDisposable
 
         public override Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
         {
-            // 清理旧 token 的反向索引（模拟真实 RedisService 行为）
+            // 将旧 token 反向索引转为"已轮换"墓碑（模拟真实 RedisService 重放检测行为）
             if (_store.TryGetValue(userId, out var oldToken))
             {
-                _stringStore.Remove($"refresh_token:{oldToken}");
+                _stringStore[$"refresh_token:{oldToken}"] = $"revoked:{userId}";
             }
             _store[userId] = refreshToken;
             // 同时写入 _stringStore，供 AuthService 正向索引一致性检查（GetStringAsync）读取
             _stringStore[$"refresh:{userId}"] = refreshToken;
             _stringStore[$"refresh_token:{refreshToken}"] = userId.ToString();
             return Task.CompletedTask;
+        }
+
+        public override Task<RefreshTokenEntry> GetRefreshTokenStateAsync(string refreshToken)
+        {
+            if (!_stringStore.TryGetValue($"refresh_token:{refreshToken}", out var raw))
+            {
+                return Task.FromResult(RefreshTokenEntry.Unknown());
+            }
+            if (raw.StartsWith("revoked:", StringComparison.Ordinal))
+            {
+                var uid = raw["revoked:".Length..];
+                return Task.FromResult(Guid.TryParse(uid, out var userId)
+                    ? RefreshTokenEntry.Reused(userId)
+                    : RefreshTokenEntry.Unknown());
+            }
+            return Task.FromResult(Guid.TryParse(raw, out var id)
+                ? RefreshTokenEntry.Valid(id)
+                : RefreshTokenEntry.Unknown());
         }
 
         public override Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
@@ -928,8 +1047,14 @@ public class AuthServiceTests : IAsyncDisposable
     /// </summary>
     private class StubAuditLogService : IAuditLogService
     {
+        /// <summary>记录所有审计动作名（用于断言安全事件是否被记录，如令牌重用）</summary>
+        public List<string> LoggedActions { get; } = new();
+
         public Task LogAsync(Guid tenantId, string action, string resourceType, string? resourceId = null, string? description = null, CancellationToken ct = default)
-            => Task.CompletedTask;
+        {
+            LoggedActions.Add(action);
+            return Task.CompletedTask;
+        }
 
         public Task LogFromContextAsync(string action, string resourceType, string? resourceId = null, string? description = null, CancellationToken ct = default)
             => Task.CompletedTask;

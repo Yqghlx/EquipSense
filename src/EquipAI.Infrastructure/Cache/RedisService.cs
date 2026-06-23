@@ -13,6 +13,12 @@ public class RedisService
     private readonly IDatabase _database;
 
     /// <summary>
+    /// 已轮换令牌反向索引值的前缀。值格式 "revoked:{userId}" 表示该 token 曾有效但已被轮换，
+    /// 再次提交即为重放，由 <see cref="GetRefreshTokenStateAsync"/> 识别为 <see cref="RefreshTokenStatus.Reused"/>。
+    /// </summary>
+    private const string RevokedTokenPrefix = "revoked:";
+
+    /// <summary>
     /// 初始化 Redis 服务，从配置中读取连接字符串并建立连接
     /// </summary>
     /// <param name="configuration">应用配置，需包含 Redis:ConnectionString 配置项</param>
@@ -37,9 +43,9 @@ public class RedisService
     ///
     /// 键格式：
     ///   正向：refresh:{userId}        → refreshToken
-    ///   反向：refresh_token:{token}   → userId
+    ///   反向：refresh_token:{token}   → userId（当前有效）或 "revoked:{userId}"（已轮换墓碑）
     ///
-    /// 写入前先清理该用户已有的旧反向索引，防止废弃 token 的索引残留
+    /// 写入前将该用户旧 token 的反向索引转为"已轮换"墓碑（而非删除），用于检测刷新令牌重放。
     /// </summary>
     /// <param name="userId">用户 ID</param>
     /// <param name="refreshToken">刷新令牌字符串</param>
@@ -48,16 +54,53 @@ public class RedisService
     {
         var forwardKey = $"refresh:{userId}";
 
-        // 清理旧 token 的反向索引（若存在），避免 Redis 中残留无效映射
+        // 将旧 token 的反向索引转为"已轮换"墓碑（而非删除），用于检测刷新令牌重放：
+        // 若该旧 token 再次被提交，说明同一 token 被两方持有（典型失窃场景），
+        // GetRefreshTokenStateAsync 识别为 Reused，AuthService 据此吊销整个会话（OAuth 2.0 BCP）。
         var oldToken = await _database.StringGetAsync(forwardKey);
         if (oldToken.HasValue)
         {
-            await _database.KeyDeleteAsync($"refresh_token:{oldToken}");
+            await _database.StringSetAsync(
+                $"refresh_token:{oldToken}", $"{RevokedTokenPrefix}{userId}", expiry);
         }
 
-        // 写入正向索引 + 反向索引（两条写入均为原子操作；极端宕机时最多出现单向残留，不影响正确性）
+        // 写入正向索引 + 新 token 反向索引（两条写入均为原子操作；极端宕机时最多出现单向残留，不影响正确性）
         await _database.StringSetAsync(forwardKey, refreshToken, expiry);
         await _database.StringSetAsync($"refresh_token:{refreshToken}", userId.ToString(), expiry);
+    }
+
+    /// <summary>
+    /// 查询刷新令牌状态（用于重放检测），返回三态：
+    /// <list type="bullet">
+    /// <item><see cref="RefreshTokenStatus.Unknown"/>：反向索引不存在（从未颁发/已彻底过期）</item>
+    /// <item><see cref="RefreshTokenStatus.Valid"/>：当前有效令牌，附带 userId</item>
+    /// <item><see cref="RefreshTokenStatus.Reused"/>：曾有效但已被轮换的令牌（墓碑），附带 userId——再次提交即重放</item>
+    /// </list>
+    /// </summary>
+    /// <param name="refreshToken">刷新令牌字符串</param>
+    /// <returns>令牌状态条目</returns>
+    public virtual async Task<RefreshTokenEntry> GetRefreshTokenStateAsync(string refreshToken)
+    {
+        var value = await _database.StringGetAsync($"refresh_token:{refreshToken}");
+        if (!value.HasValue)
+        {
+            return RefreshTokenEntry.Unknown();
+        }
+
+        var raw = value.ToString();
+
+        // 墓碑值 "revoked:{userId}"：该 token 曾有效但已被轮换，再次提交即为重放
+        if (raw.StartsWith(RevokedTokenPrefix, StringComparison.Ordinal))
+        {
+            var uid = raw[RevokedTokenPrefix.Length..];
+            return Guid.TryParse(uid, out var userId)
+                ? RefreshTokenEntry.Reused(userId)
+                : RefreshTokenEntry.Unknown();
+        }
+
+        return Guid.TryParse(raw, out var id)
+            ? RefreshTokenEntry.Valid(id)
+            : RefreshTokenEntry.Unknown();
     }
 
     /// <summary>
@@ -158,4 +201,37 @@ public class RedisService
         var key = $"quota:{tenantId}:{resourceType}";
         await _database.KeyDeleteAsync(key);
     }
+}
+
+/// <summary>
+/// 刷新令牌在 Redis 反向索引中的三态，用于重放检测
+/// </summary>
+public enum RefreshTokenStatus
+{
+    /// <summary>反向索引不存在：令牌从未颁发或已彻底过期/清理</summary>
+    Unknown,
+
+    /// <summary>当前有效的令牌（反向索引值为 userId）</summary>
+    Valid,
+
+    /// <summary>曾有效但已被轮换的令牌（反向索引值为 "revoked:{userId}" 墓碑）。
+    /// 再次提交即说明同一 token 被两方持有，按 OAuth 2.0 BCP 吊销整个会话</summary>
+    Reused,
+}
+
+/// <summary>
+/// <see cref="RedisService.GetRefreshTokenStateAsync"/> 的返回结果，携带状态与（有效/重用时的）用户 ID
+/// </summary>
+/// <param name="Status">令牌状态</param>
+/// <param name="UserId">Valid/Reused 时的用户 ID；Unknown 时为 null</param>
+public readonly record struct RefreshTokenEntry(RefreshTokenStatus Status, Guid? UserId)
+{
+    /// <summary>构造 Unknown 状态</summary>
+    public static RefreshTokenEntry Unknown() => new(RefreshTokenStatus.Unknown, null);
+
+    /// <summary>构造 Valid 状态</summary>
+    public static RefreshTokenEntry Valid(Guid userId) => new(RefreshTokenStatus.Valid, userId);
+
+    /// <summary>构造 Reused 状态</summary>
+    public static RefreshTokenEntry Reused(Guid userId) => new(RefreshTokenStatus.Reused, userId);
 }

@@ -67,4 +67,40 @@ public class AuthControllerTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
+
+    /// <summary>
+    /// 【安全】刷新令牌重用检测端到端：轮换后被取代的旧令牌重放应返回 401 并吊销整个会话，
+    /// 且重用前刚轮换出的"当前令牌"也随之失效（攻击者持有的令牌被一并杀死）。
+    ///
+    /// 通过完整 HTTP 管线 + FakeRedisService 墓碑语义验证 OAuth 2.0 BCP 行为：
+    /// 同一 refresh token 被两方持有时，重放即触发会话吊销。
+    /// </summary>
+    [Fact]
+    public async Task Refresh_ReplayedRotatedToken_RevokesEntireSession()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+
+        // 1. 登录获取刷新令牌 T1
+        var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest { Username = "admin", Password = "Admin@123" });
+        login.StatusCode.Should().Be(HttpStatusCode.OK);
+        var t1 = (await login.Content.ReadFromJsonAsync<AuthResponse>())!.RefreshToken;
+        t1.Should().NotBeNullOrEmpty();
+
+        // 2. 合法刷新 T1 → 轮换为 T2
+        var refresh1 = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { refreshToken = t1 });
+        refresh1.StatusCode.Should().Be(HttpStatusCode.OK);
+        var t2 = (await refresh1.Content.ReadFromJsonAsync<AuthResponse>())!.RefreshToken;
+        t2.Should().NotBe(t1, "刷新应轮换令牌");
+
+        // 3. 重放 T1 —— 应被 401 拒绝（重用检测命中，会话吊销）
+        var replay = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { refreshToken = t1 });
+        replay.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "轮换后的旧令牌重放应被识别并拒绝");
+
+        // 4. 重用前的当前令牌 T2 也应失效（攻击者持有的令牌被一并杀死）
+        var afterRevoke = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { refreshToken = t2 });
+        afterRevoke.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
+            "会话吊销后，攻击者持有的当前令牌 T2 必须不能再刷新");
+    }
 }

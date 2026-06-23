@@ -250,23 +250,39 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("刷新令牌不能为空");
         }
 
-        // O(1) 反向索引查找：refresh_token:{token} → userId
-        // 替代原先的全表扫描（遍历所有活跃用户逐一比对 Redis），在万级用户场景下将刷新延迟从秒级降到毫秒级
-        var userId = await _redisService.GetUserIdByRefreshTokenAsync(refreshToken);
-        if (userId == null)
+        // 三态查询：Valid（当前令牌）/ Reused（已轮换墓碑——重放）/ Unknown（不存在）
+        var state = await _redisService.GetRefreshTokenStateAsync(refreshToken);
+
+        // 重放检测（OAuth 2.0 BCP）：该 token 曾有效但已被轮换——说明同一 token 被两方持有（典型失窃场景）。
+        // 立即吊销整个会话（攻击者持有的当前 token 一并失效），强制重新登录，并记审计告警。
+        if (state.Status == RefreshTokenStatus.Reused && state.UserId.HasValue)
+        {
+            var reusedUserId = state.UserId.Value;
+            _logger.LogWarning(
+                "检测到刷新令牌重用（用户 {UserId}）：曾有效的令牌被再次提交，可能已泄露，已吊销该用户全部刷新令牌",
+                reusedUserId);
+            await _auditLogService.LogAsync(reusedUserId, "AuthRefreshTokenReused", "User", reusedUserId.ToString(),
+                "刷新令牌重用检测命中：曾有效的令牌被再次提交，已吊销会话以防令牌失窃", default);
+            await _redisService.RemoveRefreshTokenAsync(reusedUserId);
+            throw new UnauthorizedAccessException("刷新令牌无效或已过期");
+        }
+
+        if (state.Status != RefreshTokenStatus.Valid || !state.UserId.HasValue)
         {
             _logger.LogWarning("刷新令牌无效或已过期");
             throw new UnauthorizedAccessException("刷新令牌无效或已过期");
         }
 
+        var userId = state.UserId.Value;
+
         var matchedUser = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Id == userId.Value && u.IsActive);
+            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
 
         if (matchedUser == null)
         {
             // 反向索引存在但用户不存在或已禁用（账号删除/禁用后残留索引）
             _logger.LogWarning("刷新令牌对应用户 {UserId} 不存在或已禁用，清理残留索引", userId);
-            await _redisService.RemoveRefreshTokenAsync(userId.Value);
+            await _redisService.RemoveRefreshTokenAsync(userId);
             throw new UnauthorizedAccessException("刷新令牌无效或已过期");
         }
 

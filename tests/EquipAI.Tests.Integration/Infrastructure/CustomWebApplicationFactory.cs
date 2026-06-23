@@ -152,14 +152,32 @@ internal class FakeRedisService : RedisService
 
     public override Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
     {
-        // 清理旧 token 的反向索引（模拟真实 RedisService 行为）
+        // 将旧 token 反向索引转为"已轮换"墓碑（模拟真实 RedisService 重放检测行为）
         if (_store.TryGetValue($"refresh:{userId}", out var oldToken))
         {
-            _store.TryRemove($"refresh_token:{oldToken}", out _);
+            _store[$"refresh_token:{oldToken}"] = $"revoked:{userId}";
         }
         _store[$"refresh:{userId}"] = refreshToken;
         _store[$"refresh_token:{refreshToken}"] = userId.ToString();
         return Task.CompletedTask;
+    }
+
+    public override Task<RefreshTokenEntry> GetRefreshTokenStateAsync(string refreshToken)
+    {
+        if (!_store.TryGetValue($"refresh_token:{refreshToken}", out var raw))
+        {
+            return Task.FromResult(RefreshTokenEntry.Unknown());
+        }
+        if (raw.StartsWith("revoked:", StringComparison.Ordinal))
+        {
+            var uid = raw["revoked:".Length..];
+            return Task.FromResult(Guid.TryParse(uid, out var userId)
+                ? RefreshTokenEntry.Reused(userId)
+                : RefreshTokenEntry.Unknown());
+        }
+        return Task.FromResult(Guid.TryParse(raw, out var id)
+            ? RefreshTokenEntry.Valid(id)
+            : RefreshTokenEntry.Unknown());
     }
 
     public override Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
