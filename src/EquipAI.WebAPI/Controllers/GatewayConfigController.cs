@@ -85,16 +85,18 @@ public class GatewayConfigController : ControllerBase
     }
 
     /// <summary>
-    /// EdgeGateway 拉取配置 — 根据网关标识获取该网关下所有启用的设备配置
+    /// EdgeGateway 拉取配置 — 根据租户 + 网关标识获取该网关下所有启用的设备配置
     /// 使用 X-Gateway-Auth-Key 请求头认证，无需 JWT
     /// </summary>
     /// <param name="gatewayId">网关标识（对应 EdgeGateway 的 GatewayOptions.Id）</param>
+    /// <param name="tenantId">网关所属租户 ID（与心跳/注册一致，由 EdgeGateway 配置提供）</param>
     /// <returns>该网关下的设备配置列表</returns>
     [HttpGet("config")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(List<GatewayDevicePullDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<List<GatewayDevicePullDto>>> PullConfig([FromQuery] string gatewayId)
+    public async Task<ActionResult<List<GatewayDevicePullDto>>> PullConfig(
+        [FromQuery] string gatewayId, [FromQuery] Guid? tenantId)
     {
         // 校验网关认证密钥
         var authKey = _configuration["Gateway:AuthKey"];
@@ -112,9 +114,18 @@ public class GatewayConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(gatewayId))
             return BadRequest(new { code = 400, message = "gatewayId 参数不能为空" });
 
-        // 查询该网关下所有启用的设备配置（绕过租户过滤器，因为网关认证不经过 JWT）
+        // 安全修复：必须按 (TenantId, GatewayId) 双重限定。
+        // GatewayId 仅【租户内】唯一（见 GatewayConfiguration：HasIndex(TenantId,GatewayId).IsUnique()），
+        // 且 CreateDevice 默认 gatewayId="gateway-001"，多租户共用同一 Id 是常态。
+        // 若仅按 gatewayId 过滤，持有共享 AuthKey 的任意网关拉取 ?gatewayId=gateway-001 会拿到
+        // 【所有租户】同 Id 网关下的设备配置——含 OPC UA 连接串等工业敏感信息，构成跨租户泄漏。
+        // 故 tenantId 为必填，缺失即拒绝（强制 EdgeGateway 升级为携带 tenantId 的版本）。
+        if (tenantId is null || tenantId == Guid.Empty)
+            return BadRequest(new { code = 400, message = "tenantId 参数不能为空" });
+
+        // 绕过租户过滤器（本端点走网关密钥认证，无 JWT/ITenantContext），改为显式按 tenantId 限定
         var devices = await _dbContext.UnfilteredSet<GatewayDevice>()
-            .Where(d => d.GatewayId == gatewayId && d.Enabled)
+            .Where(d => d.TenantId == tenantId.Value && d.GatewayId == gatewayId && d.Enabled)
             .OrderBy(d => d.DeviceName)
             .ToListAsync();
 

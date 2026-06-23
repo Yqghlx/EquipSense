@@ -83,7 +83,8 @@ try
             httpClient.Timeout = TimeSpan.FromSeconds(10);
 
             var response = await httpClient.GetAsync(
-                $"{gatewayOpts.BackendUrl.TrimEnd('/')}/api/v1/gateway/config?gatewayId={gatewayOpts.Id}");
+                // 必须携带 tenantId：后端按 (tenantId, gatewayId) 双重限定，缺则 400（安全修复）
+                $"{gatewayOpts.BackendUrl.TrimEnd('/')}/api/v1/gateway/config?gatewayId={Uri.EscapeDataString(gatewayOpts.Id)}&tenantId={Uri.EscapeDataString(gatewayOpts.TenantId)}");
 
             if (response.IsSuccessStatusCode)
             {

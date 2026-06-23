@@ -88,7 +88,9 @@ public class ConfigRefreshService : BackgroundService
         httpClient.Timeout = TimeSpan.FromSeconds(10);
 
         var response = await httpClient.GetAsync(
-            $"{_options.BackendUrl.TrimEnd('/')}/api/v1/gateway/config?gatewayId={_options.Id}",
+            // 必须携带 tenantId：后端按 (tenantId, gatewayId) 双重限定，缺则 400。
+            // GatewayId 仅租户内唯一，不带 tenantId 会跨租户拉到他人设备配置（安全修复）
+            $"{_options.BackendUrl.TrimEnd('/')}/api/v1/gateway/config?gatewayId={Uri.EscapeDataString(_options.Id)}&tenantId={Uri.EscapeDataString(_options.TenantId)}",
             ct);
 
         if (!response.IsSuccessStatusCode)
