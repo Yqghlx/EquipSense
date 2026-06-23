@@ -39,6 +39,10 @@ public class SemanticKernelLLMService : ILLMService
     }
 
     /// <inheritdoc />
+    /// LLM 已配置（ApiKey 非空）即视为启用；未配置时上层降级规则匹配，属合法状态
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(_apiKey);
+
+    /// <inheritdoc />
     public async Task<LLMResponse> AnalyzeAsync(LLMRequest request, CancellationToken ct = default)
     {
         // 未配置 ApiKey 时立即失败，跳过 HTTP 往返

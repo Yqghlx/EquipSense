@@ -6,6 +6,13 @@ namespace EquipAI.Core.Interfaces;
 public interface ILLMService
 {
     /// <summary>
+    /// 是否已配置 ApiKey（即 LLM 功能启用）。
+    /// 未配置时 <see cref="AnalyzeAsync"/> 立即返回失败，上层降级为规则匹配——属合法降级，
+    /// 不影响业务功能。供健康检查等"轻量判断 LLM 是否启用"的场景使用，避免发真实计费请求。
+    /// </summary>
+    bool IsConfigured { get; }
+
+    /// <summary>
     /// 发送分析请求到 LLM
     /// </summary>
     Task<LLMResponse> AnalyzeAsync(LLMRequest request, CancellationToken ct = default);
