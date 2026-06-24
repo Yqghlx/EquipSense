@@ -71,7 +71,10 @@ public class OperationsReportService
         var normal = alerts.Count(a => a.Severity == AlertSeverity.Normal);
         var low = alerts.Count(a => a.Severity == AlertSeverity.Low);
         var resolved = alerts.Count(a => a.Status == AlertStatus.Resolved);
-        var active = alerts.Count(a => a.Status == AlertStatus.Active);
+        // 活跃告警定义 = Active（已触发未确认）+ Acknowledged（已确认未解决），与 DashboardStatsService/OeeService 一致。
+        // 修复历史：原代码只算 Active 漏算 Acknowledged，致报表活跃数 < Dashboard 活跃数，
+        // 且"已解决 + 活跃" ≠ 告警总数（Acknowledged 状态告警凭空消失）。#243 已统一 Dashboard/OEE 定义，此处为对称遗漏。
+        var active = alerts.Count(a => a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged);
         var ackRate = alerts.Count > 0 ? (double)alerts.Count(a => a.AcknowledgedAt != null) / alerts.Count * 100 : 0;
         sb.AppendLine($"{alerts.Count},{critical},{high},{normal},{low},{resolved},{active},{ackRate:F1}%");
         sb.AppendLine();

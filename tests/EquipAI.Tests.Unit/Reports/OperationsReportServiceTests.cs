@@ -203,6 +203,44 @@ public class OperationsReportServiceTests : IAsyncDisposable
         content.Should().Contain("10,2,3,3,2,4,6,30.0%");
     }
 
+    /// <summary>
+    /// 报表"活跃告警"定义应与 Dashboard/OeeService 一致：Active + Acknowledged
+    ///
+    /// Why：活跃告警的业务定义是"运维尚未解决的告警" = Active（已触发未确认）+ Acknowledged（已确认未解决）。
+    /// DashboardStatsService 与 OeeService 均按此定义统计（#243 已统一这两处），但报表曾只算 Active 漏算
+    /// Acknowledged，导致：(1) 报表活跃数 &lt; Dashboard 活跃数，客户对不上数怀疑数据真实性；
+    /// (2) 报表"已解决 + 活跃"之和 ≠ 告警总数（Acknowledged 状态告警在报表里凭空消失）。
+    /// 既有 happy-path 测试只构造 Active/Resolved（无 Acknowledged），掩盖了此 bug。
+    /// </summary>
+    [Fact]
+    public async Task GenerateReportAsync_活跃告警含Acknowledged状态_与Dashboard定义一致()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var now = new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc);
+
+        // 2 Active + 3 Acknowledged + 2 Resolved = 7 总（全 High）
+        // 活跃 = Active(2) + Acknowledged(3) = 5（与 Dashboard 活跃告警定义一致）
+        // 已解决 = Resolved(2) = 2；已解决 + 活跃 = 2 + 5 = 7 = 总数（数据自洽）
+        // 确认率 = AcknowledgedAt!=null（3 条 Acknowledged）/ 7 = 42.9%
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Active, now));
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Active, now));
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Acknowledged, now, acknowledged: true));
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Acknowledged, now, acknowledged: true));
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Acknowledged, now, acknowledged: true));
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Resolved, now));
+        db.Alerts.Add(CreateAlert(_tenantId, AlertSeverity.High, AlertStatus.Resolved, now));
+        await db.SaveChangesAsync();
+
+        var result = await service.GenerateReportAsync(_tenantId,
+            new DateTime(2026, 1, 1), new DateTime(2026, 1, 31));
+        var content = Encoding.UTF8.GetString(result);
+
+        // 总数=7, C=0, H=7, N=0, L=0, 已解决=2, 活跃=5(Active2+Acknowledged3), 确认率=42.9%
+        content.Should().Contain("7,0,7,0,0,2,5,42.9%",
+            "活跃告警应含 Acknowledged 状态（与 Dashboard/OeeService 定义一致），且 已解决+活跃=总数");
+    }
+
     // =========================================================================
     // 工单统计 — 状态分布 + 完成率
     // =========================================================================
