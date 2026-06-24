@@ -113,6 +113,9 @@ describe('useSignalR', () => {
       // AI 根因分析完成须监听：后端异步分析完成更新工单 RootCause 后推送 OnWorkOrderAnalysisUpdated，
       // 不监听则工单详情页根因区域不实时刷新（须手动刷新）——AI 根因是产品核心卖点，分析完成不展示降低可信度
       expect(mockConnection.on).toHaveBeenCalledWith('OnWorkOrderAnalysisUpdated', expect.any(Function));
+      // AI 候选规则产生须监听：后端高置信度分析/沉淀自动产生 PendingRule 后推送 OnPendingRuleCreated，
+      // 不监听则知识库审核页不实时刷新（专家须手动刷新才能看到新候选）——AI 知识自学习闭环实时性
+      expect(mockConnection.on).toHaveBeenCalledWith('OnPendingRuleCreated', expect.any(Function));
       // 设备离线事件必须监听：设备离线不触发阈值告警（无遥测），不监听 OnDeviceStatusChanged
       // 则运维完全不知情（通信中断/故障无人知晓），设备列表/Dashboard 也不刷新
       expect(mockConnection.on).toHaveBeenCalledWith('OnDeviceStatusChanged', expect.any(Function));

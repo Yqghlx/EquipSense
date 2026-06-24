@@ -67,6 +67,13 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['work-orders', data.workOrderId] });
       });
 
+      // AI 候选规则产生：后端 RootCauseAnalysisHandler（告警高置信度分析）或 KnowledgeCaptureService
+      //（工单关闭高置信度沉淀）自动产生 PendingRule 后推送，前端须监听以 invalidate 知识库审核列表
+      //（queryKey ['pending-rules']），让停留在审核页的专家实时看到新候选——AI 知识自学习闭环核心。
+      conn.on('OnPendingRuleCreated', () => {
+        queryClient.invalidateQueries({ queryKey: ['pending-rules'] });
+      });
+
       // SLA 超时升级是工业场景最紧急事件之一（设备停机威胁），须即时通知主管并刷新工单列表/Dashboard。
       // 后端 CheckAndEscalateAsync 只改 Priority 不改 Status、不发 WorkOrderStatusChangedEvent，
       // 故必须显式监听 OnWorkOrderEscalated，否则主管看到的还是旧优先级（直到手动刷新页面）。

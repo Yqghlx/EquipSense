@@ -45,6 +45,17 @@ public interface ISignalRNotificationService
     Task SendWorkOrderAnalysisUpdatedAsync(Guid tenantId, Guid workOrderId);
 
     /// <summary>
+    /// 推送 AI 候选规则产生事件到租户组
+    ///
+    /// 业务意义：告警高置信度分析（RootCauseAnalysisHandler）或工单关闭高置信度沉淀
+    /// （KnowledgeCaptureService）自动产生 PendingRule（AI 候选规则）写入 pending_rules，
+    /// 等待专家审核。若不推送，停留在「知识库审核」页面的专家看不到新候选（须手动刷新）——
+    /// AI 知识自学习闭环实时性缺失，候选规则积压无人知。
+    /// 轻量推送：仅 SignalR（在线刷新审核列表），不持久化通知/不发 Web Push（候选规则非紧急打扰事项）。
+    /// </summary>
+    Task SendPendingRuleCreatedAsync(Guid tenantId);
+
+    /// <summary>
     /// 推送工单 SLA 超时升级事件到租户组
     ///
     /// 业务意义：SLA 超时后系统自动升级优先级，但如果不通知，主管完全不知情。

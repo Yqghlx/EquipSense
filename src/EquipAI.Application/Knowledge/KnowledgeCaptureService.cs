@@ -110,19 +110,32 @@ public class KnowledgeCaptureService
         }
 
         // 3. 高置信度 -> 尝试通过 LLM 生成候选规则
+        bool ruleGenerated = false;
         if (analysis?.Confidence >= ConfidenceThreshold)
         {
-            await TryGenerateRuleAsync(db, wo, deviceType, analysis, faultCase.Id, ct);
+            ruleGenerated = await TryGenerateRuleAsync(db, wo, deviceType, analysis, faultCase.Id, ct);
         }
 
         await db.SaveChangesAsync(ct);
+
+        // 推送候选规则产生事件，让停留在「知识库审核」页面的专家实时看到新候选（回归 #251）。
+        // 仅在确实生成候选规则时推送（避免无新候选也触发刷新）；轻量推送仅 SignalR，与 AppDbContext 同 scope 解析。
+        if (ruleGenerated)
+        {
+            var notificationService = scope.ServiceProvider.GetService<ISignalRNotificationService>();
+            if (notificationService is not null)
+            {
+                await notificationService.SendPendingRuleCreatedAsync(tenantId);
+            }
+        }
+
         _logger.LogInformation("知识沉淀完成: WorkOrderId={WorkOrderId}", workOrderId);
     }
 
     /// <summary>
     /// 通过 LLM 从工单中提炼候选规则
     /// </summary>
-    private async Task TryGenerateRuleAsync(
+    private async Task<bool> TryGenerateRuleAsync(
         AppDbContext db,
         WorkOrder wo,
         string deviceType,
@@ -154,7 +167,7 @@ public class KnowledgeCaptureService
         if (!response.Success)
         {
             _logger.LogWarning("LLM 规则生成失败: {Error}", response.ErrorMessage);
-            return;
+            return false;
         }
 
         string conditions;
@@ -174,7 +187,7 @@ public class KnowledgeCaptureService
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "LLM 响应 JSON 解析失败，跳过规则生成");
-            return;
+            return false;
         }
 
         var pendingRule = new PendingRule
@@ -193,6 +206,7 @@ public class KnowledgeCaptureService
         };
 
         db.PendingRules.Add(pendingRule);
+        return true;
     }
 
     /// <summary>

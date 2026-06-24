@@ -183,6 +183,23 @@ public class SignalRNotificationService : ISignalRNotificationService
     }
 
     /// <inheritdoc />
+    public async Task SendPendingRuleCreatedAsync(Guid tenantId)
+    {
+        // 仅 SignalR 推送（轻量）：候选规则产生是知识库审核列表的实时更新，非紧急打扰事项，
+        // 无需持久化通知/Web Push。try/catch 隔离：推送失败仅告警，不影响已写入 DB 的候选规则
+        //（专家手动刷新仍可看到）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnPendingRuleCreated", new { updatedAt = DateTime.UtcNow });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 候选规则产生推送失败: TenantId={TenantId}", tenantId);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SendWorkOrderEscalatedAsync(Guid tenantId, Guid workOrderId,
         string workOrderCode, string title, string oldPriority, string newPriority)
     {

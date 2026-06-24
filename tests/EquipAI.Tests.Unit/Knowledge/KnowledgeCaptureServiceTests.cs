@@ -15,6 +15,8 @@ namespace EquipAI.Tests.Unit.Knowledge;
 public class KnowledgeCaptureServiceTests
 {
     private readonly Mock<IServiceScopeFactory> _scopeFactoryMock;
+    private readonly Mock<IServiceProvider> _serviceProviderMock;
+    private readonly Mock<ISignalRNotificationService> _signalRMock;
     private readonly Mock<ILLMService> _llmServiceMock;
     private readonly AppDbContext _db;
     private readonly Guid _tenantId;
@@ -32,14 +34,18 @@ public class KnowledgeCaptureServiceTests
 
         _db = new AppDbContext(options, new TestTenantContext(_tenantId));
 
-        // Mock IServiceScopeFactory，使其返回包含 AppDbContext 的 scope
-        var serviceProviderMock = new Mock<IServiceProvider>();
-        serviceProviderMock
+        // Mock IServiceScopeFactory，使其返回包含 AppDbContext + ISignalRNotificationService 的 scope
+        _serviceProviderMock = new Mock<IServiceProvider>();
+        _serviceProviderMock
             .Setup(sp => sp.GetService(typeof(AppDbContext)))
             .Returns(_db);
+        _signalRMock = new Mock<ISignalRNotificationService>();
+        _serviceProviderMock
+            .Setup(sp => sp.GetService(typeof(ISignalRNotificationService)))
+            .Returns(_signalRMock.Object);
 
         var scopeMock = new Mock<IServiceScope>();
-        scopeMock.SetupGet(s => s.ServiceProvider).Returns(serviceProviderMock.Object);
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(_serviceProviderMock.Object);
 
         _scopeFactoryMock = new Mock<IServiceScopeFactory>();
         _scopeFactoryMock
@@ -196,6 +202,51 @@ public class KnowledgeCaptureServiceTests
         rule.ReviewStatus.Should().Be(ReviewStatus.Pending);
         rule.SourceWorkorderId.Should().Be(wo.Id);
         rule.Confidence.Should().Be(0.9m);
+    }
+
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_高置信度生成候选规则后应推送让审核页实时刷新()
+    {
+        // Arrange — 高置信度工单关闭会经 LLM 生成候选规则，应推送通知知识库审核页实时刷新
+        var device = new Device
+        {
+            TenantId = _tenantId, Type = "压缩机",
+            DeviceCode = "DEV-PUSH", Name = "推送测试压缩机"
+        };
+        _db.Devices.Add(device);
+
+        var analysis = new Core.Entities.Analysis
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            AlertId = Guid.NewGuid(), Confidence = 0.9
+        };
+        _db.Analyses.Add(analysis);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId, DeviceId = device.Id,
+            Title = "温度过高", ActualHours = 3.0,
+            RootCause = "冷却液不足", ExecutionReport = "补充冷却液",
+            AnalysisId = analysis.Id
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        _llmServiceMock
+            .Setup(llm => llm.AnalyzeAsync(It.IsAny<LLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LLMResponse(
+                """{"conditions":[],"conclusion":"冷却液不足","recommendedActions":["补充冷却液"]}""",
+                0.9, true, null));
+
+        // Act
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        // Assert — 推送候选规则产生事件（回归 #251）。Invocations 逐参数断言避 Moq Verify 闭包 flaky。
+        var invocations = _signalRMock.Invocations
+            .Where(i => i.Method.Name == nameof(ISignalRNotificationService.SendPendingRuleCreatedAsync))
+            .ToList();
+        invocations.Should().HaveCount(1, "高置信度生成候选规则后应推送 1 次候选规则产生事件");
+        invocations[0].Arguments[0].Should().Be(_tenantId, "tenantId 参数应为工单所属租户");
     }
 
     [Fact]

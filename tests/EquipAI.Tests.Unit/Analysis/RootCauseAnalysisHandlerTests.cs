@@ -24,7 +24,7 @@ public class RootCauseAnalysisHandlerTests
     /// <summary>
     /// 创建测试依赖项：独立数据库 + Mock 服务
     /// </summary>
-    private (AppDbContext db, Mock<IAnalysisService> analysisMock, Mock<IEventBus> eventBusMock, RootCauseAnalysisHandler handler) CreateSut()
+    private (AppDbContext db, Mock<IAnalysisService> analysisMock, Mock<IEventBus> eventBusMock, Mock<ISignalRNotificationService> signalRMock, RootCauseAnalysisHandler handler) CreateSut()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase($"TestRCAHandler_{Guid.NewGuid()}")
@@ -38,8 +38,11 @@ public class RootCauseAnalysisHandlerTests
             .Setup(e => e.PublishAsync(It.IsAny<AnalysisCompletedEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var signalRMock = new Mock<ISignalRNotificationService>();
+
         var spMock = new Mock<IServiceProvider>();
         spMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+        spMock.Setup(sp => sp.GetService(typeof(ISignalRNotificationService))).Returns(signalRMock.Object);
 
         var scopeMock = new Mock<IServiceScope>();
         scopeMock.SetupGet(s => s.ServiceProvider).Returns(spMock.Object);
@@ -51,7 +54,7 @@ public class RootCauseAnalysisHandlerTests
         var handler = new RootCauseAnalysisHandler(
             logger, analysisMock.Object, eventBusMock.Object, scopeFactoryMock.Object);
 
-        return (db, analysisMock, eventBusMock, handler);
+        return (db, analysisMock, eventBusMock, signalRMock, handler);
     }
 
     private Core.Entities.Analysis MakeAnalysis(double confidence, string? rootCause = "测试根因")
@@ -87,7 +90,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_应调用AnalysisService执行分析()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
         SetupAnalysis(analysisMock, MakeAnalysis(0.8));
 
         var evt = MakeAlertEvent();
@@ -101,7 +104,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_应持久化分析结果到数据库()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
         var analysis = MakeAnalysis(0.85);
         SetupAnalysis(analysisMock, analysis);
 
@@ -115,7 +118,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_应发布AnalysisCompletedEvent()
     {
-        var (db, analysisMock, eventBusMock, handler) = CreateSut();
+        var (db, analysisMock, eventBusMock, _, handler) = CreateSut();
         SetupAnalysis(analysisMock, MakeAnalysis(0.8));
 
         await handler.HandleAsync(MakeAlertEvent(), CancellationToken.None);
@@ -128,7 +131,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_高置信度应生成候选规则()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
 
         var device = new Device
         {
@@ -149,9 +152,35 @@ public class RootCauseAnalysisHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_高置信度生成候选规则后应推送让审核页实时刷新()
+    {
+        var (db, analysisMock, _, signalRMock, handler) = CreateSut();
+
+        var device = new Device
+        {
+            TenantId = _tenantId, Type = "电机",
+            DeviceCode = "RCA-PUSH-1", Name = "推送测试电机"
+        };
+        db.Devices.Add(device);
+        await db.SaveChangesAsync();
+
+        SetupAnalysis(analysisMock, MakeAnalysis(0.85, "轴承磨损"));
+
+        await handler.HandleAsync(MakeAlertEvent(deviceId: device.Id), CancellationToken.None);
+
+        // 推送候选规则产生事件，让停留在知识库审核页的专家实时看到新候选（回归 #251）。
+        // 用 Invocations 逐参数断言（避 Moq Verify 闭包捕获 Guid 的间歇失败）。
+        var invocations = signalRMock.Invocations
+            .Where(i => i.Method.Name == nameof(ISignalRNotificationService.SendPendingRuleCreatedAsync))
+            .ToList();
+        invocations.Should().HaveCount(1, "高置信度生成候选规则后应推送 1 次候选规则产生事件");
+        invocations[0].Arguments[0].Should().Be(_tenantId, "tenantId 参数应为告警所属租户");
+    }
+
+    [Fact]
     public async Task HandleAsync_低置信度不应生成候选规则()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
         SetupAnalysis(analysisMock, MakeAnalysis(0.5, "不确定"));
 
         await handler.HandleAsync(MakeAlertEvent(), CancellationToken.None);
@@ -163,7 +192,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_根因为空不应生成候选规则()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
         SetupAnalysis(analysisMock, MakeAnalysis(0.8, rootCause: null));
 
         await handler.HandleAsync(MakeAlertEvent(), CancellationToken.None);
@@ -175,7 +204,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_AnalysisService异常不应抛出()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
         analysisMock.Setup(a => a.AnalyzeAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
                 It.IsAny<string>(), It.IsAny<double>(), It.IsAny<MetricBaseline?>(),
@@ -189,7 +218,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_有基线数据时应传递给AnalysisService()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
 
         var deviceId = Guid.NewGuid();
         db.MetricBaselines.Add(new MetricBaseline
@@ -216,7 +245,7 @@ public class RootCauseAnalysisHandlerTests
     [Fact]
     public async Task HandleAsync_无基线数据时baseline参数应为null()
     {
-        var (db, analysisMock, _, handler) = CreateSut();
+        var (db, analysisMock, _, _, handler) = CreateSut();
         SetupAnalysis(analysisMock, MakeAnalysis(0.6));
 
         await handler.HandleAsync(MakeAlertEvent(), CancellationToken.None);

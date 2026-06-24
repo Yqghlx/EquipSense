@@ -185,6 +185,15 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
             db.PendingRules.Add(pendingRule);
             await db.SaveChangesAsync(ct);
 
+            // 推送候选规则产生事件，让停留在「知识库审核」页面的专家实时看到新候选（回归 #251）。
+            // 原实现只写 DB 不推送，专家须手动刷新才能看到 AI 推荐规则——AI 知识自学习闭环实时性缺失。
+            // 从 scope 解析推送服务（与 AppDbContext 同 scope）；解析失败降级（DB 已写入，手动刷新仍可见）。
+            var notificationService = scope.ServiceProvider.GetService<ISignalRNotificationService>();
+            if (notificationService is not null)
+            {
+                await notificationService.SendPendingRuleCreatedAsync(tenantId);
+            }
+
             _logger.LogInformation(
                 "已从分析结果生成候选规则: PendingRuleId={PendingRuleId}, 置信度={Confidence:F2}",
                 pendingRule.Id, analysis.Confidence);
