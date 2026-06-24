@@ -1,3 +1,4 @@
+using EquipAI.Application.WorkOrders;
 using EquipAI.Application.WorkOrders.Handlers;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -180,6 +181,33 @@ public class WorkOrderAutoCreateHandlerTests
         eventBus.Verify(
             e => e.PublishAsync(It.IsAny<WorkOrderCreatedEvent>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    /// <summary>
+    /// 回归：自动建单必须设置 DueDate，否则被 WorkOrderStatisticsService 的 SLA 达成率统计
+    /// （Where DueDate.HasValue）排除，致 SLA KPI 失真（不含告警驱动工单——而这恰是最该受 SLA 约束的）。
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_自动建单应设置DueDate基于优先级SLA时限()
+    {
+        var (db, _, handler) = CreateSut();
+        var ruleId = Guid.NewGuid();
+
+        db.AlertRules.Add(new AlertRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "High规则",
+            Metric = "temperature", Conditions = "[]",
+            Severity = AlertSeverity.High, AutoCreateWorkorder = true
+        });
+        await db.SaveChangesAsync();
+
+        await handler.HandleAsync(MakeAlertEvent(ruleId: ruleId, severity: "high"), CancellationToken.None);
+
+        var wo = await db.WorkOrders.IgnoreQueryFilters().FirstAsync();
+        wo.DueDate.Should().NotBeNull("自动建单必须设 DueDate 才能纳入 SLA 达成率统计");
+        // DueDate = CreatedAt + 优先级 SLA 时限（High=8h），与 SlaManagementService 超时判断基准一致
+        wo.DueDate.Should().Be(SlaTracker.CalculateDueDate(wo.Priority.ToString(), wo.CreatedAt),
+            "DueDate 应基于 CreatedAt + 优先级 SLA 时限计算");
     }
 
     /// <summary>

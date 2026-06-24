@@ -1,3 +1,4 @@
+using EquipAI.Application.WorkOrders;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
@@ -87,6 +88,11 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
                 DeviceId = @event.DeviceId,
                 AlertId = @event.AlertId
             };
+            // SLA 到期时间：自动建单必须设 DueDate 才能纳入 WorkOrderStatisticsService 的 SLA 达成率统计
+            // （Where DueDate.HasValue），否则告警驱动工单被排除 → SLA KPI 失真（最该受 SLA 约束的工单反而不计入）。
+            // 基于工单 CreatedAt + 优先级 SLA 时限（SlaTracker.CalculateDueDate），与 SlaManagementService
+            // 的超时判断基准（createdAt + slaHours）保持一致（回归 #255）
+            workOrder.DueDate = SlaTracker.CalculateDueDate(workOrder.Priority.ToString(), workOrder.CreatedAt);
 
             dbContext.WorkOrders.Add(workOrder);
             try
