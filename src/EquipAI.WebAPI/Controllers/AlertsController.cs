@@ -124,7 +124,9 @@ public class AlertsController : ControllerBase
             return BadRequest(new { code = 400, message = "只能确认活跃状态的告警" });
 
         alert.Status = AlertStatus.Acknowledged;
-        alert.AcknowledgedBy = _tenantContext.TenantId;
+        // 记录操作用户 ID（非租户 ID）：审计须追溯「谁确认了告警」。原误用 TenantId（全租户共享同一 GUID），
+        // 致确认/解决操作审计归因失效——与 WorkOrdersController 一致地用 UserId
+        alert.AcknowledgedBy = _tenantContext.UserId;
         alert.AcknowledgedAt = DateTime.UtcNow;
         alert.AcknowledgementNote = request?.Note;
 
@@ -147,7 +149,8 @@ public class AlertsController : ControllerBase
             return BadRequest(new { code = 400, message = "告警已解决" });
 
         alert.Status = AlertStatus.Resolved;
-        alert.ResolvedBy = _tenantContext.TenantId;
+        // 记录操作用户 ID（非租户 ID），与 Acknowledge 对称（审计须追溯「谁解决了告警」）
+        alert.ResolvedBy = _tenantContext.UserId;
         alert.ResolvedAt = DateTime.UtcNow;
         alert.Resolution = request.Resolution;
 
