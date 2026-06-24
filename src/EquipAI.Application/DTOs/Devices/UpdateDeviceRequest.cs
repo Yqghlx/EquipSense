@@ -24,4 +24,24 @@ public class UpdateDeviceRequest
     /// 设备关键等级
     /// </summary>
     public string? Criticality { get; set; }
+
+    /// <summary>
+    /// 序列号
+    /// </summary>
+    public string? SerialNumber { get; set; }
+
+    /// <summary>
+    /// 安装日期
+    /// </summary>
+    public DateOnly? InstallDate { get; set; }
+
+    /// <summary>
+    /// 绑定的网关编码
+    /// </summary>
+    public string? GatewayId { get; set; }
+
+    /// <summary>
+    /// 每小时停机成本（元）
+    /// </summary>
+    public decimal? DowntimeCostPerHour { get; set; }
 }

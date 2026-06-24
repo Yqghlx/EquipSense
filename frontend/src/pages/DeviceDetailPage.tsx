@@ -713,20 +713,33 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
   const { t } = useTranslation();
   const updateMutation = useUpdateDevice();
   const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ name: '', type: '', model: '', manufacturer: '' });
+  const [form, setForm] = useState({
+    name: '',
+    type: '',
+    model: '',
+    manufacturer: '',
+    serialNumber: '',
+    installDate: '',
+    gatewayId: '',
+    downtimeCostPerHour: '',
+  });
 
-  /** 进入编辑模式 */
+  /** 进入编辑模式（回显当前设备档案字段） */
   const startEdit = () => {
     setForm({
       name: device.name ?? '',
       type: device.type ?? '',
       model: device.model ?? '',
       manufacturer: device.manufacturer ?? '',
+      serialNumber: device.serialNumber ?? '',
+      installDate: device.installDate ?? '',
+      gatewayId: device.gatewayId ?? '',
+      downtimeCostPerHour: device.downtimeCostPerHour != null ? String(device.downtimeCostPerHour) : '',
     });
     setEditing(true);
   };
 
-  /** 保存修改 */
+  /** 保存修改（可空字段空值传 undefined，触发后端 Condition 跳过、保持原值） */
   const saveEdit = () => {
     updateMutation.mutate(
       {
@@ -736,6 +749,10 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
         type: form.type,
         model: form.model || undefined,
         manufacturer: form.manufacturer || undefined,
+        serialNumber: form.serialNumber || undefined,
+        installDate: form.installDate || undefined,
+        gatewayId: form.gatewayId || undefined,
+        downtimeCostPerHour: form.downtimeCostPerHour ? Number(form.downtimeCostPerHour) : undefined,
       },
       { onSettled: () => setEditing(false) },
     );
@@ -779,6 +796,22 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
               <Label className="text-xs text-muted-foreground">{t('device.manufacturer')}</Label>
               <Input className="h-8 text-sm" value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} />
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t('device.serialNumber')}</Label>
+              <Input className="h-8 text-sm" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t('device.installDate')}</Label>
+              <Input className="h-8 text-sm" type="date" value={form.installDate} onChange={(e) => setForm({ ...form, installDate: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t('device.gatewayId')}</Label>
+              <Input className="h-8 text-sm" value={form.gatewayId} onChange={(e) => setForm({ ...form, gatewayId: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t('device.downtimeCostPerHour')}</Label>
+              <Input className="h-8 text-sm" type="number" step="0.01" min="0" value={form.downtimeCostPerHour} onChange={(e) => setForm({ ...form, downtimeCostPerHour: e.target.value })} />
+            </div>
             <div>
               <Label className="text-xs text-muted-foreground">{t('common.status')}</Label>
               <div className="mt-1"><DeviceStatusBadge status={device.status} /></div>
@@ -794,6 +827,11 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
             <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.type}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.model')}</p><p className="font-medium">{device.model ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.manufacturer')}</p><p className="font-medium">{device.manufacturer ?? '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.serialNumber')}</p><p className="font-medium">{device.serialNumber ?? '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.installDate')}</p><p className="font-medium">{device.installDate ?? '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.gatewayId')}</p><p className="font-medium">{device.gatewayId ?? '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.downtimeCostPerHour')}</p><p className="font-medium">{device.downtimeCostPerHour != null ? device.downtimeCostPerHour : '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.lastSeenAt')}</p><p className="font-medium">{device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString() : '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('common.status')}</p><DeviceStatusBadge status={device.status} /></div>
             <div><p className="text-sm text-muted-foreground">{t('device.healthScore')}</p><p className="font-medium">{device.healthScore}</p></div>
           </>

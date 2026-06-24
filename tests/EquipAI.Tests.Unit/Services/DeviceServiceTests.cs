@@ -239,6 +239,40 @@ public class DeviceServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task CreateDeviceAsync_应映射设备档案扩展字段()
+    {
+        // Arrange：回归 #260 —— CreateRequest 新增的序列号/安装日期/网关/停机成本字段须通过
+        // AutoMapper 默认名称映射写入 Device 实体（MappingProfile 已移除对应 Ignore）。
+        var request = new CreateDeviceRequest
+        {
+            DeviceCode = "DEV-PROFILE",
+            Name = "档案测试设备",
+            Type = "压缩机",
+            SerialNumber = "SN-2026-001",
+            InstallDate = new DateOnly(2026, 1, 15),
+            GatewayId = "GW-001",
+            DowntimeCostPerHour = 1500m,
+        };
+
+        // Act
+        var result = await _sut.CreateDeviceAsync(request, _tenantId);
+
+        // Assert：返回 DTO 应携带扩展字段
+        result.SerialNumber.Should().Be("SN-2026-001");
+        result.InstallDate.Should().Be(new DateOnly(2026, 1, 15));
+        result.GatewayId.Should().Be("GW-001");
+        result.DowntimeCostPerHour.Should().Be(1500m);
+
+        // 验证数据库实体确实落库了扩展字段
+        var dbDevice = await _db.Devices.FindAsync(result.Id);
+        dbDevice.Should().NotBeNull();
+        dbDevice!.SerialNumber.Should().Be("SN-2026-001");
+        dbDevice.InstallDate.Should().Be(new DateOnly(2026, 1, 15));
+        dbDevice.GatewayId.Should().Be("GW-001");
+        dbDevice.DowntimeCostPerHour.Should().Be(1500m);
+    }
+
+    [Fact]
     public async Task CreateDeviceAsync_应递增租户设备计数()
     {
         // Arrange：预先创建一个租户，初始设备计数为 2
@@ -289,6 +323,37 @@ public class DeviceServiceTests : IAsyncDisposable
         dbDevice!.Name.Should().Be("更新后名称");
         dbDevice.Manufacturer.Should().Be("ABB");
         dbDevice.Model.Should().Be("M3BP-200");
+    }
+
+    [Fact]
+    public async Task UpdateDeviceAsync_应更新设备档案扩展字段()
+    {
+        // Arrange：回归 #260 —— UpdateRequest 新增字段须经 ForAllMembers Condition（非空更新）生效。
+        var device = await SeedDeviceAsync("DEV-UPD2", "待更新档案", "电机");
+
+        var request = new UpdateDeviceRequest
+        {
+            SerialNumber = "SN-UPD-001",
+            InstallDate = new DateOnly(2025, 6, 1),
+            GatewayId = "GW-UPD",
+            DowntimeCostPerHour = 800m,
+        };
+
+        // Act
+        var result = await _sut.UpdateDeviceAsync(device.Id, _tenantId, request);
+
+        // Assert：返回 DTO 应反映更新后的扩展字段
+        result.SerialNumber.Should().Be("SN-UPD-001");
+        result.InstallDate.Should().Be(new DateOnly(2025, 6, 1));
+        result.GatewayId.Should().Be("GW-UPD");
+        result.DowntimeCostPerHour.Should().Be(800m);
+
+        // 验证数据库实体确实更新
+        var dbDevice = await _db.Devices.FindAsync(device.Id);
+        dbDevice.Should().NotBeNull();
+        dbDevice!.SerialNumber.Should().Be("SN-UPD-001");
+        dbDevice.GatewayId.Should().Be("GW-UPD");
+        dbDevice.DowntimeCostPerHour.Should().Be(800m);
     }
 
     [Fact]

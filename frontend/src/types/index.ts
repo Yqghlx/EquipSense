@@ -123,6 +123,16 @@ export interface Device {
   createdAt: string;
   /** 更新时间（ISO 8601） */
   updatedAt: string;
+  /** 序列号（资产追踪） */
+  serialNumber?: string;
+  /** 安装日期（yyyy-MM-dd） */
+  installDate?: string;
+  /** 绑定网关编码 */
+  gatewayId?: string;
+  /** 每小时停机成本（元） */
+  downtimeCostPerHour?: number;
+  /** 最后上报时间（ISO 8601，运维判断失联） */
+  lastSeenAt?: string;
 }
 
 /** 创建设备请求参数 */
@@ -137,6 +147,14 @@ export interface CreateDeviceRequest {
   manufacturer?: string;
   /** 型号 */
   model?: string;
+  /** 序列号 */
+  serialNumber?: string;
+  /** 安装日期（yyyy-MM-dd） */
+  installDate?: string;
+  /** 绑定网关编码 */
+  gatewayId?: string;
+  /** 每小时停机成本（元） */
+  downtimeCostPerHour?: number;
 }
 
 /** 设备导入预览项（解析后的有效设备行） */

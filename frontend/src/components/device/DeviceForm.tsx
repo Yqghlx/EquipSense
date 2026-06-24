@@ -14,6 +14,10 @@ const deviceSchema = z.object({
   name: z.string().min(1, 'device.nameRequired'),
   type: z.string().min(1, 'device.typeRequired'),
   model: z.string().optional(),
+  serialNumber: z.string().optional(),
+  installDate: z.string().optional(),
+  gatewayId: z.string().optional(),
+  downtimeCostPerHour: z.number().optional(),
 });
 
 type DeviceFormData = z.infer<typeof deviceSchema>;
@@ -43,7 +47,16 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<DeviceFormData>({
     resolver: zodResolver(deviceSchema),
     defaultValues: device
-      ? { deviceCode: device.deviceCode, name: device.name, type: device.type, model: device.model }
+      ? {
+          deviceCode: device.deviceCode,
+          name: device.name,
+          type: device.type,
+          model: device.model,
+          serialNumber: device.serialNumber,
+          installDate: device.installDate,
+          gatewayId: device.gatewayId,
+          downtimeCostPerHour: device.downtimeCostPerHour,
+        }
       : undefined,
   });
 
@@ -81,6 +94,36 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
       <div className="space-y-2">
         <Label>{t('device.model')}</Label>
         <Input {...register('model')} placeholder={t('device.modelPlaceholder')} />
+      </div>
+
+      {/* 序列号（资产追踪） */}
+      <div className="space-y-2">
+        <Label>{t('device.serialNumber')}</Label>
+        <Input {...register('serialNumber')} placeholder={t('device.serialNumber')} />
+      </div>
+
+      {/* 安装日期（质保起算） */}
+      <div className="space-y-2">
+        <Label>{t('device.installDate')}</Label>
+        <Input type="date" {...register('installDate')} />
+      </div>
+
+      {/* 绑定网关编码（采集架构归属） */}
+      <div className="space-y-2">
+        <Label>{t('device.gatewayId')}</Label>
+        <Input {...register('gatewayId')} placeholder={t('device.gatewayId')} />
+      </div>
+
+      {/* 每小时停机成本（ROI 核算/优先级）；setValueAs 把空值转 undefined（可选字段） */}
+      <div className="space-y-2">
+        <Label>{t('device.downtimeCostPerHour')}</Label>
+        <Input
+          type="number"
+          step="0.01"
+          min="0"
+          {...register('downtimeCostPerHour', { setValueAs: (v) => (v === '' || v == null ? undefined : Number(v)) })}
+          placeholder="0"
+        />
       </div>
 
       {/* 操作按钮 */}
