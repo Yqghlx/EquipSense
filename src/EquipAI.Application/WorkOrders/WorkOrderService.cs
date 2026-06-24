@@ -258,8 +258,12 @@ public class WorkOrderService : IWorkOrderService
 
         TransitionStatus(workOrder, WorkOrderStatus.Completed);
 
-        // 记录解决措施和完成时间
+        // 记录解决措施、维修执行报告、使用零件和完成时间
+        // 执行报告/使用零件是知识沉淀 FaultCase.Solution/PartsUsed 的数据源（回归 #252：原为死字段，
+        // 完成工单时从不写入 → Solution 永远降级为 Resolution、PartsUsed 永远空）
         workOrder.Resolution = request.Resolution;
+        workOrder.ExecutionReport = request.ExecutionReport;
+        workOrder.RequiredParts = request.RequiredParts;
         workOrder.CompletedAt = DateTime.UtcNow;
         // 计算实际维修工时（CompletedAt - StartedAt），供知识沉淀阈值与 MTTR/KPI 核算（见 ComputeActualHours）
         ComputeActualHours(workOrder);
@@ -430,8 +434,12 @@ public class WorkOrderService : IWorkOrderService
         // （回归 bug #247）。
         TransitionStatus(workOrder, WorkOrderStatus.SubmittedForApproval);
 
-        // 记录解决措施和完成时间
+        // 记录解决措施、维修执行报告、使用零件和完成时间
+        // 执行报告/使用零件是知识沉淀 FaultCase.Solution/PartsUsed 的数据源（回归 #252：原为死字段，
+        // 提交验收时从不写入 → Solution 永远降级为 Resolution、PartsUsed 永远空）
         workOrder.Resolution = request.Resolution;
+        workOrder.ExecutionReport = request.ExecutionReport;
+        workOrder.RequiredParts = request.RequiredParts;
         if (workOrder.CompletedAt == null)
         {
             workOrder.CompletedAt = DateTime.UtcNow;
@@ -600,6 +608,8 @@ public class WorkOrderService : IWorkOrderService
             AnalysisId = workOrder.AnalysisId,
             RootCause = workOrder.RootCause,
             Resolution = workOrder.Resolution,
+            ExecutionReport = workOrder.ExecutionReport,
+            RequiredParts = workOrder.RequiredParts,
             AssignedTo = workOrder.AssignedTo,
             DueDate = workOrder.DueDate,
             CompletedAt = workOrder.CompletedAt,

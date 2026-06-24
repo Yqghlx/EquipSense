@@ -11,6 +11,7 @@ import type {
   ApprovalChainTemplate,
   WorkOrderApprovalDto,
   CreateApprovalChainRequest,
+  CompleteWorkOrderRequest,
 } from '../types';
 
 /**
@@ -118,11 +119,14 @@ export function useDeleteApprovalChain() {
 export function useSubmitWorkOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      await api.post(`/work-orders/${id}/submit`);
+    // 提交验收与完成工单共享 CompleteWorkOrderRequest（携带 resolution/executionReport/requiredParts）。
+    // 原 useSubmitWorkOrder 只传 id 不传 body，后端 SubmitAsync 写入的 executionReport/requiredParts 永远为空
+    // → 知识沉淀 FaultCase.Solution/PartsUsed 数据源缺失（回归 #252）。现与完成工单入口一致透传请求体。
+    mutationFn: async ({ id, ...req }: CompleteWorkOrderRequest & { id: string }) => {
+      await api.post(`/work-orders/${id}/submit`, req);
     },
-    onSuccess: (_, id) => {
-      qc.invalidateQueries({ queryKey: ['work-orders', id] });
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['work-orders', variables.id] });
       qc.invalidateQueries({ queryKey: ['work-orders'] });
     },
   });

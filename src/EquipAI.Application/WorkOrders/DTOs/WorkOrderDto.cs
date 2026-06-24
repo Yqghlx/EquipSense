@@ -16,6 +16,17 @@ public class WorkOrderDto
     public Guid? AnalysisId { get; set; }
     public string? RootCause { get; set; }
     public string? Resolution { get; set; }
+
+    /// <summary>
+    /// 维修执行报告（详细维修过程）。知识沉淀生成故障案例 Solution 时优先使用本字段（为空则降级到 Resolution）。
+    /// </summary>
+    public string? ExecutionReport { get; set; }
+
+    /// <summary>
+    /// 使用零件（JSON 数组字符串）。知识沉淀记入故障案例 PartsUsed，并供备件成本核算。
+    /// </summary>
+    public string? RequiredParts { get; set; }
+
     public Guid? AssignedTo { get; set; }
     public DateTime? DueDate { get; set; }
     public DateTime? CompletedAt { get; set; }

@@ -245,11 +245,26 @@ describe('useSubmitWorkOrder', () => {
       wrapper: createWrapper(),
     });
 
-    result.current.mutate('wo-001');
+    // 回归 #252：提交验收必须携带 resolution/executionReport/requiredParts（原只传 id，
+    // 后端 SubmitAsync 写入的 ExecutionReport/RequiredParts 永远为空 → 知识沉淀 Solution/PartsUsed 缺失）
+    result.current.mutate({
+      id: 'wo-001',
+      resolution: '已更换轴承',
+      executionReport: '拆机更换 6205-2RS 轴承并校准动平衡',
+      requiredParts: '轴承 6205-2RS x2',
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(mockedApi.post).toHaveBeenCalledWith('/work-orders/wo-001/submit');
+    // api.post 第二参为解构 id 后的请求体（resolution/executionReport/requiredParts）
+    expect(mockedApi.post).toHaveBeenCalledWith(
+      '/work-orders/wo-001/submit',
+      {
+        resolution: '已更换轴承',
+        executionReport: '拆机更换 6205-2RS 轴承并校准动平衡',
+        requiredParts: '轴承 6205-2RS x2',
+      },
+    );
   });
 });
 

@@ -52,6 +52,10 @@ export default function WorkOrderDetailPage() {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [resolution, setResolution] = useState('');
+  // 维修执行报告/使用零件：完成或提交验收时填写，是知识沉淀 FaultCase.Solution/PartsUsed 的数据源（回归 #252：
+  // 原前端只传 resolution，后端 ExecutionReport/RequiredParts 永远为空 → Solution 永远降级、PartsUsed 永远空）
+  const [executionReport, setExecutionReport] = useState('');
+  const [requiredParts, setRequiredParts] = useState('');
   const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
   const [selectedTechnician, setSelectedTechnician] = useState('');
 
@@ -125,7 +129,12 @@ export default function WorkOrderDetailPage() {
         onReject={(reason) => rejectOrder.mutate({ id: workOrder.id, reason })}
         onClose={() => closeOrder.mutate(workOrder.id)}
         onCancel={() => setCancelDialogOpen(true)}
-        onSubmitForApproval={() => submitOrder.mutate(workOrder.id)}
+        onSubmitForApproval={() => submitOrder.mutate({
+          id: workOrder.id,
+          resolution,
+          executionReport,
+          requiredParts,
+        })}
       />
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -145,7 +154,19 @@ export default function WorkOrderDetailPage() {
                 <p className="mt-1 text-sm">{workOrder.resolution}</p>
               </div>
             ) : null}
-            {!workOrder.rootCause && !workOrder.resolution && (
+            {workOrder.executionReport ? (
+              <div>
+                <p className="text-sm text-muted-foreground">{t('workorder.executionReport')}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{workOrder.executionReport}</p>
+              </div>
+            ) : null}
+            {workOrder.requiredParts ? (
+              <div>
+                <p className="text-sm text-muted-foreground">{t('workorder.requiredParts')}</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{workOrder.requiredParts}</p>
+              </div>
+            ) : null}
+            {!workOrder.rootCause && !workOrder.resolution && !workOrder.executionReport && !workOrder.requiredParts && (
               <p className="text-sm text-muted-foreground">{t('workorder.noRelatedInfo')}</p>
             )}
           </CardContent>
@@ -165,23 +186,44 @@ export default function WorkOrderDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">{t('workorder.fillResolution')}</CardTitle></CardHeader>
           <CardContent className="space-y-3">
-            <Textarea
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value)}
-              placeholder={t('workorder.describeResolution')}
-              rows={3}
-            />
+            <div className="space-y-1.5">
+              <Label>{t('workorder.resolution')}</Label>
+              <Textarea
+                value={resolution}
+                onChange={(e) => setResolution(e.target.value)}
+                placeholder={t('workorder.describeResolution')}
+                rows={2}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('workorder.executionReport')}</Label>
+              <Textarea
+                value={executionReport}
+                onChange={(e) => setExecutionReport(e.target.value)}
+                placeholder={t('workorder.executionReportPlaceholder')}
+                rows={4}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('workorder.requiredParts')}</Label>
+              <Textarea
+                value={requiredParts}
+                onChange={(e) => setRequiredParts(e.target.value)}
+                placeholder={t('workorder.requiredPartsPlaceholder')}
+                rows={2}
+              />
+            </div>
             <Button
               onClick={async () => {
                 try {
                   if (navigator.onLine) {
-                    completeOrder.mutate({ id: workOrder.id, resolution });
+                    completeOrder.mutate({ id: workOrder.id, resolution, executionReport, requiredParts });
                   } else {
                     await enqueue(
                       'work-order-complete',
                       `/api/v1/work-orders/${workOrder.id}/complete`,
                       'PUT',
-                      { id: workOrder.id, resolution },
+                      { id: workOrder.id, resolution, executionReport, requiredParts },
                     );
                   }
                 } catch (err) {
@@ -358,7 +400,7 @@ function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onC
   const buttons: Record<string, Array<{ label: string; action: () => void; variant?: 'default' | 'outline' | 'destructive' }>> = {
     PendingDispatch: [{ label: t('workorder.dispatch'), action: onDispatch }],
     Assigned: [{ label: t('workorder.startExecution'), action: onStart }],
-    InProgress: [{ label: '提交验收', action: onSubmitForApproval }],
+    InProgress: [{ label: t('workorder.submitForApproval'), action: onSubmitForApproval }],
     SubmittedForApproval: [],
     Completed: [
       { label: t('workorder.accept'), action: onAccept },

@@ -339,6 +339,10 @@ export interface WorkOrder {
   rootCause?: string;
   /** 解决方案 */
   resolution?: string;
+  /** 维修执行报告（详细维修过程；知识沉淀生成故障案例 Solution 优先使用本字段，为空则降级到 resolution） */
+  executionReport?: string;
+  /** 使用零件（JSON 数组字符串；知识沉淀记入故障案例 PartsUsed，并供备件成本核算） */
+  requiredParts?: string;
   /** 被指派人 ID */
   assignedTo?: string;
   /** 截止时间（ISO 8601） */
@@ -383,6 +387,10 @@ export interface AssignWorkOrderRequest {
 export interface CompleteWorkOrderRequest {
   /** 解决方案描述 */
   resolution: string;
+  /** 维修执行报告（详细维修过程；知识沉淀 FaultCase.Solution 优先使用本字段） */
+  executionReport?: string;
+  /** 使用零件（JSON 数组字符串；知识沉淀 FaultCase.PartsUsed + 备件成本核算） */
+  requiredParts?: string;
 }
 
 /** 工单流转日志 */

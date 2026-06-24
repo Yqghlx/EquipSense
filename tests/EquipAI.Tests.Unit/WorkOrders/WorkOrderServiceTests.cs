@@ -174,6 +174,67 @@ public class WorkOrderServiceTests
     }
 
     [Fact]
+    public async Task CompleteAsync_应持久化执行报告与使用零件()
+    {
+        var (db, _, service) = CreateSut();
+        var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
+        await service.AssignAsync(_tenantId, wo.Id,
+            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+        await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid());
+
+        var result = await service.CompleteAsync(
+            _tenantId, wo.Id,
+            new CompleteWorkOrderRequest
+            {
+                Resolution = "已更换轴承",
+                // 详细维修过程：知识沉淀 FaultCase.Solution 优先用 ExecutionReport，比 Resolution 更有价值
+                ExecutionReport = "拆机后发现主轴轴承磨损，更换 6205-2RS 轴承并重新校准动平衡",
+                // 使用零件清单（JSON）：知识沉淀 PartsUsed + 备件成本核算
+                RequiredParts = """[{"name":"轴承 6205-2RS","qty":2,"unitCost":85.5}]"""
+            },
+            Guid.NewGuid(), CancellationToken.None);
+
+        // 回归 #252：ExecutionReport/RequiredParts 原为死字段——CompleteAsync 只写 Resolution，
+        // 两者永不写入 → 知识沉淀 FaultCase.Solution 永远降级为 Resolution（丢失详细维修过程）、
+        // PartsUsed 永远空（备件成本无法核算）。完成工单时填写的执行报告与使用零件必须被持久化。
+        result.ExecutionReport.Should().NotBeNull("完成时填写的执行报告必须返回");
+        result.ExecutionReport.Should().Contain("6205-2RS");
+        result.RequiredParts.Should().NotBeNull("完成时填写的使用零件必须返回");
+        result.RequiredParts.Should().Contain("轴承 6205-2RS");
+
+        // 验证真实持久化（非仅 DTO 映射）——避免测试只 seed 字段值绕过真实写入路径（#244 测试盲点）
+        var entity = await db.WorkOrders.FirstAsync(w => w.Id == wo.Id);
+        entity.ExecutionReport.Should().Contain("6205-2RS");
+        entity.RequiredParts.Should().Contain("轴承 6205-2RS");
+    }
+
+    [Fact]
+    public async Task SubmitAsync_应持久化执行报告与使用零件()
+    {
+        var (db, _, service) = CreateSut();
+        var userId = Guid.NewGuid();
+        var woId = await AdvanceToStatus(service, WorkOrderStatus.InProgress);
+
+        var result = await service.SubmitAsync(_tenantId, woId,
+            new CompleteWorkOrderRequest
+            {
+                Resolution = "已修复",
+                ExecutionReport = "更换密封圈并清理管路积垢",
+                RequiredParts = """[{"name":"O型密封圈","qty":4}]"""
+            },
+            userId);
+
+        // 回归 #252：提交验收路径（InProgress/Completed → SubmittedForApproval）同样必须持久化
+        // 执行报告与使用零件——知识沉淀在工单关闭时读取这两个字段，两条完成路径都覆盖
+        result.ExecutionReport.Should().Contain("密封圈");
+        result.RequiredParts.Should().Contain("O型密封圈");
+
+        var entity = await db.WorkOrders.FirstAsync(w => w.Id == woId);
+        entity.ExecutionReport.Should().Contain("密封圈");
+        entity.RequiredParts.Should().Contain("O型密封圈");
+    }
+
+    [Fact]
     public async Task AcceptAsync_应将状态从Completed变更为Accepted()
     {
         var (db, _, service) = CreateSut();
