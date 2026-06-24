@@ -18,6 +18,17 @@ public interface ISignalRNotificationService
     Task SendTelemetryUpdateAsync(Guid tenantId, Guid deviceId, string metric, double value);
 
     /// <summary>
+    /// 推送告警确认事件到租户组
+    ///
+    /// 业务意义：操作员确认接管告警后，告警中心的其他在线用户须实时看到该告警状态由 Active 变 Acknowledged
+    /// （避免多人重复确认/重复派工）。原实现 Acknowledge 只改 DB 返回、无实时推送——与工单状态变更推送
+    /// （#231-#251）不对称，告警状态变更对其他在线用户完全不可见（须手动刷新）。
+    /// 轻量推送：仅 SignalR（在线协作刷新），不持久化通知/不发 Web Push（确认接管非紧急打扰事项，避免
+    /// 每次确认都生成通知噪音淹没真告警；与 SendWorkOrderAnalysisUpdatedAsync/SendPendingRuleCreatedAsync 一致）。
+    /// </summary>
+    Task SendAlertAcknowledgedAsync(Guid tenantId, Guid alertId);
+
+    /// <summary>
     /// 推送告警解决事件到租户组
     /// </summary>
     Task SendAlertResolvedAsync(Guid tenantId, Guid alertId);

@@ -45,8 +45,18 @@ export function useSignalR() {
         queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       });
 
+      // 告警确认：后端 AlertsController.AcknowledgeAlert 发布 AlertAcknowledgedEvent →
+      // AlertStatusNotificationHandler → OnAlertAcknowledged 推送。前端须监听以 invalidate 告警列表/Dashboard，
+      // 让告警中心其他在线用户实时看到该告警状态由 Active 变 Acknowledged（避免多人重复确认/派工）。
+      // 与 OnAlertResolved 对称（原 Acknowledge 完全无实时推送，与工单状态变更推送 #231-#251 不对称）。
+      conn.on('OnAlertAcknowledged', () => {
+        queryClient.invalidateQueries({ queryKey: ['alerts'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      });
+
       conn.on('OnAlertResolved', () => {
         queryClient.invalidateQueries({ queryKey: ['alerts'] });
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       });
 
       conn.on('OnWorkOrderCreated', () => {

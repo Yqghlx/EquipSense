@@ -251,6 +251,8 @@ try
     eventBus.Subscribe<AlertTriggeredEvent, AlertEventHandler>();
     eventBus.Subscribe<AlertTriggeredEvent, RootCauseAnalysisHandler>();
     eventBus.Subscribe<AlertTriggeredEvent, WorkOrderAutoCreateHandler>();
+    eventBus.Subscribe<AlertAcknowledgedEvent, AlertStatusNotificationHandler>();
+    eventBus.Subscribe<AlertResolvedEvent, AlertStatusNotificationHandler>();
     eventBus.Subscribe<AnalysisCompletedEvent, WorkOrderAnalysisHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, KnowledgeCaptureHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderIntegrationHandler>();

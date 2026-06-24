@@ -5,6 +5,7 @@ using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
 using EquipAI.Infrastructure.Data;
@@ -28,13 +29,15 @@ public class AlertsController : ControllerBase
     private readonly IMapper _mapper;
     private readonly ITenantContext _tenantContext;
     private readonly DataExportService _exportService;
+    private readonly IEventBus _eventBus;
 
-    public AlertsController(AppDbContext dbContext, IMapper mapper, ITenantContext tenantContext, DataExportService exportService)
+    public AlertsController(AppDbContext dbContext, IMapper mapper, ITenantContext tenantContext, DataExportService exportService, IEventBus eventBus)
     {
         _dbContext = dbContext;
         _mapper = mapper;
         _tenantContext = tenantContext;
         _exportService = exportService;
+        _eventBus = eventBus;
     }
 
     [HttpGet]
@@ -132,6 +135,18 @@ public class AlertsController : ControllerBase
 
         await _dbContext.SaveChangesAsync();
 
+        // 发布告警确认事件 → AlertStatusNotificationHandler → SignalR 推送 OnAlertAcknowledged，
+        // 让告警中心其他在线用户实时看到该告警已被确认接管（避免多人重复确认/重复派工）。
+        // 原实现只改 DB 返回、无实时推送——与工单状态变更推送（#231-#251）不对称。
+        // 显式 CancellationToken.None：即便发起方断开连接，状态变更仍须通知其他在线用户
+        await _eventBus.PublishAsync(new AlertAcknowledgedEvent(
+            EventId: Guid.NewGuid(),
+            OccurredAt: DateTime.UtcNow,
+            TenantId: _tenantContext.TenantId,
+            AlertId: id,
+            AcknowledgedBy: _tenantContext.UserId,
+            Note: request?.Note), CancellationToken.None);
+
         return Ok(_mapper.Map<AlertDto>(alert));
     }
 
@@ -155,6 +170,17 @@ public class AlertsController : ControllerBase
         alert.Resolution = request.Resolution;
 
         await _dbContext.SaveChangesAsync();
+
+        // 发布告警解决事件 → AlertStatusNotificationHandler → SendAlertResolvedAsync（复活既有死代码：
+        // 接口/实现/前端监听齐备但全仓零调用），三路推送 OnAlertResolved + 持久化通知 + Web Push，
+        // 让告警中心其他用户实时看到该告警已闭环。与 Acknowledge 对称。
+        await _eventBus.PublishAsync(new AlertResolvedEvent(
+            EventId: Guid.NewGuid(),
+            OccurredAt: DateTime.UtcNow,
+            TenantId: _tenantContext.TenantId,
+            AlertId: id,
+            ResolvedBy: _tenantContext.UserId,
+            Resolution: request.Resolution), CancellationToken.None);
 
         return Ok(_mapper.Map<AlertDto>(alert));
     }

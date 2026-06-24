@@ -348,6 +348,8 @@ public static class ServiceCollectionExtensions
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
         services.AddScoped<AlertEventHandler>();
+        // 告警状态变更 SignalR 推送处理器（确认/解决事件 → 实时推送，与 WorkOrderNotificationHandler 对称）
+        services.AddScoped<AlertStatusNotificationHandler>();
         // 告警多渠道通知 — 站内通知持久化 + 钉钉/飞书机器人推送（Critical/High）
         services.AddScoped<EquipAI.Application.Alerts.AlertNotificationService>();
         // 数据导出 — 告警/审计日志 CSV 导出

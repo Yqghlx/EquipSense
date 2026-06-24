@@ -134,6 +134,28 @@ public class SignalRNotificationService : ISignalRNotificationService
     }
 
     /// <inheritdoc />
+    public async Task SendAlertAcknowledgedAsync(Guid tenantId, Guid alertId)
+    {
+        // 轻量推送（仅 SignalR）：告警确认是协作态变化（在线用户实时看到状态变更），非紧急打扰事项，
+        // 无需持久化通知/Web Push（与 SendWorkOrderAnalysisUpdatedAsync / SendPendingRuleCreatedAsync 一致；
+        // 避免每次确认都生成站内通知噪音淹没真正的故障告警）。
+        // try/catch 隔离：SignalR 推送失败仅记录警告，不影响已落库的告警状态变更（用户手动刷新仍可看到）。
+        try
+        {
+            await _hubContext.Clients.Group($"tenant:{tenantId}")
+                .SendAsync("OnAlertAcknowledged", new
+                {
+                    alertId,
+                    acknowledgedAt = DateTime.UtcNow
+                });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR 告警确认推送失败: AlertId={AlertId}", alertId);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SendWorkOrderCreatedAsync(Guid tenantId, Guid workOrderId,
         Guid deviceId, string title, string priority)
     {
