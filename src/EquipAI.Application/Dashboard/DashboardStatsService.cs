@@ -12,9 +12,9 @@ namespace EquipAI.Application.Dashboard;
 /// 数据准确性说明（v1.3.0 校准）：
 /// 1. Availability 字段是"瞬时在线设备比例"，不是工业可用率。
 ///    真正的工业可用率 = 运行时间 / 计划运行时间，需要接入设备状态历史遥测后才能实现。
-/// 2. 趋势数据按 UTC 当天分组，未做时区转换。
-///    跨时区用户（如 UTC+8 中国用户）会在 UTC 0:00-7:59 期间看到趋势图错位一天。
-///    修复需要给 Tenant 加 TimeZone 字段，属于 v1.4 范畴。
+/// 2. 趋势数据按租户本地时区当天分组（v1.4 #245 修复，使用 Tenant.TimeZone + TimeZoneResolver）。
+///    查询窗口起点 = 租户时区"今天 0:00"转 UTC；分组键 = 遥测时间转租户时区后的 .Date。
+///    跨时区用户看到的"今天"与本地一致（旧实现按 UTC 分组会让 UTC+8 用户在 UTC 0-8 点错位一天）。
 /// 3. 所有查询依赖 EF Core 全局查询过滤器自动附加 WHERE TenantId = @current，
 ///    所以 tenantId 参数虽未显式传入 LINQ，但过滤器保证租户隔离。
 /// </summary>
