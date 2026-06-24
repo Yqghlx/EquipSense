@@ -177,6 +177,7 @@
     "model": "型号",
     "modelPlaceholder": "设备型号",
     "manufacturer": "制造商",
+    "criticality": "关键等级",
     "healthScore": "健康评分",
     "serialNumber": "序列号",
     "installDate": "安装日期",

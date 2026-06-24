@@ -13,6 +13,8 @@ const deviceSchema = z.object({
   deviceCode: z.string().min(1, 'device.deviceCodeRequired'),
   name: z.string().min(1, 'device.nameRequired'),
   type: z.string().min(1, 'device.typeRequired'),
+  manufacturer: z.string().optional(),
+  criticality: z.string().optional(),
   model: z.string().optional(),
   serialNumber: z.string().optional(),
   installDate: z.string().optional(),
@@ -39,8 +41,9 @@ interface DeviceFormProps {
 /**
  * 设备表单组件
  *
- * 用于创建和编辑设备信息，集成了 React Hook Form + Zod 表单校验。
- * 支持设备编码、名称、类型和位置四个字段。
+ * 用于创建和编辑设备档案信息，集成 React Hook Form + Zod 表单校验。
+ * 覆盖设备编码、名称、类型、关键等级、型号、制造商、序列号、安装日期、
+ * 绑定网关、停机成本等档案字段；可选字段留空即不提交（保持原值）。
  */
 export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormProps) {
   const { t } = useTranslation();
@@ -51,6 +54,8 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
           deviceCode: device.deviceCode,
           name: device.name,
           type: device.type,
+          manufacturer: device.manufacturer,
+          criticality: device.criticality,
           model: device.model,
           serialNumber: device.serialNumber,
           installDate: device.installDate,
@@ -90,10 +95,29 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
         {errors.type && <p className="text-sm text-destructive">{t(errors.type.message!)}</p>}
       </div>
 
+      {/* 关键等级（设备优先级，影响告警/工单排序） */}
+      <div className="space-y-2">
+        <Label>{t('device.criticality')}</Label>
+        <Select defaultValue={device?.criticality ?? 'Normal'} onValueChange={(v) => { if (v) setValue('criticality', v); }}>
+          <SelectTrigger><SelectValue placeholder={t('device.criticality')} /></SelectTrigger>
+          <SelectContent>
+            {(['Critical', 'High', 'Normal', 'Low'] as const).map((c) => (
+              <SelectItem key={c} value={c}>{c}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* 设备型号 */}
       <div className="space-y-2">
         <Label>{t('device.model')}</Label>
         <Input {...register('model')} placeholder={t('device.modelPlaceholder')} />
+      </div>
+
+      {/* 制造商 */}
+      <div className="space-y-2">
+        <Label>{t('device.manufacturer')}</Label>
+        <Input {...register('manufacturer')} placeholder={t('device.manufacturer')} />
       </div>
 
       {/* 序列号（资产追踪） */}

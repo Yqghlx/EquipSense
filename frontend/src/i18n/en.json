@@ -177,6 +177,7 @@
     "model": "Model",
     "modelPlaceholder": "Device Model",
     "manufacturer": "Manufacturer",
+    "criticality": "Criticality",
     "healthScore": "Health Score",
     "serialNumber": "Serial Number",
     "installDate": "Install Date",

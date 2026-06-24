@@ -718,6 +718,7 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
     type: '',
     model: '',
     manufacturer: '',
+    criticality: 'Normal',
     serialNumber: '',
     installDate: '',
     gatewayId: '',
@@ -731,6 +732,7 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
       type: device.type ?? '',
       model: device.model ?? '',
       manufacturer: device.manufacturer ?? '',
+      criticality: device.criticality ?? 'Normal',
       serialNumber: device.serialNumber ?? '',
       installDate: device.installDate ?? '',
       gatewayId: device.gatewayId ?? '',
@@ -749,6 +751,7 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
         type: form.type,
         model: form.model || undefined,
         manufacturer: form.manufacturer || undefined,
+        criticality: form.criticality || undefined,
         serialNumber: form.serialNumber || undefined,
         installDate: form.installDate || undefined,
         gatewayId: form.gatewayId || undefined,
@@ -797,6 +800,17 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
               <Input className="h-8 text-sm" value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} />
             </div>
             <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t('device.criticality')}</Label>
+              <Select value={form.criticality} onValueChange={(v) => { if (v) setForm({ ...form, criticality: v }); }}>
+                <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(['Critical', 'High', 'Normal', 'Low'] as const).map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
               <Label className="text-xs text-muted-foreground">{t('device.serialNumber')}</Label>
               <Input className="h-8 text-sm" value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />
             </div>
@@ -827,6 +841,7 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
             <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.type}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.model')}</p><p className="font-medium">{device.model ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.manufacturer')}</p><p className="font-medium">{device.manufacturer ?? '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.criticality')}</p><p className="font-medium">{device.criticality ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.serialNumber')}</p><p className="font-medium">{device.serialNumber ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.installDate')}</p><p className="font-medium">{device.installDate ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.gatewayId')}</p><p className="font-medium">{device.gatewayId ?? '-'}</p></div>

@@ -145,6 +145,8 @@ export interface CreateDeviceRequest {
   type: string;
   /** 制造商 */
   manufacturer?: string;
+  /** 关键等级（Critical/High/Normal/Low） */
+  criticality?: string;
   /** 型号 */
   model?: string;
   /** 序列号 */

@@ -68,7 +68,8 @@ describe('DeviceForm', () => {
       await user.type(nameInput, '二号水泵');
 
       // 选择设备类型（Base UI Select：点击 combobox 触发器，再点击选项）
-      const selectTrigger = screen.getByRole('combobox');
+      // 表单含 type + criticality 两个 Select，type 排在首位；criticality 有默认值 Normal 无需手动选
+      const selectTrigger = screen.getAllByRole('combobox')[0];
       await user.click(selectTrigger);
 
       // 等待下拉选项出现后点击 "pump"
