@@ -267,6 +267,44 @@ public class OperationsReportServiceTests : IAsyncDisposable
         content.Should().Contain("7,4,2,1,57.1%");
     }
 
+    /// <summary>
+    /// 报表"已完成"列应含 Completed/Accepted/Closed 三态（工单生命周期的"维修完成"阶段）
+    ///
+    /// Why：工单生命周期 Completed（已完成）→ Accepted（已验收）→ Closed（已关闭）均代表"维修工作已完成"，
+    /// 区别只在审批/归档阶段。报表"已完成"标签若只算 Closed（归档），则大量 Completed/Accepted 工单
+    /// 在月报里凭空消失，completionRate 严重偏低（客户看"已完成=1、完成率 14%"会误以为效率极低，
+    /// 实际 50 个工单已完成维修只是没走完归档）。与 WorkOrderStatisticsService（Dashboard，用
+    /// CompletedAt.HasValue 涵盖 Completed 及之后）方向应一致。既有 happy-path 测试只构造
+    /// Closed/InProgress/PendingDispatch（无 Completed/Accepted），掩盖了此 bug（与 #262 同构）。
+    /// </summary>
+    [Fact]
+    public async Task GenerateReportAsync_已完成工单含CompletedAcceptedClosed_与生命周期一致()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var now = new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc);
+
+        // 2 Completed + 1 Accepted + 1 Closed + 2 InProgress + 1 PendingDispatch = 7
+        // 修复前：已完成只算 Closed=1 → completionRate=14.3%（Completed/Accepted 凭空消失）
+        // 修复后：已完成=Completed(2)+Accepted(1)+Closed(1)=4 → completionRate=4/7=57.1%
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.Completed, now));
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.Completed, now));
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.Accepted, now));
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.Closed, now));
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.InProgress, now));
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.InProgress, now));
+        db.WorkOrders.Add(CreateWorkOrder(_tenantId, WorkOrderStatus.PendingDispatch, now));
+        await db.SaveChangesAsync();
+
+        var result = await service.GenerateReportAsync(_tenantId,
+            new DateTime(2026, 1, 1), new DateTime(2026, 1, 31));
+        var content = Encoding.UTF8.GetString(result);
+
+        // 总数=7, 已完成=4(Completed2+Accepted1+Closed1), 执行中=2, 待派工=1, 完成率=57.1%
+        content.Should().Contain("7,4,2,1,57.1%",
+            "已完成应含 Completed/Accepted/Closed（维修完成的工单，不只 Closed 归档），完成率才不偏低");
+    }
+
     // =========================================================================
     // 时间窗口过滤 — 窗口外的数据不参与统计
     // =========================================================================

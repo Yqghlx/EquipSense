@@ -85,13 +85,21 @@ public class OperationsReportService
             .Where(w => w.TenantId == tenantId && w.CreatedAt >= startDate && w.CreatedAt <= endDate)
             .ToListAsync(ct);
 
-        var woClosed = workOrders.Count(w => w.Status == WorkOrderStatus.Closed);
+        // 已完成 = Completed（已完成）+ Accepted（已验收）+ Closed（已关闭），三者均代表维修工作已完成
+        // （生命周期 Completed→Accepted→Closed，区别仅在审批/归档阶段）。
+        // 修复历史：原代码只算 Closed（归档），致 Completed/Accepted 工单在报表凭空消失、completionRate
+        // 严重偏低（客户看月报"已完成=1"误以为效率极低），与 WorkOrderStatisticsService（用 CompletedAt.HasValue
+        // 涵盖 Completed 及之后）方向不一致。与 #262（活跃告警定义）同构的业务定义跨查询点不一致。
+        var woCompleted = workOrders.Count(w =>
+            w.Status == WorkOrderStatus.Completed
+            || w.Status == WorkOrderStatus.Accepted
+            || w.Status == WorkOrderStatus.Closed);
         var woInProgress = workOrders.Count(w => w.Status == WorkOrderStatus.InProgress);
         var woPending = workOrders.Count(w => w.Status == WorkOrderStatus.PendingDispatch);
-        var completionRate = workOrders.Count > 0 ? (double)woClosed / workOrders.Count * 100 : 0;
+        var completionRate = workOrders.Count > 0 ? (double)woCompleted / workOrders.Count * 100 : 0;
 
         sb.AppendLine($"工单总数,已完成,执行中,待派工,完成率");
-        sb.AppendLine($"{workOrders.Count},{woClosed},{woInProgress},{woPending},{completionRate:F1}%");
+        sb.AppendLine($"{workOrders.Count},{woCompleted},{woInProgress},{woPending},{completionRate:F1}%");
         sb.AppendLine();
 
         // === 4. OEE 指标 ===
