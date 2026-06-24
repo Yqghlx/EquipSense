@@ -192,6 +192,90 @@ public class DataExportServiceTests
         csv.Should().Contain("5000", "导出应包含 downtime_cost_per_hour（停机成本，ROI 分析基础）");
     }
 
+    /// <summary>
+    /// 工单导出必须包含 DueDate/AlertId/AnalysisId 等创建/建单/分析时写入的关键业务字段，
+    /// 保证导出备份/报表不丢数据。回归：原导出漏掉这 3 个字段——DueDate 是 SLA 基准（月度报表
+    /// 无法做 SLA 合规分析）、AlertId 关联源告警（无法追溯工单由哪条告警触发）、AnalysisId 关联
+    /// AI 分析（无法追溯根因分析记录）。
+    /// 注：经核实 Description 实体无此字段（CreateWorkOrderRequest.Description 创建时未落库，属另一问题）、
+    /// ExecutionReport/RequiredParts 为死字段（从无写入点，知识沉淀读取时永远 fallback），均不纳入本次修复。
+    /// </summary>
+    [Fact]
+    public async Task ExportWorkOrdersAsync_应导出DueDate关联告警关联分析字段()
+    {
+        var alertId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        _db.WorkOrders.Add(new WorkOrder
+        {
+            TenantId = _tenantId,
+            WorkOrderCode = "WO-EXP-001",
+            Title = "导出对称性测试工单",
+            Type = WorkOrderType.Corrective,
+            Status = WorkOrderStatus.PendingDispatch,
+            Priority = WorkOrderPriority.Medium,
+            DeviceId = Guid.NewGuid(),
+            AlertId = alertId,
+            AnalysisId = analysisId,
+            DueDate = new DateTime(2024, 6, 15, 12, 0, 0, DateTimeKind.Utc), // 取日月中点，避免跨时区日界翻转
+            CreatedAt = new DateTime(2024, 6, 1, 12, 0, 0, DateTimeKind.Utc),
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = Encoding.UTF8.GetString(await _sut.ExportWorkOrdersAsync(_tenantId));
+
+        csv.Should().Contain("WO-EXP-001");
+        csv.Should().Contain("预期完成时间", "导出应包含 DueDate 列（SLA 基准）");
+        csv.Should().Contain("2024-06-15", "导出应包含 DueDate 值（月度报表做 SLA 合规分析）");
+        csv.Should().Contain(alertId.ToString(), "导出应包含 AlertId（关联源告警，追溯工单由哪条告警触发）");
+        csv.Should().Contain(analysisId.ToString(), "导出应包含 AnalysisId（关联 AI 根因分析记录）");
+    }
+
+    /// <summary>
+    /// 告警导出必须包含 Resolution/Threshold/RuleId/TriggerCount/AcknowledgedBy/ResolvedBy/
+    /// AcknowledgementNote 等告警生命周期关键字段，保证导出备份/报表不丢数据。回归：原导出只含
+    /// 10 个基础字段，漏掉解决措施（Resolution，合规审计必需）、触发阈值（Threshold，事后分析
+    /// 「为何触发」必需）、来源规则（RuleId）、聚合计数（TriggerCount，评估告警风暴规模）、
+    /// 确认/解决人（AcknowledgedBy/ResolvedBy，审计追溯）。客户导出告警历史备份时这些全部丢失。
+    /// </summary>
+    [Fact]
+    public async Task ExportAlertsAsync_应导出解决措施阈值规则聚合确认解决字段()
+    {
+        var ruleId = Guid.NewGuid();
+        var ackBy = Guid.NewGuid();
+        var resolvedBy = Guid.NewGuid();
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = _tenantId,
+            AlertCode = "ALT-EXP-001",
+            DeviceId = Guid.NewGuid(),
+            Severity = AlertSeverity.Critical,
+            Status = AlertStatus.Resolved,
+            Metric = "vibration",
+            Value = 12.5m,
+            Threshold = 8.5m,
+            RuleId = ruleId,
+            TriggerCount = 42,
+            AcknowledgedBy = ackBy,
+            AcknowledgementNote = "已现场确认",
+            ResolvedBy = resolvedBy,
+            Resolution = "更换轴承，重新校准动平衡",
+            Message = "振动超标",
+            OccurredAt = new DateTime(2024, 6, 15, 10, 0, 0, DateTimeKind.Utc),
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = Encoding.UTF8.GetString(await _sut.ExportAlertsAsync(_tenantId));
+
+        csv.Should().Contain("ALT-EXP-001");
+        csv.Should().Contain("更换轴承，重新校准动平衡", "导出应包含 Resolution（解决措施，合规审计与经验积累必需）");
+        csv.Should().Contain("8.5", "导出应包含 Threshold（触发阈值，事后分析为何触发）");
+        csv.Should().Contain(ruleId.ToString(), "导出应包含 RuleId（来源规则，追溯告警来源）");
+        csv.Should().Contain("42", "导出应包含 TriggerCount（聚合次数，评估告警风暴规模）");
+        csv.Should().Contain(ackBy.ToString(), "导出应包含 AcknowledgedBy（确认人，审计追溯）");
+        csv.Should().Contain(resolvedBy.ToString(), "导出应包含 ResolvedBy（解决人，审计追溯）");
+        csv.Should().Contain("已现场确认", "导出应包含 AcknowledgementNote（确认备注）");
+    }
+
     /// <summary>构造一条最小可用告警，便于各测试聚焦于被测字段</summary>
     private Alert MakeAlert(string? message = null)
     {

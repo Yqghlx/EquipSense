@@ -58,11 +58,22 @@ public class DataExportService
                 OccurredAt = a.OccurredAt,
                 AcknowledgedAt = a.AcknowledgedAt,
                 ResolvedAt = a.ResolvedAt,
+                // 补全告警生命周期关键字段（回归导出对称性）：Threshold（触发阈值=事后分析「为何触发」必需）、
+                // RuleId（来源规则）、TriggerCount（聚合风暴规模）、AcknowledgedBy/AcknowledgementNote
+                // （确认人/备注）、ResolvedBy/Resolution（解决人/措施，合规审计必需）。原导出漏掉这些字段，
+                // 客户导出告警历史备份时解决措施与触发阈值等全部丢失。
+                Threshold = a.Threshold,
+                a.RuleId,
+                a.TriggerCount,
+                a.AcknowledgedBy,
+                a.AcknowledgementNote,
+                a.ResolvedBy,
+                a.Resolution,
             })
             .ToListAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("告警编码,设备ID,指标,级别,状态,触发值,告警信息,触发时间,确认时间,解决时间");
+        sb.AppendLine("告警编码,设备ID,指标,级别,状态,触发值,告警信息,触发时间,确认时间,解决时间,触发阈值,规则ID,触发次数,确认人ID,确认备注,解决人ID,解决措施");
 
         foreach (var a in alerts)
         {
@@ -76,7 +87,14 @@ public class DataExportService
                 Escape(a.Message),
                 FormatTime(a.OccurredAt),
                 FormatTime(a.AcknowledgedAt),
-                FormatTime(a.ResolvedAt)));
+                FormatTime(a.ResolvedAt),
+                a.Threshold?.ToString(CultureInfo.InvariantCulture) ?? "",
+                a.RuleId.HasValue ? a.RuleId.Value.ToString() : "",
+                a.TriggerCount.ToString(CultureInfo.InvariantCulture),
+                a.AcknowledgedBy.HasValue ? a.AcknowledgedBy.Value.ToString() : "",
+                Escape(a.AcknowledgementNote),
+                a.ResolvedBy.HasValue ? a.ResolvedBy.Value.ToString() : "",
+                Escape(a.Resolution)));
         }
 
         return ToCsvBytes(sb.ToString());
@@ -333,11 +351,18 @@ public class DataExportService
                 StartedAt = w.StartedAt,
                 CompletedAt = w.CompletedAt,
                 ClosedAt = w.ClosedAt,
+                // 补全创建/建单/分析时写入但导出遗漏的字段（回归导出对称性）：
+                // AlertId（关联源告警）、AnalysisId（关联 AI 根因分析）、DueDate（预期完成时间=SLA 基准）。
+                // 原导出漏掉这 3 个字段，客户导出 CSV 备份/报表时丢失告警追溯链与 SLA 合规基准。
+                // 注：Description 实体无此字段、ExecutionReport/RequiredParts 为死字段（从无写入点），均不纳入。
+                w.AlertId,
+                w.AnalysisId,
+                DueDate = w.DueDate,
             })
             .ToListAsync(ct);
 
         var sb = new StringBuilder();
-        sb.AppendLine("工单编码,标题,类型,状态,优先级,设备ID,负责人ID,根因,解决措施,实际工时,创建时间,开始时间,完成时间,关闭时间");
+        sb.AppendLine("工单编码,标题,类型,状态,优先级,设备ID,负责人ID,根因,解决措施,实际工时,创建时间,开始时间,完成时间,关闭时间,关联告警ID,关联分析ID,预期完成时间");
 
         foreach (var w in workOrders)
         {
@@ -355,7 +380,10 @@ public class DataExportService
                 FormatTime(w.CreatedAt),
                 FormatTime(w.StartedAt),
                 FormatTime(w.CompletedAt),
-                FormatTime(w.ClosedAt)));
+                FormatTime(w.ClosedAt),
+                w.AlertId.HasValue ? w.AlertId.Value.ToString() : "",
+                w.AnalysisId.HasValue ? w.AnalysisId.Value.ToString() : "",
+                FormatTime(w.DueDate)));
         }
 
         return ToCsvBytes(sb.ToString());
