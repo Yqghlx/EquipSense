@@ -338,6 +338,39 @@ public class KnowledgeCaptureServiceTests
         updatedPending.ReviewedAt.Should().NotBeNull();
     }
 
+    /// <summary>
+    /// 回归 #257：ApproveRuleAsync 把 PendingRule 转 KnowledgeRule 时须复制 Confidence → ConfidenceWeight。
+    /// 原实现创建 KnowledgeRule 时漏设 ConfidenceWeight（默认 0.5），丢弃 AI 分析置信度——而
+    /// RootCauseAnalysisEngine.cs:85 直接用 ConfidenceWeight 作为根因分析的最终置信度，致 AI 高置信度
+    /// 规则（0.85）与低置信度（0.5）在根因分析中权重相同，AI 置信度优势未体现（产品核心卖点受损）。
+    /// </summary>
+    [Fact]
+    public async Task ApproveRuleAsync_应将候选规则置信度复制到正式规则权重()
+    {
+        // Arrange
+        var pending = new PendingRule
+        {
+            TenantId = _tenantId,
+            DeviceType = "电机",
+            Name = "高温规则",
+            Conditions = """[{"metric":"temp","operator":">","threshold":80}]""",
+            Conclusion = "温度过高",
+            Confidence = 0.85m, // AI 分析置信度（高置信度候选规则）
+            ReviewStatus = ReviewStatus.Pending
+        };
+        _db.PendingRules.Add(pending);
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _sut.ApproveRuleAsync(pending.Id, Guid.NewGuid(), "通过验证", CancellationToken.None);
+
+        // Assert
+        var rule = await _db.KnowledgeRules.IgnoreQueryFilters().FirstAsync();
+        // 必须复制 AI 置信度，而非用默认 0.5——下游 RootCauseAnalysisEngine 用此值作根因分析置信度
+        rule.ConfidenceWeight.Should().Be(0.85m, "批准时应将候选规则的 AI 置信度复制到正式规则权重");
+        rule.ConfidenceWeight.Should().NotBe(0.5m, "默认 0.5 会丢弃 AI 置信度，致高/低置信规则在根因分析中权重相同");
+    }
+
     [Fact]
     public async Task ApproveRuleAsync_已审核规则应抛出异常()
     {

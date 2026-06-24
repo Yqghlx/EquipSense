@@ -240,7 +240,12 @@ public class KnowledgeCaptureService
             RecommendedActions = pending.RecommendedActions,
             CheckSteps = pending.CheckSteps,
             Source = "ai_generated",
-            CreatedBy = $"AI (专家验证: {reviewerId})"
+            CreatedBy = $"AI (专家验证: {reviewerId})",
+            // 复制 AI 置信度到正式规则权重（回归 #257）：下游 RootCauseAnalysisEngine.cs:85 直接用
+            // ConfidenceWeight 作根因分析的最终置信度，漏复制会让所有 AI 规则权重恒为默认 0.5，
+            // 致高/低置信规则在根因分析中权重相同，AI 置信度优势未体现。审计日志已展示 pending.Confidence
+            // 却未复制到规则，确认是遗漏（非有意丢弃）
+            ConfidenceWeight = pending.Confidence ?? 0.5m
         };
 
         db.KnowledgeRules.Add(rule);
