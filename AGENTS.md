@@ -8,6 +8,8 @@ EquipSense（内部代号 EquipAI）是一个工业设备智能监控与预测�
 
 完整技术方案（2,457 行）见 `docs/FINAL_TECHNICAL_DESIGN.md`，涵盖系统架构、数据库 Schema、API 规范、安全设计、开发路线图等所有细节。
 
+全面评估报告（25 份，5,468 行）见 `docs/evaluation/`，包括架构分析、代码质量、安全纵深、运维可观测性、DevOps/CI/CD 等 14 个专项领域，以及 ADR 决策记录、风险登记册、运维剧本等实操文档。快速入口：[`docs/evaluation/00-INDEX.md`](docs/evaluation/00-INDEX.md)。
+
 ## 开发命令
 
 ### 后端 (.NET 8)

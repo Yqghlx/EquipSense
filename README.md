@@ -165,6 +165,21 @@ EquipSense/
 - **Phase 3**：产品化 — 工单完整工作流、钉钉/飞书集成、PWA、多租户 SaaS 完善
 - **Phase 4**：智能化 — ML.NET 异常检测（L4）、安全加固、压力测试、v1.0 发布
 
+## 项目评估文档
+
+项目代码和架构的全面评估报告位于 [`docs/evaluation/`](./docs/evaluation/)：
+
+| 类别 | 文档 |
+|------|------|
+| **快速上手** | [执行摘要](./docs/evaluation/S03-执行摘要.md) · [上手指南](./docs/evaluation/S07-开发者快速上手指南.md) · [术语表](./docs/evaluation/S02-术语表.md) |
+| **架构分析** | [后端](./docs/evaluation/02-后端架构分析.md) · [前端](./docs/evaluation/03-前端架构分析.md) · [边缘网关](./docs/evaluation/04-边缘网关架构分析.md) |
+| **领域评估** | [代码质量](./docs/evaluation/05-代码质量分析.md) · [安全纵深](./docs/evaluation/06-安全纵深分析.md) · [运维](./docs/evaluation/07-运维与可观测性分析.md) · [DevOps](./docs/evaluation/08-DevOps与CI_CD分析.md) |
+| **专题** | [数据库](./docs/evaluation/09-数据库与数据架构分析.md) · [API](./docs/evaluation/10-API面与接口契约分析.md) · [性能](./docs/evaluation/11-性能与可扩展性基准分析.md) · [依赖](./docs/evaluation/12-依赖与供应链安全分析.md) |
+| **行动** | [ADR 决策记录](./docs/evaluation/S08-架构决策记录ADR.md) · [风险登记册](./docs/evaluation/S09-风险登记册.md) · [技术债务路线图](./docs/evaluation/13-技术债务与改进路线图.md) · [测试策略](./docs/evaluation/14-测试策略与金字塔分析.md) |
+| **运维** | [运维剧本](./docs/evaluation/S10-运维剧本.md) · [Bug 演进故事](./docs/evaluation/S06-Bug历史与演进故事.md) |
+
+> 完整索引见 [`docs/evaluation/00-INDEX.md`](./docs/evaluation/00-INDEX.md)
+
 ## License
 
 Private — All rights reserved.
