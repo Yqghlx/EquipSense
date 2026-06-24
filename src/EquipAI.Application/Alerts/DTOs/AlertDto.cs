@@ -21,6 +21,13 @@ public class AlertDto
     public int TriggerCount { get; set; }
     public DateTime? WindowStartAt { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>
+    /// 告警触发时刻的设备全量指标快照（JSON 字符串）。
+    /// 由 AlertEvaluationService 在告警创建时序列化 DeviceContext.Metrics（Dictionary&lt;string,double&gt;）。
+    /// 前端告警详情抽屉解析展示，让运维看到告警那一刻所有指标的值（根因上下文回放，比事后查遥测更准）。
+    /// </summary>
+    public string? DataSnapshot { get; set; }
 }
 
 /// <summary>

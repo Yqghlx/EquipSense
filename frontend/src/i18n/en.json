@@ -272,6 +272,7 @@
     "acknowledge": "Acknowledge",
     "resolve": "Resolve",
     "triggeredAt": "Triggered At",
+    "dataSnapshot": "Metrics Snapshot at Alert",
     "acknowledgedAt": "Acknowledged At",
     "resolvedAt": "Resolved At"
   },

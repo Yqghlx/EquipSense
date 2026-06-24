@@ -233,6 +233,8 @@ export interface Alert {
   resolved: boolean;
   /** 创建时间（ISO 8601） */
   createdAt: string;
+  /** 告警触发时刻的设备全量指标快照（JSON 字符串），由后端 DataSnapshot 投影；前端解析展示根因上下文 */
+  dataSnapshot?: string;
 }
 
 /** 告警规则 */

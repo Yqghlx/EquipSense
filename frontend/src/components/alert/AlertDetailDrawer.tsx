@@ -6,6 +6,25 @@ import { Badge } from '../ui/badge';
 import { SeverityBadge } from './SeverityBadge';
 import type { Alert } from '../../types';
 
+/**
+ * 解析告警指标快照 JSON（后端 DataSnapshot，由 DeviceContext.Metrics 序列化）。
+ * 失败/为空时返回空数组，前端优雅降级（不展示快照区，不阻塞告警详情）。
+ */
+function parseMetrics(dataSnapshot?: string): Array<[string, number]> {
+  if (!dataSnapshot) return [];
+  try {
+    const parsed = JSON.parse(dataSnapshot);
+    if (parsed && typeof parsed === 'object') {
+      return Object.entries(parsed)
+        .filter(([, v]) => typeof v === 'number')
+        .map(([k, v]) => [k, v as number]);
+    }
+  } catch {
+    // DataSnapshot 格式异常时静默降级（不阻塞告警详情展示）
+  }
+  return [];
+}
+
 interface AlertDetailDrawerProps {
   /** 当前查看的告警，为 null 时隐藏 */
   alert: Alert | null;
@@ -30,6 +49,9 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
   const { t } = useTranslation();
 
   if (!alert) return null;
+
+  // 解析告警时刻指标快照（DataSnapshot），为空（旧告警）则不展示快照区
+  const snapshotMetrics = parseMetrics(alert.dataSnapshot);
 
   return (
     <Sheet open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
@@ -76,6 +98,35 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
               </div>
             )}
           </div>
+
+          {/* 告警时刻指标快照：DataSnapshot 解析展示，让运维看到告警那一刻所有指标的值（根因上下文回放，
+              比事后查遥测更准——告警触发瞬间的完整设备状态）。DataSnapshot 为空（旧告警）则不展示 */}
+          {snapshotMetrics.length > 0 && (
+            <>
+              <Separator />
+              <div>
+                <p className="text-sm font-medium mb-2">{t('alert.dataSnapshot')}</p>
+                <div className="rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-2 font-medium">{t('alert.metric')}</th>
+                        <th className="text-right p-2 font-medium">{t('alert.value')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {snapshotMetrics.map(([metric, val]) => (
+                        <tr key={metric} className="border-t">
+                          <td className="p-2">{metric}</td>
+                          <td className="p-2 text-right tabular-nums">{val}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* active 状态：显示确认和解决按钮 */}
           {alert.status === 'active' && (

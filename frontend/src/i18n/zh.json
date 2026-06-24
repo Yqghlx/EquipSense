@@ -272,6 +272,7 @@
     "acknowledge": "确认",
     "resolve": "解决",
     "triggeredAt": "触发时间",
+    "dataSnapshot": "告警时刻指标快照",
     "acknowledgedAt": "确认时间",
     "resolvedAt": "解决时间"
   },
