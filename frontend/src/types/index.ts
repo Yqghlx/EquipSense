@@ -575,6 +575,14 @@ export interface FaultCase {
   repairDurationMinutes?: number;
   /** 是否已验证 */
   isVerified: boolean;
+  /** 故障现象/症状（从关联告警指标推断，知识沉淀核心检索维度） */
+  symptoms?: string;
+  /** 故障时刻指标快照（JSON 字符串，告警 DataSnapshot，根因回放） */
+  faultData?: string;
+  /** 维修执行人姓名（工单指派技术员，经验传承追溯） */
+  operator?: string;
+  /** 分类标签（逗号分隔：设备类型,工单优先级） */
+  tags?: string;
   /** 创建时间（ISO 8601） */
   createdAt: string;
 }

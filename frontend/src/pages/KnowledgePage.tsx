@@ -10,6 +10,7 @@ import {
   Pencil,
   History,
   Power,
+  Wrench,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -520,6 +521,25 @@ function CasesList({ keyword }: CasesListProps) {
   );
 }
 
+/**
+ * 解析故障时刻指标快照 JSON（FaultCase.faultData，来自告警 DataSnapshot）。
+ * 失败/为空时返回空数组，前端优雅降级（不展示快照区，不阻塞案例卡片）。
+ */
+function parseMetrics(faultData?: string): Array<[string, number]> {
+  if (!faultData) return [];
+  try {
+    const parsed = JSON.parse(faultData);
+    if (parsed && typeof parsed === 'object') {
+      return Object.entries(parsed)
+        .filter(([, v]) => typeof v === 'number')
+        .map(([k, v]) => [k, v as number]);
+    }
+  } catch {
+    // faultData 格式异常时静默降级（不阻塞案例卡片展示）
+  }
+  return [];
+}
+
 /** 案例卡片属性 */
 interface CaseCardProps {
   caseItem: FaultCase;
@@ -528,10 +548,15 @@ interface CaseCardProps {
 /**
  * 案例卡片组件
  *
- * 展示故障描述、根因、解决方案和维修时长。
+ * 展示故障描述、现象、根因、解决方案、指标快照、维修时长与维修人。
  */
 function CaseCard({ caseItem }: CaseCardProps) {
   const { t } = useTranslation();
+
+  // 解析故障时刻指标快照（faultData），为空（无关联告警）则不展示快照区
+  const snapshotMetrics = parseMetrics(caseItem.faultData);
+  // 标签拆分（逗号分隔 → Badge 数组），为空则不展示
+  const tagList = caseItem.tags?.split(',').map((s) => s.trim()).filter(Boolean) ?? [];
 
   return (
     <Card className="flex flex-col">
@@ -546,6 +571,14 @@ function CaseCard({ caseItem }: CaseCardProps) {
             </Badge>
           </div>
         </div>
+        {/* 标签：设备类型+优先级派生的分类标签，便于按类检索 */}
+        {tagList.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {tagList.map((tag) => (
+              <Badge key={tag} variant="outline" className="text-xs font-normal">{tag}</Badge>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Clock className="h-3.5 w-3.5" />
           <span>{caseItem.faultOccurredAt ? new Date(caseItem.faultOccurredAt).toLocaleDateString() : t('common.noData')}</span>
@@ -559,6 +592,16 @@ function CaseCard({ caseItem }: CaseCardProps) {
           </p>
           <p className="text-sm line-clamp-2">{caseItem.faultDescription}</p>
         </div>
+
+        {/* 故障现象（从关联告警推断）：知识库按症状检索相似案例的核心维度 */}
+        {caseItem.symptoms && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">
+              {t('knowledge.symptoms')}
+            </p>
+            <p className="text-sm line-clamp-2">{caseItem.symptoms}</p>
+          </div>
+        )}
 
         {/* 根因 */}
         <div>
@@ -576,12 +619,44 @@ function CaseCard({ caseItem }: CaseCardProps) {
           <p className="text-sm line-clamp-2">{caseItem.solution}</p>
         </div>
 
-        {/* 维修时长 */}
-        {caseItem.repairDurationMinutes != null && (
-          <div className="flex items-center gap-1.5 pt-2 border-t text-sm">
-            <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-muted-foreground">{t('knowledge.repairDuration')}:</span>
-            <span className="font-medium">{caseItem.repairDurationMinutes} {t('knowledge.minutes')}</span>
+        {/* 故障时刻指标快照（告警 DataSnapshot）：根因回放，折叠避免占卡片空间 */}
+        {snapshotMetrics.length > 0 && (
+          <details className="text-sm">
+            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+              {t('knowledge.metricSnapshot')}（{snapshotMetrics.length}）
+            </summary>
+            <div className="mt-1.5 rounded-md border">
+              <table className="w-full text-xs">
+                <tbody>
+                  {snapshotMetrics.map(([metric, val]) => (
+                    <tr key={metric} className="border-b last:border-0">
+                      <td className="p-1.5">{metric}</td>
+                      <td className="p-1.5 text-right tabular-nums">{val}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        )}
+
+        {/* 维修时长 + 维修人：知识沉淀的执行追溯维度 */}
+        {(caseItem.repairDurationMinutes != null || caseItem.operator) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-2 border-t text-sm">
+            {caseItem.repairDurationMinutes != null && (
+              <div className="flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">{t('knowledge.repairDuration')}:</span>
+                <span className="font-medium">{caseItem.repairDurationMinutes} {t('knowledge.minutes')}</span>
+              </div>
+            )}
+            {caseItem.operator && (
+              <div className="flex items-center gap-1.5">
+                <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">{t('knowledge.maintainer')}:</span>
+                <span className="font-medium">{caseItem.operator}</span>
+              </div>
+            )}
           </div>
         )}
       </CardContent>

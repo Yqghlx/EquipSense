@@ -82,6 +82,34 @@ public class KnowledgeCaptureService
             .FirstOrDefaultAsync(d => d.Id == wo.DeviceId && d.TenantId == tenantId, ct);
         var deviceType = device?.Type ?? "未知";
 
+        // === 回归 #259：补全故障案例核心检索字段（Symptoms/FaultData/Operator/Tags）===
+        // 这四字段是知识库故障案例的核心检索维度（症状检索/指标回放/维修人追溯/分类），FaultCaseResponse DTO
+        // 已投影、前端已展示，但原创建点从不填充 → 四列永远空白，经验传承价值大打折扣。数据源均来自已有关联链，
+        // 无需新增用户输入：
+        //   - FaultData  ← 关联告警的 DataSnapshot（#258 复活字段：告警触发时刻全量指标快照，jsonb，根因回放更准）
+        //   - Symptoms   ← 关联告警的 Metric + AlertCode（哪个指标如何异常 = 故障现象）
+        //   - Operator   ← 工单指派技术员 AssignedTo → User.DisplayName ?? Username（维修执行人姓名）
+        //   - Tags       ← 设备类型 + 工单优先级（数据源恒在，总能生成分类标签）
+        // 注意：本服务运行在后台 scope（ITenantContext.TenantId == Guid.Empty），下列查询必须 IgnoreQueryFilters
+        // 并显式按 tenantId 限定，否则全局租户过滤器会吞掉真实租户数据（与上面 wo/device 查询同理）。
+        Alert? alert = null;
+        if (wo.AlertId.HasValue)
+        {
+            alert = await db.Alerts
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(a => a.Id == wo.AlertId!.Value && a.TenantId == tenantId, ct);
+        }
+
+        string? operatorName = null;
+        if (wo.AssignedTo.HasValue)
+        {
+            // 取实体后内存运算 ?? 而非 Select 投影 COALESCE，规避 InMemory 掩盖关系型翻译差异的风险
+            var technician = await db.Users
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(u => u.Id == wo.AssignedTo!.Value && u.TenantId == tenantId, ct);
+            operatorName = technician?.DisplayName ?? technician?.Username;
+        }
+
         // 1. 创建故障案例
         var faultCase = new FaultCase
         {
@@ -90,11 +118,19 @@ public class KnowledgeCaptureService
             DeviceType = deviceType,
             FaultOccurredAt = wo.CreatedAt,
             FaultDescription = wo.Title,
+            // 故障现象：从关联告警构造（指标异常描述 + 告警编码）；手动建单无告警关联则留空
+            Symptoms = alert is not null ? $"指标 {alert.Metric} 异常（{alert.AlertCode}）" : null,
             RootCause = wo.RootCause ?? "未记录",
             Solution = wo.ExecutionReport ?? wo.Resolution ?? "未记录",
             RepairDurationMinutes = (int?)((wo.ActualHours ?? 0) * 60),
             PartsUsed = wo.RequiredParts,
+            // 故障时刻指标快照（jsonb）：直接复用告警快照，根因回放比事后查遥测更准；无关联告警则留空
+            FaultData = alert?.DataSnapshot,
+            // 维修执行人姓名：工单指派技术员；无指派则留空
+            Operator = operatorName,
             SourceWorkorderId = wo.Id,
+            // 分类标签：设备类型 + 工单优先级派生（数据源恒在，总能生成，便于按类检索）
+            Tags = $"{deviceType},{wo.Priority}",
             IsVerified = false
         };
 

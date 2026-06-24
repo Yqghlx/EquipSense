@@ -104,6 +104,100 @@ public class KnowledgeCaptureServiceTests
     }
 
     [Fact]
+    public async Task ProcessWorkOrderClosedAsync_应从关联告警和指派技术员填充案例核心检索字段()
+    {
+        // Arrange：关联告警（含指标快照）+ 指派技术员，验证 Symptoms/FaultData/Operator/Tags 四字段被填充。
+        // 回归 #259：原创建点从不填这四字段 → 知识库故障案例核心检索维度（症状检索/指标回放/维修人追溯/分类）永远空白。
+        var device = new Device
+        {
+            TenantId = _tenantId,
+            Type = "电机",
+            DeviceCode = "DEV-001",
+            Name = "1号电机"
+        };
+        _db.Devices.Add(device);
+
+        var alert = new Alert
+        {
+            TenantId = _tenantId,
+            DeviceId = device.Id,
+            AlertCode = "ALT-DEV001-temperature-20260101",
+            Metric = "temperature",
+            Severity = AlertSeverity.Critical,
+            // #258 复活的 DataSnapshot 字段：告警触发时刻全量指标快照，此处作为 FaultCase.FaultData 的数据源
+            DataSnapshot = """{"temperature":95.3,"pressure":1.2}"""
+        };
+        _db.Alerts.Add(alert);
+
+        var technician = new User
+        {
+            TenantId = _tenantId,
+            Username = "zhangsan",
+            DisplayName = "张三"
+        };
+        _db.Users.Add(technician);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId,
+            DeviceId = device.Id,
+            Title = "电机过热停机",
+            ActualHours = 2.0,
+            AlertId = alert.Id,
+            AssignedTo = technician.Id,
+            Priority = WorkOrderPriority.High
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        // Assert：四字段从关联链填充
+        var fc = (await _db.FaultCases.IgnoreQueryFilters().ToListAsync()).Single();
+        fc.FaultData.Should().Be("""{"temperature":95.3,"pressure":1.2}""");
+        fc.Symptoms.Should().Contain("temperature");
+        fc.Operator.Should().Be("张三");
+        fc.Tags.Should().Be("电机,High");
+    }
+
+    [Fact]
+    public async Task ProcessWorkOrderClosedAsync_无关联告警和指派时核心字段应为空但标签仍生成()
+    {
+        // Arrange：手动建单（无关联告警、无指派技术员）—— FaultData/Symptoms/Operator 应优雅留空，
+        // 但 Tags 由设备类型+优先级派生（数据源恒在），仍应生成。
+        var device = new Device
+        {
+            TenantId = _tenantId,
+            Type = "水泵",
+            DeviceCode = "PUMP-001",
+            Name = "1号水泵"
+        };
+        _db.Devices.Add(device);
+
+        var wo = new WorkOrder
+        {
+            TenantId = _tenantId,
+            DeviceId = device.Id,
+            Title = "水泵定期检修",
+            ActualHours = 1.5,
+            Priority = WorkOrderPriority.Medium
+        };
+        _db.WorkOrders.Add(wo);
+        await _db.SaveChangesAsync();
+
+        // Act
+        await _sut.ProcessWorkOrderClosedAsync(_tenantId, wo.Id, CancellationToken.None);
+
+        // Assert
+        var fc = (await _db.FaultCases.IgnoreQueryFilters().ToListAsync()).Single();
+        fc.FaultData.Should().BeNull();
+        fc.Symptoms.Should().BeNull();
+        fc.Operator.Should().BeNull();
+        fc.Tags.Should().Be("水泵,Medium");
+    }
+
+    [Fact]
     public async Task ProcessWorkOrderClosedAsync_工单时长不足应跳过()
     {
         // Arrange
