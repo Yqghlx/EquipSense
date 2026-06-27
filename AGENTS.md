@@ -28,7 +28,7 @@ dotnet test tests/EquipAI.Tests.Unit
 dotnet test tests/EquipAI.Tests.Integration
 
 # 运行单个测试类
-dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~AlertServiceTests"
+dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~AlertEvaluationServiceTests"
 
 # 清理构建产物
 dotnet clean
@@ -72,8 +72,8 @@ npx playwright install
 # 运行 E2E 测试
 npx playwright test
 
-# 运行特定测试文件
-npx playwright test tests/e2e/device-management.spec.ts
+# 运行特定测试文件（E2E 按功能分目录存放在 e2e-comprehensive/ 下）
+npx playwright test e2e-comprehensive/02-crud/devices-crud.spec.ts
 
 # 调试模式
 npx playwright test --debug

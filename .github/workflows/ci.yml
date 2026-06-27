@@ -6,26 +6,18 @@ on:
   # paths 过滤避免只改文档/输出时白跑测试
   push:
     branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'frontend/**'
-      - 'docker/**'
-      - 'tools/**'
-      - '.github/workflows/ci.yml'
-      - 'EquipAI.slnx'
-      - 'Directory.Build.props'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'output/**'
+      - 'coverage-results/**'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - 'frontend/**'
-      - 'docker/**'
-      - 'tools/**'
-      - '.github/workflows/ci.yml'
-      - 'EquipAI.slnx'
-      - 'Directory.Build.props'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'output/**'
+      - 'coverage-results/**'
   workflow_dispatch:  # 保留手动触发能力（紧急验证 / 选择性重跑）
 
 env:
@@ -36,11 +28,35 @@ env:
 
 jobs:
   # ============================================================================
+  # 密钥泄露扫描（Gitleaks）— 安全门禁，发现泄露即阻断
+  # 作用：防止私钥、API Key、密码等被意外提交到仓库
+  # ============================================================================
+  secret-scan:
+    name: 密钥泄露扫描
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Gitleaks 需要完整 git 历史才能扫描所有提交
+          fetch-depth: 0
+
+      - name: Gitleaks 扫描
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          # 使用免费开源探测规则，无需配置 GitHub Secret
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: true
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  # ============================================================================
   # 后端构建 + 测试
   # ============================================================================
   backend:
     name: 后端测试
     runs-on: ubuntu-latest
+    # 密钥泄露必须先通过，再跑构建（避免在含泄露的代码上浪费资源）
+    needs: secret-scan
 
     steps:
       - uses: actions/checkout@v4
@@ -62,9 +78,10 @@ jobs:
       - name: 运行集成测试
         run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal
 
-      # NuGet 包漏洞检查（已知 CVE 的依赖会列出，不阻断 CI）
-      - name: 检查 NuGet 依赖漏洞
-        run: dotnet list EquipAI.slnx package --vulnerable --include-transitive || true
+      # NuGet 包漏洞检查 — 发现已知 CVE 即阻断 CI
+      # 若确需暂缓修复某 CVE，在 nuget 包配置中显式忽略，而非关闭门禁
+      - name: 检查 NuGet 依赖漏洞（阻断）
+        run: dotnet list EquipAI.slnx package --vulnerable --include-transitive
 
   # ============================================================================
   # 前端构建 + 测试
@@ -105,6 +122,10 @@ jobs:
       - name: 构建前端
         run: npm run build
 
+      # 前端依赖漏洞检查 — 发现 high/critical 即阻断
+      - name: npm audit（仅检查 high/critical）
+        run: npm audit --omit=dev --audit-level=high
+
   # ============================================================================
   # Docker 镜像构建 + 推送（仅 main 分支）
   # ============================================================================
@@ -116,7 +137,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -155,14 +175,14 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta.outputs.sha_short }}
 
       # ========================================================
-      # 安全扫描：Trivy 扫描镜像已知漏洞（CVE）
+      # 安全扫描：Trivy 扫描镜像已知漏洞（CVE）— HIGH/CRITICAL 阻断
       # ========================================================
       - name: Trivy 扫描后端镜像
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:${{ steps.meta.outputs.sha_short }}
           format: table
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
@@ -171,7 +191,7 @@ jobs:
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta.outputs.sha_short }}
           format: table
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
@@ -244,6 +264,8 @@ jobs:
           Redis__ConnectionString: "localhost:6379"
           Jwt__Secret: "e2e-test-secret-key-that-is-at-least-32-characters-long!!"
           DISABLE_RATE_LIMITING: "true"
+          # E2E 跨租户隔离测试（permission-denied.spec.ts）依赖第二租户账户
+          SEED_TENANT2_ACCOUNT: "true"
         run: |
           dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
           # 等待后端健康检查通过（最多 90 秒）

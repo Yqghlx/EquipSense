@@ -256,4 +256,18 @@ public class DeviceService : IDeviceService
             "设备 {DeviceId}（编码：{DeviceCode}）已删除，同时归档 {AlertCount} 条活跃告警，移除 {LinkCount} 个网关关联，清理 {RuleCount} 条绑定告警规则",
             deviceId, device.DeviceCode, activeAlerts.Count, gatewayLinks.Count, deviceRules.Count);
     }
+
+    /// <summary>
+    /// 根据设备编码解析设备 ID（用于 HTTP 遥测上报等以编码标识设备的场景）
+    /// 查询受 AppDbContext 全局租户过滤器约束，仅返回当前请求租户的设备，
+    /// 避免跨租户通过枚举编码探测设备存在性。
+    /// </summary>
+    public async Task<Guid?> GetDeviceIdByCodeAsync(string deviceCode)
+    {
+        // 投影到 Id 而非拉取整个实体，减少不必要的数据传输
+        return await _dbContext.Devices
+            .Where(d => d.DeviceCode == deviceCode)
+            .Select(d => (Guid?)d.Id)
+            .FirstOrDefaultAsync();
+    }
 }

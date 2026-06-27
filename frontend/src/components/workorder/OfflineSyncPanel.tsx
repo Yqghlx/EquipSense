@@ -1,18 +1,11 @@
 import { useState, useEffect } from 'react';
 import { RefreshCw, CloudOff, Check, AlertTriangle, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { useOfflineQueue } from '../../hooks/useOfflineQueue';
 import { useOfflineStatus } from '../../hooks/useOfflineStatus';
 import type { PendingOperation } from '../../types';
-
-/** 操作类型的中文标签映射 */
-const operationTypeLabels: Record<string, string> = {
-  'work-order-complete': '完成工单',
-  'work-order-accept': '验收通过',
-  'work-order-reject': '验收驳回',
-  'device-note': '设备备注',
-};
 
 /**
  * 离线同步面板
@@ -21,6 +14,7 @@ const operationTypeLabels: Record<string, string> = {
  * 离线时显示橙色边框提示，在线时提供立即同步按钮。
  */
 export function OfflineSyncPanel() {
+  const { t } = useTranslation();
   const { isOffline } = useOfflineStatus();
   const { pendingCount, isSyncing, lastSyncResult, syncNow, getPending, removePending } = useOfflineQueue();
   const [pendingOps, setPendingOps] = useState<PendingOperation[]>([]);
@@ -55,7 +49,7 @@ export function OfflineSyncPanel() {
           ) : (
             <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
           )}
-          {isOffline ? '离线操作队列' : '待同步操作'}
+          {isOffline ? t('offlineSync.titleOffline') : t('offlineSync.titlePending')}
           {pendingCount > 0 && (
             <span className="ml-1 rounded-full bg-primary px-2 py-0.5 text-xs text-white">
               {pendingCount}
@@ -70,19 +64,19 @@ export function OfflineSyncPanel() {
             {lastSyncResult.succeeded.length > 0 && (
               <p className="flex items-center gap-1 text-green-600">
                 <Check className="h-3 w-3" />
-                {lastSyncResult.succeeded.length} 项操作已同步成功
+                {t('offlineSync.synced', { count: lastSyncResult.succeeded.length })}
               </p>
             )}
             {lastSyncResult.conflicts.length > 0 && (
               <p className="flex items-center gap-1 text-orange-600">
                 <AlertTriangle className="h-3 w-3" />
-                {lastSyncResult.conflicts.length} 项操作存在冲突
+                {t('offlineSync.conflicts', { count: lastSyncResult.conflicts.length })}
               </p>
             )}
             {lastSyncResult.failed.length > 0 && (
               <p className="flex items-center gap-1 text-red-600">
                 <X className="h-3 w-3" />
-                {lastSyncResult.failed.length} 项操作同步失败
+                {t('offlineSync.failed', { count: lastSyncResult.failed.length })}
               </p>
             )}
           </div>
@@ -98,14 +92,14 @@ export function OfflineSyncPanel() {
               >
                 <div className="flex items-center gap-2">
                   <span className="font-medium">
-                    {operationTypeLabels[op.type] ?? op.type}
+                    {t(`offlineSync.op.${op.type}`, { defaultValue: op.type })}
                   </span>
                   <span className="text-muted-foreground">
                     {new Date(op.timestamp).toLocaleTimeString()}
                   </span>
                   {op.retryCount > 0 && (
                     <span className="text-xs text-orange-500">
-                      已重试 {op.retryCount} 次
+                      {t('offlineSync.retried', { count: op.retryCount })}
                     </span>
                   )}
                 </div>
@@ -120,21 +114,21 @@ export function OfflineSyncPanel() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">暂无待同步操作</p>
+          <p className="text-sm text-muted-foreground">{t('offlineSync.empty')}</p>
         )}
 
         {/* 在线且有待同步操作时显示立即同步按钮 */}
         {!isOffline && pendingCount > 0 && (
           <Button onClick={handleSync} disabled={isSyncing} className="w-full">
             <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-            {isSyncing ? '同步中...' : '立即同步'}
+            {isSyncing ? t('offlineSync.syncing') : t('offlineSync.syncNow')}
           </Button>
         )}
 
         {/* 离线时显示提示信息 */}
         {isOffline && (
           <p className="text-xs text-muted-foreground">
-            网络恢复后将自动同步所有操作
+            {t('offlineSync.autoSyncHint')}
           </p>
         )}
       </CardContent>

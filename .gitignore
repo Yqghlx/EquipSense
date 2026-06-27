@@ -487,3 +487,15 @@ frontend/test-results/
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# ============================================================
+# 敏感凭证 — 禁止提交到版本控制
+# 这些文件由 docker/setup.sh 在首次部署时自动生成
+# 若已提交过，必须 git rm --cached 后轮换密钥
+# ============================================================
+# TLS 证书与私钥（首次部署由 docker/generate-cert.sh 生成）
+docker/ssl/*.pem
+# Mosquitto MQTT 凭证哈希（首次部署由 docker/setup.sh 生成）
+docker/mosquitto_passwd/passwd
+# 保留目录占位符，确保 docker/ssl 目录本身入库
+!docker/ssl/.gitkeep

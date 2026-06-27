@@ -51,4 +51,12 @@ public interface IDeviceService
     /// <param name="deviceId">设备 ID</param>
     /// <param name="tenantId">租户 ID</param>
     Task DeleteDeviceAsync(Guid deviceId, Guid tenantId);
+
+    /// <summary>
+    /// 根据设备编码解析设备 ID（用于 HTTP 遥测上报等以编码标识设备的场景）
+    /// 查询受全局租户过滤器约束，仅返回当前租户的设备
+    /// </summary>
+    /// <param name="deviceCode">设备编码</param>
+    /// <returns>设备 ID；若编码不存在则返回 null</returns>
+    Task<Guid?> GetDeviceIdByCodeAsync(string deviceCode);
 }

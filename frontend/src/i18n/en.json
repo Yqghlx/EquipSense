@@ -941,5 +941,46 @@
     "dragToUpload": "Drag files here or click to upload",
     "uploadHint": "Images, PDF, docs, archives. Max 20MB each",
     "uploading": "Uploading..."
+  },
+  "offlineSync": {
+    "titleOffline": "Offline operation queue",
+    "titlePending": "Pending operations",
+    "synced": "{{count}} operation(s) synced",
+    "conflicts": "{{count}} operation(s) have conflicts",
+    "failed": "{{count}} operation(s) failed to sync",
+    "retried": "Retried {{count}} time(s)",
+    "empty": "No pending operations",
+    "syncNow": "Sync now",
+    "syncing": "Syncing...",
+    "autoSyncHint": "All operations will sync automatically when the network recovers",
+    "op": {
+      "work-order-complete": "Complete work order",
+      "work-order-accept": "Accept work order",
+      "work-order-reject": "Reject work order",
+      "device-note": "Device note"
+    }
+  },
+  "mfa": {
+    "title": "Multi-factor authentication",
+    "enabledDesc": "Your account has TOTP multi-factor authentication enabled",
+    "enableDesc": "After enabling, you'll need to provide a verification code from an Authenticator app at login, significantly improving account security",
+    "configTitle": "Configure Authenticator app",
+    "configDesc": "Scan the QR code below with Google Authenticator / Microsoft Authenticator, then enter the verification code to confirm",
+    "statusEnabled": "Enabled",
+    "enable": "Enable MFA",
+    "disable": "Disable MFA",
+    "confirmEnable": "Confirm enable",
+    "disableConfirm": "Are you sure you want to disable MFA? Login will no longer require a verification code, reducing account security.",
+    "setupFailed": "Failed to initialize MFA, please retry",
+    "enableSuccess": "MFA enabled successfully! A verification code will be required at next login",
+    "disableSuccess": "MFA disabled",
+    "disableFailed": "Failed to disable MFA, please retry",
+    "codeInvalid": "Verification code must be 6 digits",
+    "codeError": "Invalid verification code. Please check that the time in your authenticator app is accurate",
+    "codeLabel": "Enter verification code to confirm",
+    "manualKeyLabel": "Can't scan? Enter the key manually:",
+    "copied": "Key copied to clipboard",
+    "copy": "Copy",
+    "qrAlt": "MFA QR Code"
   }
 }

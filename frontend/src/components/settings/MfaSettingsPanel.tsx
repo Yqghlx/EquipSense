@@ -12,6 +12,7 @@
  *   - 用户禁用 MFA 时清除 TotpSecret，下次登录不再要求验证码
  */
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -26,6 +27,7 @@ import { useMfaSetup, useMfaConfirm, useMfaDisable } from '../../hooks/useMfa';
 import QRCode from 'qrcode';
 
 export default function MfaSettingsPanel() {
+  const { t } = useTranslation();
   const user = useAuthStore((s) => s.user);
   const mfaEnabled = user?.mfaEnabled ?? false;
 
@@ -57,41 +59,41 @@ export default function MfaSettingsPanel() {
       });
       setQrCodeDataUrl(dataUrl);
     } catch {
-      setError('初始化 MFA 失败，请重试');
+      setError(t('mfa.setupFailed'));
     }
   };
 
   /** 用户扫码后输入验证码，提交确认启用 MFA */
   const handleConfirm = async () => {
     if (!/^\d{6}$/.test(totpCode)) {
-      setError('验证码必须为 6 位数字');
+      setError(t('mfa.codeInvalid'));
       return;
     }
     setError('');
     try {
       await confirmMutation.mutateAsync({ totpCode });
-      setSuccess('MFA 已成功启用！下次登录时将要求输入验证码');
+      setSuccess(t('mfa.enableSuccess'));
       setQrCodeDataUrl(null);
       setSecret(null);
       setTotpCode('');
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '验证码错误，请检查 authenticator 应用中的时间是否准确';
+      const msg = err instanceof Error ? err.message : t('mfa.codeError');
       setError(msg);
     }
   };
 
   /** 禁用 MFA */
   const handleDisable = async () => {
-    if (!window.confirm('确定要禁用 MFA 吗？禁用后登录将不再需要验证码，账户安全性会降低。')) {
+    if (!window.confirm(t('mfa.disableConfirm'))) {
       return;
     }
     setError('');
     setSuccess('');
     try {
       await disableMutation.mutateAsync();
-      setSuccess('MFA 已禁用');
+      setSuccess(t('mfa.disableSuccess'));
     } catch {
-      setError('禁用 MFA 失败，请重试');
+      setError(t('mfa.disableFailed'));
     }
   };
 
@@ -110,9 +112,9 @@ export default function MfaSettingsPanel() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-green-600" />
-            <CardTitle>多因素认证</CardTitle>
+            <CardTitle>{t('mfa.title')}</CardTitle>
           </div>
-          <CardDescription>您的账户已启用 TOTP 多因素认证</CardDescription>
+          <CardDescription>{t('mfa.enabledDesc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {success && <p className="text-sm text-green-600">{success}</p>}
@@ -120,11 +122,11 @@ export default function MfaSettingsPanel() {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
               <ShieldCheck className="h-4 w-4" />
-              已启用
+              {t('mfa.statusEnabled')}
             </div>
             <Button variant="outline" onClick={handleDisable} disabled={disableMutation.isPending}>
               {disableMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldOff className="h-4 w-4" />}
-              <span className="ml-2">禁用 MFA</span>
+              <span className="ml-2">{t('mfa.disable')}</span>
             </Button>
           </div>
         </CardContent>
@@ -139,15 +141,15 @@ export default function MfaSettingsPanel() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Shield className="h-5 w-5" />
-            <CardTitle>多因素认证</CardTitle>
+            <CardTitle>{t('mfa.title')}</CardTitle>
           </div>
-          <CardDescription>启用后登录时需额外提供 Authenticator 应用生成的验证码，显著提升账户安全性</CardDescription>
+          <CardDescription>{t('mfa.enableDesc')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button onClick={handleSetup} disabled={setupMutation.isPending}>
             {setupMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-            <span className="ml-2">启用 MFA</span>
+            <span className="ml-2">{t('mfa.enable')}</span>
           </Button>
         </CardContent>
       </Card>
@@ -160,15 +162,15 @@ export default function MfaSettingsPanel() {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5" />
-          <CardTitle>配置 Authenticator 应用</CardTitle>
+          <CardTitle>{t('mfa.configTitle')}</CardTitle>
         </div>
-        <CardDescription>用 Google Authenticator / Microsoft Authenticator 等应用扫描下方二维码，然后输入验证码确认</CardDescription>
+        <CardDescription>{t('mfa.configDesc')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* QR 码图片（canvas 渲染） */}
         <div className="flex justify-center">
           {qrCodeDataUrl ? (
-            <img src={qrCodeDataUrl} alt="MFA QR Code" className="border rounded" />
+            <img src={qrCodeDataUrl} alt={t('mfa.qrAlt')} className="border rounded" />
           ) : (
             <canvas ref={qrCanvasRef} />
           )}
@@ -177,7 +179,7 @@ export default function MfaSettingsPanel() {
         {/* 手动输入密钥（无法扫码时的备选方案） */}
         {secret && (
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">无法扫码？手动输入密钥：</Label>
+            <Label className="text-xs text-muted-foreground">{t('mfa.manualKeyLabel')}</Label>
             <div className="flex items-center gap-2 rounded bg-muted px-3 py-2 font-mono text-sm">
               <code className="flex-1 break-all">{secret}</code>
               <Button
@@ -185,11 +187,11 @@ export default function MfaSettingsPanel() {
                 size="sm"
                 onClick={() => {
                   navigator.clipboard.writeText(secret);
-                  setSuccess('密钥已复制到剪贴板');
+                  setSuccess(t('mfa.copied'));
                   setTimeout(() => setSuccess(''), 2000);
                 }}
               >
-                复制
+                {t('mfa.copy')}
               </Button>
             </div>
           </div>
@@ -197,7 +199,7 @@ export default function MfaSettingsPanel() {
 
         {/* 验证码输入 */}
         <div className="space-y-2">
-          <Label htmlFor="totpCode">输入验证码以确认</Label>
+          <Label htmlFor="totpCode">{t('mfa.codeLabel')}</Label>
           <Input
             id="totpCode"
             value={totpCode}
@@ -215,7 +217,7 @@ export default function MfaSettingsPanel() {
         <div className="flex gap-2">
           <Button onClick={handleConfirm} disabled={confirmMutation.isPending || totpCode.length !== 6}>
             {confirmMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            确认启用
+            {t('mfa.confirmEnable')}
           </Button>
           <Button
             variant="outline"
@@ -226,7 +228,7 @@ export default function MfaSettingsPanel() {
               setError('');
             }}
           >
-            取消
+            {t('common.cancel')}
           </Button>
         </div>
       </CardContent>

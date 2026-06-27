@@ -8,6 +8,7 @@ import { AuthGuard } from './components/layout/AuthGuard';
 import { NotificationToast } from './components/layout/NotificationToast';
 import { InstallPrompt } from './components/layout/InstallPrompt';
 import { OfflineIndicator } from './components/layout/OfflineIndicator';
+import { RootErrorBoundary } from './components/layout/RootErrorBoundary';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 import useTokenRefresh from './hooks/useTokenRefresh';
@@ -85,38 +86,66 @@ function AppRoutes() {
       {/* 业务路由（需认证，AuthGuard 保护） */}
       <Route element={<AuthGuard />}>
         <Route element={<AppLayout />}>
-          <Route path="/dashboard" element={<Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>} />
-          <Route path="/devices" element={<Suspense fallback={<PageFallback />}><DeviceListPage /></Suspense>} />
-          <Route path="/devices/:id" element={<Suspense fallback={<PageFallback />}><DeviceDetailPage /></Suspense>} />
-          <Route path="/device-setup" element={<Suspense fallback={<PageFallback />}><DeviceSetupPage /></Suspense>} />
-          <Route path="/gateways" element={<Suspense fallback={<PageFallback />}><GatewayListPage /></Suspense>} />
-          <Route path="/gateways/:gatewayId" element={<Suspense fallback={<PageFallback />}><GatewayMonitorPage /></Suspense>} />
-          <Route path="/gateway/monitor" element={<Navigate to="/gateways" replace />} />
-          <Route path="/alerts" element={<Suspense fallback={<PageFallback />}><AlertCenterPage /></Suspense>} />
-          <Route path="/alert-rules" element={<Suspense fallback={<PageFallback />}><AlertRulesPage /></Suspense>} />
-          <Route path="/work-orders" element={<Suspense fallback={<PageFallback />}><WorkOrderListPage /></Suspense>} />
-          <Route path="/work-orders/reports" element={<Suspense fallback={<PageFallback />}><WorkOrderReportsPage /></Suspense>} />
-          <Route path="/work-orders/:id" element={<Suspense fallback={<PageFallback />}><WorkOrderDetailPage /></Suspense>} />
-          <Route path="/pending-approvals" element={<Suspense fallback={<PageFallback />}><PendingApprovalsPage /></Suspense>} />
-          <Route path="/notifications" element={<Suspense fallback={<PageFallback />}><NotificationsPage /></Suspense>} />
-          <Route path="/audit-logs" element={<Suspense fallback={<PageFallback />}><AuditLogsPage /></Suspense>} />
-          <Route path="/users" element={<Suspense fallback={<PageFallback />}><UsersPage /></Suspense>} />
-          <Route path="/dispatch" element={<Suspense fallback={<PageFallback />}><DispatchBoardPage /></Suspense>} />
-          <Route path="/analyses" element={<Suspense fallback={<PageFallback />}><AnalysesPage /></Suspense>} />
-          <Route path="/knowledge" element={<Suspense fallback={<PageFallback />}><KnowledgePage /></Suspense>} />
-          <Route path="/fmea" element={<Suspense fallback={<PageFallback />}><FmeaPage /></Suspense>} />
-          <Route path="/evaluation" element={<Suspense fallback={<PageFallback />}><EvaluationPage /></Suspense>} />
-          <Route path="/pending-rules" element={<Suspense fallback={<PageFallback />}><PendingRulesPage /></Suspense>} />
-          <Route path="/settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
-          {/* system_admin 管理路由 */}
-          <Route path="/admin/tenants" element={<Suspense fallback={<PageFallback />}><TenantsPage /></Suspense>} />
-          <Route path="/admin/tenants/:id" element={<Suspense fallback={<PageFallback />}><TenantDetailPage /></Suspense>} />
+          {/* 路由级错误边界：单页面崩溃时在此兜底，避免影响整个 AppLayout（侧边栏/头部仍可用） */}
+          <Route errorElement={<RouteErrorFallback />}>
+            <Route path="/dashboard" element={<Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>} />
+            <Route path="/devices" element={<Suspense fallback={<PageFallback />}><DeviceListPage /></Suspense>} />
+            <Route path="/devices/:id" element={<Suspense fallback={<PageFallback />}><DeviceDetailPage /></Suspense>} />
+            <Route path="/device-setup" element={<Suspense fallback={<PageFallback />}><DeviceSetupPage /></Suspense>} />
+            <Route path="/gateways" element={<Suspense fallback={<PageFallback />}><GatewayListPage /></Suspense>} />
+            <Route path="/gateways/:gatewayId" element={<Suspense fallback={<PageFallback />}><GatewayMonitorPage /></Suspense>} />
+            <Route path="/gateway/monitor" element={<Navigate to="/gateways" replace />} />
+            <Route path="/alerts" element={<Suspense fallback={<PageFallback />}><AlertCenterPage /></Suspense>} />
+            <Route path="/alert-rules" element={<Suspense fallback={<PageFallback />}><AlertRulesPage /></Suspense>} />
+            <Route path="/work-orders" element={<Suspense fallback={<PageFallback />}><WorkOrderListPage /></Suspense>} />
+            <Route path="/work-orders/reports" element={<Suspense fallback={<PageFallback />}><WorkOrderReportsPage /></Suspense>} />
+            <Route path="/work-orders/:id" element={<Suspense fallback={<PageFallback />}><WorkOrderDetailPage /></Suspense>} />
+            <Route path="/pending-approvals" element={<Suspense fallback={<PageFallback />}><PendingApprovalsPage /></Suspense>} />
+            <Route path="/notifications" element={<Suspense fallback={<PageFallback />}><NotificationsPage /></Suspense>} />
+            <Route path="/audit-logs" element={<Suspense fallback={<PageFallback />}><AuditLogsPage /></Suspense>} />
+            <Route path="/users" element={<Suspense fallback={<PageFallback />}><UsersPage /></Suspense>} />
+            <Route path="/dispatch" element={<Suspense fallback={<PageFallback />}><DispatchBoardPage /></Suspense>} />
+            <Route path="/analyses" element={<Suspense fallback={<PageFallback />}><AnalysesPage /></Suspense>} />
+            <Route path="/knowledge" element={<Suspense fallback={<PageFallback />}><KnowledgePage /></Suspense>} />
+            <Route path="/fmea" element={<Suspense fallback={<PageFallback />}><FmeaPage /></Suspense>} />
+            <Route path="/evaluation" element={<Suspense fallback={<PageFallback />}><EvaluationPage /></Suspense>} />
+            <Route path="/pending-rules" element={<Suspense fallback={<PageFallback />}><PendingRulesPage /></Suspense>} />
+            <Route path="/settings" element={<Suspense fallback={<PageFallback />}><SettingsPage /></Suspense>} />
+            {/* system_admin 管理路由 */}
+            <Route path="/admin/tenants" element={<Suspense fallback={<PageFallback />}><TenantsPage /></Suspense>} />
+            <Route path="/admin/tenants/:id" element={<Suspense fallback={<PageFallback />}><TenantDetailPage /></Suspense>} />
+          </Route>
         </Route>
       </Route>
 
       {/* 兜底路由 */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+  );
+}
+
+/**
+ * 路由级错误回退
+ *
+ * 与 RootErrorBoundary 不同，这个组件在 React Router 的 errorElement 机制下工作，
+ * 只替代出错路由的 outlet，AppLayout 的侧边栏/头部仍保持可用，用户可切换其他菜单继续操作。
+ * 使用 useRouteError 获取错误详情（React Router v7）。
+ */
+function RouteErrorFallback() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="space-y-2">
+        <h2 className="text-xl font-semibold">此页面发生错误</h2>
+        <p className="text-sm text-muted-foreground">请尝试刷新页面，或从左侧菜单切换到其他功能。</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+      >
+        重新加载
+      </button>
+    </div>
   );
 }
 
@@ -131,13 +160,15 @@ function AppRoutes() {
  */
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <AppRoutes />
-        <NotificationToast />
-        <InstallPrompt />
-        <OfflineIndicator />
-      </BrowserRouter>
-    </QueryClientProvider>
+    <RootErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AppRoutes />
+          <NotificationToast />
+          <InstallPrompt />
+          <OfflineIndicator />
+        </BrowserRouter>
+      </QueryClientProvider>
+    </RootErrorBoundary>
   );
 }

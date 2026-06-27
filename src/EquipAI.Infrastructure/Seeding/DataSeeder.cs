@@ -263,8 +263,22 @@ public class DataSeeder
         await _dbContext.SaveChangesAsync();
 
         // 第二租户的 admin 用户（用于 E2E 跨租户隔离测试）
-        // 注意：此账户不强制改密码，因为自动化 E2E 测试需要稳定凭据。
-        // 生产环境如不需要跨租户测试，应在启动后手动删除此账户。
+        //
+        // 安全说明：此账户默认密码不强制改密（自动化 E2E 测试需要稳定凭据），
+        // 因此默认【不创建】，避免生产环境部署后留下弱口令后门。
+        // 仅在显式设置 SEED_TENANT2_ACCOUNT=true 时创建（E2E/CI 环境会注入此变量）。
+        //
+        // 已存在的历史账户不会被自动删除（避免误删生产数据）；
+        // 如部署后不再需要，请手动执行：DELETE FROM users WHERE username = 'tenant2admin'。
+        var seedTenant2Account = Environment.GetEnvironmentVariable("SEED_TENANT2_ACCOUNT")?
+            .Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+        if (!seedTenant2Account)
+        {
+            // 未显式开启，跳过第二租户账户创建
+            return;
+        }
+
         var secondTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var tenant2AdminExists = await _dbContext.Users
             .IgnoreQueryFilters()
@@ -287,7 +301,7 @@ public class DataSeeder
             };
 
             _dbContext.Users.Add(tenant2Admin);
-            _logger.LogInformation("已创建第二租户管理员账户：tenant2admin");
+            _logger.LogInformation("已创建第二租户管理员账户：tenant2admin（仅测试用途，SEED_TENANT2_ACCOUNT=true）");
         }
 
         await _dbContext.SaveChangesAsync();

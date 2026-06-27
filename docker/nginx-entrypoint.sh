@@ -7,16 +7,15 @@ envsubst '${BACKEND_URL} ${SSL_CERT_PATH} ${SSL_KEY_PATH}' < /etc/nginx/conf.d/d
 # 安全检测：默认自签名证书警告
 # =============================================================================
 #
-# EquipSense 源码公开仓库（github.com/yqghlx/equipsense）随附一对默认的自签名
-# 证书（CN=localhost）。这意味着：
-#   1. 私钥（key.pem）在 GitHub 公开可见，任何人都能下载
-#   2. 用此默认证书部署的 HTTPS 流量可被任何拿到私钥的人解密（中间人攻击）
-#   3. 浏览器也会显示"不安全"警告
+# 历史版本曾把自签名证书（CN=localhost）随源码提交到公开仓库，导致私钥泄露。
+# 现已修正：仓库不再内置任何证书，首次部署时由 docker/setup.sh 自动生成。
+# 但仍需检测：如果用户运行 setup.sh 生成的是默认 CN=localhost 证书，它仅适用于
+# 本地开发，不应用于公网部署。自签名证书的问题：
+#   1. 无 CA 签名，浏览器会显示"不安全"警告
+#   2. 不提供任何身份认证，易被中间人冒充
 #
-# 修复方式：客户首次部署时运行 docker/setup.sh 生成自己的证书，或手动调用
-# docker/generate-cert.sh <域名> 生成。生产环境强烈推荐用 Let's Encrypt。
-#
-# 此处检测到默认证书时输出明显警告到 stderr（容器日志可见）。
+# 生产环境强烈推荐使用 Let's Encrypt（certbot）或购买商业证书。
+# 此处检测到默认 localhost 证书时输出明显警告到 stderr（容器日志可见）。
 CERT_PATH="${SSL_CERT_PATH:-/etc/nginx/ssl/cert.pem}"
 
 if [ -f "${CERT_PATH}" ]; then

@@ -941,5 +941,46 @@
     "dragToUpload": "拖拽文件到此处或点击上传",
     "uploadHint": "支持图片、PDF、文档、压缩包，最大 20MB",
     "uploading": "正在上传..."
+  },
+  "offlineSync": {
+    "titleOffline": "离线操作队列",
+    "titlePending": "待同步操作",
+    "synced": "{{count}} 项操作已同步成功",
+    "conflicts": "{{count}} 项操作存在冲突",
+    "failed": "{{count}} 项操作同步失败",
+    "retried": "已重试 {{count}} 次",
+    "empty": "暂无待同步操作",
+    "syncNow": "立即同步",
+    "syncing": "同步中...",
+    "autoSyncHint": "网络恢复后将自动同步所有操作",
+    "op": {
+      "work-order-complete": "完成工单",
+      "work-order-accept": "验收通过",
+      "work-order-reject": "验收驳回",
+      "device-note": "设备备注"
+    }
+  },
+  "mfa": {
+    "title": "多因素认证",
+    "enabledDesc": "您的账户已启用 TOTP 多因素认证",
+    "enableDesc": "启用后登录时需额外提供 Authenticator 应用生成的验证码，显著提升账户安全性",
+    "configTitle": "配置 Authenticator 应用",
+    "configDesc": "用 Google Authenticator / Microsoft Authenticator 等应用扫描下方二维码，然后输入验证码确认",
+    "statusEnabled": "已启用",
+    "enable": "启用 MFA",
+    "disable": "禁用 MFA",
+    "confirmEnable": "确认启用",
+    "disableConfirm": "确定要禁用 MFA 吗？禁用后登录将不再需要验证码，账户安全性会降低。",
+    "setupFailed": "初始化 MFA 失败，请重试",
+    "enableSuccess": "MFA 已成功启用！下次登录时将要求输入验证码",
+    "disableSuccess": "MFA 已禁用",
+    "disableFailed": "禁用 MFA 失败，请重试",
+    "codeInvalid": "验证码必须为 6 位数字",
+    "codeError": "验证码错误，请检查 authenticator 应用中的时间是否准确",
+    "codeLabel": "输入验证码以确认",
+    "manualKeyLabel": "无法扫码？手动输入密钥：",
+    "copied": "密钥已复制到剪贴板",
+    "copy": "复制",
+    "qrAlt": "MFA 二维码"
   }
 }

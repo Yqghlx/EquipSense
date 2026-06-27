@@ -1,12 +1,11 @@
+using EquipAI.Application.Interfaces;
 using EquipAI.Application.Telemetry;
 using EquipAI.Application.Telemetry.DTOs;
 using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
-using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -20,18 +19,18 @@ namespace EquipAI.WebAPI.Controllers;
 public class TelemetryController : ControllerBase
 {
     private readonly ITelemetryService _telemetryService;
-    private readonly AppDbContext _dbContext;
+    private readonly IDeviceService _deviceService;
     private readonly ITenantContext _tenantContext;
     private readonly TelemetryQueryService _queryService;
 
     public TelemetryController(
         ITelemetryService telemetryService,
-        AppDbContext dbContext,
+        IDeviceService deviceService,
         ITenantContext tenantContext,
         TelemetryQueryService queryService)
     {
         _telemetryService = telemetryService;
-        _dbContext = dbContext;
+        _deviceService = deviceService;
         _tenantContext = tenantContext;
         _queryService = queryService;
     }
@@ -52,13 +51,13 @@ public class TelemetryController : ControllerBase
         }
         else
         {
-            var device = await _dbContext.Devices
-                .FirstOrDefaultAsync(d => d.DeviceCode == request.DeviceId);
-            if (device == null)
+            // 设备编码解析下沉到 Application 层（IDeviceService），避免 Controller 直接依赖 AppDbContext
+            var resolvedId = await _deviceService.GetDeviceIdByCodeAsync(request.DeviceId);
+            if (resolvedId is null)
             {
                 return BadRequest(new { code = 400, message = $"设备编码 '{request.DeviceId}' 不存在" });
             }
-            deviceId = device.Id;
+            deviceId = resolvedId.Value;
         }
 
         foreach (var (metric, value) in request.Metrics)

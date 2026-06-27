@@ -290,7 +290,7 @@ public class AlertNotificationService
     }
 
     /// <summary>读取租户的集成配置（复用工单集成的 tenant.Settings.integrations 格式）</summary>
-    private static async Task<List<(string Type, bool Enabled, string Config)>> GetIntegrationConfigsAsync(
+    private async Task<List<(string Type, bool Enabled, string Config)>> GetIntegrationConfigsAsync(
         AppDbContext db, Guid tenantId, CancellationToken ct)
     {
         var result = new List<(string, bool, string)>();
@@ -310,9 +310,10 @@ public class AlertNotificationService
                 result.Add((prop.Name, enabled, prop.Value.GetRawText()));
             }
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            // 配置解析失败静默跳过
+            // 配置解析失败会导致该租户的所有集成通知静默失效，必须留痕以便排查
+            _logger.LogWarning(ex, "租户集成配置解析失败，将跳过所有集成通知");
         }
         return result;
     }

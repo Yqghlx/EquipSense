@@ -17,7 +17,7 @@ namespace EquipAI.Application.Telemetry;
 /// 使用内存队列批量写入 TimescaleDB，发布 TelemetryReceivedEvent 触发告警评估
 /// Flush 策略：队列满 100 条或每 500ms
 /// </summary>
-public class TelemetryService : ITelemetryService, IDisposable
+public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEventBus _eventBus;
@@ -321,12 +321,40 @@ public class TelemetryService : ITelemetryService, IDisposable
         return valid;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _flushTimer.Dispose();
         // 关闭时排空：Timer 已 Dispose 不会再触发新回调，此时直接调 FlushCoreAsync 绕过并发保护，
         // 确保关闭瞬间队列中残留的数据被写入（若走受保护的 FlushAsync，可能因上一次回调仍在执行而被跳过）。
-        FlushCoreAsync().GetAwaiter().GetResult();
+        // 异步路径：.NET Core 3.0+ 容器释放 Singleton 时优先调用 DisposeAsync，避免 sync-over-async 死锁。
+        try
+        {
+            await FlushCoreAsync();
+        }
+        catch (Exception ex)
+        {
+            // 应用关闭阶段不应抛出未处理异常导致进程异常退出，仅记录
+            _logger.LogError(ex, "应用关闭时排空遥测队列失败");
+        }
+    }
+
+    public void Dispose()
+    {
+        _flushTimer.Dispose();
+        // 同步兜底路径：仅在调用方未走异步释放（如某些宿主或显式 Dispose）时触发。
+        // 用带超时的等待替代 GetAwaiter().GetResult()：FlushCoreAsync 含 DB 往返，
+        // 若 DB 已不可达，无限等待会阻塞应用关闭进程；超时后残留数据由边缘网关 7 天缓冲兜底。
+        try
+        {
+            if (!FlushCoreAsync().Wait(TimeSpan.FromSeconds(10)))
+            {
+                _logger.LogWarning("应用关闭时排空遥测队列超时（10s），队列残留数据将丢弃（边缘网关会重传）");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "应用关闭时排空遥测队列失败");
+        }
     }
 
     /// <summary>

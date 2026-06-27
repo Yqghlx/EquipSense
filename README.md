@@ -47,9 +47,9 @@ cp docker/.env.example docker/.env
 docker compose -f docker/docker-compose.yml up -d --build
 
 # 4. 访问应用
-# 前端：http://localhost（默认 80 端口，可通过 FRONTEND_PORT 修改）
+# 前端：https://localhost:8443（默认 8443 HTTPS，可通过 FRONTEND_PORT 修改）
 # 后端 API：http://localhost:8080/swagger
-# 默认管理员账号：admin / Admin@123
+# 默认管理员账号：admin / Admin@123（首次登录后强制修改密码）
 ```
 
 ### 方式二：本地开发

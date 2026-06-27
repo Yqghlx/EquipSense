@@ -247,9 +247,10 @@ public class FeishuIntegration : IWorkOrderIntegration
                 return msgId.GetString();
             }
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            // 响应解析失败不影响推送本身，返回原始 body
+            // 推送本身已成功（HTTP 200），仅响应体解析失败；Debug 级留痕便于排查 message_id 丢失原因
+            _logger.LogDebug(ex, "飞书响应体解析失败，无法提取 message_id，返回原始 body");
         }
 
         _logger.LogInformation("飞书应用模式消息发送成功，但响应未包含 message_id");
