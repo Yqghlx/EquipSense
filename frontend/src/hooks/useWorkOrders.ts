@@ -7,6 +7,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
+import { downloadBlob } from '../lib/utils';
 import type {
   WorkOrder,
   WorkOrderLog,
@@ -214,11 +215,5 @@ export async function exportWorkOrdersCsv(params: {
   const response = await api.get(`/work-orders/export${query ? `?${query}` : ''}`, {
     responseType: 'blob',
   });
-  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `work_orders_${Date.now()}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(response.data, `work_orders_${Date.now()}.csv`);
 }

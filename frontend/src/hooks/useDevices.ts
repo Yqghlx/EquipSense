@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
+import { downloadBlob } from '../lib/utils';
 import type {
   Device, PagedResult, PagedQuery, CreateDeviceRequest,
   DeviceImportPreviewResult, ImportResult,
@@ -153,13 +154,7 @@ export async function downloadImportTemplate(): Promise<void> {
   const response = await api.get('/devices/import/template', {
     responseType: 'blob',
   });
-  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = 'device_import_template.csv';
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(response.data, 'device_import_template.csv');
 }
 
 /**
@@ -176,13 +171,7 @@ export async function exportDevicesCsv(params: { status?: string; type?: string 
   const response = await api.get(`/devices/export${query ? `?${query}` : ''}`, {
     responseType: 'blob',
   });
-  const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `devices_${Date.now()}.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(response.data, `devices_${Date.now()}.csv`);
 }
 
 /** 健康度刷新响应 */
