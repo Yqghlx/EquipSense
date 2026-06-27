@@ -4,6 +4,11 @@ import userEvent from '@testing-library/user-event';
 import { OfflineSyncPanel } from '../OfflineSyncPanel';
 import type { PendingOperation, SyncResult } from '../../../types';
 
+// Mock react-i18next：返回 key 作为翻译结果（带插值的 key 仍返回 key 字符串）
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
+}));
+
 // Mock useOfflineStatus hook
 const mockUseOfflineStatus = vi.fn();
 vi.mock('../../../hooks/useOfflineStatus', () => ({
@@ -80,11 +85,11 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 离线时应显示"离线操作队列"标题
-    expect(await screen.findByText('离线操作队列')).toBeInTheDocument();
+    // 离线时应显示标题（i18n mock 返回 key）
+    expect(await screen.findByText('offlineSync.titleOffline')).toBeInTheDocument();
 
     // 应显示自动同步提示
-    expect(screen.getByText('网络恢复后将自动同步所有操作')).toBeInTheDocument();
+    expect(screen.getByText('offlineSync.autoSyncHint')).toBeInTheDocument();
   });
 
   it('在线且有待同步操作时应显示面板', async () => {
@@ -100,14 +105,14 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 应显示"待同步操作"标题
-    expect(await screen.findByText('待同步操作')).toBeInTheDocument();
+    // 应显示标题（i18n mock 返回 key）
+    expect(await screen.findByText('offlineSync.titlePending')).toBeInTheDocument();
 
     // 应显示待同步数量
     expect(screen.getByText('3')).toBeInTheDocument();
 
     // 应显示"立即同步"按钮
-    expect(screen.getByText('立即同步')).toBeInTheDocument();
+    expect(screen.getByText('offlineSync.syncNow')).toBeInTheDocument();
   });
 
   // ==========================================================================
@@ -126,8 +131,8 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 应显示同步成功的提示
-    expect(await screen.findByText(/1 项操作已同步成功/)).toBeInTheDocument();
+    // 应显示同步成功的提示（i18n mock 返回 key）
+    expect(await screen.findByText('offlineSync.synced')).toBeInTheDocument();
   });
 
   it('应展示同步失败和冲突的结果', async () => {
@@ -148,9 +153,9 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 应显示冲突和失败的提示
-    expect(await screen.findByText(/1 项操作存在冲突/)).toBeInTheDocument();
-    expect(screen.getByText(/1 项操作同步失败/)).toBeInTheDocument();
+    // 应显示冲突和失败的提示（i18n mock 返回 key）
+    expect(await screen.findByText('offlineSync.conflicts')).toBeInTheDocument();
+    expect(screen.getByText('offlineSync.failed')).toBeInTheDocument();
   });
 
   // ==========================================================================
@@ -174,10 +179,10 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 应显示操作类型的中文标签
-    expect(await screen.findByText('完成工单')).toBeInTheDocument();
+    // 应显示操作类型的翻译 key（mock 返回 key 字符串）
+    expect(await screen.findByText('offlineSync.op.work-order-complete')).toBeInTheDocument();
     // 应显示重试次数
-    expect(screen.getByText(/已重试 2 次/)).toBeInTheDocument();
+    expect(screen.getByText('offlineSync.retried')).toBeInTheDocument();
   });
 
   // ==========================================================================
@@ -205,7 +210,7 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    const syncButton = await screen.findByText('立即同步');
+    const syncButton = await screen.findByText('offlineSync.syncNow');
     await user.click(syncButton);
 
     expect(mockSyncNow).toHaveBeenCalledTimes(1);
@@ -223,8 +228,8 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 同步中按钮应显示"同步中..."文本并禁用
-    const syncButton = await screen.findByText('同步中...');
+    // 同步中按钮应显示"同步中"文本（i18n key）并禁用
+    const syncButton = await screen.findByText('offlineSync.syncing');
     expect(syncButton).toBeDisabled();
   });
 
@@ -242,8 +247,8 @@ describe('OfflineSyncPanel', () => {
 
     render(<OfflineSyncPanel />);
 
-    // 等待操作列表渲染
-    await screen.findByText('完成工单');
+    // 等待操作列表渲染（i18n mock 返回 key）
+    await screen.findByText('offlineSync.op.work-order-complete');
 
     // 找到所有按钮中带有 X 图标的（删除按钮）
     const removeButton = screen.getByRole('button', { name: '' });
