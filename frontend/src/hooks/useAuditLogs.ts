@@ -6,6 +6,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import api from '../lib/api';
+import { downloadBlob } from '../lib/utils';
 
 /** 审计日志项 */
 export interface AuditLogItem {
@@ -68,17 +69,5 @@ export async function exportAuditLogsCsv(params: { action?: string; resourceType
   const response = await api.get(`/audit-logs/export${query ? `?${query}` : ''}`, {
     responseType: 'blob',
   });
-  triggerDownload(response.data as Blob, `audit_logs_${Date.now()}.csv`);
-}
-
-/** 触发浏览器下载 Blob 文件 */
-function triggerDownload(blob: Blob, fileName: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  downloadBlob(response.data as Blob, `audit_logs_${Date.now()}.csv`);
 }

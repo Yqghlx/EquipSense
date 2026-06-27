@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
+import { downloadBlob } from '../lib/utils';
 import type {
   KnowledgeRule,
   PendingRule,
@@ -327,15 +328,11 @@ export function useExportRules() {
       const response = await api.get(`/knowledge/rules/export?${params}`, {
         responseType: 'blob',
       });
-      const blob = new Blob([response.data]);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `knowledge_rules_${new Date().toISOString().slice(0, 10)}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      downloadBlob(
+        response.data,
+        `knowledge_rules_${new Date().toISOString().slice(0, 10)}.${format}`,
+        format === 'json' ? 'application/json' : 'text/csv;charset=utf-8',
+      );
     },
   });
 }
