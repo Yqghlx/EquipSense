@@ -33,6 +33,9 @@ export function useAlerts(query: PagedQuery, filters?: AlertFilters) {
       const { data } = await api.get<PagedResult<Alert>>('/alerts?' + params);
       return data;
     },
+    // 30s staleTime：告警是核心时效数据。正常时由 SignalR 实时 invalidate 触发刷新；
+    // 此较短 staleTime 作为 SignalR 断连期间的兜底，避免用户切 Tab 回来看到陈旧告警。
+    staleTime: 30_000,
   });
 }
 

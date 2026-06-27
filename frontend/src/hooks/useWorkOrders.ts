@@ -48,6 +48,9 @@ export function useWorkOrders(query: PagedQuery, filters?: WorkOrderFilters) {
       const { data } = await api.get<PagedResult<WorkOrder>>('/work-orders?' + params);
       return data;
     },
+    // 60s staleTime：工单状态变化需及时反映。正常时由 SignalR 实时 invalidate；
+    // 此 staleTime 作为 SignalR 断连期间的兜底（比全局 5 分钟更短）。
+    staleTime: 60_000,
   });
 }
 

@@ -48,6 +48,9 @@ export function useNotifications(params: NotificationParams = {}) {
       const { data } = await api.get<NotificationListResponse>(`/notifications?${searchParams}`);
       return data;
     },
+    // 60s staleTime：通知时效性较强。正常时由 SignalR 触发刷新；
+    // 此 staleTime 作为断连兜底（useUnreadCount 已有 30s refetchInterval 轮询）。
+    staleTime: 60_000,
   });
 }
 
