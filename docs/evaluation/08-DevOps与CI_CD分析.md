@@ -1,6 +1,6 @@
 # EquipSense DevOps / CI/CD 专项分析报告
 
-> 分析日期：2026-06-24 · 范围：.github/workflows/ci.yml · Dockerfiles · playwright/playwright · vitest · K6
+> 分析日期：2026-07-02（数据校正） · 范围：.github/workflows/ci.yml · Dockerfiles · e2e-comprehensive · vitest · K6
 
 ---
 
@@ -62,7 +62,7 @@ workflow_dispatch: true  # 手动触发
 | tsc --noEmit | ~30s | strict: true, 0 error |
 | check:i18n | ~5s | key 完整性 |
 | ESLint | ~30s | `--max-warnings 1` |
-| vitest | ~30s | 258 测试 |
+| vitest | ~30s | 321 测试 |
 | vite build | ~60s | 分包构建 |
 | **合计** | **~3.5min** | |
 

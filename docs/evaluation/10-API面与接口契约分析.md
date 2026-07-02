@@ -1,6 +1,6 @@
 # EquipSense API 面与接口契约专项分析报告
 
-> 分析日期：2026-06-24 · 范围：30 个 Controller · 135+ 端点 · 23 个 DTO
+> 分析日期：2026-07-02（数据校正） · 范围：30 个 Controller · 156 端点 · 47 个 DTO/Request/Response 文件
 
 ---
 
