@@ -47,8 +47,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 442 NUnit 测试 |
-| Integration test | ~120s | 86 xUnit (Testcontainers) |
+| Unit test | ~30s | 835 xUnit 测试 |
+| Integration test | ~120s | 103 xUnit (Testcontainers) |
 | NuGet vuln | ~20s | `|| true` 不阻断 |
 | **合计** | **~5min** | |
 
@@ -108,7 +108,7 @@ services:
   redis: redis:7-alpine
 ```
 
-### E2E 目录结构 (52 spec, 344 用例)
+### E2E 目录结构 (52 spec, 512 用例)
 
 ```
 00-setup/        (2)  — 健康检查 + 种子数据
@@ -154,7 +154,7 @@ timeout: 60s
 |------|------|------|
 | 构建速度 | ⭐⭐⭐⭐☆ | ~8min CI + ~35min E2E，层缓存利用充分 |
 | 测试门禁 | ⭐⭐⭐⭐⭐ | 7 道门禁 (TS/ESLint/i18n/Vitest/Vite/xUnit/Integration) |
-| E2E 覆盖 | ⭐⭐⭐⭐⭐ | 52 spec/344 用例/8 场景/含安全测试 |
+| E2E 覆盖 | ⭐⭐⭐⭐⭐ | 52 spec/512 用例/8 场景/含安全测试 |
 | Docker 构建 | ⭐⭐⭐⭐⭐ | 多阶段 + 层缓存 + GHCR + 双标签 |
 | 安全扫描 | ⭐⭐⭐⭐☆ | Trivy 镜像 CVE，exit-code=0 不阻断 |
 | 压测集成 | ⭐⭐⭐☆☆ | K6 脚本存在但不跑 |
@@ -189,4 +189,4 @@ timeout: 60s
 | 技术债务 | [13-技术债务与改进路线图](./13-技术债务与改进路线图.md) |
 
 ---
-*本文档属于 EquipSense 项目评估体系 · 生成日期：2026-06-24 · 版本：v3.0*
+*本文档属于 EquipSense 项目评估体系 · 生成日期：2026-06-24 · 版本：v3.1*

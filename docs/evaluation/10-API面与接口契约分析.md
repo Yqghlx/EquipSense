@@ -90,7 +90,7 @@
 ### 3.2 RBAC 权限标注覆盖
 
 ```
-123 个 [RequirePermission] 标注, 覆盖 39 个独立权限标识
+123 个 [RequirePermission] 标注, 覆盖 34 个独立权限标识（RbacService 矩阵共定义 43 个）
 分布最密集: DevicesController(12个) · WorkOrdersController(17个) · KnowledgeController(19个)
 ```
 
@@ -199,4 +199,4 @@ const params = new URLSearchParams({
 | 测试覆盖 | [14-测试策略与金字塔分析](./14-测试策略与金字塔分析.md) |
 
 ---
-*本文档属于 EquipSense 项目评估体系 · 生成日期：2026-06-24 · 版本：v3.0*
+*本文档属于 EquipSense 项目评估体系 · 生成日期：2026-06-24 · 版本：v3.1*
