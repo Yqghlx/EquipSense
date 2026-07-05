@@ -50,6 +50,11 @@ npx tsc -p tsconfig.json --noEmit
 
 # Lint 检查
 npm run lint
+# 注意：CI 限定范围并严格卡阈值 — `npx eslint src/ --max-warnings 1`，
+# 改前端时务必满足「src/ 内 0 error、≤1 warning」，否则 CI 红。
+
+# i18n 键覆盖检查（中英文键齐全）— CI 强制
+npm run check:i18n
 
 # 运行单元测试 (Vitest)
 npm run test
@@ -84,9 +89,11 @@ npx playwright show-report
 
 ### 模拟器（发送测试遥测数据）
 
+模拟器有两个副本，**仅 `src/EquipAI.Simulator` 收录在 `EquipAI.slnx` 中**（被 `dotnet build` 编译）；`tools/EquipAI.Simulator` 是未纳入解决方案的旧副本，命令请用前者。
+
 ```bash
 # 向指定租户的 3 个设备每 5 秒发送遥测数据（5% 概率触发异常）
-dotnet run --project tools/EquipAI.Simulator -- \
+dotnet run --project src/EquipAI.Simulator -- \
   --tenant 11111111-1111-1111-1111-111111111111 \
   --devices 3 \
   --interval 5
@@ -156,7 +163,8 @@ EquipSense/
 ├── tests/                         # 测试项目
 │   ├── EquipAI.Tests.Unit/       # xUnit 单元测试
 │   ├── EquipAI.Tests.Integration/ # Testcontainers 集成测试
-│   ├── e2e/                      # Playwright E2E 测试
+│   ├── e2e/                      # Playwright E2E 测试（编排入口）
+│   ├── load/                     # 负载测试脚本
 │   └── stress/                   # 压力测试脚本
 ├── docker/                        # Docker 配置
 │   ├── Dockerfile.backend        # 后端多阶段构建
@@ -306,7 +314,7 @@ dotnet ef database update --startup-project ../EquipAI.WebAPI
 使用模拟器发送异常数据：
 
 ```bash
-dotnet run --project tools/EquipAI.Simulator -- \
+dotnet run --project src/EquipAI.Simulator -- \
   --tenant <your-tenant-id> \
   --devices 1 \
   --interval 2 \
@@ -314,6 +322,26 @@ dotnet run --project tools/EquipAI.Simulator -- \
 ```
 
 前端告警中心页面会通过 SignalR 实时接收告警推送。
+
+## 改动前必读的文档
+
+修改敏感区域前先读对应文档，避免破坏既有约定：
+
+- `docs/FINAL_TECHNICAL_DESIGN.md` — 全量技术设计（架构 / Schema / API / 安全 / 路线图）
+- `docs/evaluation/00-INDEX.md` — 25 份专项评估入口（架构、代码质量、安全纵深、可观测性、DevOps 等）
+- `docs/DEPLOY.md` — 部署步骤与环境变量
+- `docs/OPS_RUNBOOK.md` — 运维剧本（故障演练、回滚）
+- `docs/environment-variables.md` — 后端/前端环境变量清单（改配置先对齐此表）
+- `docs/USER_GUIDE.md` — 用户操作手册
+
+## 已知坑点
+
+- **模拟器有两份**：只有 `src/EquipAI.Simulator` 在 `EquipAI.slnx` 中；`tools/EquipAI.Simulator` 是未编译的旧副本，命令一律用前者。
+- **E2E 测试位置**：Playwright 配置在 `frontend/`，测试用例按功能分目录放 `frontend/e2e-comprehensive/` 下（不是 `tests/e2e/`）。运行前需 `cd frontend && npx playwright install`。
+- **前端 lint 阈值严格**：CI 用 `npx eslint src/ --max-warnings 1`，新增 warning 也可能挂 CI。
+- **i18n 双语必须齐全**：改文案需同步中英文，`npm run check:i18n` 在 CI 强制运行。
+- **多租户查询不可漏 tenant_id**：所有业务表查询必须带 `tenant_id`（EF Core 全局过滤器），跨租户读取属于严重缺陷。
+- **数据库迁移自动执行**：后端首次启动会跑迁移和种子；手动迁移命令见下文「运行数据库迁移」。
 
 ## CI/CD 流水线
 
