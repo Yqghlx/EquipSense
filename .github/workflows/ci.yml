@@ -201,7 +201,7 @@ jobs:
   e2e:
     name: E2E 测试
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'pull_request'
     needs: [backend, frontend]
 
     services:

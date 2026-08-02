@@ -147,13 +147,13 @@ try
                     opts.Endpoint = new Uri(otllEndpoint);
                     // 默认协议 gRPC（兼容 Jaeger 4317）
                 });
-                Console.WriteLine($"[OTel] Trace OTLP exporter 已启用 → {otllEndpoint}");
+                Log.Information("[OTel] Trace OTLP exporter 已启用 → {Endpoint}", otllEndpoint);
             }
             else
             {
                 // 开发：Console 输出，trace 直接可见
                 tracing.AddConsoleExporter();
-                Console.WriteLine("[OTel] Trace Console exporter 已启用（开发模式）");
+                Log.Information("[OTel] Trace Console exporter 已启用（开发模式）");
             }
         })
         .WithMetrics(metrics =>
@@ -177,13 +177,13 @@ try
                 {
                     opts.Endpoint = new Uri(otllEndpoint);
                 });
-                Console.WriteLine($"[OTel] Metrics OTLP exporter 已启用 → {otllEndpoint}");
+                Log.Information("[OTel] Metrics OTLP exporter 已启用 → {Endpoint}", otllEndpoint);
             }
             else
             {
                 // 开发环境：用 Console 看运行时指标（默认 10 秒导出一次）
                 metrics.AddConsoleExporter();
-                Console.WriteLine("[OTel] Metrics Console exporter 已启用（开发模式，仅运行时指标）");
+                Log.Information("[OTel] Metrics Console exporter 已启用（开发模式，仅运行时指标）");
             }
         });
 
