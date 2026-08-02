@@ -25,12 +25,25 @@ cp docker/.env.example docker/.env
 # 必须修改
 PG_PASSWORD=<强密码，至少16位>
 JWT_SECRET=<随机密钥，至少32位>
+MQTT_USERNAME=<MQTT用户名>
+MQTT_PASSWORD=<MQTT强密码>
+SEED_ADMIN_PASSWORD=<管理员初始密码>
+SEED_LEAD_PASSWORD=<主管初始密码>
+SEED_TECH_PASSWORD=<技术员初始密码>
+SEED_OPERATOR_PASSWORD=<操作员初始密码>
+SEED_VIEWER_PASSWORD=<观察者初始密码>
 VAPID__PUBLICKEY=<由 web-push 生成的公钥>
 VAPID__PRIVATEKEY=<由 web-push 生成的私钥>
 
 # 可选修改
 DOMAIN=your-domain.com
 REDIS_PASSWORD=<Redis密码>
+```
+
+确认 `docker/.env` 中的必填项已替换占位值后，生成开发/测试用 Nginx 与 MQTT TLS 证书，并创建 MQTT 密码文件：
+
+```bash
+cd docker && ./setup.sh && cd ..
 ```
 
 生成 VAPID 密钥：
@@ -70,7 +83,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 种子数据）。
+首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。
 
 ### 4. 验证部署
 
@@ -98,7 +111,10 @@ curl http://localhost:8080/api/v1/system/info
 | `PG_PORT` | PostgreSQL 端口 | `5432` | 否 |
 | `REDIS_PASSWORD` | Redis 密码 | 空 | 否 |
 | `REDIS_PORT` | Redis 端口 | `6379` | 否 |
-| `MQTT_PORT` | MQTT 端口 | `1883` | 否 |
+| `MQTT_PORT` | MQTT 对外端口 | `8883` | 否 |
+| `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
+| `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
+| `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码 | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
 | `LLM_MODEL` | LLM 模型 | `qwen-plus` | 否 |
@@ -117,11 +133,15 @@ curl http://localhost:8080/api/v1/system/info
 2. 创建 TimescaleDB 超级表和连续聚合
 3. 种子数据（角色、权限、系统管理员）
 
-默认管理员账户：
-- 用户名：`admin`
-- 密码：见启动日志输出
+管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。所有种子用户首次登录后必须修改密码。
 
-**重要：** 首次登录后请立即修改默认密码。
+> `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。
+
+### 依赖审计说明
+
+CI 会执行 `frontend/scripts/check-production-audit.mjs`，对生产依赖中的 high/critical 漏洞逐项阻断。当前仅登记一项 React Router 例外：官方公告影响不稳定的 RSC API，而本项目是使用 `BrowserRouter` 的 SPA，不使用该 API；脚本同时锁定 `react-router` 与 `react-router-dom` 的实际安装版本为 `7.18.x`，并校验公告 URL，其他漏洞仍会阻断流水线。详见 [React Router 安全公告](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)。
+
+React Router DOM 包尚未提供对应的 `8.3.0` 修复版本，因此当前不降级到旧版本（旧版本会引入其他漏洞），待 DOM 包提供修复版本后重新评估升级路径。
 
 ## 功能配置（按需启用）
 

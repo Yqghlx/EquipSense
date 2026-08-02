@@ -41,6 +41,21 @@ public class GatewayOptions
     public string? MqttPassword { get; set; }
 
     /// <summary>
+    /// 是否通过 TLS 连接 MQTT Broker。
+    /// </summary>
+    public bool MqttUseTls { get; set; }
+
+    /// <summary>
+    /// 是否允许不受信任的服务端证书，仅用于开发环境。
+    /// </summary>
+    public bool MqttAllowUntrustedCertificates { get; set; }
+
+    /// <summary>
+    /// 可选的 MQTT Broker CA 证书路径，未配置时使用系统信任链。
+    /// </summary>
+    public string? MqttCaCertificatePath { get; set; }
+
+    /// <summary>
     /// 数据上传间隔（秒），默认 5 秒。
     /// </summary>
     public int UploadIntervalSeconds { get; set; } = 5;

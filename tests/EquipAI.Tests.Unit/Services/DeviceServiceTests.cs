@@ -34,7 +34,9 @@ public class DeviceServiceTests : IAsyncDisposable
         _db = new AppDbContext(options, new TestTenantContext(_tenantId));
 
         // 使用真实的 AutoMapper 和 MappingProfile，确保映射逻辑的测试真实性
-        var mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile<MappingProfile>());
+        var mapperConfig = new MapperConfiguration(
+            cfg => cfg.AddProfile<MappingProfile>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
         var mapper = mapperConfig.CreateMapper();
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<DeviceService>();
         // 传入桩件审计服务：验证 DeviceService 是否正确触发审计调用契约

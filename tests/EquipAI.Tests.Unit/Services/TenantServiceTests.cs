@@ -32,7 +32,9 @@ public class TenantServiceTests : IAsyncDisposable
         _db = new AppDbContext(options, new TestTenantContext(Guid.NewGuid()));
 
         // 使用真实的 AutoMapper 和 MappingProfile，确保映射逻辑的测试真实性
-        var mapperConfig = new MapperConfiguration(cfg => cfg.AddProfile<MappingProfile>());
+        var mapperConfig = new MapperConfiguration(
+            cfg => cfg.AddProfile<MappingProfile>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
         var mapper = mapperConfig.CreateMapper();
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<TenantService>();
         _sut = new TenantService(_db, mapper, logger);

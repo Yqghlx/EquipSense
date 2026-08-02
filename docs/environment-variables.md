@@ -26,12 +26,29 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 
 ## MQTT
 
-| 叉量名 | 说明 | 默认值 | 必填 |
+| 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
-| `Mqtt__Broker` | MQTT Broker 地址 | `localhost` | 否 |
+| `Mqtt__Host` | MQTT Broker 地址 | `localhost` | 否 |
 | `Mqtt__Port` | MQTT Broker 端口 | `1883` | 否 |
-| `Mqtt__Username` | MQTT 用户名 | — | 否 |
-| `Mqtt__Password` | MQTT 密码 | — | 否 |
+| `Mqtt__UseTls` | 是否启用 MQTT TLS | `false` | 生产环境必填为 `true` |
+| `Mqtt__AllowUntrustedCertificates` | 是否忽略服务端证书校验 | `false` | 生产环境必须为 `false` |
+| `Mqtt__CaCertificatePath` | 自定义 CA 证书路径 | — | 否（未配置时使用系统信任链） |
+| `Mqtt__Username` | MQTT 用户名 | — | 生产环境必填 |
+| `Mqtt__Password` | MQTT 密码 | — | 生产环境必填 |
+
+生产 Docker Compose 使用 8883/TLS，并要求 `MQTT_USERNAME`、`MQTT_PASSWORD` 显式配置；开发 Compose 仍使用 1883 明文。
+
+## 生产种子账户
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `SEED_ADMIN_PASSWORD` | 系统管理员初始密码 | — | 生产环境必填 |
+| `SEED_LEAD_PASSWORD` | 维保主管初始密码 | — | 生产环境必填 |
+| `SEED_TECH_PASSWORD` | 技术员初始密码 | — | 生产环境必填 |
+| `SEED_OPERATOR_PASSWORD` | 操作员初始密码 | — | 生产环境必填 |
+| `SEED_VIEWER_PASSWORD` | 观察者初始密码 | — | 生产环境必填 |
+| `SEED_TENANT2_ACCOUNT` | 是否创建测试用第二租户账户 | `false` | 否 |
+| `SEED_TENANT2_PASSWORD` | 第二租户测试账户密码 | — | 启用第二租户账户时必填 |
 
 ## AI/LLM
 
@@ -86,8 +103,11 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | `Gateway__TenantId` | 所属租户 ID | — | 是 |
 | `Gateway__BackendUrl` | 后端 API 地址 | `http://localhost:8080` | 是 |
 | `Gateway__MqttBroker` | MQTT Broker 地址 | `localhost:1883` | 否 |
-| `Gateway__MqttUsername` | MQTT 用户名 | — | 否 |
-| `Gateway__MqttPassword` | MQTT 密码 | — | 否 |
+| `Gateway__MqttUseTls` | 是否启用 MQTT TLS | `false` | 生产环境必填为 `true` |
+| `Gateway__MqttAllowUntrustedCertificates` | 是否忽略服务端证书校验 | `false` | 生产环境必须为 `false` |
+| `Gateway__MqttCaCertificatePath` | 自定义 CA 证书路径 | — | 否（未配置时使用系统信任链） |
+| `Gateway__MqttUsername` | MQTT 用户名 | — | 生产环境必填 |
+| `Gateway__MqttPassword` | MQTT 密码 | — | 生产环境必填 |
 | `Gateway__UploadIntervalSeconds` | 数据上传间隔（秒） | `5` | 否 |
 | `Gateway__BufferSize` | 内存队列容量 | `10000` | 否 |
 | `Gateway__OpcUaSecurityMode` | OPC UA 安全模式（None/Sign/SignAndEncrypt） | `None` | 否 |

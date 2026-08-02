@@ -122,9 +122,10 @@ jobs:
       - name: 构建前端
         run: npm run build
 
-      # 前端依赖漏洞检查 — 发现 high/critical 即阻断
-      - name: npm audit（仅检查 high/critical）
-        run: npm audit --omit=dev --audit-level=high
+      # 前端依赖漏洞检查 — 发现未登记的 high/critical 即阻断。
+      # 脚本只对已核实的 React Router RSC-only 公告保留精确例外。
+      - name: npm 生产依赖审计
+        run: node scripts/check-production-audit.mjs
 
   # ============================================================================
   # Docker 镜像构建 + 推送（仅 main 分支）

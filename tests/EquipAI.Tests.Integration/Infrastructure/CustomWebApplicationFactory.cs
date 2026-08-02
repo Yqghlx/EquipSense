@@ -18,10 +18,11 @@ namespace EquipAI.Tests.Integration.Infrastructure;
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 {
     /// <summary>
-    /// SQLite 内存连接需要保持打开状态，否则数据库会被销毁
-    /// 使用静态实例确保所有测试共享同一个内存数据库连接
+    /// 命名内存数据库需要一个保持打开的锚点连接，否则数据库会被销毁。
+    /// 锚点只负责维持数据库生命周期，业务 DbContext 均通过连接字符串创建独立连接，避免并发复用同一连接实例。
     /// </summary>
-    private static readonly Microsoft.Data.Sqlite.SqliteConnection _sqliteConnection;
+    private const string SqliteConnectionString = "Data Source=EquipAIIntegration;Mode=Memory;Cache=Shared";
+    private static readonly Microsoft.Data.Sqlite.SqliteConnection _sqliteKeepAliveConnection;
 
     /// <summary>
     /// 标记数据库 schema 是否已初始化，避免重复创建
@@ -31,8 +32,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     static CustomWebApplicationFactory()
     {
         // 创建并打开 SQLite 内存连接
-        _sqliteConnection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
-        _sqliteConnection.Open();
+        _sqliteKeepAliveConnection = new Microsoft.Data.Sqlite.SqliteConnection(SqliteConnectionString);
+        _sqliteKeepAliveConnection.Open();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -49,7 +50,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
             // 注册 DbContextOptions<AppDbContext>，使用 SQLite 连接
             services.AddSingleton(new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite(_sqliteConnection)
+                .UseSqlite(SqliteConnectionString)
                 .Options);
 
             // 注册 AppDbContext 工厂，创建 TestAppDbContext 实例
@@ -91,20 +92,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 首次调用时创建数据库 schema
-        // 使用 EnsureCreatedAsync 而非 Migrate()，因为：
+        // 首次调用时创建数据库 schema。
+        // 测试环境使用 EnsureCreatedAsync 而非生产迁移，因为：
         // 1. EnsureCreatedAsync 基于 OnModelCreating 的模型创建表，不依赖 migration SQL
         // 2. Migration 是为 Npgsql 生成的，包含 PG 特有语法（如 text[]），SQLite 无法执行
-        // 3. Program.cs 中的 Migrate() 只创建了 __EFMigrationsHistory 表但未创建业务表
+        // 3. Program.cs 在 Testing 环境跳过生产迁移，避免污染 SQLite 的迁移历史
         if (!_databaseCreated)
         {
-            // 删除 Migrate() 创建的空 __EFMigrationsHistory 表
-            // 确保 EnsureCreatedAsync 不会因为检测到该表而跳过 schema 创建
-            await dbContext.Database.ExecuteSqlRawAsync(
-                "DROP TABLE IF EXISTS __EFMigrationsHistory");
-
             var options = new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite(_sqliteConnection)
+                .UseSqlite(SqliteConnectionString)
                 .Options;
             using var initContext = new TestAppDbContext(options,
                 scope.ServiceProvider.GetRequiredService<EquipAI.Core.Interfaces.ITenantContext>());

@@ -16,7 +16,9 @@ public class AlertMappingTests
 {
     private static IMapper CreateMapper()
     {
-        var config = new MapperConfiguration(cfg => cfg.AddProfile<MappingProfile>());
+        var config = new MapperConfiguration(
+            cfg => cfg.AddProfile<MappingProfile>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
         return config.CreateMapper();
     }
 

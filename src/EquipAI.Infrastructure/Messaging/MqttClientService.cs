@@ -1,8 +1,10 @@
 using EquipAI.Infrastructure.Metrics;
+using EquipAI.Core.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Client;
+using System.Security.Authentication;
 
 namespace EquipAI.Infrastructure.Messaging;
 
@@ -19,6 +21,18 @@ public class MqttOptions
 
     /// <summary>MQTT 认证密码（可选）</summary>
     public string? Password { get; set; }
+
+    /// <summary>是否通过 TLS 连接 MQTT Broker。</summary>
+    public bool UseTls { get; set; }
+
+    /// <summary>
+    /// 是否允许不受信任的服务端证书。
+    /// 仅用于开发环境临时连接自签名证书，生产环境必须为 false。
+    /// </summary>
+    public bool AllowUntrustedCertificates { get; set; }
+
+    /// <summary>可选的自定义 CA 证书路径，未配置时使用系统信任链。</summary>
+    public string? CaCertificatePath { get; set; }
 }
 
 /// <summary>
@@ -56,24 +70,7 @@ public class MqttClientService
         var factory = new MqttFactory();
         _client = factory.CreateMqttClient();
 
-        // 构建 MQTT 客户端选项，包含认证（如果配置了用户名密码）
-        var builder = new MqttClientOptionsBuilder()
-            .WithTcpServer(_options.Host, _options.Port)
-            .WithClientId($"{_options.ClientIdPrefix}-{Environment.MachineName}-{Guid.NewGuid():N}")
-            .WithCleanStart(true);
-
-        // 如果配置了认证凭证，则添加用户名密码
-        if (!string.IsNullOrEmpty(_options.Username))
-        {
-            builder.WithCredentials(_options.Username, _options.Password ?? string.Empty);
-            _logger.LogInformation("MQTT 使用认证连接: 用户名={Username}", _options.Username);
-        }
-        else
-        {
-            _logger.LogWarning("MQTT 未配置认证凭证，使用匿名连接");
-        }
-
-        _clientOptions = builder.Build();
+        _clientOptions = BuildClientOptions();
 
         _client.DisconnectedAsync += HandleDisconnectedAsync;
         _client.ApplicationMessageReceivedAsync += HandleMessageAsync;
@@ -90,6 +87,58 @@ public class MqttClientService
         await _client.SubscribeAsync(subscribeOptions, cancellationToken);
         _logger.LogInformation("MQTT 已订阅主题: {Topic}", _options.TopicPattern);
     }
+
+    /// <summary>
+    /// 构建 MQTT 客户端连接选项。
+    /// </summary>
+    private MqttClientOptions BuildClientOptions()
+    {
+        // 构建 MQTT 客户端选项，包含认证（如果配置了用户名密码）。
+        var builder = new MqttClientOptionsBuilder()
+            .WithTcpServer(_options.Host, _options.Port)
+            .WithClientId($"{_options.ClientIdPrefix}-{Environment.MachineName}-{Guid.NewGuid():N}")
+            .WithCleanStart(true);
+
+        if (_options.UseTls)
+        {
+            builder.WithTlsOptions(tlsOptions =>
+            {
+                tlsOptions
+                    .UseTls()
+                    .WithSslProtocols(SslProtocols.Tls12 | SslProtocols.Tls13)
+                    .WithAllowUntrustedCertificates(_options.AllowUntrustedCertificates)
+                    .WithIgnoreCertificateChainErrors(_options.AllowUntrustedCertificates)
+                    .WithIgnoreCertificateRevocationErrors(_options.AllowUntrustedCertificates);
+
+                if (!string.IsNullOrWhiteSpace(_options.CaCertificatePath))
+                {
+                    tlsOptions.WithCertificateValidationHandler(context =>
+                        MqttServerCertificateValidator.Validate(
+                            context.Certificate,
+                            context.SslPolicyErrors,
+                            _options.CaCertificatePath));
+                }
+            });
+        }
+
+        // 如果配置了认证凭证，则添加用户名密码
+        if (!string.IsNullOrEmpty(_options.Username))
+        {
+            builder.WithCredentials(_options.Username, _options.Password ?? string.Empty);
+            _logger.LogInformation("MQTT 使用认证连接: 用户名={Username}", _options.Username);
+        }
+        else
+        {
+            _logger.LogWarning("MQTT 未配置认证凭证，使用匿名连接");
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// 测试辅助入口：返回实际使用的 MQTTnet 连接选项，不建立网络连接。
+    /// </summary>
+    internal MqttClientOptions BuildClientOptionsForTest() => BuildClientOptions();
 
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {

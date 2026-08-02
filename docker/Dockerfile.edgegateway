@@ -2,11 +2,13 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# 先复制项目文件并还原依赖（利用 Docker 层缓存）
+# 先复制项目文件并还原依赖（利用 Docker 层缓存）。EdgeGateway 依赖 Core，两个项目文件都必须存在。
+COPY src/EquipAI.Core/EquipAI.Core.csproj EquipAI.Core/
 COPY src/EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj EquipAI.EdgeGateway/
 RUN dotnet restore EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj
 
 # 复制完整源码并构建
+COPY src/EquipAI.Core/ EquipAI.Core/
 COPY src/EquipAI.EdgeGateway/ EquipAI.EdgeGateway/
 RUN dotnet publish EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj \
     -c Release -o /app/publish

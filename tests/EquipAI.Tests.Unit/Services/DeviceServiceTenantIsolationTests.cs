@@ -49,7 +49,9 @@ public class DeviceServiceTenantIsolationTests : IAsyncLifetime
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
         // 全局租户上下文固定为租户 A（模拟租户 A 用户登录），凸显"FindAsync 绕过过滤器找到 B 的设备"
         services.AddSingleton<ITenantContext>(new FixedTenantContext(_tenantA));
-        services.AddSingleton<IMapper>(_ => new Mapper(new MapperConfiguration(c => c.AddProfile<MappingProfile>())));
+        services.AddSingleton<IMapper>(_ => new Mapper(new MapperConfiguration(
+            c => c.AddProfile<MappingProfile>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)));
         services.AddLogging();
         // 注册空实现审计服务：DeleteDeviceAsync 在跨租户拒绝路径（FindAsync 失败抛 KeyNotFound）先于审计执行，
         // 审计不会被实际调用，此处仅满足 DeviceService 构造签名

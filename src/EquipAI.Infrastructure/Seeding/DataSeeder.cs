@@ -5,6 +5,7 @@ using EquipAI.Core.Enums;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Infrastructure.Seeding;
@@ -20,36 +21,32 @@ public class DataSeeder
 {
     private readonly AppDbContext _dbContext;
     private readonly ILogger<DataSeeder> _logger;
+    private readonly IHostEnvironment _hostEnvironment;
 
     /// <summary>
     /// 初始化数据种子器
     /// </summary>
     /// <param name="dbContext">数据库上下文</param>
     /// <param name="logger">日志记录器</param>
-    public DataSeeder(AppDbContext dbContext, ILogger<DataSeeder> logger)
+    /// <param name="hostEnvironment">宿主环境，用于区分生产凭据策略</param>
+    public DataSeeder(
+        AppDbContext dbContext,
+        ILogger<DataSeeder> logger,
+        IHostEnvironment hostEnvironment)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _hostEnvironment = hostEnvironment;
     }
 
     /// <summary>
-    /// 执行种子数据初始化，确保数据库已创建并填充基础数据
+    /// 执行幂等种子数据初始化。
+    /// 数据库 schema 必须由应用启动流程或测试夹具提前创建，本方法不负责建表或迁移。
     /// 所有存在性检查均使用 IgnoreQueryFilters 跨租户查询
     /// </summary>
     public async Task SeedAsync()
     {
         _logger.LogInformation("开始执行数据库种子数据初始化...");
-
-        // 先应用待处理的迁移（适用于已有数据库的增量更新）
-        var pendingMigrations = await _dbContext.Database.GetPendingMigrationsAsync();
-        if (pendingMigrations.Any())
-        {
-            _logger.LogInformation("检测到 {Count} 个待处理迁移，开始应用...", pendingMigrations.Count());
-            await _dbContext.Database.MigrateAsync();
-        }
-
-        // 兜底：确保数据库已创建（新数据库场景，无迁移历史时直接创建）
-        await _dbContext.Database.EnsureCreatedAsync();
 
         // 数据修复：早期版本（v1.3.0 前）的种子告警规则硬编码 device_type='空压机'，
         // 导致非空压机设备永远不触发告警。已部署的旧库需要一次性迁移到通用规则（device_type=null）。
@@ -66,7 +63,6 @@ public class DataSeeder
         _logger.LogInformation("数据库种子数据初始化完成");
     }
 
-    /// <summary>
     /// <summary>
     /// 数据迁移：把 v1.3.0 前硬编码 device_type='空压机' 的种子告警规则改为通用规则（device_type=null）
     ///
@@ -195,9 +191,9 @@ public class DataSeeder
     /// 默认用户名 admin，归属默认租户
     /// 同时创建维保主管、技术员、操作员、观察者四种角色的测试用户
     ///
-    /// 密码来源（按优先级）：
-    /// 1. 环境变量 SEED_{USERNAME}_PASSWORD（生产环境强烈推荐设置，避免默认密码被公开）
-    /// 2. 内置默认密码（仅用于开发/演示）
+    /// 密码来源（按环境）：
+    /// 1. 生产环境必须配置环境变量 SEED_{USERNAME}_PASSWORD
+    /// 2. 非生产环境允许使用内置默认密码（仅用于开发/演示）
     ///
     /// 所有种子用户首次登录后必须修改密码（MustChangePassword = true），强制客户重置为强密码。
     /// </summary>
@@ -215,6 +211,20 @@ public class DataSeeder
             new { Username = "viewer", DefaultPassword = "Viewer@123", EnvVar = "SEED_VIEWER_PASSWORD", DisplayName = "观察者", Role = UserRole.Viewer }
         };
 
+        // 第二租户账户仅在显式开启时创建。生产环境若开启，也必须提供独立密码。
+        var seedTenant2Account = Environment.GetEnvironmentVariable("SEED_TENANT2_ACCOUNT")?
+            .Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+        var seedCredentials = seedUsers.ToDictionary(
+            seedUser => seedUser.EnvVar,
+            seedUser => Environment.GetEnvironmentVariable(seedUser.EnvVar));
+        seedCredentials["SEED_TENANT2_PASSWORD"] =
+            Environment.GetEnvironmentVariable("SEED_TENANT2_PASSWORD");
+        SeedCredentialValidator.Validate(
+            _hostEnvironment.IsProduction(),
+            seedCredentials,
+            seedTenant2Account);
+
         var usingDefaultPassword = false;
         foreach (var seedUser in seedUsers)
         {
@@ -224,7 +234,7 @@ public class DataSeeder
 
             if (!userExists)
             {
-                // 密码来源：环境变量优先（生产部署应配置），否则使用内置默认密码
+                // 非生产环境允许回退到演示密码；生产环境已在方法开头完成必填校验。
                 var password = Environment.GetEnvironmentVariable(seedUser.EnvVar);
                 if (string.IsNullOrEmpty(password))
                 {
@@ -270,9 +280,6 @@ public class DataSeeder
         //
         // 已存在的历史账户不会被自动删除（避免误删生产数据）；
         // 如部署后不再需要，请手动执行：DELETE FROM users WHERE username = 'tenant2admin'。
-        var seedTenant2Account = Environment.GetEnvironmentVariable("SEED_TENANT2_ACCOUNT")?
-            .Equals("true", StringComparison.OrdinalIgnoreCase) == true;
-
         if (!seedTenant2Account)
         {
             // 未显式开启，跳过第二租户账户创建

@@ -29,6 +29,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # 官方镜像启动时需要初始化数据目录并降权运行。
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
@@ -59,6 +64,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # 官方镜像启动时需要先切换到 redis 用户。
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
@@ -70,9 +80,10 @@ services:
     container_name: equipai-mosquitto
     restart: unless-stopped
     ports:
-      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_PORT:-8883}:8883"
     volumes:
       - ./mosquitto.prod.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mqtt-certs:/mosquitto/config/certs:ro
       - mosquitto_data:/mosquitto/data
       - ./mosquitto_passwd/passwd:/mosquitto/config/passwd:ro
     # 安全加固
@@ -80,6 +91,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # 官方镜像启动时需要初始化数据目录并降权运行。
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
@@ -107,11 +123,20 @@ services:
       # ⚠️ 必须为纯 ASCII（HTTP header 不允许中文），生产环境请替换为强随机值
       Gateway__AuthKey: "${GATEWAY_AUTH_KEY:?请在 .env 中设置 GATEWAY_AUTH_KEY（纯 ASCII）}"
       Mqtt__Host: mosquitto
-      Mqtt__Port: 1883
+      Mqtt__Port: 8883
       Mqtt__ClientIdPrefix: "equipai-backend"
       Mqtt__TopicPattern: "factory/+/telemetry/+"
-      Mqtt__Username: "${MQTT_USERNAME:-device}"
-      Mqtt__Password: "${MQTT_PASSWORD:-device123}"
+      Mqtt__UseTls: "true"
+      Mqtt__AllowUntrustedCertificates: "false"
+      Mqtt__CaCertificatePath: "/etc/equipai/mqtt-certs/ca.crt"
+      Mqtt__Username: "${MQTT_USERNAME:?请在 .env 中设置 MQTT_USERNAME}"
+      Mqtt__Password: "${MQTT_PASSWORD:?请在 .env 中设置 MQTT_PASSWORD}"
+      # 生产种子用户密码：禁止回退到仓库中的公开默认值
+      SEED_ADMIN_PASSWORD: "${SEED_ADMIN_PASSWORD:?请在 .env 中设置 SEED_ADMIN_PASSWORD}"
+      SEED_LEAD_PASSWORD: "${SEED_LEAD_PASSWORD:?请在 .env 中设置 SEED_LEAD_PASSWORD}"
+      SEED_TECH_PASSWORD: "${SEED_TECH_PASSWORD:?请在 .env 中设置 SEED_TECH_PASSWORD}"
+      SEED_OPERATOR_PASSWORD: "${SEED_OPERATOR_PASSWORD:?请在 .env 中设置 SEED_OPERATOR_PASSWORD}"
+      SEED_VIEWER_PASSWORD: "${SEED_VIEWER_PASSWORD:?请在 .env 中设置 SEED_VIEWER_PASSWORD}"
       Llm__ApiKey: "${LLM_API_KEY:-}"
       Llm__ModelId: "${LLM_MODEL:-qwen-plus}"
       Llm__Endpoint: "${LLM_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
@@ -134,6 +159,8 @@ services:
       # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
+    volumes:
+      - ./mqtt-certs:/etc/equipai/mqtt-certs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,9 +201,12 @@ services:
     environment:
       Gateway__Id: "${GATEWAY_ID:-gateway-001}"
       Gateway__TenantId: "${GATEWAY_TENANT_ID:-}"
-      Gateway__MqttBroker: "mosquitto:1883"
-      Gateway__MqttUsername: "${MQTT_USERNAME:-device}"
-      Gateway__MqttPassword: "${MQTT_PASSWORD:-device123}"
+      Gateway__MqttBroker: "mosquitto:8883"
+      Gateway__MqttUseTls: "true"
+      Gateway__MqttAllowUntrustedCertificates: "false"
+      Gateway__MqttCaCertificatePath: "/app/mqtt-certs/ca.crt"
+      Gateway__MqttUsername: "${MQTT_USERNAME:?请在 .env 中设置 MQTT_USERNAME}"
+      Gateway__MqttPassword: "${MQTT_PASSWORD:?请在 .env 中设置 MQTT_PASSWORD}"
       Gateway__BackendUrl: "http://backend:8080"
       Gateway__AuthKey: "${GATEWAY_AUTH_KEY:-}"
       Gateway__UploadIntervalSeconds: "${GATEWAY_UPLOAD_INTERVAL:-5}"
@@ -185,6 +215,7 @@ services:
       Gateway__Version: "1.0.0"
     volumes:
       - edgegateway_data:/data
+      - ./mqtt-certs:/app/mqtt-certs:ro
     depends_on:
       mosquitto:
         condition: service_started
@@ -229,17 +260,21 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    # 安全加固：nginx 容器以非 root 用户（uid 101）运行（见 Dockerfile.frontend），
-    # 通过降低非特权端口门槛让其绑定 443，无需 NET_BIND_SERVICE capability。
+    # 安全加固：Nginx master 仅用于绑定 80/443，worker 会按 nginx.conf 降权为 nginx 用户；
+    # 仅恢复绑定低端口所需的最小能力，其余 capability 全部丢弃。
     # tmpfs 承载 nginx 运行期 temp 文件（client body / proxy temp），避免写镜像层。
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    sysctls:
-      net.ipv4.ip_unprivileged_port_start: 443
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETGID
+      - SETUID
     tmpfs:
-      - /var/cache/nginx
+      # master 会先创建临时子目录，使用 sticky-bit 临时目录避免依赖 DAC_OVERRIDE。
+      - /var/cache/nginx:mode=1777
     deploy:
       resources:
         limits:
@@ -271,6 +306,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # 官方镜像启动时需要初始化数据目录并降权运行。
+    cap_add:
+      - NET_BIND_SERVICE
     deploy:
       resources:
         limits:
@@ -355,7 +393,7 @@ services:
   # 配置：后端 OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
   # 生产环境可换为 Tempo（与 Grafana 一体化）或 OTel Collector 多导出。
   jaeger:
-    image: jaegertracing/all-in-one:1.62
+    image: jaegertracing/all-in-one:1.62.0
     container_name: equipai-jaeger
     restart: unless-stopped
     ports:

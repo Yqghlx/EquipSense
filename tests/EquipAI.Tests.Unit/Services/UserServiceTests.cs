@@ -34,7 +34,7 @@ public class UserServiceTests : IAsyncDisposable
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
 
         // 注册 AutoMapper，使用项目实际的 MappingProfile
-        services.AddAutoMapper(typeof(MappingProfile));
+        services.AddAutoMapper(_ => { }, typeof(MappingProfile).Assembly);
 
         services.AddLogging();
         // 审计日志服务（真实实现，写入同一 InMemory db，便于断言审计记录）

@@ -499,3 +499,9 @@ docker/ssl/*.pem
 docker/mosquitto_passwd/passwd
 # 保留目录占位符，确保 docker/ssl 目录本身入库
 !docker/ssl/.gitkeep
+
+# MQTT TLS 证书与 CA 私钥（首次部署由 docker/generate-mqtt-cert.sh 生成）
+docker/mqtt-certs/*
+!docker/mqtt-certs/.gitkeep
+docker/mqtt-ca/*
+!docker/mqtt-ca/.gitkeep

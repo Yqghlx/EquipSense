@@ -219,7 +219,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IEventBus, InMemoryEventBus>();
 
         // AutoMapper 映射配置，扫描 MappingProfile 所在程序集
-        services.AddAutoMapper(typeof(MappingProfile).Assembly);
+        // AutoMapper 15 要求显式传入配置委托，再指定需要扫描的程序集。
+        services.AddAutoMapper(_ => { }, typeof(MappingProfile).Assembly);
 
         // 遥测数据服务（Singleton — 内部维护定时器和队列）
         services.AddSingleton<ITelemetryService, TelemetryService>();

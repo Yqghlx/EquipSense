@@ -10,8 +10,7 @@
 #   cd docker && ./setup-mosquitto.sh
 #   cd docker && ./setup-mosquitto.sh <用户名> <密码>
 #
-# 默认创建的用户（与 .env.example 中 MQTT_USERNAME/MQTT_PASSWORD 一致）：
-#   用户名: device    密码: device123
+# 用户名和密码必须通过命令行参数、环境变量或 docker/.env 提供，脚本不再内置公开默认值。
 # =============================================================================
 
 set -euo pipefail
@@ -21,13 +20,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASSWD_DIR="${SCRIPT_DIR}/mosquitto_passwd"
 PASSWD_FILE="${PASSWD_DIR}/passwd"
 
-# 默认用户配置（与 .env.example 保持一致）
-DEFAULT_USERNAME="device"
-DEFAULT_PASSWORD="device123"
+# 从命令行参数或环境变量读取。
+USERNAME="${1:-${MQTT_USERNAME:-}}"
+PASSWORD="${2:-${MQTT_PASSWORD:-}}"
 
-# 从命令行参数或环境变量读取，未提供则使用默认值
-USERNAME="${1:-${MQTT_USERNAME:-${DEFAULT_USERNAME}}}"
-PASSWORD="${2:-${MQTT_PASSWORD:-${DEFAULT_PASSWORD}}}"
+# setup.sh 会在密码文件缺失时调用本脚本，此时优先从同目录 .env 读取，避免把密码打印到日志。
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [ -f "${ENV_FILE}" ]; then
+    [ -n "${USERNAME}" ] || USERNAME="$(awk -F= '$1 == "MQTT_USERNAME" {print substr($0, index($0, "=") + 1); exit}' "${ENV_FILE}")"
+    [ -n "${PASSWORD}" ] || PASSWORD="$(awk -F= '$1 == "MQTT_PASSWORD" {print substr($0, index($0, "=") + 1); exit}' "${ENV_FILE}")"
+fi
 
 # 颜色输出
 RED='\033[0;31m'
@@ -39,6 +41,16 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}  Mosquitto 密码文件配置工具${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+
+if [ -z "${USERNAME}" ] || [ -z "${PASSWORD}" ]; then
+    echo -e "${RED}错误：必须配置 MQTT_USERNAME 和 MQTT_PASSWORD，脚本不提供默认凭据${NC}" >&2
+    exit 1
+fi
+
+if [[ "${USERNAME}" == *"请修改"* || "${PASSWORD}" == *"请修改"* || "${USERNAME}" == "device" || "${PASSWORD}" == "device123" ]]; then
+    echo -e "${RED}错误：MQTT_USERNAME/MQTT_PASSWORD 仍是占位值或公开默认值，请先修改 docker/.env${NC}" >&2
+    exit 1
+fi
 
 # 创建密码文件目录
 mkdir -p "${PASSWD_DIR}"

@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- 暂时抑制 NuGet 警告：NU1603 版本自动解析、NU1901/NU1903 已知漏洞 -->
-    <NoWarn>NU1603;NU1901;NU1903</NoWarn>
+    <!-- 仅保留已评估的版本自动解析提示；依赖漏洞警告必须进入构建门禁。 -->
+    <NoWarn>NU1603</NoWarn>
   </PropertyGroup>
 </Project>

@@ -169,6 +169,16 @@ else
     fi
 fi
 
+# 生产 Compose 的 Mosquitto 使用 8883/TLS，需要单独的 Broker 证书和 CA。
+MQTT_CERT_DIR="${SCRIPT_DIR}/mqtt-certs"
+if [ -f "${MQTT_CERT_DIR}/ca.crt" ] && [ -f "${MQTT_CERT_DIR}/server.crt" ] && [ -f "${MQTT_CERT_DIR}/server.key" ]; then
+    success "MQTT TLS 证书已存在"
+else
+    echo -e "  ${YELLOW}MQTT TLS 证书不存在，正在生成开发/测试证书...${NC}"
+    bash "${SCRIPT_DIR}/generate-mqtt-cert.sh"
+    success "MQTT TLS 证书生成完成"
+fi
+
 echo -e "  ${YELLOW}⚠️  当前使用自签名证书，仅适用于开发/测试环境。${NC}"
 echo -e "  ${YELLOW}   生产环境请使用 Let's Encrypt 或购买正式证书。${NC}"
 
@@ -199,18 +209,7 @@ else
         bash "${SCRIPT_DIR}/setup-mosquitto.sh"
         success "Mosquitto 密码文件创建完成"
     else
-        # 如果脚本不存在，尝试使用 docker 容器生成
-        mkdir -p "${PASSWD_DIR}"
-        if command -v docker &> /dev/null; then
-            echo -e "  ${YELLOW}使用 Docker 容器生成默认用户...${NC}"
-            docker run --rm -v "${PASSWD_DIR}":/work \
-                eclipse-mosquitto:2 \
-                mosquitto_passwd -c -b /work/passwd device device123
-            success "已创建默认用户: device"
-        else
-            error "无法创建 Mosquitto 密码文件"
-            error "  请手动运行: ${SCRIPT_DIR}/setup-mosquitto.sh"
-        fi
+        error "无法创建 Mosquitto 密码文件：缺少 ${SCRIPT_DIR}/setup-mosquitto.sh"
     fi
 fi
 
@@ -229,6 +228,9 @@ REQUIRED_FILES=(
     "docker-compose.dev.yml|Docker Compose 开发环境配置"
     "mosquitto.conf|Mosquitto 开发环境配置"
     "mosquitto.prod.conf|Mosquitto 生产环境配置"
+    "mqtt-certs/ca.crt|MQTT CA 证书"
+    "mqtt-certs/server.crt|MQTT 服务端证书"
+    "mqtt-certs/server.key|MQTT 服务端私钥"
     "mosquitto_passwd/passwd|Mosquitto 密码文件"
     "nginx.conf|Nginx 反向代理配置"
     "prometheus.yml|Prometheus 指标采集配置"
@@ -260,6 +262,7 @@ echo ""
 echo -e "  ${BLUE}检查脚本文件可执行权限...${NC}"
 EXECUTABLE_SCRIPTS=(
     "generate-cert.sh"
+    "generate-mqtt-cert.sh"
     "setup-mosquitto.sh"
     "setup.sh"
     "entrypoint.sh"
@@ -304,7 +307,7 @@ if [ ${ERRORS} -eq 0 ]; then
     echo -e "${YELLOW}注意事项：${NC}"
     echo "  1. 首次启动前请确认 .env 文件中的密码和密钥已修改"
     echo "  2. 自签名 TLS 证书仅用于开发/测试，浏览器会提示不安全"
-    echo "  3. Mosquitto 默认用户: device / device123（请及时修改）"
+    echo "  3. Mosquitto 用户密码来自 .env 中的 MQTT_USERNAME/MQTT_PASSWORD"
     echo "  4. Grafana 默认管理员: admin（密码见 .env 中 GRAFANA_PASSWORD）"
 else
     echo -e "${RED}  配置验证发现 ${ERRORS} 个错误${NC}"

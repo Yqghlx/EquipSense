@@ -56,7 +56,7 @@ public class AuthServiceTests : IAsyncDisposable
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
 
         // 注册 AutoMapper，使用项目实际的 MappingProfile
-        services.AddAutoMapper(typeof(MappingProfile));
+        services.AddAutoMapper(_ => { }, typeof(MappingProfile).Assembly);
 
         services.AddLogging();
 

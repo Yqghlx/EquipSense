@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using EquipAI.Core.Security;
 using EquipAI.EdgeGateway;
 using EquipAI.EdgeGateway.Persistence;
 using EquipAI.EdgeGateway.Pipeline;
@@ -46,6 +47,20 @@ try
 
     var gatewayOpts = new GatewayOptions();
     builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(gatewayOpts);
+
+    var mqttParts = gatewayOpts.MqttBroker.Split(':', 2, StringSplitOptions.TrimEntries);
+    var mqttPort = mqttParts.Length > 1 && int.TryParse(mqttParts[1], out var configuredMqttPort)
+        ? configuredMqttPort
+        : (gatewayOpts.MqttUseTls ? 8883 : 1883);
+    MqttSecurityConfigurationValidator.Validate(
+        componentName: "Gateway",
+        environmentName: builder.Environment.EnvironmentName,
+        port: mqttPort,
+        useTls: gatewayOpts.MqttUseTls,
+        allowUntrustedCertificates: gatewayOpts.MqttAllowUntrustedCertificates,
+        caCertificatePath: gatewayOpts.MqttCaCertificatePath,
+        username: gatewayOpts.MqttUsername,
+        password: gatewayOpts.MqttPassword);
 
     var localBuffer = new LocalBuffer(
         capacity: gatewayOpts.BufferSize,

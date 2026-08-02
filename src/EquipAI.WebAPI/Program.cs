@@ -9,8 +9,10 @@ using EquipAI.Application.Knowledge;
 using EquipAI.Application.WorkOrders.Handlers;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Security;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.HealthChecks;
+using EquipAI.Infrastructure.Messaging;
 using Microsoft.EntityFrameworkCore;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
@@ -236,6 +238,18 @@ try
         throw new InvalidOperationException("JWT 密钥不安全，应用拒绝启动。请在环境变量中设置至少 32 位的随机密钥");
     }
 
+    // MQTT 安全配置在启动阶段校验，避免生产服务先启动后才在后台重连中暴露配置错误。
+    var mqttOptions = builder.Configuration.GetSection("Mqtt").Get<MqttOptions>() ?? new MqttOptions();
+    MqttSecurityConfigurationValidator.Validate(
+        componentName: "Mqtt",
+        environmentName: app.Environment.EnvironmentName,
+        port: mqttOptions.Port,
+        useTls: mqttOptions.UseTls,
+        allowUntrustedCertificates: mqttOptions.AllowUntrustedCertificates,
+        caCertificatePath: mqttOptions.CaCertificatePath,
+        username: mqttOptions.Username,
+        password: mqttOptions.Password);
+
     // 生产环境 HTTPS 安全（当不在反向代理之后时启用）
     // BEHIND_PROXY=true 时由 Nginx 负责 TLS 终止，后端不需要 HTTPS 重定向
     var behindProxy = builder.Configuration["BEHIND_PROXY"]?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
@@ -379,6 +393,25 @@ try
         }
     });
 
+    // 生产/开发环境统一先执行 EF Core 迁移，再初始化种子数据和 TimescaleDB。
+    // Testing 环境由集成测试夹具使用 SQLite EnsureCreatedAsync 创建 schema。
+    if (DatabaseInitializationPolicy.ShouldApplyMigrations(app.Environment.EnvironmentName))
+    {
+        using var migrateScope = app.Services.CreateScope();
+        var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        try
+        {
+            Log.Information("正在检查数据库迁移...");
+            await db.Database.MigrateAsync();
+            Log.Information("数据库迁移完成");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "数据库迁移失败，服务拒绝启动");
+            throw;
+        }
+    }
+
     // 种子数据初始化 + TimescaleDB 初始化：首次启动自动执行，确保生产环境有基础数据
     if (args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction())
     {
@@ -394,26 +427,6 @@ try
         }
     }
 
-    // 数据库迁移：仅在显式传入 --migrate 参数时执行
-    // 注意：DataSeeder 使用 EnsureCreatedAsync 创建 schema，与 Migrate 不兼容
-    // 如果需要使用迁移模式，应在第一次部署前删除 EnsureCreatedAsync 的调用
-    if (args.Contains("--migrate"))
-    {
-        using var migrateScope = app.Services.CreateScope();
-        var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        try
-        {
-            Log.Information("正在检查数据库迁移...");
-            db.Database.Migrate();
-            Log.Information("数据库迁移完成");
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "数据库迁移失败");
-            throw;
-        }
-    }
-
     Log.Information("EquipAI 后端服务启动成功");
 
     // 配置缺失警告 — 生产环境应配置以下项
@@ -425,9 +438,9 @@ try
     if (string.IsNullOrEmpty(vapidSubject))
         Log.Warning("VAPID 未配置，浏览器推送通知功能不可用。请设置 Vapid:Subject / PublicKey / PrivateKey");
 
-    var mqttBroker = builder.Configuration["Mqtt:Broker"];
+    var mqttBroker = builder.Configuration["Mqtt:Host"];
     if (string.IsNullOrEmpty(mqttBroker))
-        Log.Warning("MQTT Broker 未配置，遥测数据接收功能不可用。请设置 Mqtt:Broker");
+        Log.Warning("MQTT Broker 未配置，遥测数据接收功能不可用。请设置 Mqtt:Host");
 
     var llmKey = builder.Configuration["LLM:ApiKey"];
     if (string.IsNullOrEmpty(llmKey))
@@ -438,6 +451,7 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "服务启动失败");
+    Environment.ExitCode = 1;
 }
 finally
 {

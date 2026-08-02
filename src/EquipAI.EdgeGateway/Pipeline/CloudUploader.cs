@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Authentication;
+using EquipAI.Core.Security;
 using EquipAI.EdgeGateway.Persistence;
 using EquipAI.EdgeGateway.Protocols;
 using Microsoft.Extensions.Logging;
@@ -62,21 +64,60 @@ public class CloudUploader : IAsyncDisposable
     {
         _mqttClient = _mqttFactory.CreateMqttClient();
 
-        var parts = _options.MqttBroker.Split(':');
+        await _mqttClient.ConnectAsync(BuildMqttClientOptions(), ct);
+        _logger.LogInformation("MQTT 已连接: {Broker}", _options.MqttBroker);
+    }
+
+    /// <summary>
+    /// 构建 MQTT 发布端连接选项。
+    /// </summary>
+    private MqttClientOptions BuildMqttClientOptions()
+    {
+        var parts = _options.MqttBroker.Split(':', 2, StringSplitOptions.TrimEntries);
         var host = parts[0];
-        var port = parts.Length > 1 ? int.Parse(parts[1]) : 1883;
+        var port = parts.Length > 1 && int.TryParse(parts[1], out var configuredPort)
+            ? configuredPort
+            : (_options.MqttUseTls ? 8883 : 1883);
 
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(host, port)
             .WithClientId($"edge-gateway-{_options.Id}")
             .WithCleanSession(true);
 
-        if (!string.IsNullOrEmpty(_options.MqttUsername))
-            builder.WithCredentials(_options.MqttUsername, _options.MqttPassword);
+        if (_options.MqttUseTls)
+        {
+            builder.WithTlsOptions(tlsOptions =>
+            {
+                tlsOptions
+                    .UseTls()
+                    .WithSslProtocols(SslProtocols.Tls12 | SslProtocols.Tls13)
+                    .WithAllowUntrustedCertificates(_options.MqttAllowUntrustedCertificates)
+                    .WithIgnoreCertificateChainErrors(_options.MqttAllowUntrustedCertificates)
+                    .WithIgnoreCertificateRevocationErrors(_options.MqttAllowUntrustedCertificates);
 
-        await _mqttClient.ConnectAsync(builder.Build(), ct);
-        _logger.LogInformation("MQTT 已连接: {Broker}", _options.MqttBroker);
+                if (!string.IsNullOrWhiteSpace(_options.MqttCaCertificatePath))
+                {
+                    tlsOptions.WithCertificateValidationHandler(context =>
+                        MqttServerCertificateValidator.Validate(
+                            context.Certificate,
+                            context.SslPolicyErrors,
+                            _options.MqttCaCertificatePath));
+                }
+            });
+        }
+
+        if (!string.IsNullOrEmpty(_options.MqttUsername))
+        {
+            builder.WithCredentials(_options.MqttUsername, _options.MqttPassword ?? string.Empty);
+        }
+
+        return builder.Build();
     }
+
+    /// <summary>
+    /// 测试辅助入口：返回实际使用的 MQTTnet 连接选项，不建立网络连接。
+    /// </summary>
+    internal MqttClientOptions BuildMqttClientOptionsForTest() => BuildMqttClientOptions();
 
     /// <summary>
     /// 上传标准化遥测消息

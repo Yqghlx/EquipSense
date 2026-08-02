@@ -49,7 +49,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 # 4. 访问应用
 # 前端：https://localhost:8443（默认 8443 HTTPS，可通过 FRONTEND_PORT 修改）
 # 后端 API：http://localhost:8080/swagger
-# 默认管理员账号：admin / Admin@123（首次登录后强制修改密码）
+# 管理员初始密码由 docker/.env 中的 SEED_ADMIN_PASSWORD 设置（首次登录后强制修改密码）
 ```
 
 ### 方式二：本地开发
