@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  覆盖率采集配置 coverlet XPlat Code Coverage
+
+  设计说明：
+  - 阈值不在本文件声明。原因：coverlet msbuild thresholds 对 collect 模式不生效，
+    且只能校验全局单一值，不适合本项目按程序集分级的现实覆盖率分布。
+    阈值断言由 scripts/check-coverage.mjs 读取合并后的 Cobertura XML 后按程序集门禁。
+  - exclude 明确排除两类无法或不应被测试的代码：
+      1. EF Core 迁移类，自动生成，由 schema 审查与集成测试保证
+      2. .NET 源生成器产物 RegexGenerator 等，由编译器生成
+  - exclude-by-file 排除映射 profile AutoMapper，运行时反射无意义覆盖
+  - 由 dotnet test 配合 collect XPlat Code Coverage 与 -s Tests/coverage.runsettings 使用
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <Exclude>
+            [*]*.Migrations.*,
+            [*]System.Text.RegularExpressions.Generated.*
+          </Exclude>
+          <ExcludeByFile>
+            **/Mapping/MappingProfile.cs
+          </ExcludeByFile>
+          <UseSourceLink>false</UseSourceLink>
+          <SingleHit>false</SingleHit>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

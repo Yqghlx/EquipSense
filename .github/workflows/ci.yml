@@ -74,11 +74,48 @@ jobs:
       - name: 构建后端
         run: dotnet build EquipAI.slnx --configuration Release --no-restore
 
-      - name: 运行单元测试
-        run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal
+      - name: 安装 ReportGenerator（合并覆盖率报告）
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool --version 5.5.11
 
-      - name: 运行集成测试
-        run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal
+      # 单元测试 + 集成测试分别采集覆盖率（Cobertura 格式），随后合并门禁。
+      # 阈值不在 coverlet 声明（--collect 模式不生效），由 scripts/check-coverage.mjs
+      # 按程序集分级门禁（Core 80% / Application 78% / WebAPI 50% / Edge 28%，
+      # Infrastructure 与 Simulator 豁免 — 见脚本头注释）
+      - name: 运行单元测试（采集覆盖率）
+        run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s Tests/coverage.runsettings --results-directory ./coverage-results
+
+      - name: 运行集成测试（采集覆盖率）
+        run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s Tests/coverage.runsettings --results-directory ./coverage-results
+
+      # 合并单元 + 集成覆盖率为单份 Cobertura XML，供门禁脚本读取
+      - name: 合并覆盖率报告
+        run: |
+          reportgenerator \
+            -reports:"coverage-results/*/coverage.cobertura.xml" \
+            -targetdir:"coverage-merged" \
+            -reporttypes:"Cobertura;TextSummary"
+
+      # 覆盖率门禁：按程序集断言下限，低于阈值 → CI 红
+      - name: 覆盖率门禁检查
+        run: node scripts/check-coverage.mjs coverage-merged/Cobertura.xml
+
+      # 覆盖率报告留档（HTML + Cobertura XML），便于跨版本对比回归
+      - name: 生成 HTML 覆盖率报告
+        run: |
+          reportgenerator \
+            -reports:"coverage-merged/Cobertura.xml" \
+            -targetdir:"coverage-report" \
+            -reporttypes:"Html"
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: |
+            coverage-report/
+            coverage-merged/
+          retention-days: 14
 
       # NuGet 包漏洞检查 — 发现已知 CVE 即阻断 CI
       # 若确需暂缓修复某 CVE，在 nuget 包配置中显式忽略，而非关闭门禁
@@ -118,8 +155,19 @@ jobs:
       - name: Lint 检查
         run: npx eslint src/ --max-warnings 1
 
-      - name: 运行单元测试
-        run: npx vitest run
+      - name: 运行单元测试（采集覆盖率 + 阈值门禁）
+        run: npx vitest run --coverage
+        # vitest.config.ts 配置 thresholds: lines 80% / functions 80%（ratchet 棘轮下限）
+        # 低于阈值 → vitest 退出码非零 → CI 红
+
+      - name: 上传前端覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-report
+          path: frontend/coverage/
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: 构建前端
         run: npm run build

@@ -155,6 +155,13 @@ coverage*.json
 coverage*.xml
 coverage*.info
 
+# 覆盖率采集/合并/报告目录（本地跑 [dotnet test --collect] 或 vitest --coverage 产物）
+coverage-results/
+coverage-merged/
+coverage-baseline/
+coverage-integration/
+coverage-report/
+
 # Visual Studio code coverage results
 *.coverage
 *.coveragexml
