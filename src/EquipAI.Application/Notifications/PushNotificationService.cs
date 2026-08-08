@@ -18,8 +18,8 @@ public class PushNotificationService : IPushNotificationService
     private readonly AppDbContext _dbContext;
     private readonly ILogger<PushNotificationService> _logger;
     private readonly string _vapidSubject;
-    private readonly string _vapidPublicKey;
-    private readonly string _vapidPrivateKey;
+    private readonly string? _vapidPublicKey;
+    private readonly string? _vapidPrivateKey;
 
     public PushNotificationService(
         AppDbContext dbContext,
@@ -31,10 +31,12 @@ public class PushNotificationService : IPushNotificationService
 
         _vapidSubject = configuration["Vapid:Subject"]
             ?? "mailto:admin@equipsense.com";
-        _vapidPublicKey = configuration["Vapid:PublicKey"]
-            ?? throw new InvalidOperationException("VAPID 公钥未配置");
-        _vapidPrivateKey = configuration["Vapid:PrivateKey"]
-            ?? throw new InvalidOperationException("VAPID 私钥未配置");
+        // 关键修复：VAPID 密钥未配置时不再抛异常（构造时抛 InvalidOperationException 会被
+        // ExceptionHandlingMiddleware 映射为 409，导致拉取本服务的任意请求 — 如 SLA 概览 —
+        // 全部失败）。改为延迟到实际发送时降级：开发/测试/未启用 Web Push 的部署应能正常
+        // 运行其他功能，仅推送功能不可用。
+        _vapidPublicKey = configuration["Vapid:PublicKey"];
+        _vapidPrivateKey = configuration["Vapid:PrivateKey"];
     }
 
     /// <inheritdoc />
@@ -120,6 +122,13 @@ public class PushNotificationService : IPushNotificationService
     private async Task SendPayloadToSubscriptions(
         List<Core.Entities.PushSubscription> subscriptions, string payload)
     {
+        // VAPID 未配置时降级：订阅管理仍可用，仅发送功能跳过
+        if (string.IsNullOrEmpty(_vapidPublicKey) || string.IsNullOrEmpty(_vapidPrivateKey))
+        {
+            _logger.LogWarning("VAPID 未配置，浏览器推送通知功能不可用。请设置 Vapid:PublicKey / Vapid:PrivateKey 以启用");
+            return;
+        }
+
         var vapidDetails = new VapidDetails(_vapidSubject, _vapidPublicKey, _vapidPrivateKey);
         var webPushClient = new WebPushClient();
 
