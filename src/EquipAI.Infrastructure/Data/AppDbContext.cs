@@ -19,6 +19,18 @@ public class AppDbContext : DbContext
     }
 
     /// <summary>
+    /// 派生上下文（如 <see cref="AppReadDbContext"/>）用的构造函数。
+    /// 接受非泛型 <see cref="DbContextOptions"/>——EF Core DbContext 基类支持这种重载，
+    /// 内部按 options 的 ContextType 字段识别上下文身份。
+    /// protected 限制仅子类可调用，不对外暴露（主代码继续用泛型构造函数）。
+    /// </summary>
+    protected AppDbContext(DbContextOptions options, ITenantContext tenantContext)
+        : base(options)
+    {
+        _tenantContext = tenantContext;
+    }
+
+    /// <summary>
     /// 租户表
     /// </summary>
     public DbSet<Core.Entities.Tenant> Tenants => Set<Core.Entities.Tenant>();
@@ -198,9 +210,12 @@ public class AppDbContext : DbContext
     }
 
     /// <summary>
-    /// 获取当前请求的租户 ID，供全局查询过滤器使用
+    /// 获取当前请求的租户 ID，供全局查询过滤器使用。
+    /// 用 protected 而非 private：派生上下文（如 <see cref="AppReadDbContext"/>）的
+    /// OnModelCreating 会通过 Expression.Constant(this) 引用本方法，
+    /// Expression.Call 需能在派生类型的运行时实例上解析到继承的方法，private 不可见。
     /// </summary>
-    private Guid GetCurrentTenantId() => _tenantContext.TenantId;
+    protected Guid GetCurrentTenantId() => _tenantContext.TenantId;
 
     /// <summary>
     /// 获取不受租户过滤器约束的 DbSet

@@ -35,6 +35,8 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
 
         var services = new ServiceCollection();
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        // 只读上下文（被测服务注入）：共享同一 SQLite 连接，保证能读到主库的种子数据
+        services.AddDbContext<AppReadDbContext>(o => o.UseSqlite(_connection));
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
         services.AddLogging();
         _sp = services.BuildServiceProvider();
@@ -54,7 +56,10 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
 
     private AppDbContext GetDb() => _sp.GetRequiredService<AppDbContext>();
 
-    private TelemetryQueryService CreateService(AppDbContext db)
+    /// <summary>只读上下文（被测服务注入的类型）</summary>
+    private AppReadDbContext GetReadDb() => _sp.GetRequiredService<AppReadDbContext>();
+
+    private TelemetryQueryService CreateService(AppReadDbContext db)
     {
         var logger = _sp.GetRequiredService<ILogger<TelemetryQueryService>>();
         return new TelemetryQueryService(db, logger);
@@ -104,7 +109,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         await InsertTelemetryAsync(db, _deviceId, "temperature", t0, 10.0);
         await InsertTelemetryAsync(db, _deviceId, "temperature", t1, 20.0);
 
-        var service = CreateService(db);
+        var service = CreateService(GetReadDb());
         var result = await service.QueryAsync(_deviceId, "temperature", t0.AddMinutes(-1), t2.AddMinutes(1));
 
         result.Should().HaveCount(3);
@@ -129,7 +134,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         await InsertTelemetryAsync(db, _deviceId, "pressure", inside, 2.0);
         await InsertTelemetryAsync(db, _deviceId, "pressure", after, 3.0);
 
-        var service = CreateService(db);
+        var service = CreateService(GetReadDb());
         var result = await service.QueryAsync(_deviceId, "pressure", windowStart, windowStart.AddHours(5));
 
         result.Should().HaveCount(1);
@@ -147,7 +152,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         await InsertTelemetryAsync(db, _deviceId, "humidity", t, 60.0);
         await InsertTelemetryAsync(db, _deviceId, "vibration", t, 5.0);
 
-        var service = CreateService(db);
+        var service = CreateService(GetReadDb());
         var result = await service.QueryAsync(_deviceId, "temperature", t.AddMinutes(-1), t.AddMinutes(1));
 
         result.Should().HaveCount(1);
@@ -162,7 +167,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         var t = DateTime.UtcNow.AddMinutes(-5);
         await InsertTelemetryAsync(db, _deviceId, "current", t, value: null);
 
-        var service = CreateService(db);
+        var service = CreateService(GetReadDb());
         var result = await service.QueryAsync(_deviceId, "current", t.AddMinutes(-1), t.AddMinutes(1));
 
         result.Should().HaveCount(1);
@@ -172,7 +177,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
     [Fact]
     public async Task QueryAsync_NoData_ReturnsEmpty()
     {
-        var service = CreateService(GetDb());
+        var service = CreateService(GetReadDb());
         var result = await service.QueryAsync(_deviceId, "temperature",
             DateTime.UtcNow.AddHours(-1), DateTime.UtcNow);
 
@@ -198,7 +203,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         await InsertTelemetryAsync(db, _deviceId, "pressure", baseTime, 1.0);
         await InsertTelemetryAsync(db, _deviceId, "pressure", baseTime.AddHours(1), 1.2);
 
-        var service = CreateService(db);
+        var service = CreateService(GetReadDb());
         var result = await service.GetLatestAsync(_deviceId);
 
         result.Should().HaveCount(2);
@@ -214,7 +219,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         var t = DateTime.UtcNow.AddMinutes(-5);
         await InsertTelemetryAsync(db, _deviceId, "current", t, value: null);
 
-        var service = CreateService(db);
+        var service = CreateService(GetReadDb());
         var result = await service.GetLatestAsync(_deviceId);
 
         result.Should().ContainKey("current");
@@ -224,7 +229,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
     [Fact]
     public async Task GetLatestAsync_NoData_ReturnsEmpty()
     {
-        var service = CreateService(GetDb());
+        var service = CreateService(GetReadDb());
         var result = await service.GetLatestAsync(_deviceId);
 
         result.Should().BeEmpty();

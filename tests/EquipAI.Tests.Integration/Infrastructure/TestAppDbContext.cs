@@ -12,23 +12,10 @@ namespace EquipAI.Tests.Integration.Infrastructure;
 /// </summary>
 public class TestAppDbContext : AppDbContext
 {
-    private readonly ITenantContext _testTenantContext;
-
     public TestAppDbContext(DbContextOptions<AppDbContext> options, ITenantContext tenantContext)
         : base(options, tenantContext)
     {
-        // 保存租户上下文引用，供 GetCurrentTenantId 方法使用
-        _testTenantContext = tenantContext;
     }
-
-    /// <summary>
-    /// 声明与基类同名的方法，解决 Expression.Call 在子类类型上找不到方法的问题。
-    /// 基类 AppDbContext.OnModelCreating 中使用 Expression.Call(constant(this), "GetCurrentTenantId", null)
-    /// 构建多租户查询过滤器。当 DI 容器创建 TestAppDbContext 实例时，Expression.Constant(this) 的运行时类型
-    /// 是 TestAppDbContext，而基类的 GetCurrentTenantId 是 private 的，Expression.Call 无法在子类类型上找到。
-    /// 通过在子类中声明同名方法，确保表达式能正确绑定。
-    /// </summary>
-    private Guid GetCurrentTenantId() => _testTenantContext.TenantId;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -12,15 +12,18 @@ public record TelemetryDataPoint(DateTime Time, double Value);
 /// <summary>
 /// 遥测数据查询服务
 /// 负责查询设备历史遥测数据和最新实时数据，供前端图表展示使用
-/// 多租户隔离由 AppDbContext 全局查询过滤器自动处理
+/// 多租户隔离由 AppReadDbContext 全局查询过滤器自动处理（继承自 AppDbContext）
+///
+/// v1.6 读路径分离：改注入只读上下文 AppReadDbContext（NoTracking + 可选只读副本），
+/// 遥测时序聚合查询不再占用主库连接池，减轻写入路径压力。
 /// </summary>
 public class TelemetryQueryService
 {
-    private readonly AppDbContext _dbContext;
+    private readonly AppReadDbContext _dbContext;
     private readonly ILogger<TelemetryQueryService> _logger;
 
     public TelemetryQueryService(
-        AppDbContext dbContext,
+        AppReadDbContext dbContext,
         ILogger<TelemetryQueryService> logger)
     {
         _dbContext = dbContext;

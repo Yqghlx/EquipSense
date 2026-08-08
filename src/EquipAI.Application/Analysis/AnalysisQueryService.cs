@@ -10,14 +10,17 @@ namespace EquipAI.Application.Analysis;
 /// <summary>
 /// AI 分析结果查询服务。
 /// 封装分析结果的列表/详情查询，使 Controller 不直接依赖 <c>AppDbContext</c>。
-/// 多租户隔离由 AppDbContext 全局查询过滤器自动处理。
+/// 多租户隔离由 AppReadDbContext 全局查询过滤器自动处理（继承自 AppDbContext）。
+///
+/// v1.6 读路径分离：改注入只读上下文 AppReadDbContext（NoTracking + 可选只读副本），
+/// 历史分析结果查询不再占用主库连接池。
 /// </summary>
 public class AnalysisQueryService
 {
-    private readonly AppDbContext _dbContext;
+    private readonly AppReadDbContext _dbContext;
     private readonly IMapper _mapper;
 
-    public AnalysisQueryService(AppDbContext dbContext, IMapper mapper)
+    public AnalysisQueryService(AppReadDbContext dbContext, IMapper mapper)
     {
         _dbContext = dbContext;
         _mapper = mapper;

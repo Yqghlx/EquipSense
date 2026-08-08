@@ -64,6 +64,20 @@ public static class ServiceCollectionExtensions
                     errorCodesToAdd: null));
         });
 
+        // 只读副本 DbContext（CQRS 读路径）：独立连接串 ConnectionStrings:ReadOnly，
+        // 默认退化为指向主库（未配置副本时行为零变化）。
+        // NoTracking 跳过变更跟踪，复杂分析查询更快；SaveChanges 被重写为抛异常防误写。
+        services.AddDbContext<AppReadDbContext>(options =>
+        {
+            options.UseNpgsql(
+                configuration.GetConnectionString("ReadOnly") ?? configuration.GetConnectionString("Default"),
+                npgsqlOptions => npgsqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 6,
+                    maxRetryDelay: TimeSpan.FromSeconds(30),
+                    errorCodesToAdd: null));
+            options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+        });
+
         // 租户上下文注册为 Scoped，从 HttpContext.Items["TenantContext"] 中获取
         // TenantResolutionMiddleware 在管道中先于业务逻辑执行，将解析好的 ITenantContext 存入 HttpContext.Items
         services.AddScoped<ITenantContext>(sp =>

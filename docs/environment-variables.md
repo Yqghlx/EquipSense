@@ -6,7 +6,10 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
-| `ConnectionStrings__Default` | PostgreSQL 连接字符串 | `Host=localhost;Port=5432;Database=equipai;Username=equipai;Password=...` | 是 |
+| `ConnectionStrings__Default` | PostgreSQL 连接字符串（读写主库） | `Host=localhost;Port=5432;Database=equipai;Username=equipai;Password=...` | 是 |
+| `ConnectionStrings__ReadOnly` | PostgreSQL 只读副本连接串（CQRS 读路径）。未配置或等于 Default 时退化为单库（只读上下文指向主库，行为零变化）。配置独立副本后纯读 QueryService（遥测、分析）路由到此库 | 同 Default | 否 |
+| `READONLY_DB_HOST` | docker-compose 中只读副本的主机（覆盖 ReadOnly 连接的 Host） | `postgres`（同主库） | 否 |
+| `READONLY_DB_PORT` | docker-compose 中只读副本的端口 | `5432`（同主库） | 否 |
 | `PG_PASSWORD` | Docker 部署中的 PostgreSQL 密码 | — | Docker 部署必填 |
 
 ## 认证

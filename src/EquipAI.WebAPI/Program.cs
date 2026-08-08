@@ -190,11 +190,17 @@ try
         });
 
     // 健康检查：三级探针 — startup(仅DB) / liveness(DB+Redis) / ready(全部)
+    // replica-postgresql 只挂 ready tag（不挂 startup/liveness）：
+    // 只读副本故障不应阻止应用启动，也不应让 k8s/docker 误判应用不存活（主库仍可用）
     builder.Services.AddHealthChecks()
         .AddNpgSql(builder.Configuration.GetConnectionString("Default")!, name: "postgresql", tags: new[] { "startup", "liveness", "ready" })
         .AddRedis(builder.Configuration["Redis:ConnectionString"]!, name: "redis", tags: new[] { "liveness", "ready" })
         .AddCheck<MqttHealthCheck>("mqtt", tags: new[] { "ready" })
-        .AddCheck<LlmHealthCheck>("llm", tags: new[] { "ready" }, timeout: TimeSpan.FromSeconds(5));
+        .AddCheck<LlmHealthCheck>("llm", tags: new[] { "ready" }, timeout: TimeSpan.FromSeconds(5))
+        .AddNpgSql(
+            builder.Configuration.GetConnectionString("ReadOnly") ?? builder.Configuration.GetConnectionString("Default")!,
+            name: "replica-postgresql",
+            tags: new[] { "ready" });
 
     // 业务指标采集后台服务 — 每 30 秒从数据库采集 Gauge 指标
     builder.Services.AddHostedService<BusinessMetricsCollector>();
