@@ -229,6 +229,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<DeviceImportService>();
         services.AddScoped<Application.Devices.DeviceTypeTemplateService>();
+        services.AddScoped<Application.Devices.DeviceConfigService>();
 
         // RBAC 权限校验服务注册为 Singleton，内部使用静态权限矩阵，无状态
         services.AddSingleton<IRbacService, RbacService>();
@@ -256,6 +257,7 @@ public static class ServiceCollectionExtensions
 
         // 告警评估服务（Scoped — 需要 DbContext）
         services.AddScoped<IAlertEvaluationService, AlertEvaluationService>();
+        services.AddScoped<Application.Alerts.AlertRuleService>();
 
         // 内存缓存（供 DataQualityService 等服务使用）
         services.AddMemoryCache();
@@ -289,6 +291,7 @@ public static class ServiceCollectionExtensions
 
         // 智能派工服务 — 基于技能匹配 + 负载均衡推荐最佳技术人员
         services.AddScoped<ISmartDispatchService, SmartDispatchService>();
+        services.AddScoped<Application.WorkOrders.TechnicianProfileService>();
 
         // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
         services.AddScoped<KnowledgeCaptureService>();
@@ -363,6 +366,7 @@ public static class ServiceCollectionExtensions
 
         // 通知偏好设置服务 — 读写用户 NotificationPrefs JSONB 字段
         services.AddScoped<NotificationPreferenceService>();
+        services.AddScoped<NotificationService>();
 
         // SMTP 邮件通知服务 — 通过 SMTP 协议发送告警/工单邮件（需配置 Smtp 节）
         services.AddScoped<SmtpEmailNotificationService>();

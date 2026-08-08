@@ -1,9 +1,7 @@
 using EquipAI.Application.Notifications;
 using EquipAI.Core.Interfaces;
-using EquipAI.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -15,14 +13,17 @@ namespace EquipAI.WebAPI.Controllers;
 [Authorize]
 public class NotificationsController : ControllerBase
 {
-    private readonly AppDbContext _db;
     private readonly ITenantContext _tenantContext;
+    private readonly NotificationService _notificationService;
     private readonly NotificationPreferenceService _prefService;
 
-    public NotificationsController(AppDbContext db, ITenantContext tenantContext, NotificationPreferenceService prefService)
+    public NotificationsController(
+        ITenantContext tenantContext,
+        NotificationService notificationService,
+        NotificationPreferenceService prefService)
     {
-        _db = db;
         _tenantContext = tenantContext;
+        _notificationService = notificationService;
         _prefService = prefService;
     }
 
@@ -35,47 +36,14 @@ public class NotificationsController : ControllerBase
         [FromQuery] int pageSize = 20,
         [FromQuery] bool? unreadOnly = null,
         CancellationToken ct = default)
-    {
-        var query = _db.Notifications
-            .Where(n => n.UserId == _tenantContext.UserId);
-
-        if (unreadOnly == true)
-        {
-            query = query.Where(n => !n.IsRead);
-        }
-
-        var total = await query.CountAsync(ct);
-
-        var items = await query
-            .OrderByDescending(n => n.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(n => new
-            {
-                n.Id,
-                n.Type,
-                n.Title,
-                n.Content,
-                n.RelatedId,
-                n.Link,
-                n.IsRead,
-                n.CreatedAt,
-            })
-            .ToListAsync(ct);
-
-        return Ok(new { items, total, page, pageSize });
-    }
+        => Ok(await _notificationService.ListAsync(page, pageSize, unreadOnly, ct));
 
     /// <summary>
     /// 获取当前用户未读通知数量
     /// </summary>
     [HttpGet("unread-count")]
     public async Task<ActionResult<int>> GetUnreadCount(CancellationToken ct)
-    {
-        var count = await _db.Notifications
-            .CountAsync(n => n.UserId == _tenantContext.UserId && !n.IsRead, ct);
-        return Ok(count);
-    }
+        => Ok(await _notificationService.GetUnreadCountAsync(ct));
 
     /// <summary>
     /// 标记指定通知为已读
@@ -83,17 +51,8 @@ public class NotificationsController : ControllerBase
     [HttpPut("{id:guid}/read")]
     public async Task<ActionResult> MarkRead(Guid id, CancellationToken ct)
     {
-        var notification = await _db.Notifications
-            .FirstOrDefaultAsync(n => n.Id == id && n.UserId == _tenantContext.UserId, ct);
-
-        if (notification is null)
-        {
-            return NotFound();
-        }
-
-        notification.IsRead = true;
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
+        var ok = await _notificationService.MarkReadAsync(id, ct);
+        return ok ? NoContent() : NotFound();
     }
 
     /// <summary>
@@ -102,10 +61,7 @@ public class NotificationsController : ControllerBase
     [HttpPut("read-all")]
     public async Task<ActionResult> MarkAllRead(CancellationToken ct)
     {
-        await _db.Notifications
-            .Where(n => n.UserId == _tenantContext.UserId && !n.IsRead)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(n => n.IsRead, true), ct);
-
+        await _notificationService.MarkAllReadAsync(ct);
         return NoContent();
     }
 
@@ -115,17 +71,8 @@ public class NotificationsController : ControllerBase
     [HttpDelete("{id:guid}")]
     public async Task<ActionResult> DeleteNotification(Guid id, CancellationToken ct)
     {
-        var notification = await _db.Notifications
-            .FirstOrDefaultAsync(n => n.Id == id && n.UserId == _tenantContext.UserId, ct);
-
-        if (notification is null)
-        {
-            return NotFound();
-        }
-
-        _db.Notifications.Remove(notification);
-        await _db.SaveChangesAsync(ct);
-        return NoContent();
+        var ok = await _notificationService.DeleteAsync(id, ct);
+        return ok ? NoContent() : NotFound();
     }
 
     /// <summary>

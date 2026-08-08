@@ -34,8 +34,9 @@ public class AnalysesController : ControllerBase
     [ProducesResponseType(typeof(PagedResult<AnalysisDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<AnalysisDto>>> GetAnalyses(
         [FromQuery] PagedQuery query,
-        [FromQuery] Guid? deviceId = null)
-        => Ok(await _queryService.ListAsync(query, deviceId));
+        [FromQuery] Guid? deviceId = null,
+        CancellationToken ct = default)
+        => Ok(await _queryService.ListAsync(query, deviceId, ct));
 
     /// <summary>
     /// 根据 ID 获取单条分析结果详情
@@ -44,9 +45,9 @@ public class AnalysesController : ControllerBase
     [RequirePermission("analysis:read")]
     [ProducesResponseType(typeof(AnalysisDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AnalysisDto>> GetAnalysis(Guid id)
+    public async Task<ActionResult<AnalysisDto>> GetAnalysis(Guid id, CancellationToken ct = default)
     {
-        var analysis = await _queryService.GetAsync(id);
+        var analysis = await _queryService.GetAsync(id, ct);
         if (analysis == null)
             return NotFound(new { code = 404, message = "分析记录不存在" });
 
@@ -61,9 +62,9 @@ public class AnalysesController : ControllerBase
     [RequirePermission("analysis:trigger")]
     [ProducesResponseType(typeof(AnalysisDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AnalysisDto>> TriggerAnalysis([FromBody] CreateAnalysisRequest request)
+    public async Task<ActionResult<AnalysisDto>> TriggerAnalysis([FromBody] CreateAnalysisRequest request, CancellationToken ct = default)
     {
-        var (analysis, alertFound) = await _triggerService.TriggerFromAlertAsync(request.AlertId);
+        var (analysis, alertFound) = await _triggerService.TriggerFromAlertAsync(request.AlertId, ct);
         if (!alertFound || analysis is null)
             return NotFound(new { code = 404, message = "告警不存在" });
 

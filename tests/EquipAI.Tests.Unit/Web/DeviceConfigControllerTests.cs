@@ -1,3 +1,4 @@
+using EquipAI.Application.Devices;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
@@ -78,7 +79,8 @@ public class DeviceConfigControllerTests : IAsyncLifetime
         using var scope = _sp.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
-        var controller = new DeviceConfigController(db, tenantContext);
+        var service = new DeviceConfigService(db, tenantContext);
+        var controller = new DeviceConfigController(service);
 
         await controller.QuickRegister(new QuickRegisterRequest
         {
