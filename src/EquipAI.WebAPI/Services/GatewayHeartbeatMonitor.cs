@@ -1,3 +1,4 @@
+using EquipAI.Application.Hosting;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -9,40 +10,27 @@ namespace EquipAI.WebAPI.Services;
 ///
 /// 定期检查已注册网关的 LastHeartbeatAt，将超时的网关标记为 offline。
 /// </summary>
-public class GatewayHeartbeatMonitor : BackgroundService
+public class GatewayHeartbeatMonitor : LockedTimerService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
-    private readonly ILogger<GatewayHeartbeatMonitor> _logger;
 
     public GatewayHeartbeatMonitor(
         IServiceProvider serviceProvider,
         IConfiguration configuration,
+        IDistributedLockProvider lockProvider,
         ILogger<GatewayHeartbeatMonitor> logger)
+        : base(lockProvider, logger, lockResource: "gateway-heartbeat-monitor", lockExpiry: TimeSpan.FromMinutes(5))
     {
         _serviceProvider = serviceProvider;
         _configuration = configuration;
-        _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("网关心跳监控服务已启动");
+    /// <summary>每 30s 检查一次网关心跳。</summary>
+    protected override TimeSpan DefaultInterval => TimeSpan.FromSeconds(30);
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await CheckHeartbeatsAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "网关心跳检查异常");
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
-        }
-    }
+    /// <summary>基类回调：持锁后执行心跳检查。委托给 <see cref="CheckHeartbeatsAsync"/> 以便单元测试直接验证。</summary>
+    protected override Task ExecuteWorkAsync(CancellationToken ct) => CheckHeartbeatsAsync(ct);
 
     /// <summary>
     /// 检查所有网关的心跳状态。public 便于单元测试直接验证（跳过 ExecuteAsync 的 Task.Delay 调度）。
@@ -69,7 +57,7 @@ public class GatewayHeartbeatMonitor : BackgroundService
         foreach (var gateway in expiredGateways)
         {
             gateway.Status = "offline";
-            _logger.LogInformation("网关 {GatewayId}（{Name}）心跳超时，标记为 offline", gateway.GatewayId, gateway.Name);
+            Logger.LogInformation("网关 {GatewayId}（{Name}）心跳超时，标记为 offline", gateway.GatewayId, gateway.Name);
 
             // 推送网关离线通知（P0 工业：网关是数据采集入口，离线=该网关下设备数据断，运维需立即知晓）。
             // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强），
@@ -80,7 +68,7 @@ public class GatewayHeartbeatMonitor : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "网关离线通知推送失败，不影响离线标记: GatewayId={GatewayId}", gateway.GatewayId);
+                Logger.LogWarning(ex, "网关离线通知推送失败，不影响离线标记: GatewayId={GatewayId}", gateway.GatewayId);
             }
         }
 

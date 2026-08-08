@@ -76,6 +76,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 return instance;
             });
 
+            // 移除真实的 IConnectionMultiplexer，避免启动时连接 Redis（生产注册在 ServiceCollectionExtensions）
+            // ConnectionMultiplexer.Connect 在测试环境会立即失败抛 RedisConnectionException
+            // 测试环境无组件解析 IConnectionMultiplexer（唯一消费者 RedisDistributedLockProvider 已被下方存根替换）
+            services.RemoveAll<StackExchange.Redis.IConnectionMultiplexer>();
+
+            // 分布式锁：单实例测试环境用总是可获取的存根（无真实 Redis 依赖）
+            services.RemoveAll<EquipAI.Core.Interfaces.IDistributedLockProvider>();
+            services.AddSingleton<EquipAI.Core.Interfaces.IDistributedLockProvider, AlwaysAcquireLockProvider>();
+
             // 注册种子数据服务
             services.AddScoped<DataSeeder>();
         });

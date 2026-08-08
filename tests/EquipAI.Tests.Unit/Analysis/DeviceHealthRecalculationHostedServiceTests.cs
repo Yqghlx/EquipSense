@@ -3,6 +3,7 @@ using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -39,6 +40,8 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
         services.AddScoped<ITenantContext>(_ => new BackgroundTenantContext());
         services.AddLogging();
         services.AddScoped<DeviceHealthService>();
+        // 后台服务现在依赖 IDistributedLockProvider（LockedTimerService 基类）；测试用始终获取锁的 mock
+        services.AddSingleton<IDistributedLockProvider, AlwaysAcquireLockProvider>();
         services.AddSingleton<DeviceHealthRecalculationHostedService>();
         _sp = services.BuildServiceProvider();
 

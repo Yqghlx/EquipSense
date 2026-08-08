@@ -1,8 +1,9 @@
+using EquipAI.Application.Hosting;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Application.WorkOrders;
@@ -18,45 +19,31 @@ namespace EquipAI.Application.WorkOrders;
 /// 本服务每 5 分钟遍历所有活跃（非 Expired、非系统）租户，逐租户调用 CheckAndEscalateAsync。
 /// 通知能力由 SlaManagementService 通过其注入的 ISignalRNotificationService 自动完成（DI 解析 3 参构造函数）。
 /// 单租户失败不阻断其余租户（捕获并记录）。
+/// 多实例部署下通过分布式锁保证仅一个实例执行升级扫描（避免重复升级 + 重复 DB 负载）。
 /// </summary>
-public class SlaEscalationHostedService : BackgroundService
+public class SlaEscalationHostedService : LockedTimerService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<SlaEscalationHostedService> _logger;
 
-    /// <summary>扫描间隔：5 分钟。Critical SLA 为 2h，5 分钟粒度足以及时捕获超时且 DB 负载极低。</summary>
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromMinutes(5);
-
-    /// <summary>启动延迟：等待应用完全启动后再扫描，避免启动期 DB 压力叠加。</summary>
-    private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(30);
-
-    public SlaEscalationHostedService(IServiceScopeFactory scopeFactory, ILogger<SlaEscalationHostedService> logger)
+    public SlaEscalationHostedService(
+        IServiceScopeFactory scopeFactory,
+        IDistributedLockProvider lockProvider,
+        ILogger<SlaEscalationHostedService> logger)
+        : base(lockProvider, logger, lockResource: "sla-escalation", lockExpiry: TimeSpan.FromMinutes(10))
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
     }
 
-    /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // 首次延迟等待应用完全启动
-        await Task.Delay(StartupDelay, stoppingToken);
+    /// <summary>启动延迟：等待应用完全启动后再扫描，避免启动期 DB 压力叠加。</summary>
+    protected override TimeSpan DefaultStartupDelay => TimeSpan.FromSeconds(30);
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await RunEscalationAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                // 单次扫描整体失败不应终止后台循环，记录后等待下次扫描
-                _logger.LogError(ex, "SLA 升级扫描执行失败");
-            }
+    /// <summary>扫描间隔：5 分钟。Critical SLA 为 2h，5 分钟粒度足以及时捕获超时且 DB 负载极低。</summary>
+    protected override TimeSpan DefaultInterval => TimeSpan.FromMinutes(5);
 
-            await Task.Delay(ScanInterval, stoppingToken);
-        }
-    }
+    /// <summary>
+    /// 基类回调：持锁后执行 SLA 升级扫描。委托给 <see cref="RunEscalationAsync"/> 以便单元测试直接验证升级逻辑。
+    /// </summary>
+    protected override async Task ExecuteWorkAsync(CancellationToken ct) => await RunEscalationAsync(ct);
 
     /// <summary>
     /// 单次扫描：遍历所有活跃租户，逐租户执行 SLA 升级。
@@ -87,13 +74,13 @@ public class SlaEscalationHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "租户 {TenantId} 的 SLA 升级失败", tenantId);
+                Logger.LogError(ex, "租户 {TenantId} 的 SLA 升级失败", tenantId);
             }
         }
 
         if (totalEscalated > 0)
         {
-            _logger.LogInformation("SLA 升级扫描完成：处理 {TenantCount} 个租户，累计升级 {EscalatedCount} 个工单",
+            Logger.LogInformation("SLA 升级扫描完成：处理 {TenantCount} 个租户，累计升级 {EscalatedCount} 个工单",
                 tenants.Count, totalEscalated);
         }
 

@@ -4,6 +4,7 @@ using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -57,6 +58,7 @@ public class SubscriptionExpiryServiceTests : IAsyncLifetime
     private SubscriptionExpiryService CreateService()
         => new(
             _sp.GetRequiredService<IServiceScopeFactory>(),
+            new AlwaysAcquireLockProvider(),
             _sp.GetRequiredService<ILogger<SubscriptionExpiryService>>());
 
     [Fact]

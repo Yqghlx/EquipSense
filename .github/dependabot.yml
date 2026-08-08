@@ -1,0 +1,126 @@
+# Dependabot 依赖更新配置
+#
+# 自动监测依赖更新并创建 PR，配合 CI 门禁（NuGet 漏洞阻断 + npm 审计 + Trivy 镜像扫描）
+# 形成闭环：依赖出 CVE → Dependabot 提 PR → CI 扫描验证 → 合并即修复。
+#
+# 策略：
+#   - 安全更新与次要版本更新开启（major 版本单独分组便于人工评估）
+#   - 每周一集中出 PR，避免高频打扰
+#   - 按生态分组（group），同生态多个依赖合并为一个 PR，减少 PR 数量
+#   - 限制每个生态同时最多 5 个开放 PR
+version: 2
+
+updates:
+  # ============================================================
+  # GitHub Actions — CI workflow 中的 action 版本
+  # ============================================================
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # ============================================================
+  # NuGet — 后端 .NET 依赖
+  # ============================================================
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+      - nuget
+    commit-message:
+      prefix: deps
+      include: scope
+    # 主版本（major）单独成 PR，便于人工评估破坏性变更
+    groups:
+      # 安全更新优先独立成 PR（CVE 修复不应被次要更新拖延）
+      security-updates:
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+        # 注：安全更新 Dependabot 会自动单独成 PR，此 group 仅聚合普通次要/补丁更新
+      ef-core:
+        patterns:
+          - "Microsoft.EntityFrameworkCore*"
+          - "Npgsql*"
+      aspnet:
+        patterns:
+          - "Microsoft.AspNetCore*"
+          - "Microsoft.Extensions.*"
+      testing:
+        patterns:
+          - "xunit*"
+          - "Moq"
+          - "FluentAssertions"
+          - "Microsoft.NET.Test.Sdk"
+
+  # ============================================================
+  # npm — 前端依赖
+  # ============================================================
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+      - npm
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      # React 生态整体升级（react/react-dom/react-router/@types/react 同步更新）
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "react-router"
+          - "react-router-dom"
+          - "@types/react"
+          - "@types/react-dom"
+      # 开发依赖合并（lint/build/test 工具）
+      dev-tools:
+        dependency-type: development
+      # ECharts + 图表相关
+      charts:
+        patterns:
+          - "echarts"
+          - "echarts-for-react"
+    ignore:
+      # 主版本需人工评估（React 19 等大版本升级走专门 PR）
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # ============================================================
+  # Docker — Dockerfile 基础镜像
+  # ============================================================
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: deps
+      include: scope

@@ -102,6 +102,7 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | `Gateway__Id` | 网关唯一标识 | `gateway-001` | 否 |
 | `Gateway__TenantId` | 所属租户 ID | — | 是 |
 | `Gateway__BackendUrl` | 后端 API 地址 | `http://localhost:8080` | 是 |
+| `Gateway__RequireHttps` | 强制后端 API 走 HTTPS（AuthKey 经 `X-Gateway-Auth-Key` 头明文传输，HTTP 下会泄露密钥） | `false` | 网关独立部署（跨网络访问后端）时必填 `true`；Docker Compose 内网（容器间通信）可保持 `false` |
 | `Gateway__MqttBroker` | MQTT Broker 地址 | `localhost:1883` | 否 |
 | `Gateway__MqttUseTls` | 是否启用 MQTT TLS | `false` | 生产环境必填为 `true` |
 | `Gateway__MqttAllowUntrustedCertificates` | 是否忽略服务端证书校验 | `false` | 生产环境必须为 `false` |

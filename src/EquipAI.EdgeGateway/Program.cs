@@ -48,6 +48,24 @@ try
     var gatewayOpts = new GatewayOptions();
     builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(gatewayOpts);
 
+    // 安全门禁：RequireHttps=true 时强制 BackendUrl 必须是 https
+    // AuthKey 经 X-Gateway-Auth-Key 头明文传输，HTTP 下会泄露网关认证密钥
+    if (gatewayOpts.RequireHttps)
+    {
+        if (string.IsNullOrWhiteSpace(gatewayOpts.BackendUrl))
+        {
+            throw new InvalidOperationException(
+                "RequireHttps=true 但未配置 BackendUrl。请在配置中设置 Gateway__BackendUrl 为 https:// 地址。");
+        }
+        if (!gatewayOpts.BackendUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"RequireHttps=true 但 BackendUrl='{gatewayOpts.BackendUrl}' 非 https。" +
+                "AuthKey 经 X-Gateway-Auth-Key 头传输，HTTP 明文会泄露密钥。" +
+                "请改用 https:// 地址，或显式设置 Gateway__RequireHttps=false（仅限开发环境）。");
+        }
+    }
+
     var mqttParts = gatewayOpts.MqttBroker.Split(':', 2, StringSplitOptions.TrimEntries);
     var mqttPort = mqttParts.Length > 1 && int.TryParse(mqttParts[1], out var configuredMqttPort)
         ? configuredMqttPort
@@ -178,6 +196,22 @@ try
 
     var host = builder.Build();
     Log.Information("边缘网关启动中...");
+
+    // OPC UA 安全模式告警：生产环境 None/Sign 模式记录显著警告（不阻断，因部分老旧 PLC 不支持安全模式）
+    // validator 返回 (Level, Message)? —— Core 层不依赖日志框架，由宿主记录
+    var enabledProtocols = devices.Select(d => d.Protocol).Distinct().ToArray();
+    var opcUaAlert = OpcUaSecurityConfigurationValidator.Validate(
+        environmentName: builder.Environment.EnvironmentName,
+        securityMode: gatewayOpts.OpcUaSecurityMode,
+        enabledProtocols: enabledProtocols);
+    if (opcUaAlert is { } alert)
+    {
+        if (alert.Level == OpcUaSecurityAlertLevel.Error)
+            Log.Error(alert.Message);
+        else
+            Log.Warning(alert.Message);
+    }
+
     await host.RunAsync();
 }
 catch (Exception ex)

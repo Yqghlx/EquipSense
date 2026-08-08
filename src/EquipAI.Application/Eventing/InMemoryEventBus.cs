@@ -12,12 +12,24 @@ namespace EquipAI.Application.Eventing;
 public class InMemoryEventBus : IEventBus, IDisposable
 {
     /// <summary>
-    /// 事件通道，有界容量 1000，满时丢弃最旧的事件以防止内存溢出
+    /// 事件通道有界容量。扩容到 10000：原 1000 在告警风暴或批量遥测下极易打满，
+    /// DropOldest 会静默丢弃最早的事件（包括告警触发、工单创建这类绝不能丢的业务事件），
+    /// 导致下游 SignalR 推送、自动建单、知识沉淀丢失，且生产环境难以察觉。
     /// </summary>
+    private const int ChannelCapacity = 10000;
+
+    /// <summary>
+    /// 发布端在通道满时的等待超时：超过则放弃写入并记录错误，避免高吞吐遥测发布者
+    /// 长时间阻塞拖垮采集线程。正常负载下通道容量充裕，该超时几乎不会触发。
+    /// </summary>
+    private static readonly TimeSpan PublishFullTimeout = TimeSpan.FromSeconds(5);
+
     private readonly Channel<IIntegrationEvent> _channel = Channel.CreateBounded<IIntegrationEvent>(
-        new BoundedChannelOptions(1000)
+        new BoundedChannelOptions(ChannelCapacity)
         {
-            FullMode = BoundedChannelFullMode.DropOldest,
+            // Wait 而非 DropOldest：业务事件（告警、工单）丢失代价远高于发布端短暂背压。
+            // 配合 PublishFullTimeout 兜底，避免无限阻塞。
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false
         });
@@ -68,8 +80,24 @@ public class InMemoryEventBus : IEventBus, IDisposable
             return;
         }
 
-        await _channel.Writer.WriteAsync(@event, cancellationToken);
-        _logger.LogDebug("事件 {EventType} 已发布 (EventId: {EventId})", typeof(TEvent).Name, @event.EventId);
+        // Wait 模式下通道满时 WriteAsync 会阻塞，直到消费者腾出空位。
+        // 用复合 CTS 施加 PublishFullTimeout 兜底：超时说明消费严重滞后（处理器卡在 DB/外部调用），
+        // 此时丢弃【这一个】事件并记错误日志，比无限阻塞发布线程（可能拖垮遥测采集）更可控。
+        // 业务事件极少触发：容量 10000 + 超时 5s 意味着需要消费停滞且积压 10000 才会丢。
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(PublishFullTimeout);
+        try
+        {
+            await _channel.Writer.WriteAsync(@event, linkedCts.Token);
+            _logger.LogDebug("事件 {EventType} 已发布 (EventId: {EventId})", typeof(TEvent).Name, @event.EventId);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // 超时（非调用方取消）：通道持续满 5s，消费者已严重滞后。记录而非吞掉，便于运维发现。
+            _logger.LogError(
+                "事件 {EventType} (EventId: {EventId}) 发布超时：事件通道已满 {Capacity} 且消费滞后超过 {Timeout}s，事件被丢弃",
+                typeof(TEvent).Name, @event.EventId, ChannelCapacity, PublishFullTimeout.TotalSeconds);
+        }
     }
 
     /// <summary>

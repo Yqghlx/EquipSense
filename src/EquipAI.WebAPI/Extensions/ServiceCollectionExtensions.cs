@@ -27,6 +27,7 @@ using EquipAI.Infrastructure.Identity;
 using EquipAI.Infrastructure.Messaging;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Tenant;
+using StackExchange.Redis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -83,6 +84,22 @@ public static class ServiceCollectionExtensions
 
         // Redis 缓存服务，Singleton 生命周期，整个应用共享一个连接
         services.AddSingleton<RedisService>();
+
+        // Redis 连接多路复用器（Singleton），供分布式锁等共享同一连接池。
+        // RedisService 内部自建连接以保持解耦；此处额外注册 IConnectionMultiplexer 供需要直接操作 Redis 的组件复用。
+        services.AddSingleton<IConnectionMultiplexer>(sp =>
+        {
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            var connectionString = configuration["Redis:ConnectionString"];
+            if (string.IsNullOrEmpty(connectionString))
+            {
+                connectionString = "localhost:6379";
+            }
+            return ConnectionMultiplexer.Connect(connectionString);
+        });
+
+        // 分布式锁提供者，供后台服务在多实例部署下互斥执行（单实例下锁恒可获取，行为不变）
+        services.AddSingleton<IDistributedLockProvider, RedisDistributedLockProvider>();
 
         // JWT 令牌服务，Singleton 生命周期，无状态服务
         services.AddSingleton<JwtTokenService>();

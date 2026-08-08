@@ -1,0 +1,33 @@
+# 生产环境 Compose 覆盖（拉取 CI 构建的镜像，不在服务器本地构建）
+#
+# 用法（生产服务器）：
+#   export TAG=1.2.0  # 与 git tag 一致（不带 v 前缀）
+#   docker compose \
+#     -f docker/docker-compose.yml \
+#     -f docker/docker-compose.prod.yml \
+#     up -d
+#
+# 设计：
+#   - base（docker-compose.yml）用 build: 本地构建，适合开发
+#   - 本覆盖用 image: 指向 GHCR 镜像 + 拉取认证，适合生产
+#   - 保留 base 的所有 environment/volumes/networks，只替换镜像来源
+#   - CD 流水线（.github/workflows/ci.yml deploy job）用此覆盖文件
+#
+# 必需环境变量：
+#   TAG                — 镜像标签（semver 如 1.2.0，或 latest）
+#   GHCR_PULL_USER     — GHCR 拉取用户名（个人访问令牌所属用户）
+#   GHCR_PULL_TOKEN    — GHCR 拉取令牌（read:packages 权限）
+#
+# 镜像 registry：ghcr.io/yqghlx/equipsense/{backend,frontend}
+
+services:
+  backend:
+    image: ghcr.io/yqghlx/equipsense/backend:${TAG:?请设置 TAG 环境变量（如 1.2.0）}
+    # 覆盖 base 的 build:（拉取已构建镜像，不在服务器编译）
+    build: !reset null
+    pull_policy: always
+
+  frontend:
+    image: ghcr.io/yqghlx/equipsense/frontend:${TAG:?请设置 TAG 环境变量（如 1.2.0）}
+    build: !reset null
+    pull_policy: always

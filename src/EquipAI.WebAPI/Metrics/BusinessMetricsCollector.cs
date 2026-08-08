@@ -1,4 +1,6 @@
+using EquipAI.Application.Hosting;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Metrics;
 using Microsoft.EntityFrameworkCore;
@@ -9,10 +11,9 @@ namespace EquipAI.WebAPI.Metrics;
 /// 业务指标采集后台服务 — 每 30 秒从数据库采集 Gauge 类型的业务指标
 /// Counter/Histogram 类型由业务代码在操作时直接记录，无需定时采集
 /// </summary>
-public class BusinessMetricsCollector : BackgroundService
+public class BusinessMetricsCollector : LockedTimerService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<BusinessMetricsCollector> _logger;
 
     /// <summary>上一次采集到的标签集合，用于检测已消失的标签并将其归零</summary>
     private readonly HashSet<string> _lastAlertLabels = [];
@@ -21,31 +22,21 @@ public class BusinessMetricsCollector : BackgroundService
 
     public BusinessMetricsCollector(
         IServiceScopeFactory scopeFactory,
+        IDistributedLockProvider lockProvider,
         ILogger<BusinessMetricsCollector> logger)
+        : base(lockProvider, logger, lockResource: "business-metrics-collector", lockExpiry: TimeSpan.FromMinutes(5))
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // 启动后等待 15 秒，让数据库迁移和种子数据先完成
-        await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken);
+    /// <summary>启动后等待 15 秒，让数据库迁移和种子数据先完成。</summary>
+    protected override TimeSpan DefaultStartupDelay => TimeSpan.FromSeconds(15);
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await CollectAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "业务指标采集失败，将在下个周期重试");
-            }
+    /// <summary>每 30 秒采集一次业务指标。</summary>
+    protected override TimeSpan DefaultInterval => TimeSpan.FromSeconds(30);
 
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
-        }
-    }
+    /// <summary>基类回调：持锁后执行采集。</summary>
+    protected override Task ExecuteWorkAsync(CancellationToken ct) => CollectAsync();
 
     private async Task CollectAsync()
     {

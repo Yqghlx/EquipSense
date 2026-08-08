@@ -1,6 +1,7 @@
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Tests.Unit.TestHelpers;
 using EquipAI.WebAPI.Services;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -61,6 +62,7 @@ public class GatewayHeartbeatMonitorTests : IAsyncLifetime
         => new(
             _sp,
             new ConfigurationBuilder().Build(),  // 空 config，HeartbeatTimeoutSeconds 用默认 90s
+            new AlwaysAcquireLockProvider(),
             _sp.GetRequiredService<ILogger<GatewayHeartbeatMonitor>>());
 
     [Fact]

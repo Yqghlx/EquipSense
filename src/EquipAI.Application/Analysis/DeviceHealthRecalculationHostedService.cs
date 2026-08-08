@@ -1,8 +1,9 @@
+using EquipAI.Application.Hosting;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Application.Analysis;
@@ -18,50 +19,34 @@ namespace EquipAI.Application.Analysis;
 ///
 /// 本服务每 10 分钟遍历所有活跃（非 Expired、非系统）租户，逐租户调用 UpdateAllHealthScoresAsync 重算并
 /// 持久化健康度。单租户失败不阻断其余租户（捕获并记录）。
+/// 多实例部署下通过分布式锁保证仅一个实例执行重算（避免重复计算 + 重复 DB 负载）。
 ///
 /// 注意：DeviceHealthService 的设备/遥测查询已配合加 IgnoreQueryFilters（后台 scope 无 HttpContext，
 /// 默认租户过滤器解析为 Guid.Empty 会吞掉查询），否则即便有定时调用者也会查不到设备而形同空跑。
 /// </summary>
-public class DeviceHealthRecalculationHostedService : BackgroundService
+public class DeviceHealthRecalculationHostedService : LockedTimerService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<DeviceHealthRecalculationHostedService> _logger;
-
-    /// <summary>重算间隔：10 分钟。健康度是慢变指标（基于 7 天告警窗口 + 状态），10 分钟粒度足够及时且 DB 负载可控。</summary>
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromMinutes(10);
-
-    /// <summary>启动延迟：等待应用完全启动后再扫描，避免启动期 DB 压力叠加。</summary>
-    private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(60);
 
     public DeviceHealthRecalculationHostedService(
         IServiceScopeFactory scopeFactory,
+        IDistributedLockProvider lockProvider,
         ILogger<DeviceHealthRecalculationHostedService> logger)
+        : base(lockProvider, logger, lockResource: "device-health-recalculation", lockExpiry: TimeSpan.FromMinutes(20))
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
     }
 
-    /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // 首次延迟等待应用完全启动（健康度重算非启动关键路径，延后避免与迁移/播种争抢 DB）
-        await Task.Delay(StartupDelay, stoppingToken);
+    /// <summary>启动延迟：等待应用完全启动后再扫描，避免启动期 DB 压力叠加（健康度重算非启动关键路径）。</summary>
+    protected override TimeSpan DefaultStartupDelay => TimeSpan.FromSeconds(60);
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await RunRecalculationAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                // 单次扫描整体失败不应终止后台循环，记录后等待下次扫描
-                _logger.LogError(ex, "设备健康度重算扫描执行失败");
-            }
+    /// <summary>重算间隔：10 分钟。健康度是慢变指标（基于 7 天告警窗口 + 状态），10 分钟粒度足够及时且 DB 负载可控。</summary>
+    protected override TimeSpan DefaultInterval => TimeSpan.FromMinutes(10);
 
-            await Task.Delay(ScanInterval, stoppingToken);
-        }
-    }
+    /// <summary>
+    /// 基类回调：持锁后执行重算。委托给 <see cref="RunRecalculationAsync"/> 以便单元测试直接验证重算逻辑。
+    /// </summary>
+    protected override async Task ExecuteWorkAsync(CancellationToken ct) => await RunRecalculationAsync(ct);
 
     /// <summary>
     /// 单次扫描：遍历所有活跃租户，逐租户重算并持久化设备健康度。
@@ -92,13 +77,13 @@ public class DeviceHealthRecalculationHostedService : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "租户 {TenantId} 的设备健康度重算失败", tenantId);
+                Logger.LogError(ex, "租户 {TenantId} 的设备健康度重算失败", tenantId);
             }
         }
 
         if (totalUpdated > 0)
         {
-            _logger.LogInformation("设备健康度重算完成：处理 {TenantCount} 个租户，累计重算 {UpdatedCount} 台设备",
+            Logger.LogInformation("设备健康度重算完成：处理 {TenantCount} 个租户，累计重算 {UpdatedCount} 台设备",
                 tenants.Count, totalUpdated);
         }
 

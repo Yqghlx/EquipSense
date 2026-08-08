@@ -72,37 +72,45 @@ public class WorkOrderService : IWorkOrderService
         var priority = Enum.TryParse<WorkOrderPriority>(request.Priority, ignoreCase: true, out var p)
             ? p : WorkOrderPriority.Medium;
 
-        // 生成唯一工单编码
-        var code = await GenerateCodeAsync(dbContext, tenantId, ct);
+        // 生成唯一工单编码并持久化（带并发冲突重试）
+        // 与 WorkOrderAutoCreateHandler 共用 WorkOrderCodeGenerator，保证两条路径行为一致：
+        // 同样 IgnoreQueryFilters 读跨租户最大序号、同样在唯一约束冲突时重试。
+        // 注意：审计日志在重试成功后写入（持久化之前的 Add 不算落库），避免冲突回滚后残留孤立日志。
+        var workOrder = await WorkOrderCodeGenerator.CreateWithUniqueCodeAsync(
+            dbContext,
+            code => new WorkOrder
+            {
+                TenantId = tenantId,
+                WorkOrderCode = code,
+                Title = request.Title,
+                Type = type,
+                Priority = priority,
+                Status = WorkOrderStatus.PendingDispatch,
+                DeviceId = request.DeviceId,
+                AlertId = request.AlertId,
+                RootCause = request.RootCause,
+                AssignedTo = null,
+                // JSON 反序列化的 DueDate 可能 Kind=Unspecified，入库 timestamptz 列前需转 Utc
+                DueDate = request.DueDate.ToSafeUtc(),
+                CreatedBy = userId
+            },
+            _logger,
+            ct);
 
-        var workOrder = new WorkOrder
+        if (workOrder is null)
         {
-            TenantId = tenantId,
-            WorkOrderCode = code,
-            Title = request.Title,
-            Type = type,
-            Priority = priority,
-            Status = WorkOrderStatus.PendingDispatch,
-            DeviceId = request.DeviceId,
-            AlertId = request.AlertId,
-            RootCause = request.RootCause,
-            AssignedTo = null,
-            // JSON 反序列化的 DueDate 可能 Kind=Unspecified，入库 timestamptz 列前需转 Utc
-            DueDate = request.DueDate.ToSafeUtc(),
-            CreatedBy = userId
-        };
+            // 3 次重试后仍冲突：极少见（需同秒内 3 次并发），向上层暴露为可重试的冲突错误。
+            throw new InvalidOperationException("工单编码生成失败：并发冲突，请稍后重试。");
+        }
 
-        dbContext.WorkOrders.Add(workOrder);
-
-        // 写入创建审计日志
+        // 写入创建审计日志（在工单落库后单独保存；重试阶段不写日志，避免冲突回滚产生孤立日志）
         await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.Created,
             oldStatus: null, newStatus: WorkOrderStatus.PendingDispatch.ToString(),
             operatorId: userId, note: null, ct: ct);
-
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单已创建: {WorkOrderCode}（设备: {DeviceId}, 优先级: {Priority}）",
-            code, request.DeviceId, priority);
+            workOrder.WorkOrderCode, request.DeviceId, priority);
 
         BusinessMetrics.WorkOrdersCreated.WithLabels(type.ToString(), priority.ToString()).Inc();
 
@@ -472,41 +480,6 @@ public class WorkOrderService : IWorkOrderService
     // ===================================================================
     // 辅助方法
     // ===================================================================
-
-    /// <summary>
-    /// 生成工单编码，格式: WO-{yyyyMMdd}-{4位序号}
-    /// 编码在同一天内按序号递增，保证唯一性
-    /// </summary>
-    /// <param name="dbContext">数据库上下文</param>
-    /// <param name="tenantId">租户 ID</param>
-    /// <param name="ct">取消令牌</param>
-    /// <returns>生成的工单编码</returns>
-    private static async Task<string> GenerateCodeAsync(
-        AppDbContext dbContext, Guid tenantId, CancellationToken ct)
-    {
-        var today = DateTime.UtcNow;
-        var prefix = $"WO-{today:yyyyMMdd}";
-
-        // 查询今天已有的最大编码序号
-        var lastCode = await dbContext.WorkOrders
-            .Where(wo => wo.WorkOrderCode.StartsWith(prefix))
-            .OrderByDescending(wo => wo.WorkOrderCode)
-            .Select(wo => wo.WorkOrderCode)
-            .FirstOrDefaultAsync(ct);
-
-        var nextSeq = 1;
-        if (!string.IsNullOrEmpty(lastCode) && lastCode.Length > prefix.Length)
-        {
-            // 从编码中提取序号部分并递增
-            var seqPart = lastCode[(prefix.Length + 1)..]; // 跳过 prefix + "-"
-            if (int.TryParse(seqPart, out var lastSeq))
-            {
-                nextSeq = lastSeq + 1;
-            }
-        }
-
-        return $"{prefix}-{nextSeq:D4}";
-    }
 
     /// <summary>
     /// 写入工单审计日志

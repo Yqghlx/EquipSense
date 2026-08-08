@@ -1,8 +1,8 @@
+using EquipAI.Application.Hosting;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Application.Alerts;
@@ -12,39 +12,31 @@ namespace EquipAI.Application.Alerts;
 /// 定期从 telemetry_hourly 连续聚合视图查询最近 7 天的统计数据，
 /// 按 tenant_id, device_id, metric 聚合后 UPSERT 到 metric_baselines 表。
 /// 仅当样本数量 >= 100 时才写入基线（确保统计意义）。
+/// 多实例部署下通过分布式锁保证仅一个实例执行基线计算（避免重复计算 + 重复 DB 负载）。
 /// </summary>
-public class BaselineCalculationService : BackgroundService, IBaselineCalculationService
+public class BaselineCalculationService : LockedTimerService, IBaselineCalculationService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<BaselineCalculationService> _logger;
 
     public BaselineCalculationService(
         IServiceScopeFactory scopeFactory,
+        IDistributedLockProvider lockProvider,
         ILogger<BaselineCalculationService> logger)
+        : base(lockProvider, logger, lockResource: "baseline-calculation", lockExpiry: TimeSpan.FromHours(2))
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // 首次延迟 30 秒等待应用完全启动
-        await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+    /// <summary>启动延迟：等待应用完全启动后再计算基线，避免启动期 DB 压力叠加。</summary>
+    protected override TimeSpan DefaultStartupDelay => TimeSpan.FromSeconds(30);
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await CalculateBaselinesAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "基线计算执行失败");
-            }
+    /// <summary>执行间隔：每小时计算一次基线。</summary>
+    protected override TimeSpan DefaultInterval => TimeSpan.FromHours(1);
 
-            await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
-        }
-    }
+    /// <summary>
+    /// 基类回调：持锁后执行基线计算。委托给 <see cref="CalculateBaselinesAsync"/> 以便单元测试直接验证计算逻辑。
+    /// </summary>
+    protected override Task ExecuteWorkAsync(CancellationToken ct) => CalculateBaselinesAsync(ct);
 
     /// <inheritdoc />
     public async Task CalculateBaselinesAsync(CancellationToken cancellationToken = default)
@@ -76,7 +68,7 @@ public class BaselineCalculationService : BackgroundService, IBaselineCalculatio
 
         if (baselines.Count == 0)
         {
-            _logger.LogDebug("暂无满足条件的基线数据（需要 7 天内 100+ 样本）");
+            Logger.LogDebug("暂无满足条件的基线数据（需要 7 天内 100+ 样本）");
             return;
         }
 
@@ -109,7 +101,7 @@ public class BaselineCalculationService : BackgroundService, IBaselineCalculatio
             await dbContext.Database.ExecuteSqlRawAsync(upsertSql, parameters!, cancellationToken);
         }
 
-        _logger.LogInformation("基线计算完成，已更新 {Count} 条基线记录", baselines.Count);
+        Logger.LogInformation("基线计算完成，已更新 {Count} 条基线记录", baselines.Count);
     }
 
     /// <summary>

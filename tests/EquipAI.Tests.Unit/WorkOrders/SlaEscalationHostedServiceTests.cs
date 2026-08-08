@@ -3,6 +3,7 @@ using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,8 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
         services.AddScoped<SlaManagementService>();
         // 注入通知 Mock，使 DI 解析 SlaManagementService 的 3 参构造函数（带通知能力）
         services.AddScoped<ISignalRNotificationService>(_ => _notifyMock.Object);
+        // 后台服务现在依赖 IDistributedLockProvider（LockedTimerService 基类）；测试用始终获取锁的 mock
+        services.AddSingleton<IDistributedLockProvider, AlwaysAcquireLockProvider>();
         services.AddSingleton<SlaEscalationHostedService>();
         _sp = services.BuildServiceProvider();
 

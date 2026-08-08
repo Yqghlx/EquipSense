@@ -26,6 +26,13 @@ public class GatewayOptions
     public string BackendUrl { get; set; } = "http://localhost:8080";
 
     /// <summary>
+    /// 是否强制后端 API 使用 HTTPS。开启后若 <see cref="BackendUrl"/> 非 https，网关启动即失败。
+    /// 生产环境必须开启（AuthKey 经 X-Gateway-Auth-Key 头传输，HTTP 明文会泄露密钥）。
+    /// 默认 false 仅为兼容现有开发配置；Docker 生产环境通过 Gateway__RequireHttps=true 启用。
+    /// </summary>
+    public bool RequireHttps { get; set; }
+
+    /// <summary>
     /// MQTT Broker 地址（格式：host:port）。
     /// </summary>
     public string MqttBroker { get; set; } = "localhost:1883";

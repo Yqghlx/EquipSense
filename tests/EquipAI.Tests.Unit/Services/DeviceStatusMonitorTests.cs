@@ -2,6 +2,7 @@ using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Tests.Unit.TestHelpers;
 using EquipAI.WebAPI.Services;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
@@ -86,6 +87,7 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
         var monitor = new DeviceStatusMonitor(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             config,
+            new AlwaysAcquireLockProvider(),
             _sp.GetRequiredService<ILogger<DeviceStatusMonitor>>());
 
         var affected = await monitor.CheckDeviceStatusAsync(CancellationToken.None);
@@ -124,6 +126,7 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
         var monitor = new DeviceStatusMonitor(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             config,
+            new AlwaysAcquireLockProvider(),
             _sp.GetRequiredService<ILogger<DeviceStatusMonitor>>());
 
         var affected = await monitor.CheckDeviceStatusAsync(CancellationToken.None);
@@ -153,6 +156,7 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
         var monitor = new DeviceStatusMonitor(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             config,
+            new AlwaysAcquireLockProvider(),
             _sp.GetRequiredService<ILogger<DeviceStatusMonitor>>());
 
         await monitor.CheckDeviceStatusAsync(CancellationToken.None);

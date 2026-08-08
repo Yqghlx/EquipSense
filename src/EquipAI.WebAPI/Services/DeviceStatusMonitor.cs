@@ -1,3 +1,4 @@
+using EquipAI.Application.Hosting;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -15,41 +16,27 @@ namespace EquipAI.WebAPI.Services;
 ///
 /// 这样 Dashboard 的"在线设备数"、"设备可用率"、"OEE"才能反映真实状态。
 /// </summary>
-public class DeviceStatusMonitor : BackgroundService
+public class DeviceStatusMonitor : LockedTimerService
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
-    private readonly ILogger<DeviceStatusMonitor> _logger;
 
     public DeviceStatusMonitor(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
+        IDistributedLockProvider lockProvider,
         ILogger<DeviceStatusMonitor> logger)
+        : base(lockProvider, logger, lockResource: "device-status-monitor", lockExpiry: TimeSpan.FromMinutes(5))
     {
         _scopeFactory = scopeFactory;
         _configuration = configuration;
-        _logger = logger;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("设备在线状态监控服务已启动");
+    /// <summary>每 30s 扫一次，配合默认 90s 超时阈值。</summary>
+    protected override TimeSpan DefaultInterval => TimeSpan.FromSeconds(30);
 
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                await CheckDeviceStatusAsync(stoppingToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "设备状态检查异常");
-            }
-
-            // 每 30s 扫一次，配合默认 90s 超时阈值
-            await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
-        }
-    }
+    /// <summary>基类回调：持锁后执行状态巡检。委托给 <see cref="CheckDeviceStatusAsync"/> 以便单元测试直接验证。</summary>
+    protected override Task<int> ExecuteWorkAsync(CancellationToken ct) => CheckDeviceStatusAsync(ct);
 
     /// <summary>
     /// 把 LastSeenAt 超过阈值仍标记为 Online 的设备改为 Offline。
@@ -111,11 +98,11 @@ public class DeviceStatusMonitor : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "设备离线通知推送失败: DeviceId={DeviceId}", device.Id);
+                Logger.LogError(ex, "设备离线通知推送失败: DeviceId={DeviceId}", device.Id);
             }
         }
 
-        _logger.LogInformation("已将 {Count} 个超时无遥测的设备标记为 Offline 并通知运维（阈值 {Timeout}s）",
+        Logger.LogInformation("已将 {Count} 个超时无遥测的设备标记为 Offline 并通知运维（阈值 {Timeout}s）",
             affected, timeoutSeconds);
 
         return affected;

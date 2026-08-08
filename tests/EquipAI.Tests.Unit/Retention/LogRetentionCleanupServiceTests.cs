@@ -2,6 +2,7 @@ using EquipAI.Application.Retention;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
+using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -64,10 +65,15 @@ public class LogRetentionCleanupServiceTests : IAsyncLifetime
     }
 
     private LogRetentionCleanupService CreateService()
-        => new(
+    {
+        // 单元测试直接验证清理逻辑，用始终获取锁成功的 mock（生产由 Redis 锁互斥）
+        var lockProvider = new AlwaysAcquireLockProvider();
+        return new LogRetentionCleanupService(
             _sp.GetRequiredService<IServiceScopeFactory>(),
             _sp.GetRequiredService<IConfiguration>(),
+            lockProvider,
             _sp.GetRequiredService<ILogger<LogRetentionCleanupService>>());
+    }
 
     [Fact]
     public async Task CleanupAsync_清理超过保留期的审计日志_保留近期日志()
