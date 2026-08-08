@@ -8,7 +8,7 @@
  * - 种子数据文件可写入（测试环境可写性检查）
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, getToken, captureErrors } from '../helpers';
+import { BASE_URL, login, getToken, captureErrors, isLoggedIn } from '../helpers';
 
 test.describe('00-种子数据验证', () => {
   test('1. 验证 admin 可登录', async ({ page }) => {
@@ -20,9 +20,9 @@ test.describe('00-种子数据验证', () => {
     // 登录成功后应跳转到仪表盘
     await expect(page).toHaveURL(/dashboard/);
 
-    // 验证 sessionStorage 中保存了 Token
-    const token = await page.evaluate(() => sessionStorage.getItem("token"));
-    expect(token).toBeTruthy();
+    // v1.3.0 后 access_token 在 HttpOnly Cookie 中，sessionStorage 只存 user。
+    // 用 user 信息验证登录态已建立（替代旧的 token 字符串断言）。
+    expect(await isLoggedIn(page)).toBeTruthy();
 
     expect(errors).toEqual([]);
   });

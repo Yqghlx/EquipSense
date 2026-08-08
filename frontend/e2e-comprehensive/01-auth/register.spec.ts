@@ -15,7 +15,7 @@
  * - 中文用户名注册
  */
 import { test, expect } from '@playwright/test';
-import {  captureErrors, gotoRegister } from '../helpers';
+import { captureErrors, gotoRegister, isLoggedIn } from '../helpers';
 
 test.describe('01-注册功能', () => {
   /**
@@ -337,10 +337,9 @@ test.describe('01-注册功能', () => {
       await page.waitForURL(/dashboard/, { timeout: 15000 }).catch(() => {});
       await page.waitForLoadState('networkidle');
 
-      // 如果成功跳转，验证已存储 Token
+      // 如果成功跳转，验证已建立登录态（v1.3.0 后 user 是登录态真实代理）
       if (/dashboard/.test(page.url())) {
-        const token = await page.evaluate(() => sessionStorage.getItem('token'));
-        expect(token).toBeTruthy();
+        expect(await isLoggedIn(page)).toBeTruthy();
       }
     }
 
@@ -389,9 +388,8 @@ test.describe('01-注册功能', () => {
       // 2. 后端不支持中文用户名 → 停留在注册页，出现错误提示
       const currentUrl = page.url();
       if (/dashboard/.test(currentUrl)) {
-        // 中文用户名注册成功
-        const token = await page.evaluate(() => sessionStorage.getItem('token'));
-        expect(token).toBeTruthy();
+        // 中文用户名注册成功（v1.3.0 后用 user 信息验证）
+        expect(await isLoggedIn(page)).toBeTruthy();
       } else {
         // 中文用户名可能被拒绝，验证错误提示出现
         const hasError = await page.locator('.text-destructive').isVisible().catch(() => false);

@@ -670,6 +670,10 @@ jobs:
         env:
           PLAYWRIGHT_BASE_URL: http://localhost:5173
           CI: true
+          # 启用 API 快速登录路径（loginAsFast）：跳过 UI 表单填写，
+          # 用 API 登录 + addInitScript 注入 sessionStorage。带 UI 兜底，失败自动降级。
+          # 154 次 beforeEach 登录可节省约 10 分钟（每次 ~5s → ~0.5s）。
+          E2E_FAST_LOGIN: '1'
         run: npx playwright test e2e-comprehensive --reporter=list
 
       - name: 上传测试报告

@@ -10,7 +10,7 @@
  * - 登出流程与状态清理
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, captureErrors } from '../helpers';
+import { BASE_URL, login, loginViaUI, captureErrors, getAuthState, verifyAuthCookie } from '../helpers';
 
 test.describe('01-登录功能', () => {
   test('1. 登录页面加载无错误 — 检查 placeholder 和 button 可见', async ({ page }) => {
@@ -85,8 +85,8 @@ test.describe('01-登录功能', () => {
   test('4. 正确登录跳转仪表盘 — admin/Admin@123', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 使用正确的管理员凭证登录
-    await login(page);
+    // 使用正确的管理员凭证通过 UI 登录（本用例专门验证登录流程，不能用快速路径）
+    await loginViaUI(page, 'admin');
 
     // 验证已跳转到仪表盘页面
     await expect(page).toHaveURL(/dashboard/);
@@ -100,15 +100,15 @@ test.describe('01-登录功能', () => {
     expect(errors).toEqual([]);
   });
 
-  test('5. Token 存储到 sessionStorage', async ({ page }) => {
+  test('5. 登录态持久化（HttpOnly Cookie + sessionStorage user）', async ({ page }) => {
     const errors = captureErrors(page);
 
     await page.goto(`${BASE_URL}/login`);
     await page.waitForLoadState('networkidle');
 
-    // 登录前验证 sessionStorage 中没有 Token
-    const tokenBefore = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(tokenBefore).toBeNull();
+    // 登录前：sessionStorage 中没有 user（未登录态）
+    const { user: userBefore } = await getAuthState(page);
+    expect(userBefore).toBeNull();
 
     // 执行登录操作
     await page.getByPlaceholder(/用户名|username/i).fill('admin');
@@ -117,18 +117,20 @@ test.describe('01-登录功能', () => {
     await page.waitForURL(/dashboard/, { timeout: 10000 });
     await page.waitForLoadState('networkidle');
 
-    // 登录后验证 sessionStorage 中已存储 Token
-    const tokenAfter = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(tokenAfter).toBeTruthy();
-    // JWT Token 应以 ey 开头（Base64 编码的 Header）
-    expect(tokenAfter).toMatch(/^eyJ/);
+    // v1.3.0 后 access_token 移到 HttpOnly Cookie，sessionStorage 只存 user。
+    // 登录成功 → user 信息已写入 sessionStorage。
+    const { user: userAfter, tokenExpiryMs } = await getAuthState(page);
+    expect(userAfter).toBeTruthy();
+    expect((userAfter as { username?: string }).username).toBe('admin');
 
-    // 验证同时存储了用户信息
-    const userStr = await page.evaluate(() => sessionStorage.getItem('user'));
-    expect(userStr).toBeTruthy();
-    const userInfo = JSON.parse(userStr!);
-    expect(userInfo.username).toBe('admin');
+    // 主动续期时间戳应已写入（用于 useTokenRefresh 调度）
+    expect(tokenExpiryMs).not.toBeNull();
+    expect(tokenExpiryMs!).toBeGreaterThan(Date.now());
 
+    // access_token 在 HttpOnly Cookie 中，前端 JS 读不到；
+    // 用 /auth/me 探活证明 Cookie 确实有效（替代旧的 /^eyJ/ 格式断言）。
+    const meResp = await verifyAuthCookie(page);
+    expect(meResp.ok()).toBeTruthy();
 
     expect(errors).toEqual([]);
   });
@@ -200,16 +202,16 @@ test.describe('01-登录功能', () => {
     expect(errors2).toEqual([]);
   });
 
-  test('8. 登出清除 Token 并跳转登录页', async ({ page }) => {
+  test('8. 登出清除登录态并跳转登录页', async ({ page }) => {
     const errors = captureErrors(page);
 
     // 先登录
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
 
-    // 验证已登录状态（Token 存在）
-    const tokenBefore = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(tokenBefore).toBeTruthy();
+    // 验证已登录状态（user 信息存在）
+    const { user: userBefore } = await getAuthState(page);
+    expect(userBefore).toBeTruthy();
 
     // 找到并点击退出登录按钮
     // 退出按钮可能在用户菜单下拉框中，先尝试找到用户头像/菜单触发器
@@ -229,13 +231,9 @@ test.describe('01-登录功能', () => {
       // 然后点击退出
       await page.getByRole('menuitem', { name: /退出登录|logout/i }).click();
     } else {
-      // 最后手段：使用 API 方式调用登出
-      // 通过修改 localStorage 模拟登出行为
-      await page.evaluate(() => {
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('user');
-        sessionStorage.removeItem('refreshToken');
-      });
+      // 最后手段：调用后端 /auth/logout 清除 HttpOnly Cookie + 清前端状态
+      await page.request.post(`${BASE_URL}/api/v1/auth/logout`);
+      await page.evaluate(() => sessionStorage.removeItem('user'));
       await page.goto(`${BASE_URL}/login`);
     }
 
@@ -244,17 +242,13 @@ test.describe('01-登录功能', () => {
     // 验证已跳转回登录页
     await expect(page).toHaveURL(/login/);
 
-    // 验证 Token 已被清除
-    const tokenAfter = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(tokenAfter).toBeNull();
-
-    // 验证用户信息已清除
-    const userAfter = await page.evaluate(() => sessionStorage.getItem('user'));
+    // v1.3.0 后 user 是登录态真实代理，登出应清除 user（token 本就不在 JS 可见范围）
+    const { user: userAfter } = await getAuthState(page);
     expect(userAfter).toBeNull();
 
-    // 验证 refreshToken 已清除
-    const refreshTokenAfter = await page.evaluate(() => sessionStorage.getItem('refreshToken'));
-    expect(refreshTokenAfter).toBeNull();
+    // HttpOnly Cookie 应被后端 /auth/logout 清除，/auth/me 探活应失败（401）
+    const meResp = await verifyAuthCookie(page);
+    expect(meResp.status()).toBe(401);
 
     expect(errors).toEqual([]);
   });

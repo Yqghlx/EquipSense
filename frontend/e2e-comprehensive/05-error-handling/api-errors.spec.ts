@@ -19,6 +19,7 @@ import {
   getToken,
   navigateViaSidebar,
   gotoAlertRules,
+  getAuthState,
 } from '../helpers';
 
 test.describe('API 错误响应处理', () => {
@@ -81,15 +82,15 @@ test.describe('API 错误响应处理', () => {
   // 2. 401 Unauthorized 清除 Token 跳转登录
   // ==========================================================================
 
-  test('401 Unauthorized 清除 Token 跳转登录', async ({ page }) => {
+  test('401 Unauthorized 清除登录态跳转登录', async ({ page }) => {
     const errors = captureErrors(page);
 
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
 
-    // 验证已登录
-    const tokenBefore = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(tokenBefore).toBeTruthy();
+    // 验证已登录（v1.3.0 后用 user 信息判断，不再读 token 字符串）
+    const { user: userBefore } = await getAuthState(page);
+    expect(userBefore).toBeTruthy();
 
     // 拦截所有 API 请求返回 401
     await page.route('**/api/v1/**', async (route) => {
@@ -107,15 +108,15 @@ test.describe('API 错误响应处理', () => {
     await page.reload();
     await page.waitForTimeout(5000);
 
-    // 验证：要么 Token 被清除并跳转登录页，要么显示登录过期提示
+    // 验证：要么 user 被清除并跳转登录页，要么显示登录过期提示
     const currentUrl = page.url();
     const redirectedToLogin = /login/.test(currentUrl);
 
-    const tokenAfter = await page.evaluate(() => sessionStorage.getItem('token'));
-    const tokenCleared = tokenAfter === null || tokenAfter !== tokenBefore;
+    const { user: userAfter } = await getAuthState(page);
+    const authCleared = userAfter === null;
 
-    // 至少满足一个条件：跳转登录页或 Token 被清除
-    expect(redirectedToLogin || tokenCleared).toBeTruthy();
+    // 至少满足一个条件：跳转登录页或登录态被清除
+    expect(redirectedToLogin || authCleared).toBeTruthy();
 
     // 取消路由拦截
     await page.unroute('**/api/v1/**');

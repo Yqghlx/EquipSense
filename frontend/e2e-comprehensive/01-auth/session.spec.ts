@@ -10,7 +10,7 @@
  * - 记住登录状态跨浏览器重启
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, captureErrors, getToken } from '../helpers';
+import { BASE_URL, login, captureErrors, getToken, getAuthState, isLoggedIn } from '../helpers';
 
 test.describe('01-会话管理', () => {
   test('1. Token 过期时间读取正确', async ({ page }) => {
@@ -20,8 +20,10 @@ test.describe('01-会话管理', () => {
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
 
-    // 从 sessionStorage 读取 Token
-    const token = await page.evaluate(() => sessionStorage.getItem('token'));
+    // v1.3.0 后 access_token 在 HttpOnly Cookie 中，前端 JS 读不到。
+    // 通过 /auth/login API 拿到 token（响应体仍含 token，供机器客户端用），
+    // 解析 JWT payload 验证 exp 声明（token 字符串本身仍可被服务端返回的响应体读到）。
+    const token = await getToken(page);
     expect(token).toBeTruthy();
 
     // 解析 JWT Token 的 payload 部分（第二段 Base64）
@@ -55,6 +57,12 @@ test.describe('01-会话管理', () => {
     // 验证 Token 包含必要的声明字段
     expect(tokenPayload.sub || tokenPayload.nameid || tokenPayload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name']).toBeTruthy();
 
+    // 验证前端侧的主动续期时间戳已写入 sessionStorage
+    // （v1.3.0 后这是前端唯一能读到的 token 相关时间戳）
+    const { tokenExpiryMs } = await getAuthState(page);
+    expect(tokenExpiryMs).not.toBeNull();
+    expect(tokenExpiryMs!).toBeGreaterThan(Date.now());
+
     expect(errors).toEqual([]);
   });
 
@@ -65,9 +73,9 @@ test.describe('01-会话管理', () => {
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
 
-    // 获取初始 Token
-    const originalToken = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(originalToken).toBeTruthy();
+    // v1.3.0 后前端 JS 读不到 access_token 字符串。
+    // 用 user 信息（登录态真实代理）确认已登录，再用 API 拿 token 验证刷新链路。
+    expect(await isLoggedIn(page)).toBeTruthy();
 
     // 通过 API 获取新的 Token（模拟刷新操作）
     const newToken = await getToken(page);
@@ -91,7 +99,7 @@ test.describe('01-会话管理', () => {
     // 在第一个标签页使用 admin 登录
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
-    await page.evaluate(() => sessionStorage.getItem('token'));
+    expect(await isLoggedIn(page)).toBeTruthy();
 
     // 在第二个标签页也使用 admin 登录
     const page2 = await context.newPage();
@@ -123,18 +131,16 @@ test.describe('01-会话管理', () => {
     await page2.waitForLoadState('networkidle');
     await page2.waitForTimeout(1500);
 
-    // 验证第二个标签页登录成功
+    // 验证第二个标签页登录成功（v1.3.0 后用 user 信息判断，不再读 token 字符串）
     await expect(page2).toHaveURL(/dashboard/);
-    const token2 = await page2.evaluate(() => sessionStorage.getItem('token'));
-    expect(token2).toBeTruthy();
+    expect(await isLoggedIn(page2)).toBeTruthy();
 
     // 验证第一个标签页的会话仍然有效
     // 刷新第一个页面，确认仍处于登录状态
     await page.reload();
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
-    const token1After = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(token1After).toBeTruthy();
+    expect(await isLoggedIn(page)).toBeTruthy();
 
     // 清理
     await page2.close();
@@ -172,12 +178,9 @@ test.describe('01-会话管理', () => {
       await page.waitForTimeout(500);
       await page.getByRole('menuitem', { name: /退出登录|logout/i }).click();
     } else {
-      // 使用 sessionStorage 清除模拟登出
-      await page.evaluate(() => {
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('user');
-        sessionStorage.removeItem('refreshToken');
-      });
+      // 调用后端 /auth/logout 清除 HttpOnly Cookie（v1.3.0 token 在 Cookie 里）
+      await page.request.post(`${BASE_URL}/api/v1/auth/logout`);
+      await page.evaluate(() => sessionStorage.removeItem('user'));
     }
 
     await page.waitForTimeout(2000);
@@ -188,16 +191,15 @@ test.describe('01-会话管理', () => {
     await page2.waitForTimeout(2000);
 
     // 验证第二个标签页检测到会话失效
-    // 应用应跳转到登录页或显示未认证状态
+    // 应用应跳转到登录页，或 user 信息已被清除（v1.3.0 后 user 是登录态真实代理）
     const page2Url = page2.url();
-    const page2Token = await page2.evaluate(() => sessionStorage.getItem('token'));
-    const isLoggedOut = /login/.test(page2Url) || page2Token === null;
+    const page2LoggedIn = await isLoggedIn(page2);
+    const isLoggedOut = /login/.test(page2Url) || !page2LoggedIn;
 
     // 清理
     await page2.close();
 
-    // 注意：由于 localStorage 是同源共享的，登出操作清除后
-    // 第二个标签页刷新时应检测到 Token 丢失并跳转到登录页
+    // 登出后 HttpOnly Cookie 被清除，第二个标签页刷新时受保护接口 401 → 拦截器清 user → 跳登录
     expect(isLoggedOut).toBeTruthy();
 
     expect(errors).toEqual([]);
