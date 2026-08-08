@@ -1,15 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
-import { usePermission, useIsSystemAdmin } from '../usePermission';
+import { usePermission, useIsSystemAdmin, useUserRole } from '../usePermission';
 
 /**
  * usePermission Hook 测试
  *
- * 验证基于用户角色的权限检查逻辑，包括：
- * - 系统管理员拥有所有权限
- * - 技术员只有部分权限
- * - useIsSystemAdmin 正确判断
- * - 未登录用户无任何权限
+ * 验证基于用户角色的权限检查逻辑，覆盖全部 5 个角色 + 未登录 + 未知角色 + useUserRole。
+ * 权限矩阵参照 AGENTS.md RBAC 表：
+ *   SystemAdmin   — 所有 CRUD
+ *   MaintenanceLead — 设备/告警/工单/知识库 RW，告警可配置，知识库可审批
+ *   Technician    — 设备/知识库 R，告警/工单 R+执行
+ *   Operator      — 设备/告警/工单 R，告警可确认
+ *   Viewer        — 全部只读
  */
 
 // Mock auth store，模拟不同角色的用户状态
@@ -108,5 +110,143 @@ describe('usePermission', () => {
     expect(perm.canApprove).toBe(false);
     expect(perm.canTriggerAI).toBe(false);
     expect(perm.canManage).toBe(false);
+  });
+
+  describe('维保主管（MaintenanceLead）', () => {
+    it('设备模块：可读/创建/编辑/删除，但不能审批', () => {
+      setMockUser('MaintenanceLead');
+      const { result } = renderHook(() => usePermission('device'));
+      const p = result.current;
+      expect(p.canRead).toBe(true);
+      expect(p.canCreate).toBe(true);
+      expect(p.canEdit).toBe(true);
+      expect(p.canDelete).toBe(true);
+      expect(p.canApprove).toBe(false);
+      expect(p.canManage).toBe(false);
+    });
+
+    it('告警模块：RW + 可配置 + 可执行', () => {
+      setMockUser('MaintenanceLead');
+      const { result } = renderHook(() => usePermission('alert'));
+      const p = result.current;
+      expect(p.canCreate).toBe(true);
+      expect(p.canEdit).toBe(true);
+      expect(p.canDelete).toBe(true);
+      expect(p.canExecute).toBe(true);
+      expect(p.canConfigure).toBe(true);
+    });
+
+    it('工单模块：可删除但不可配置（派工验收走 canExecute）', () => {
+      setMockUser('MaintenanceLead');
+      const { result } = renderHook(() => usePermission('workOrder'));
+      const p = result.current;
+      expect(p.canCreate).toBe(true);
+      expect(p.canEdit).toBe(true);
+      expect(p.canDelete).toBe(true);
+      expect(p.canExecute).toBe(true);
+      expect(p.canConfigure).toBe(false);
+    });
+
+    it('知识库模块：可创建/编辑/审批，但不能删除', () => {
+      setMockUser('MaintenanceLead');
+      const { result } = renderHook(() => usePermission('knowledge'));
+      const p = result.current;
+      expect(p.canCreate).toBe(true);
+      expect(p.canEdit).toBe(true);
+      expect(p.canApprove).toBe(true);
+      expect(p.canDelete).toBe(false);
+    });
+
+    it('AI 模块：可触发分析但不可管理', () => {
+      setMockUser('MaintenanceLead');
+      const { result } = renderHook(() => usePermission('ai'));
+      const p = result.current;
+      expect(p.canTriggerAI).toBe(true);
+      expect(p.canManage).toBe(false);
+    });
+
+    it('admin 模块：全部 false（仅读）', () => {
+      setMockUser('MaintenanceLead');
+      const { result } = renderHook(() => usePermission('admin'));
+      const p = result.current;
+      expect(p.canRead).toBe(true);
+      expect(p.canCreate).toBe(false);
+      expect(p.canManage).toBe(false);
+    });
+  });
+
+  describe('操作员（Operator）', () => {
+    it('告警模块：只读 + 可确认（canExecute）', () => {
+      setMockUser('Operator');
+      const { result } = renderHook(() => usePermission('alert'));
+      const p = result.current;
+      expect(p.canRead).toBe(true);
+      expect(p.canExecute).toBe(true);
+      expect(p.canCreate).toBe(false);
+      expect(p.canConfigure).toBe(false);
+    });
+
+    it('工单模块：只读，不可执行（区别于技术员）', () => {
+      setMockUser('Operator');
+      const { result } = renderHook(() => usePermission('workOrder'));
+      const p = result.current;
+      expect(p.canRead).toBe(true);
+      expect(p.canExecute).toBe(false);
+      expect(p.canCreate).toBe(false);
+    });
+
+    it('设备模块：只读', () => {
+      setMockUser('Operator');
+      const { result } = renderHook(() => usePermission('device'));
+      const p = result.current;
+      expect(p.canRead).toBe(true);
+      expect(p.canCreate).toBe(false);
+      expect(p.canDelete).toBe(false);
+    });
+  });
+
+  describe('观察者（Viewer）', () => {
+    it('所有模块全部只读，无任何写权限', () => {
+      setMockUser('Viewer');
+      const modules = ['device', 'alert', 'workOrder', 'knowledge', 'ai', 'admin'] as const;
+      for (const mod of modules) {
+        const { result } = renderHook(() => usePermission(mod));
+        const p = result.current;
+        expect(p.canRead).toBe(true);
+        expect(p.canCreate).toBe(false);
+        expect(p.canEdit).toBe(false);
+        expect(p.canDelete).toBe(false);
+        expect(p.canExecute).toBe(false);
+        expect(p.canConfigure).toBe(false);
+        expect(p.canApprove).toBe(false);
+        expect(p.canTriggerAI).toBe(false);
+        expect(p.canManage).toBe(false);
+      }
+    });
+  });
+
+  describe('未知角色（default 分支）', () => {
+    it('应返回全 false 的默认权限', () => {
+      setMockUser('SuperUser'); // 不在枚举内的角色
+      const { result } = renderHook(() => usePermission('device'));
+      const p = result.current;
+      expect(p.canRead).toBe(false);
+      expect(p.canCreate).toBe(false);
+      expect(p.canManage).toBe(false);
+    });
+  });
+
+  describe('useUserRole', () => {
+    it('已登录用户应返回其角色', () => {
+      setMockUser('Technician');
+      const { result } = renderHook(() => useUserRole());
+      expect(result.current).toBe('Technician');
+    });
+
+    it('未登录用户应返回 undefined', () => {
+      setMockUser(undefined);
+      const { result } = renderHook(() => useUserRole());
+      expect(result.current).toBeUndefined();
+    });
   });
 });

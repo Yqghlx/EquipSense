@@ -1,12 +1,14 @@
 import axios from 'axios';
+import { useNotificationStore } from '../stores/notificationStore';
+import { useAuthStore } from '../stores/authStore';
 
 /**
  * 显示全局错误提示（通过 toast 通知）
- * 使用动态导入避免循环依赖，并在 store 未初始化时静默降级
+ * 静态导入：notificationStore 仅依赖 zustand + 类型，无循环依赖。
+ * 防御性 try/catch 保留，store 未初始化时静默降级。
  */
 async function showGlobalError(message: string): Promise<void> {
   try {
-    const { useNotificationStore } = await import('../stores/notificationStore');
     useNotificationStore.getState().push({
       type: 'system',
       title: '操作失败',
@@ -129,7 +131,6 @@ api.interceptors.response.use(
 
       // 更新 authStore（同步 Zustand 内存状态，Cookie 由浏览器管理）
       if (userInfo) {
-        const { useAuthStore } = await import('../stores/authStore');
         useAuthStore.getState().setAuth(userInfo);
       }
 
