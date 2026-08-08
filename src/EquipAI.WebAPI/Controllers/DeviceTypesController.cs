@@ -1,11 +1,8 @@
-using EquipAI.Core.Constants;
+using EquipAI.Application.Devices;
 using EquipAI.Core.Entities;
-using EquipAI.Core.Interfaces;
-using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -18,18 +15,11 @@ namespace EquipAI.WebAPI.Controllers;
 [Authorize]
 public class DeviceTypesController : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
-    private readonly ITenantContext _tenantContext;
+    private readonly DeviceTypeTemplateService _service;
 
-    /// <summary>
-    /// 初始化设备类型模板控制器
-    /// </summary>
-    /// <param name="dbContext">数据库上下文，直接操作以使用 IgnoreQueryFilters</param>
-    /// <param name="tenantContext">租户上下文，用于获取当前租户 ID</param>
-    public DeviceTypesController(AppDbContext dbContext, ITenantContext tenantContext)
+    public DeviceTypesController(DeviceTypeTemplateService service)
     {
-        _dbContext = dbContext;
-        _tenantContext = tenantContext;
+        _service = service;
     }
 
     /// <summary>
@@ -42,24 +32,7 @@ public class DeviceTypesController : ControllerBase
     [RequirePermission("device:read")]
     [ProducesResponseType(typeof(List<DeviceTypeTemplate>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<DeviceTypeTemplate>>> GetDeviceTypes([FromQuery] string? industry)
-    {
-        // 查询当前租户模板 + 系统租户预置模板
-        var query = _dbContext.DeviceTypeTemplates
-            .IgnoreQueryFilters()
-            .Where(t => t.TenantId == _tenantContext.TenantId
-                     || t.TenantId == SystemConstants.SystemTenantId);
-
-        // 按行业筛选（可选）
-        if (!string.IsNullOrEmpty(industry))
-            query = query.Where(t => t.Industry == industry);
-
-        var templates = await query
-            .OrderByDescending(t => t.TenantId == _tenantContext.TenantId)
-            .ThenBy(t => t.Name)
-            .ToListAsync();
-
-        return Ok(templates);
-    }
+        => Ok(await _service.ListAsync(industry));
 
     /// <summary>
     /// 创建租户自定义设备类型模板
@@ -70,40 +43,9 @@ public class DeviceTypesController : ControllerBase
     [RequirePermission("device:create")]
     [ProducesResponseType(typeof(DeviceTypeTemplate), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<DeviceTypeTemplate>> CreateDeviceType([FromBody] CreateDeviceTypeRequest request)
+    public async Task<ActionResult<DeviceTypeTemplate>> CreateDeviceType([FromBody] CreateDeviceTypeTemplateRequest request)
     {
-        var template = new DeviceTypeTemplate
-        {
-            TenantId = _tenantContext.TenantId,
-            Name = request.Name,
-            Industry = request.Industry,
-            Parameters = request.Parameters ?? "{}"
-        };
-
-        _dbContext.DeviceTypeTemplates.Add(template);
-        await _dbContext.SaveChangesAsync();
-
+        var template = await _service.CreateAsync(request);
         return CreatedAtAction(nameof(GetDeviceTypes), new { }, template);
     }
-}
-
-/// <summary>
-/// 创建设备类型模板请求 DTO
-/// </summary>
-public class CreateDeviceTypeRequest
-{
-    /// <summary>
-    /// 模板名称（如 "三相异步电机"、"离心泵"）
-    /// </summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>
-    /// 所属行业（如 "制造业"、"化工"、"电力"）
-    /// </summary>
-    public string? Industry { get; set; }
-
-    /// <summary>
-    /// 设备参数定义（JSONB），描述该类型设备的监控指标、单位、范围等
-    /// </summary>
-    public string? Parameters { get; set; }
 }

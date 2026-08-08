@@ -228,6 +228,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<DeviceImportService>();
+        services.AddScoped<Application.Devices.DeviceTypeTemplateService>();
 
         // RBAC 权限校验服务注册为 Singleton，内部使用静态权限矩阵，无状态
         services.AddSingleton<IRbacService, RbacService>();
@@ -264,6 +265,9 @@ public static class ServiceCollectionExtensions
 
         // 根因分析引擎
         services.AddScoped<Core.Interfaces.IAnalysisService, RootCauseAnalysisEngine>();
+        // 分析结果查询服务 + 手动触发编排服务（使 Controller 不直接依赖 AppDbContext）
+        services.AddScoped<Application.Analysis.AnalysisQueryService>();
+        services.AddScoped<Application.Analysis.AnalysisTriggerService>();
 
         // L2 规则引擎诊断（Scoped — 需要 DbContext 查询知识库规则）
         services.AddScoped<Core.Interfaces.IRuleEngineAnalysisService, RuleEngineAnalysisService>();

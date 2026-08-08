@@ -1,13 +1,10 @@
-using AutoMapper;
+using EquipAI.Application.Analysis;
 using EquipAI.Application.Analysis.DTOs;
 using EquipAI.Application.DTOs.Common;
-using EquipAI.Core.Interfaces;
 using EquipAI.Core.Models;
-using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -20,15 +17,13 @@ namespace EquipAI.WebAPI.Controllers;
 [Authorize]
 public class AnalysesController : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
-    private readonly IMapper _mapper;
-    private readonly IAnalysisService _analysisService;
+    private readonly AnalysisQueryService _queryService;
+    private readonly AnalysisTriggerService _triggerService;
 
-    public AnalysesController(AppDbContext dbContext, IMapper mapper, IAnalysisService analysisService)
+    public AnalysesController(AnalysisQueryService queryService, AnalysisTriggerService triggerService)
     {
-        _dbContext = dbContext;
-        _mapper = mapper;
-        _analysisService = analysisService;
+        _queryService = queryService;
+        _triggerService = triggerService;
     }
 
     /// <summary>
@@ -40,22 +35,7 @@ public class AnalysesController : ControllerBase
     public async Task<ActionResult<PagedResult<AnalysisDto>>> GetAnalyses(
         [FromQuery] PagedQuery query,
         [FromQuery] Guid? deviceId = null)
-    {
-        var analyses = _dbContext.Analyses.AsQueryable();
-
-        if (deviceId.HasValue)
-            analyses = analyses.Where(a => a.DeviceId == deviceId.Value);
-
-        var (items, total) = await analyses.ToPagedAsync(query);
-
-        return Ok(new PagedResult<AnalysisDto>
-        {
-            Items = _mapper.Map<List<AnalysisDto>>(items)!,
-            Total = total,
-            Page = query.Page,
-            PageSize = query.PageSize
-        });
-    }
+        => Ok(await _queryService.ListAsync(query, deviceId));
 
     /// <summary>
     /// 根据 ID 获取单条分析结果详情
@@ -66,11 +46,11 @@ public class AnalysesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AnalysisDto>> GetAnalysis(Guid id)
     {
-        var analysis = await _dbContext.Analyses.FindAsync(id);
+        var analysis = await _queryService.GetAsync(id);
         if (analysis == null)
             return NotFound(new { code = 404, message = "分析记录不存在" });
 
-        return Ok(_mapper.Map<AnalysisDto>(analysis));
+        return Ok(analysis);
     }
 
     /// <summary>
@@ -83,22 +63,10 @@ public class AnalysesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AnalysisDto>> TriggerAnalysis([FromBody] CreateAnalysisRequest request)
     {
-        var alert = await _dbContext.Alerts.FindAsync(request.AlertId);
-        if (alert == null)
+        var (analysis, alertFound) = await _triggerService.TriggerFromAlertAsync(request.AlertId);
+        if (!alertFound || analysis is null)
             return NotFound(new { code = 404, message = "告警不存在" });
 
-        // 查询该设备该指标的基线数据，用于 L2 级别分析
-        var baseline = await _dbContext.MetricBaselines
-            .FirstOrDefaultAsync(b => b.DeviceId == alert.DeviceId && b.Metric == alert.Metric);
-
-        // Alert.Value 类型为 decimal，IAnalysisService 接口要求 double 参数
-        var analysis = await _analysisService.AnalyzeAsync(
-            alert.TenantId, alert.Id, alert.DeviceId,
-            alert.Metric, (double)alert.Value, baseline);
-
-        _dbContext.Analyses.Add(analysis);
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(_mapper.Map<AnalysisDto>(analysis));
+        return Ok(analysis);
     }
 }
