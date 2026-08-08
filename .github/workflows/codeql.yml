@@ -1,0 +1,77 @@
+# CodeQL 静态应用安全测试（SAST）
+#
+# 对 C# 后端 + TypeScript/JavaScript 前端做语义级安全扫描，发现 SQL 注入、XSS、
+# 路径遍历、硬编码凭证、不安全反序列化等漏洞。扫描结果以 SARIF 上传到 GitHub
+# Security tab（PR 内联标注 + main 分支基线追踪）。
+#
+# 触发：main/develop 分支推送 + PR，每周一全量扫描兜底。
+#
+# 与 CI 现有安全门禁互补：
+#   - Gitleaks（ci.yml）— 密钥泄露扫描（提交历史）
+#   - dotnet list --vulnerable（ci.yml）— NuGet 已知 CVE 阻断
+#   - npm 生产审计（ci.yml）— npm 已知漏洞阻断
+#   - Trivy（ci.yml）— 镜像 CVE 扫描
+#   - CodeQL（本文件）— 源码语义级漏洞分析（0-day 模式，非依赖 CVE）
+name: CodeQL SAST
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  schedule:
+    # 每周一 03:17 UTC 全量扫描（非整点减少并发排队）
+    - cron: '17 3 * * 1'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '20'
+
+jobs:
+  analyze:
+    name: CodeQL 分析 (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # 上传 SARIF 到 Security tab 所需
+      security-events: write
+      # CodeQL 需读仓库
+      contents: read
+      # PR 内联标注所需
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # CodeQL 按语言独立分析；C# 需 .NET SDK，TS/JS 仅需源码（autobuild 无构建）
+        language: ['csharp', 'javascript-typescript']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 初始化 CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # suite：安全-扩展查询集，比默认更全面（含路径遍历、SSRF、日志注入等）
+          queries: security-extended
+
+      # C# autobuild 需 .NET SDK 才能编译解决方案（CodeQL 分析需编译产物）
+      - name: 设置 .NET ${{ env.DOTNET_VERSION }}
+        if: matrix.language == 'csharp'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: 自动构建（${{ matrix.language }}）
+        uses: github/codeql-action/autobuild@v3
+
+      - name: 执行 CodeQL 分析
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'
