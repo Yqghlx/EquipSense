@@ -21,16 +21,16 @@ export const config = {
   password: __ENV.AUTH_PASS || 'Admin@123',
 };
 
-/** 标准性能阈值 — P95 < 500ms，错误率 < 1% */
+/** 标准性能阈值 — 读路径 SLO：P95 < 500ms、P99 < 1000ms，错误率 < 0.1% */
 export const standardThresholds = {
-  http_req_duration: ['p(95)<500'],
-  http_req_failed: ['rate<0.01'],
+  http_req_duration: ['p(95)<500', 'p(99)<1000'],
+  http_req_failed: ['rate<0.001'],
 };
 
-/** 宽松性能阈值 — P95 < 1000ms，错误率 < 5%（适用于写操作） */
+/** 宽松性能阈值 — 写路径 SLO：P95 < 1000ms、P99 < 2000ms，错误率 < 1% */
 export const relaxedThresholds = {
-  http_req_duration: ['p(95)<1000'],
-  http_req_failed: ['rate<0.05'],
+  http_req_duration: ['p(95)<1000', 'p(99)<2000'],
+  http_req_failed: ['rate<0.01'],
 };
 
 /** 缓存的 token（避免每次迭代都登录，提升压测准确性） */
