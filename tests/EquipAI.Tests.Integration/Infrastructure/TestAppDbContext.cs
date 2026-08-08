@@ -40,3 +40,33 @@ public class TestAppDbContext : AppDbContext
         }
     }
 }
+
+/// <summary>
+/// 测试专用的 AppReadDbContext 子类
+/// 覆写 OnModelCreating，将 PostgreSQL 特有的列类型（如 jsonb）替换为 SQLite 兼容的类型
+/// 与 TestAppDbContext 对称——供注入 AppReadDbContext 的 QueryService 在集成测试使用
+/// </summary>
+public class TestAppReadDbContext : AppReadDbContext
+{
+    public TestAppReadDbContext(DbContextOptions<AppReadDbContext> options, ITenantContext tenantContext)
+        : base(options, tenantContext)
+    {
+    }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        foreach (IMutableEntityType entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (IMutableProperty property in entityType.GetProperties())
+            {
+                string? columnType = property.GetColumnType();
+                if (columnType is not null && columnType.Equals("jsonb", StringComparison.OrdinalIgnoreCase))
+                {
+                    property.SetColumnType("TEXT");
+                }
+            }
+        }
+    }
+}

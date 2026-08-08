@@ -61,6 +61,20 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 return new TestAppDbContext(options, tenantContext);
             });
 
+            // 替换 AppReadDbContext（CQRS 只读上下文）为 SQLite 内存，与 AppDbContext 共享连接
+            // 未替换时生产注册用 Npgsql 连 ReadOnly 连接串，测试环境无 PG → 查询 500
+            services.RemoveAll(typeof(DbContextOptions<AppReadDbContext>));
+            services.RemoveAll<AppReadDbContext>();
+            services.AddSingleton(new DbContextOptionsBuilder<AppReadDbContext>()
+                .UseSqlite(SqliteConnectionString)
+                .Options);
+            services.AddScoped<AppReadDbContext>(sp =>
+            {
+                var options = sp.GetRequiredService<DbContextOptions<AppReadDbContext>>();
+                var tenantContext = sp.GetRequiredService<EquipAI.Core.Interfaces.ITenantContext>();
+                return new TestAppReadDbContext(options, tenantContext);
+            });
+
             // 移除真实的 RedisService，替换为不依赖 Redis 连接的存根
             // RedisService 构造函数会尝试连接 Redis，在测试环境中不可用
             services.RemoveAll<RedisService>();
