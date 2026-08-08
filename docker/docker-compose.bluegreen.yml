@@ -1,0 +1,95 @@
+# 蓝绿部署覆盖文件（Blue-Green Deployment）
+#
+# 工作原理：用 Docker Compose profiles 同时运行 backend/frontend 的两份实例（blue/green），
+# 各自监听独立端口。Nginx 路由层（router 服务）通过可热重载的 upstream 配置指向活跃颜色。
+# 部署流程（由 scripts/deploy-bluegreen.sh 编排）：
+#   1. 确定当前活跃颜色（读 .active-color 文件，默认 blue）
+#   2. 在非活跃颜色上拉取新镜像 + 启动（旧颜色仍服务流量）
+#   3. 健康门禁：轮询非活跃颜色的 /health
+#   4. 切换：更新 router upstream include → nginx reload（原子切换，<1s 中断）
+#   5. 优雅停止旧颜色（drain 连接后停止）
+#   6. 记录新活跃颜色
+#
+# 与 docker-compose.yml + docker-compose.prod.yml 叠加使用：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.bluegreen.yml \
+#     --profile blue --profile green up -d
+#
+# 端口分配：backend blue 8081 / green 8082；frontend blue 3001 / green 3002；
+# router 占用 80/443（对外入口）。
+
+services:
+  # ── 后端蓝绿实例 ──────────────────────────────────────────────────
+  # 通过 profile 隔离：`--profile blue` 启动 backend-blue，`--profile green` 启动 backend-green
+  backend-blue:
+    extends:
+      file: docker-compose.yml
+      service: backend
+    profiles: ["blue"]
+    container_name: equipai-backend-blue
+    ports: ["8081:8080"]
+    # 不再发布宿主 8080（由 router 反代）；仅暴露给同网络服务
+    networks:
+      - bluegreen
+
+  backend-green:
+    extends:
+      file: docker-compose.yml
+      service: backend
+    profiles: ["green"]
+    container_name: equipai-backend-green
+    ports: ["8082:8080"]
+    networks:
+      - bluegreen
+
+  # ── 前端蓝绿实例 ──────────────────────────────────────────────────
+  frontend-blue:
+    extends:
+      file: docker-compose.yml
+      service: frontend
+    profiles: ["blue"]
+    container_name: equipai-frontend-blue
+    ports: ["3001:80"]
+    environment:
+      BACKEND_URL: "http://backend-blue:8080"
+    networks:
+      - bluegreen
+
+  frontend-green:
+    extends:
+      file: docker-compose.yml
+      service: frontend
+    profiles: ["green"]
+    container_name: equipai-frontend-green
+    ports: ["3002:80"]
+    environment:
+      BACKEND_URL: "http://backend-green:8080"
+    networks:
+      - bluegreen
+
+  # ── 蓝绿路由层（Nginx，原子切换入口） ────────────────────────────
+  # 独立于 frontend 容器内的 nginx；router 负责把 /api/ /hubs/ / 反代到活跃色。
+  # upstream 由 /etc/nginx/conf.d/upstream-active.conf 决定，部署脚本切换时重写 + reload。
+  router:
+    image: nginx:1.27-alpine
+    container_name: equipai-router
+    profiles: ["blue", "green"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.bluegreen.conf:/etc/nginx/nginx.conf:ro
+      - ./upstream-active.conf:/etc/nginx/conf.d/upstream-active.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      frontend-blue:
+        condition: service_started
+      backend-blue:
+        condition: service_started
+    networks:
+      - bluegreen
+    restart: unless-stopped
+
+networks:
+  bluegreen:
+    name: equipsense_bluegreen
+
