@@ -1,10 +1,8 @@
-using EquipAI.Core.Entities;
+using EquipAI.Application.WorkOrders;
 using EquipAI.Core.Interfaces;
-using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -16,21 +14,18 @@ namespace EquipAI.WebAPI.Controllers;
 [Authorize]
 public class WorkOrderAttachmentsController : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
+    private readonly WorkOrderAttachmentService _service;
     private readonly IFileStorageService _fileStorage;
     private readonly ITenantContext _tenantContext;
-    private readonly ILogger<WorkOrderAttachmentsController> _logger;
 
     public WorkOrderAttachmentsController(
-        AppDbContext dbContext,
+        WorkOrderAttachmentService service,
         IFileStorageService fileStorage,
-        ITenantContext tenantContext,
-        ILogger<WorkOrderAttachmentsController> logger)
+        ITenantContext tenantContext)
     {
-        _dbContext = dbContext;
+        _service = service;
         _fileStorage = fileStorage;
         _tenantContext = tenantContext;
-        _logger = logger;
     }
 
     /// <summary>
@@ -38,24 +33,8 @@ public class WorkOrderAttachmentsController : ControllerBase
     /// </summary>
     [HttpGet]
     [RequirePermission("workorder:read")]
-    public async Task<ActionResult<List<WorkOrderAttachmentDto>>> GetAttachments(Guid workOrderId)
-    {
-        var attachments = await _dbContext.WorkOrderAttachments
-            .Where(a => a.WorkOrderId == workOrderId)
-            .OrderByDescending(a => a.CreatedAt)
-            .Select(a => new WorkOrderAttachmentDto
-            {
-                Id = a.Id,
-                FileName = a.FileName,
-                ContentType = a.ContentType,
-                FileSize = a.FileSize,
-                UploadedBy = a.UploadedBy,
-                CreatedAt = a.CreatedAt,
-            })
-            .ToListAsync();
-
-        return Ok(attachments);
-    }
+    public async Task<ActionResult<List<WorkOrderAttachmentDto>>> GetAttachments(Guid workOrderId, CancellationToken ct = default)
+        => Ok(await _service.ListAsync(workOrderId, ct));
 
     /// <summary>
     /// 上传附件到工单
@@ -65,14 +44,14 @@ public class WorkOrderAttachmentsController : ControllerBase
     [RequirePermission("workorder:execute")]
     public async Task<ActionResult<WorkOrderAttachmentDto>> UploadAttachment(
         Guid workOrderId,
-        IFormFile file)
+        IFormFile file,
+        CancellationToken ct = default)
     {
         if (file == null || file.Length == 0)
             return BadRequest(new { code = 400, message = "请选择要上传的文件" });
 
         // 验证工单存在
-        var workOrder = await _dbContext.WorkOrders.FindAsync(workOrderId);
-        if (workOrder == null)
+        if (!await _service.WorkOrderExistsAsync(workOrderId, ct))
             return NotFound(new { code = 404, message = "工单不存在" });
 
         await using var stream = file.OpenReadStream();
@@ -83,33 +62,9 @@ public class WorkOrderAttachmentsController : ControllerBase
             stream,
             file.ContentType);
 
-        var attachment = new WorkOrderAttachment
-        {
-            TenantId = _tenantContext.TenantId,
-            WorkOrderId = workOrderId,
-            FileName = file.FileName,
-            ContentType = file.ContentType,
-            FileSize = file.Length,
-            StoragePath = storagePath,
-            UploadedBy = _tenantContext.UserId,
-        };
+        var dto = await _service.CreateAsync(workOrderId, file.FileName, file.ContentType, file.Length, storagePath, ct);
 
-        _dbContext.WorkOrderAttachments.Add(attachment);
-        await _dbContext.SaveChangesAsync();
-
-        _logger.LogInformation("工单 {WorkOrderId} 上传附件：{FileName}（{Size} 字节）",
-            workOrderId, file.FileName, file.Length);
-
-        return CreatedAtAction(nameof(GetAttachments), new { workOrderId },
-            new WorkOrderAttachmentDto
-            {
-                Id = attachment.Id,
-                FileName = attachment.FileName,
-                ContentType = attachment.ContentType,
-                FileSize = attachment.FileSize,
-                UploadedBy = attachment.UploadedBy,
-                CreatedAt = attachment.CreatedAt,
-            });
+        return CreatedAtAction(nameof(GetAttachments), new { workOrderId }, dto);
     }
 
     /// <summary>
@@ -117,16 +72,13 @@ public class WorkOrderAttachmentsController : ControllerBase
     /// </summary>
     [HttpGet("{attachmentId:guid}/download")]
     [RequirePermission("workorder:read")]
-    public async Task<IActionResult> DownloadAttachment(Guid workOrderId, Guid attachmentId)
+    public async Task<IActionResult> DownloadAttachment(Guid workOrderId, Guid attachmentId, CancellationToken ct = default)
     {
-        var attachment = await _dbContext.WorkOrderAttachments
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.WorkOrderId == workOrderId);
-
+        var attachment = await _service.GetAsync(workOrderId, attachmentId, ct);
         if (attachment == null)
             return NotFound(new { code = 404, message = "附件不存在" });
 
         var (stream, contentType, fileName) = await _fileStorage.GetAsync(attachment.StoragePath);
-
         return File(stream, contentType, fileName);
     }
 
@@ -135,11 +87,9 @@ public class WorkOrderAttachmentsController : ControllerBase
     /// </summary>
     [HttpDelete("{attachmentId:guid}")]
     [RequirePermission("workorder:execute")]
-    public async Task<IActionResult> DeleteAttachment(Guid workOrderId, Guid attachmentId)
+    public async Task<IActionResult> DeleteAttachment(Guid workOrderId, Guid attachmentId, CancellationToken ct = default)
     {
-        var attachment = await _dbContext.WorkOrderAttachments
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.WorkOrderId == workOrderId);
-
+        var attachment = await _service.GetAsync(workOrderId, attachmentId, ct);
         if (attachment == null)
             return NotFound(new { code = 404, message = "附件不存在" });
 
@@ -147,25 +97,7 @@ public class WorkOrderAttachmentsController : ControllerBase
         await _fileStorage.DeleteAsync(attachment.StoragePath);
 
         // 删除数据库记录
-        _dbContext.WorkOrderAttachments.Remove(attachment);
-        await _dbContext.SaveChangesAsync();
-
-        _logger.LogInformation("工单 {WorkOrderId} 删除附件：{FileName}",
-            workOrderId, attachment.FileName);
-
+        await _service.DeleteTrackedAsync(attachment, ct);
         return NoContent();
     }
-}
-
-/// <summary>
-/// 工单附件 DTO
-/// </summary>
-public class WorkOrderAttachmentDto
-{
-    public Guid Id { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public string ContentType { get; set; } = string.Empty;
-    public long FileSize { get; set; }
-    public Guid UploadedBy { get; set; }
-    public DateTime CreatedAt { get; set; }
 }

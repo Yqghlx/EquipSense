@@ -258,6 +258,7 @@ public static class ServiceCollectionExtensions
         // 告警评估服务（Scoped — 需要 DbContext）
         services.AddScoped<IAlertEvaluationService, AlertEvaluationService>();
         services.AddScoped<Application.Alerts.AlertRuleService>();
+        services.AddScoped<Application.Alerts.AlertQueryService>();
 
         // 内存缓存（供 DataQualityService 等服务使用）
         services.AddMemoryCache();
@@ -292,6 +293,7 @@ public static class ServiceCollectionExtensions
         // 智能派工服务 — 基于技能匹配 + 负载均衡推荐最佳技术人员
         services.AddScoped<ISmartDispatchService, SmartDispatchService>();
         services.AddScoped<Application.WorkOrders.TechnicianProfileService>();
+        services.AddScoped<Application.WorkOrders.WorkOrderAttachmentService>();
 
         // 知识沉淀服务（Scoped — 内部通过 IServiceScopeFactory 创建独立作用域）
         services.AddScoped<KnowledgeCaptureService>();

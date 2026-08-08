@@ -1,4 +1,5 @@
 using AutoMapper;
+using EquipAI.Application.Alerts;
 using EquipAI.Application.Alerts.DTOs;
 using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
@@ -51,7 +52,10 @@ public class AlertsControllerTests
             .Setup(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var controller = new AlertsController(db, mapperMock.Object, new FixedTenantContext(tenantId, userId), exportService, eventBus.Object);
+        var tenantContext = new FixedTenantContext(tenantId, userId);
+        // AlertQueryService 持有 db/mapper/tenantContext/eventBus —— 告警状态变更 + 事件发布均下沉到服务
+        var queryService = new AlertQueryService(db, mapperMock.Object, tenantContext, eventBus.Object);
+        var controller = new AlertsController(queryService, exportService, tenantContext);
         return (db, controller, eventBus);
     }
 
