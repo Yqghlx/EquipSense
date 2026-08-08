@@ -102,6 +102,42 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  # RabbitMQ：事件总线（可选，EventBus__Provider=RabbitMQ 时启用）
+  # 提供持久化 + 重试 + 死信队列，进程重启不丢业务事件（告警/工单/分析）
+  # 默认不启用事件总线依赖此服务——backend 仍可降级到进程内事件总线
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: equipai-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-equipai}"
+      # 软默认：未配置 RabbitMQ 事件总线时允许留空；启用 EventBus__Provider=RabbitMQ 时必须在 .env 设置
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:-changeme_rabbitmq}"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    # 安全加固
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+
   backend:
     build:
       context: ..
@@ -159,6 +195,14 @@ services:
       # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
+      # 事件总线：默认 InMemory（进程内），设为 RabbitMQ 启用持久化事件总线
+      # 启用 RabbitMQ 时 backend 会依赖 rabbitmq 服务（depends_on 已配置但用 service_started 宽松条件，
+      # 因 EventBus:Provider 默认 InMemory，rabbitmq 服务存在与否不影响 backend 启动）
+      EventBus__Provider: "${EVENTBUS_PROVIDER:-InMemory}"
+      EventBus__RabbitMq__Host: "rabbitmq"
+      EventBus__RabbitMq__Port: "5672"
+      EventBus__RabbitMq__Username: "${RABBITMQ_USER:-equipai}"
+      EventBus__RabbitMq__Password: "${RABBITMQ_PASSWORD:-}"
     volumes:
       - ./mqtt-certs:/etc/equipai/mqtt-certs:ro
     depends_on:
@@ -167,6 +211,9 @@ services:
       redis:
         condition: service_healthy
       mosquitto:
+        condition: service_started
+      # rabbitmq 用宽松条件：EventBus:Provider 默认 InMemory，rabbitmq 服务存在与否不影响 backend 启动
+      rabbitmq:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/startup"]
@@ -422,6 +469,7 @@ volumes:
   pg_backup:
   redis_data:
   mosquitto_data:
+  rabbitmq_data:
   seq_data:
   prometheus_data:
   alertmanager_data:

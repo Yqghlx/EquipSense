@@ -118,6 +118,20 @@ public static class ServiceCollectionExtensions
         // SMTP 邮件通知配置
         services.Configure<SmtpOptions>(configuration.GetSection("Smtp"));
 
+        // 事件总线注册：默认进程内实现（InMemoryEventBus），配置 EventBus:Provider=RabbitMQ 时切换到 RabbitMQ
+        // RabbitMQ 实现提供持久化 + 重试 + 死信队列，进程重启不丢业务事件（告警/工单/分析）。
+        // 切换通过配置驱动，单实例部署无需 RabbitMQ；多实例或对事件可靠性要求高时启用。
+        var eventBusProvider = configuration["EventBus:Provider"] ?? "InMemory";
+        if (string.Equals(eventBusProvider, "RabbitMQ", StringComparison.OrdinalIgnoreCase))
+        {
+            services.Configure<EquipAI.Infrastructure.Messaging.RabbitMqOptions>(configuration.GetSection("EventBus:RabbitMq"));
+            services.AddSingleton<IEventBus, EquipAI.Infrastructure.Messaging.RabbitMqEventBus>();
+        }
+        else
+        {
+            services.AddSingleton<IEventBus, InMemoryEventBus>();
+        }
+
         // MQTT 客户端服务（Singleton — 共享连接）
         services.AddSingleton<MqttClientService>();
 
@@ -235,9 +249,6 @@ public static class ServiceCollectionExtensions
 
         // RBAC 权限校验服务注册为 Singleton，内部使用静态权限矩阵，无状态
         services.AddSingleton<IRbacService, RbacService>();
-
-        // 事件总线注册为 Singleton，内部维护 Channel 和后台消费任务
-        services.AddSingleton<IEventBus, InMemoryEventBus>();
 
         // AutoMapper 映射配置，扫描 MappingProfile 所在程序集
         // AutoMapper 15 要求显式传入配置委托，再指定需要扫描的程序集。

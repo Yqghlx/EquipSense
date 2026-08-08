@@ -41,5 +41,20 @@ services:
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
 
+  # RabbitMQ：事件总线（可选，默认进程内事件总线即可运行）
+  # 启用方式：.env 设 EventBus__Provider=RabbitMQ，backend 依赖此服务
+  # 含 management 插件，访问 http://localhost:15672（guest/guest）查看队列/消息/死信
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: equipai-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
 volumes:
   pgdev:

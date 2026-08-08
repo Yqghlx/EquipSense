@@ -87,6 +87,23 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | `Gateway__HealthPort` | 网关健康端点端口 | `8081` | 否 |
 | `Gateway__Host` | 网关主机地址 | `localhost` | 否 |
 
+## 事件总线
+
+默认进程内事件总线（`InMemory`），零额外依赖。设为 `RabbitMQ` 启用持久化事件总线
+（进程重启不丢业务事件：告警触发、工单创建、AI 分析）。详见 [`docs/EVENT_BUS.md`](EVENT_BUS.md)。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `EventBus__Provider` | 事件总线实现：`InMemory` / `RabbitMQ` | `InMemory` | 否 |
+| `EventBus__RabbitMq__Host` | RabbitMQ 主机 | `localhost` | Provider=RabbitMQ 时必填 |
+| `EventBus__RabbitMq__Port` | RabbitMQ AMQP 端口 | `5672` | 否 |
+| `EventBus__RabbitMq__Username` | RabbitMQ 用户名 | `guest` | Provider=RabbitMQ 时必填 |
+| `EventBus__RabbitMq__Password` | RabbitMQ 密码 | `guest` | Provider=RabbitMQ 时必填 |
+| `EventBus__RabbitMq__MaxRetryCount` | 最大重试次数（含首次） | `5` | 否 |
+| `EventBus__RabbitMq__RetryIntervalSeconds` | 重试间隔（秒） | `30` | 否 |
+| `RABBITMQ_PASSWORD` | docker-compose rabbitmq 服务默认密码 | `changeme_rabbitmq` | 生产必改 |
+| `RABBITMQ_USER` | docker-compose rabbitmq 服务默认用户 | `equipai` | 否 |
+
 ## 限流与调试
 
 | 变量名 | 说明 | 默认值 | 必填 |
