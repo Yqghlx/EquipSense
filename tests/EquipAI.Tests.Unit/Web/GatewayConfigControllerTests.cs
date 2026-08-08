@@ -1,4 +1,5 @@
 using EquipAI.Application.DTOs.Gateway;
+using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -55,7 +56,9 @@ public class GatewayConfigControllerTests
         if (withAuthHeader)
             httpContext.Request.Headers["X-Gateway-Auth-Key"] = AuthKey;
 
-        return new GatewayConfigController(db, Mock.Of<ITenantContext>(), config, NullLogger<GatewayConfigController>.Instance)
+        // GatewayDeviceConfigService 持有 db/ITenantContext/logger —— 设备配置查询下沉到服务
+        var service = new GatewayDeviceConfigService(db, Mock.Of<ITenantContext>(), NullLogger<GatewayDeviceConfigService>.Instance);
+        return new GatewayConfigController(service, config, NullLogger<GatewayConfigController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext },
         };

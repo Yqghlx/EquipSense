@@ -1,15 +1,10 @@
-using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using EquipAI.Application.DTOs.Gateway;
-using EquipAI.Core.Entities;
-using EquipAI.Core.Interfaces;
-using EquipAI.Infrastructure.Data;
+using EquipAI.Application.Services;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -20,25 +15,16 @@ namespace EquipAI.WebAPI.Controllers;
 [Route("api/v1/gateway")]
 public class GatewayConfigController : ControllerBase
 {
-    private readonly AppDbContext _dbContext;
-    private readonly ITenantContext _tenantContext;
+    private readonly GatewayDeviceConfigService _service;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GatewayConfigController> _logger;
 
-    /// <summary>
-    /// 初始化网关配置管理控制器
-    /// </summary>
-    /// <param name="dbContext">数据库上下文</param>
-    /// <param name="tenantContext">租户上下文</param>
-    /// <param name="configuration">应用配置，用于读取 Gateway:AuthKey 等配置项</param>
     public GatewayConfigController(
-        AppDbContext dbContext,
-        ITenantContext tenantContext,
+        GatewayDeviceConfigService service,
         IConfiguration configuration,
         ILogger<GatewayConfigController> logger)
     {
-        _dbContext = dbContext;
-        _tenantContext = tenantContext;
+        _service = service;
         _configuration = configuration;
         _logger = logger;
     }
@@ -96,7 +82,7 @@ public class GatewayConfigController : ControllerBase
     [ProducesResponseType(typeof(List<GatewayDevicePullDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<GatewayDevicePullDto>>> PullConfig(
-        [FromQuery] string gatewayId, [FromQuery] Guid? tenantId)
+        [FromQuery] string gatewayId, [FromQuery] Guid? tenantId, CancellationToken ct = default)
     {
         // 校验网关认证密钥
         var authKey = _configuration["Gateway:AuthKey"];
@@ -114,31 +100,12 @@ public class GatewayConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(gatewayId))
             return BadRequest(new { code = 400, message = "gatewayId 参数不能为空" });
 
-        // 安全修复：必须按 (TenantId, GatewayId) 双重限定。
-        // GatewayId 仅【租户内】唯一（见 GatewayConfiguration：HasIndex(TenantId,GatewayId).IsUnique()），
-        // 且 CreateDevice 默认 gatewayId="gateway-001"，多租户共用同一 Id 是常态。
-        // 若仅按 gatewayId 过滤，持有共享 AuthKey 的任意网关拉取 ?gatewayId=gateway-001 会拿到
-        // 【所有租户】同 Id 网关下的设备配置——含 OPC UA 连接串等工业敏感信息，构成跨租户泄漏。
-        // 故 tenantId 为必填，缺失即拒绝（强制 EdgeGateway 升级为携带 tenantId 的版本）。
+        // 安全修复：必须按 (TenantId, GatewayId) 双重限定——GatewayId 仅租户内唯一，
+        // 单按 gatewayId 过滤会跨租户泄漏工业敏感信息（OPC UA 连接串等）。tenantId 必填，缺失即拒绝。
         if (tenantId is null || tenantId == Guid.Empty)
             return BadRequest(new { code = 400, message = "tenantId 参数不能为空" });
 
-        // 绕过租户过滤器（本端点走网关密钥认证，无 JWT/ITenantContext），改为显式按 tenantId 限定
-        var devices = await _dbContext.UnfilteredSet<GatewayDevice>()
-            .Where(d => d.TenantId == tenantId.Value && d.GatewayId == gatewayId && d.Enabled)
-            .OrderBy(d => d.DeviceName)
-            .ToListAsync();
-
-        // 转换为 EdgeGateway 可直接使用的拉取 DTO
-        var result = devices.Select(d => new GatewayDevicePullDto
-        {
-            DeviceId = d.Id.ToString(),
-            Protocol = d.Protocol,
-            ConnectionString = d.ConnectionConfig,
-            DataPoints = ParseDataPoints(d.DataPoints),
-            PollIntervalMs = d.PollIntervalMs,
-        }).ToList();
-
+        var result = await _service.PullConfigAsync(tenantId.Value, gatewayId, ct);
         return Ok(result);
     }
 
@@ -151,20 +118,8 @@ public class GatewayConfigController : ControllerBase
     [Authorize]
     [RequirePermission("device:read")]
     [ProducesResponseType(typeof(List<GatewayDeviceDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<GatewayDeviceDto>>> GetDevices([FromQuery] string? gatewayId)
-    {
-        var query = _dbContext.GatewayDevices.AsQueryable();
-
-        if (!string.IsNullOrWhiteSpace(gatewayId))
-            query = query.Where(d => d.GatewayId == gatewayId);
-
-        var devices = await query
-            .OrderByDescending(d => d.CreatedAt)
-            .ToListAsync();
-
-        var result = devices.Select(MapToDto).ToList();
-        return Ok(result);
-    }
+    public async Task<ActionResult<List<GatewayDeviceDto>>> GetDevices([FromQuery] string? gatewayId, CancellationToken ct = default)
+        => Ok(await _service.ListAsync(gatewayId, ct));
 
     /// <summary>
     /// 创建网关设备配置
@@ -176,7 +131,7 @@ public class GatewayConfigController : ControllerBase
     [RequirePermission("device:create")]
     [ProducesResponseType(typeof(GatewayDeviceDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<GatewayDeviceDto>> CreateDevice([FromBody] CreateGatewayDeviceRequest request)
+    public async Task<ActionResult<GatewayDeviceDto>> CreateDevice([FromBody] CreateGatewayDeviceRequest request, CancellationToken ct = default)
     {
         // 参数校验
         if (string.IsNullOrWhiteSpace(request.DeviceName))
@@ -184,28 +139,9 @@ public class GatewayConfigController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Protocol))
             return BadRequest(new { code = 400, message = "协议类型不能为空" });
 
-        // 优先使用请求中指定的网关 ID，否则使用默认值
-        var gatewayId = !string.IsNullOrWhiteSpace(request.GatewayId)
-            ? request.GatewayId
-            : _configuration["Gateway:DefaultGatewayId"] ?? "gateway-001";
-
-        var entity = new GatewayDevice
-        {
-            TenantId = _tenantContext.TenantId,
-            GatewayId = gatewayId,
-            DeviceId = request.DeviceId,
-            DeviceName = request.DeviceName,
-            Protocol = request.Protocol.ToLowerInvariant(),
-            ConnectionConfig = request.ConnectionConfig,
-            DataPoints = request.DataPoints,
-            PollIntervalMs = request.PollIntervalMs,
-            Enabled = true,
-        };
-
-        _dbContext.GatewayDevices.Add(entity);
-        await _dbContext.SaveChangesAsync();
-
-        return CreatedAtAction(nameof(GetDevices), new { }, MapToDto(entity));
+        var defaultGatewayId = _configuration["Gateway:DefaultGatewayId"] ?? "gateway-001";
+        var dto = await _service.CreateAsync(request, defaultGatewayId, ct);
+        return CreatedAtAction(nameof(GetDevices), new { }, dto);
     }
 
     /// <summary>
@@ -218,7 +154,7 @@ public class GatewayConfigController : ControllerBase
     [Authorize]
     [RequirePermission("device:create")]
     [ProducesResponseType(typeof(TestConnectionResponse), StatusCodes.Status200OK)]
-    public async Task<ActionResult<TestConnectionResponse>> TestConnection([FromBody] TestConnectionRequest request)
+    public async Task<ActionResult<TestConnectionResponse>> TestConnection([FromBody] TestConnectionRequest request, CancellationToken ct = default)
     {
         // 参数校验
         if (string.IsNullOrWhiteSpace(request.Protocol))
@@ -236,88 +172,16 @@ public class GatewayConfigController : ControllerBase
         }
 
         // 尝试代理到当前租户的在线边缘网关
-        var onlineGateway = await _dbContext.UnfilteredSet<Gateway>()
-            .Where(g => g.TenantId == _tenantContext.TenantId && g.Status == "online" && g.Enabled)
-            .OrderByDescending(g => g.LastHeartbeatAt)
-            .FirstOrDefaultAsync();
-
+        var onlineGateway = await _service.FindOnlineGatewayAsync(ct);
         if (onlineGateway != null)
         {
-            try
-            {
-                using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-                var payload = new { protocol, connectionString = request.ConnectionConfig };
-                var response = await httpClient.PostAsJsonAsync(
-                    $"http://{onlineGateway.Host}:{onlineGateway.HealthPort}/test-connection",
-                    payload);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-                    return Ok(new TestConnectionResponse
-                    {
-                        Success = result.TryGetProperty("success", out var successEl) && successEl.GetBoolean(),
-                        Message = result.TryGetProperty("message", out var msgEl) ? msgEl.GetString() ?? "连接测试完成" : "连接测试完成"
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "代理连接测试到网关 {GatewayId} 失败，回退到配置校验", onlineGateway.GatewayId);
-            }
+            var (result, proxied) = await _service.ProxyTestConnectionAsync(protocol, request.ConnectionConfig, onlineGateway, ct);
+            if (proxied)
+                return Ok(result);
         }
 
         // 回退：JSON 格式校验
-        return await TestConnectionValidationAsync(protocol, request.ConnectionConfig);
-    }
-
-    /// <summary>
-    /// 纯 JSON 格式校验回退（无在线网关时使用）
-    /// </summary>
-    private async Task<ActionResult<TestConnectionResponse>> TestConnectionValidationAsync(string protocol, string connectionConfig)
-    {
-        try
-        {
-            var configDoc = JsonDocument.Parse(connectionConfig);
-            var hasRequiredField = protocol switch
-            {
-                "opcua" => configDoc.RootElement.TryGetProperty("endpointUrl", out _),
-                "modbus-tcp" => configDoc.RootElement.TryGetProperty("host", out _),
-                "modbus-rtu" => configDoc.RootElement.TryGetProperty("portName", out _) || configDoc.RootElement.TryGetProperty("port", out _),
-                _ => false
-            };
-
-            if (!hasRequiredField)
-            {
-                var requiredField = protocol switch
-                {
-                    "opcua" => "endpointUrl",
-                    "modbus-tcp" => "host",
-                    "modbus-rtu" => "portName 或 port",
-                    _ => "unknown"
-                };
-
-                return Ok(new TestConnectionResponse
-                {
-                    Success = false,
-                    Message = $"连接配置缺少必填字段：{requiredField}"
-                });
-            }
-
-            return Ok(new TestConnectionResponse
-            {
-                Success = true,
-                Message = $"配置格式校验通过（{protocol}），无在线网关可执行真实连接测试"
-            });
-        }
-        catch (JsonException)
-        {
-            return Ok(new TestConnectionResponse
-            {
-                Success = false,
-                Message = "连接配置 JSON 格式无效"
-            });
-        }
+        return Ok(await _service.ValidateConnectionConfigAsync(protocol, request.ConnectionConfig));
     }
 
     /// <summary>
@@ -331,22 +195,12 @@ public class GatewayConfigController : ControllerBase
     [RequirePermission("device:update")]
     [ProducesResponseType(typeof(GatewayDeviceDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<GatewayDeviceDto>> UpdateDevice(Guid id, [FromBody] UpdateGatewayDeviceRequest request)
+    public async Task<ActionResult<GatewayDeviceDto>> UpdateDevice(Guid id, [FromBody] UpdateGatewayDeviceRequest request, CancellationToken ct = default)
     {
-        var entity = await _dbContext.GatewayDevices.FindAsync(id);
-        if (entity == null)
+        var dto = await _service.UpdateAsync(id, request, ct);
+        if (dto is null)
             return NotFound(new { code = 404, message = "网关设备配置不存在" });
-
-        if (request.DeviceName is not null) entity.DeviceName = request.DeviceName;
-        if (request.ConnectionConfig is not null) entity.ConnectionConfig = request.ConnectionConfig;
-        if (request.DataPoints is not null) entity.DataPoints = request.DataPoints;
-        if (request.PollIntervalMs.HasValue) entity.PollIntervalMs = request.PollIntervalMs.Value;
-        if (request.Enabled.HasValue) entity.Enabled = request.Enabled.Value;
-
-        await _dbContext.SaveChangesAsync();
-
-        _logger.LogInformation("网关设备 {DeviceId} 配置已更新", id);
-        return Ok(MapToDto(entity));
+        return Ok(dto);
     }
 
     /// <summary>
@@ -358,60 +212,11 @@ public class GatewayConfigController : ControllerBase
     [RequirePermission("device:delete")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteDevice(Guid id)
+    public async Task<IActionResult> DeleteDevice(Guid id, CancellationToken ct = default)
     {
-        var entity = await _dbContext.GatewayDevices.FindAsync(id);
-        if (entity == null)
+        var deleted = await _service.DeleteAsync(id, ct);
+        if (!deleted)
             return NotFound(new { code = 404, message = "网关设备配置不存在" });
-
-        _dbContext.GatewayDevices.Remove(entity);
-        await _dbContext.SaveChangesAsync();
-
         return NoContent();
-    }
-
-    /// <summary>
-    /// 将 GatewayDevice 实体映射为 GatewayDeviceDto
-    /// </summary>
-    /// <param name="entity">网关设备实体</param>
-    /// <returns>网关设备 DTO</returns>
-    private static GatewayDeviceDto MapToDto(GatewayDevice entity)
-    {
-        return new GatewayDeviceDto
-        {
-            Id = entity.Id,
-            GatewayId = entity.GatewayId,
-            DeviceId = entity.DeviceId,
-            DeviceName = entity.DeviceName,
-            Protocol = entity.Protocol,
-            ConnectionConfig = entity.ConnectionConfig,
-            DataPoints = entity.DataPoints,
-            PollIntervalMs = entity.PollIntervalMs,
-            Enabled = entity.Enabled,
-            CreatedAt = entity.CreatedAt,
-        };
-    }
-
-    /// <summary>
-    /// 解析 DataPoints JSON 字符串为字典
-    /// </summary>
-    /// <param name="dataPointsJson">JSON 格式的数据点映射</param>
-    /// <returns>指标名到点位地址的映射字典</returns>
-    private Dictionary<string, string> ParseDataPoints(string dataPointsJson)
-    {
-        if (string.IsNullOrEmpty(dataPointsJson) || dataPointsJson == "{}")
-            return new Dictionary<string, string>();
-
-        try
-        {
-            return JsonSerializer.Deserialize<Dictionary<string, string>>(dataPointsJson)
-                   ?? new Dictionary<string, string>();
-        }
-        catch (Exception ex)
-        {
-            // DataPoints JSON 解析失败，返回空字典
-            _logger.LogWarning(ex, "DataPoints JSON 解析失败，返回空字典");
-            return new Dictionary<string, string>();
-        }
     }
 }

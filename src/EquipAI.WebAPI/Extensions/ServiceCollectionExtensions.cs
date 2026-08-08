@@ -228,6 +228,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<DeviceImportService>();
+        services.AddScoped<GatewayManagementService>();
+        services.AddScoped<GatewayDeviceConfigService>();
         services.AddScoped<Application.Devices.DeviceTypeTemplateService>();
         services.AddScoped<Application.Devices.DeviceConfigService>();
 
@@ -331,6 +333,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();
         services.AddScoped<IWorkOrderIntegration, FeishuIntegration>();
         services.AddScoped<IWorkOrderIntegration, EamIntegration>();
+        services.AddScoped<IntegrationSettingsService>();
 
         // 集成路由服务 — 统一管理外部集成的推送分发、重试和日志记录
         services.AddScoped<IntegrationRouter>();
