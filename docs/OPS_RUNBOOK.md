@@ -121,7 +121,7 @@ docker stats equipai-backend --no-stream
    psql -c "SELECT name, device_type FROM knowledge_rules WHERE enabled=true;"
 3. 检查 AlertTriggeredEvent 是否发布
    grep "AlertTriggeredEvent" /tmp/backend.log
-4. 检查事件总线是否丢弃事件（容量 1000，高峰可能 DropOldest）
+4. 检查 `/health/ready` 中 `rabbitmq-eventbus`，再查看 `equipai.v2.*.retry` 和 `*.dead` 队列积压
 ```
 
 ### 2.4 MQTT 数据中断
@@ -281,3 +281,12 @@ curl http://localhost:8080/health
 3. 检查异常登录 `psql -c "SELECT * FROM audit_logs WHERE action='LoginFailed' AND created_at > now() - interval '24 hours';"`
 4. 修改所有密码（admin/数据库/Redis/JWT_SECRET）
 5. 联系安全团队评估影响范围
+
+### 6.4 RabbitMQ 不可用或版本升级
+
+1. 先检查 `docker compose ps rabbitmq`、`rabbitmq-diagnostics -q ping` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
+2. 验证 v2 policy：`rabbitmqctl list_policies -p /`，并用 `rabbitmqctl list_queues -p / name durable arguments policy` 检查 `equipai.v2.*` 队列。
+3. 既有 3.13 数据卷需要保留时，先完整备份，排空旧 `equipai.events.*` 主/retry 队列，再按官方支持路径升级到 4.2、启用稳定 feature flags，最后升级到 4.3.4。
+4. v2 切换后保留旧 dead 队列供人工核对；应用和脚本不得自动删除旧队列或 `rabbitmq_data` 卷。
+5. 回滚应用版本时保留 v2 队列和数据卷。只有在确认没有业务队列数据且备份可恢复时，运维人员才可显式重建 broker。
+6. 极端情况下可显式设置 `EventBus__Provider=InMemory` 与 `EventBus__AllowInMemoryInProduction=true` 应急启动；该模式重启会丢事件，恢复 RabbitMQ 后立即撤销。

@@ -1,148 +1,78 @@
 # 事件总线（EventBus）
 
-> 模块间解耦的核心基础设施。本项目提供两种可配置切换的实现：
-> **进程内事件总线**（默认，零依赖）和 **RabbitMQ 持久化事件总线**（生产高可用）。
+EquipSense 通过 `IEventBus` 解耦告警、分析、工单和通知模块。生产环境默认使用 RabbitMQ；Development 和 Testing 默认使用 InMemory，避免本地开发被外部 broker 阻塞。
 
-## 架构
+## 运行模式
 
-```
-发布者(Service) ──PublishAsync──> IEventBus ──> [InMemory: Channel | RabbitMQ: Exchange]
-                                                      │
-                                                      ▼
-                                               消费者循环（后台）
-                                                      │
-                                          DI 作用域解析 Handler ──> 处理事件
-```
+| 维度 | InMemoryEventBus | RabbitMqEventBus |
+|---|---|---|
+| 适用环境 | 开发、测试、生产紧急降级 | 生产默认 |
+| 持久化 | 无，进程重启会丢未处理事件 | 持久化消息 + quorum queue |
+| 多处理器语义 | 进程内广播 | 每个处理器独立队列和确认 |
+| 失败处理 | 日志记录 | 有限重试 + 独立死信队列 |
+| 发布成功语义 | 已写入进程内队列 | broker 已确认且至少路由到一个队列 |
 
-两种实现都实现 `EquipAI.Core.Interfaces.IEventBus`，通过配置切换，业务代码（`PublishAsync` / `Subscribe`）零感知。
+只接受 `InMemory` 和 `RabbitMQ` 两个 Provider，拼写错误会拒绝启动。生产环境使用 InMemory 还必须显式设置：
 
-## 实现对比
-
-| 维度 | InMemoryEventBus（默认） | RabbitMqEventBus |
-|------|--------------------------|-------------------|
-| 持久化 | ❌ 进程内 Channel，重启丢未消费事件 | ✅ 消息落盘，broker 重启不丢 |
-| 重试 | ❌ 处理器抛异常仅记日志 | ✅ 失败进重试队列，TTL 到期重投 |
-| 死信 | ❌ 无 | ✅ 超过重试上限进死信队列供排查 |
-| 多实例 | ❌ 事件不跨进程（仅当前实例消费者） | ✅ 多实例竞争消费同一队列（work queue） |
-| 部署依赖 | 无 | RabbitMQ 服务 |
-| 适用场景 | 单实例开发/测试、事件可容忍丢失 | 生产、多实例、事件不可丢（告警/工单/分析） |
-
-## 切换方式
-
-### 配置驱动
-
-```json
-// appsettings.json
-{
-  "EventBus": {
-    "Provider": "InMemory",  // 或 "RabbitMQ"
-    "RabbitMq": {
-      "Host": "localhost",
-      "Port": 5672,
-      "Username": "guest",
-      "Password": "guest",
-      "MaxRetryCount": 5,
-      "RetryIntervalSeconds": 30
-    }
-  }
-}
+```env
+EventBus__Provider=InMemory
+EventBus__AllowInMemoryInProduction=true
 ```
 
-环境变量覆盖（Docker / CI）：
+该开关只用于故障期间的 break-glass，启用后日志会记录最高级别告警；进程重启仍会丢失未处理事件。
 
-```bash
-EventBus__Provider=RabbitMQ
-EventBus__RabbitMq__Host=rabbitmq
-EventBus__RabbitMq__Password=s3cret
+## RabbitMQ v2 拓扑
+
+应用启动时先登记全部订阅，再由 `RabbitMqEventBus` 托管服务统一连接并启动消费者。每个事件使用一个 fanout exchange，每个处理器使用独立队列：
+
+```text
+equipai.v2.events.{event-key}                      事件广播交换机
+equipai.v2.{event-key}.{handler-key}              处理器主队列
+equipai.v2.{event-key}.{handler-key}.retry        处理器重试队列
+equipai.v2.{event-key}.{handler-key}.dead         处理器死信队列
 ```
 
-`.env` 模板见 `docker/.env.example` 的 `EVENTBUS_PROVIDER` / `RABBITMQ_*` 段。
+类型键由可读类型简称和 `Type.FullName` 的稳定 SHA-256 摘要组成，不包含程序集版本。v2 前缀与旧 `equipai.events.*` 拓扑隔离，避免队列参数变化触发声明冲突。
 
-### Docker 启用
+主队列处理失败后执行 `nack(requeue=false)`，消息进入自己的 retry 队列；TTL 到期后返回原主队列。`MaxRetryCount=5` 表示包括首次处理在内总共最多执行五次。计数来自当前主队列、`reason=rejected` 的 `x-death.count`，不是 `x-death` 数组长度。
 
-`docker/docker-compose.yml` 已包含 `rabbitmq` 服务（3.13-management-alpine，含管理 UI）。
+达到上限时，应用先用持久化、mandatory 和 publisher confirm 把消息写入该处理器 dead 队列，确认成功后才 ack 原消息。死信发布失败时原消息保持未确认，避免静默丢失。
 
-```bash
-# .env 设置
+## 发布和连接保证
+
+- 发布通道启用 Publisher Confirms 和确认跟踪。
+- 所有发布使用 `mandatory=true`；无路由、broker Nack、断连或取消会向调用方报错。
+- 共享发布通道由异步信号量串行保护，避免 AMQP 帧交错。
+- 消费处理通过 `WaitAsync` 强制执行 `HandlerTimeoutSeconds`。
+- RabbitMQ 连接、发布通道或消费者未就绪时，`/health/ready` 返回失败；`/health` liveness 不受影响。
+
+## 配置
+
+```env
 EVENTBUS_PROVIDER=RabbitMQ
-RABBITMQ_PASSWORD=<强密码>
-
-# 启动
-docker compose -f docker/docker-compose.yml up -d
+RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine
+RABBITMQ_USER=equipai
+RABBITMQ_PASSWORD=<至少16字符的强密码>
+EventBus__RabbitMq__Host=rabbitmq
+EventBus__RabbitMq__Port=5672
+EventBus__RabbitMq__MaxRetryCount=5
+EventBus__RabbitMq__RetryIntervalSeconds=30
 ```
 
-管理 UI：http://localhost:15672（用户 equipai / .env 中的 RABBITMQ_PASSWORD）
+生产 Compose 会加载 `docker/rabbitmq/definitions.json`，为 `equipai.v2.*` quorum 队列设置 `dead-letter-strategy=at-least-once` 和 `overflow=reject-publish`。外部 RabbitMQ 部署必须应用等价策略。应用不需要 management 权限，策略验证由部署前置检查完成。
 
-## RabbitMQ 队列拓扑
+## 版本升级和旧队列
 
-每个事件类型（按 CLR FullName）一套队列：
+RabbitMQ 镜像变量是必填项，目的是让已有部署在变更容器前安全失败。不得把 3.13 数据卷直接挂载到 4.3；保留消息时必须按官方支持路径 `3.13 -> 4.2 -> 4.3` 升级，并在每一步启用稳定 feature flags。
 
-```
-equipai.events.{EventType}              主队列    — DLX → retry-exchange
-equipai.events.{EventType}.retry        重试队列  — TTL=RetryIntervalSeconds, DLX → 主 exchange
-equipai.events.{EventType}.dead         死信队列  — 无消费者，堆积供人工排查
-```
-
-**重试回路**：处理器抛异常 → `nack(requeue=false)` → 主队列 DLX 投到重试队列 →
-TTL 到期 → 重试队列 DLX 投回主队列 → 重新消费。
-
-**死信兜底**：通过 `x-death` header 累计推断重试次数，超过 `MaxRetryCount`（默认 5）
-后原样转发到死信队列（附 `x-dead-reason` 异常信息），不再重投。
-
-**队列类型**：`quorum`（quorum queue）—— 跨节点强一致 + 持久化，生产可用性高于 classic。
-
-## 为什么默认 InMemory
-
-1. **单实例部署够用**：Phase 1 模块化单体，单实例下 InMemoryEventBus 功能完整
-2. **零额外依赖**：开发/测试无需启动 RabbitMQ
-3. **可平滑升级**：配置切 `RabbitMQ` 即启用，业务代码零改动
-
-**何时切 RabbitMQ**：
-- 多实例部署（事件需跨进程分发）
-- 对事件可靠性要求高（进程重启不能丢告警/工单事件）
-- 需要可观测的事件处理状态（RabbitMQ 管理 UI + 死信队列）
-
-## 当前订阅的事件
-
-`Program.cs` 启动时注册（11 个订阅，覆盖告警、工单、分析、遥测全链路）：
-
-| 事件 | 处理器 | 作用 |
-|------|--------|------|
-| `TelemetryReceivedEvent` | `TelemetryEventHandler` | 触发告警评估 |
-| `AlertTriggeredEvent` | `AlertEventHandler` | SignalR 推送告警 |
-| `AlertTriggeredEvent` | `RootCauseAnalysisHandler` | AI 根因分析 |
-| `AlertTriggeredEvent` | `WorkOrderAutoCreateHandler` | 自动建单 |
-| `AlertAcknowledgedEvent` | `AlertStatusNotificationHandler` | 推送确认状态 |
-| `AlertResolvedEvent` | `AlertStatusNotificationHandler` | 推送解决状态 |
-| `AnalysisCompletedEvent` | `WorkOrderAnalysisHandler` | 工单关联分析 |
-| `WorkOrderStatusChangedEvent` | `KnowledgeCaptureHandler` | 知识沉淀 |
-| `WorkOrderStatusChangedEvent` | `WorkOrderIntegrationHandler` | 钉钉/飞书/Webhook |
-| `WorkOrderCreatedEvent` | `WorkOrderNotificationHandler` | 推送新工单 |
-| `WorkOrderStatusChangedEvent` | `WorkOrderNotificationHandler` | 推送状态变更 |
+切换 v2 后先排空旧 `equipai.events.*` 主队列和 retry 队列，旧 dead 队列保留供人工检查。应用和部署脚本不会自动删除旧队列、死信或 RabbitMQ 数据卷。详细步骤见 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md)。
 
 ## 测试
 
-### 单元测试（无需 broker）
+- 单元测试覆盖 Provider 安全校验、拓扑命名、压缩 `x-death` 解析、总尝试次数边界、生命周期和 readiness。
+- `tests/EquipAI.Tests.Integration/Eventing/RabbitMqEventBusIntegrationTests.cs` 使用真实 RabbitMQ 验证多处理器隔离、有限重试、并发确认发布和重启恢复。
+- 本地默认跳过真实 broker 测试；CI 设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 并强制执行。
 
-`tests/EquipAI.Tests.Unit/Eventing/RabbitMqEventBusOptionsTests.cs`：
-- `RabbitMqOptions` 默认值验证（13 项生产基线）
-- 配置绑定（`EventBus:RabbitMq` 节 → 对象）
-- Provider 切换逻辑（大小写不敏感、空值默认 InMemory）
-- 队列命名约定（反射验证私有方法，防改名导致孤儿队列）
-- 持久化投递常量（`DeliveryModes.Persistent == 2`）
+## 可靠性边界
 
-### 集成测试（需 RabbitMQ 容器）
-
-`RabbitMqEventBus` 实例化需真实 broker 连接。端到端交付测试（发布 → 持久化 → 重启消费 → 重试 → 死信）
-应在集成层用 Testcontainers.RabbitMq 完成。当前未包含——因本项目默认 InMemory，
-集成测试用 InMemoryEventBus 即覆盖业务逻辑；切 RabbitMQ 部署时再补充。
-
-## 文件清单
-
-| 文件 | 作用 |
-|------|------|
-| `src/EquipAI.Core/Interfaces/IEventBus.cs` | 事件总线接口（PublishAsync / Subscribe） |
-| `src/EquipAI.Application/Eventing/InMemoryEventBus.cs` | 默认进程内实现（Channel + 后台消费） |
-| `src/EquipAI.Infrastructure/Messaging/RabbitMqEventBus.cs` | RabbitMQ 持久化实现（重试 + 死信） |
-| `src/EquipAI.Infrastructure/Messaging/RabbitMqOptions.cs` | RabbitMQ 配置选项 |
-| `src/EquipAI.WebAPI/Extensions/ServiceCollectionExtensions.cs` | DI 切换（配置驱动） |
+当前实现提供 RabbitMQ 内的 at-least-once 投递，不提供恰好一次。单节点 quorum queue 只增强重启恢复能力，不等同于多节点高可用。业务数据库提交和消息发布仍不是同一原子事务；下一阶段必须通过事务 Outbox、幂等 Inbox 和消费者副作用去重补齐这一窗口。

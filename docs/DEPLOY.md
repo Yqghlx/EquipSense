@@ -37,6 +37,7 @@ VAPID__PUBLICKEY=<由 web-push 生成的公钥>
 VAPID__PRIVATEKEY=<由 web-push 生成的私钥>
 REDIS_PASSWORD=<Redis强密码>
 RABBITMQ_PASSWORD=<RabbitMQ强密码>
+RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine
 SEQ_ADMIN_PASSWORD=<Seq管理员密码>
 GRAFANA_PASSWORD=<Grafana管理员密码>
 
@@ -98,6 +99,9 @@ docker compose -f docker/docker-compose.yml ps
 # 检查后端健康
 curl http://localhost:8080/health/startup
 
+# 检查生产就绪状态（包含 RabbitMQ 事件总线）
+curl http://localhost:8080/health/ready
+
 # 检查前端
 curl https://localhost/health
 
@@ -115,7 +119,8 @@ curl http://localhost:8080/api/v1/system/info
 | `PG_PORT` | PostgreSQL 端口 | `5432` | 否 |
 | `REDIS_PASSWORD` | Redis 密码 | - | 生产环境必填 |
 | `REDIS_PORT` | Redis 端口 | `6379` | 否 |
-| `RABBITMQ_PASSWORD` | RabbitMQ 密码（即使事件总线使用 InMemory，RabbitMQ 容器也会启动） | - | 生产环境必填 |
+| `RABBITMQ_IMAGE` | RabbitMQ 精确镜像版本 | 无默认值 | 生产环境必填 |
+| `RABBITMQ_PASSWORD` | RabbitMQ 密码（至少 16 字符，禁止 guest） | - | 生产环境必填 |
 | `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | - | 生产环境必填 |
 | `GRAFANA_PASSWORD` | Grafana 管理员密码 | - | 生产环境必填 |
 | `MQTT_PORT` | MQTT 对外端口 | `8883` | 否 |
@@ -144,6 +149,10 @@ curl http://localhost:8080/api/v1/system/info
 管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。所有种子用户首次登录后必须修改密码。
 
 > `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。
+
+### RabbitMQ 既有部署升级
+
+生产 Compose 默认使用 RabbitMQ，且 `RABBITMQ_IMAGE` 必须显式设置。已有 3.13 数据卷不得直接挂载到 4.3；有保留消息需求时按 `3.13 -> 4.2 -> 4.3` 升级，每一步先备份并启用稳定 feature flags。切换后验证 `equipai-v2-at-least-once-dlx` policy，再启动后端。完整迁移、排空和回滚步骤见 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md)。
 
 ### 依赖审计说明
 

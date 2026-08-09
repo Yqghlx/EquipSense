@@ -18,6 +18,7 @@ EquipSense（内部代号 EquipAI）是一个端到端的工业 IoT 监控平台
 | 前端 | React 19 + TypeScript + Vite + shadcn/ui + TailwindCSS |
 | 数据库 | PostgreSQL 16 + TimescaleDB（业务 + 时序一体化） |
 | 缓存 | Redis 7 |
+| 可靠事件 | RabbitMQ 4.3（生产默认，处理器独立重试/死信） |
 | 实时通信 | SignalR（按租户分组隔离） |
 | 工业协议 | MQTT（MQTTnet + Mosquitto） |
 | AI/ML | LLM（通义千问 / GLM via DashScope） |
@@ -41,7 +42,7 @@ cd EquipSense
 
 # 2. 创建环境变量文件
 cp docker/.env.example docker/.env
-# 编辑 .env，设置 PG_PASSWORD 和 JWT_SECRET（必填）
+# 编辑 .env，设置所有必填密码、JWT_SECRET 和固定的 RABBITMQ_IMAGE
 
 # 3. 启动全套服务
 docker compose -f docker/docker-compose.yml up -d --build

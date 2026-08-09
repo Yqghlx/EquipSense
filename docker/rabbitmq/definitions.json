@@ -1,0 +1,15 @@
+{
+  "policies": [
+    {
+      "vhost": "/",
+      "name": "equipai-v2-at-least-once-dlx",
+      "pattern": "^equipai\\.v2\\.",
+      "apply-to": "queues",
+      "definition": {
+        "dead-letter-strategy": "at-least-once",
+        "overflow": "reject-publish"
+      },
+      "priority": 20
+    }
+  ]
+}

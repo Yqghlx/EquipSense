@@ -24,6 +24,7 @@ using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Data.Repositories;
 using EquipAI.Infrastructure.Identity;
+using EquipAI.Infrastructure.HealthChecks;
 using EquipAI.Infrastructure.Messaging;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Tenant;
@@ -34,6 +35,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Threading.RateLimiting;
+using Microsoft.Extensions.Hosting;
 
 namespace EquipAI.WebAPI.Extensions;
 
@@ -135,14 +137,19 @@ public static class ServiceCollectionExtensions
         // SMTP 邮件通知配置
         services.Configure<SmtpOptions>(configuration.GetSection("Smtp"));
 
-        // 事件总线注册：默认进程内实现（InMemoryEventBus），配置 EventBus:Provider=RabbitMQ 时切换到 RabbitMQ
-        // RabbitMQ 实现提供持久化 + 重试 + 死信队列，进程重启不丢业务事件（告警/工单/分析）。
-        // 切换通过配置驱动，单实例部署无需 RabbitMQ；多实例或对事件可靠性要求高时启用。
-        var eventBusProvider = configuration["EventBus:Provider"] ?? "InMemory";
-        if (string.Equals(eventBusProvider, "RabbitMQ", StringComparison.OrdinalIgnoreCase))
+        // 事件总线实现必须由统一解析器确定，未知值直接失败，避免配置拼写错误静默降级。
+        // RabbitMQ 总线以同一单例暴露为业务接口、托管服务和就绪状态，保证生命周期一致。
+        var eventBusProvider = EventBusConfiguration.ResolveProvider(configuration);
+        if (eventBusProvider == EventBusProvider.RabbitMQ)
         {
-            services.Configure<EquipAI.Infrastructure.Messaging.RabbitMqOptions>(configuration.GetSection("EventBus:RabbitMq"));
-            services.AddSingleton<IEventBus, EquipAI.Infrastructure.Messaging.RabbitMqEventBus>();
+            services.Configure<RabbitMqOptions>(configuration.GetSection("EventBus:RabbitMq"));
+            services.AddSingleton<RabbitMqEventBus>();
+            services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<RabbitMqEventBus>());
+            services.AddSingleton<IRabbitMqConnectionState>(provider => provider.GetRequiredService<RabbitMqEventBus>());
+            services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<RabbitMqEventBus>());
+            services.AddHealthChecks().AddCheck<RabbitMqHealthCheck>(
+                "rabbitmq-eventbus",
+                tags: ["ready"]);
         }
         else
         {

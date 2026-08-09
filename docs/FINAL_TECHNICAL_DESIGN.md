@@ -75,7 +75,7 @@
 
 **Phase 1 基础设施**：PG + TimescaleDB + Redis + Mosquitto + 后端 + 前端。
 
-**Phase 1 不引入**：RabbitMQ（进程内事件）、MinIO（文件存本地）、K8s（Compose 够）、YARP（单体不需要）。
+**当前部署边界**：生产事件总线使用 RabbitMQ 4.3，开发/测试保留进程内实现；暂不引入 MinIO、K8s 和 YARP。
 
 ### 2.1 后端项目结构
 
@@ -963,7 +963,7 @@ public class AlertWindow
 
 ```csharp
 /// <summary>
-/// 进程内事件总线（Phase 1），Phase 2+ 可替换为 RabbitMQ 实现
+/// 模块间事件总线；生产使用 RabbitMQ，开发和测试可使用进程内实现
 /// </summary>
 public interface IEventBus
 {

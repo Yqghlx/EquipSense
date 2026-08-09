@@ -490,7 +490,7 @@ public sealed class RabbitMqEventBus :
 
     private static Exception Unwrap(Exception exception) =>
         exception is TargetInvocationException { InnerException: not null } invocationException
-            ? invocationException.InnerException
+            ? invocationException.InnerException!
             : exception;
 
     private async Task DisposeBrokerResourcesAsync(CancellationToken cancellationToken = default)

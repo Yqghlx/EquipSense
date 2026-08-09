@@ -60,6 +60,20 @@ jobs:
     # 密钥泄露必须先通过，再跑构建（避免在含泄露的代码上浪费资源）
     needs: secret-scan
 
+    services:
+      rabbitmq:
+        image: rabbitmq:4.3.4-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: equipai_test
+          RABBITMQ_DEFAULT_PASS: equipai_test_password
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
     steps:
       - uses: actions/checkout@v4
 
@@ -84,8 +98,23 @@ jobs:
       - name: 运行单元测试（采集覆盖率）
         run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s tests/coverage.runsettings --results-directory ./coverage-results
 
+      - name: 配置并验证 RabbitMQ v2 可靠死信策略
+        run: |
+          container_id=$(docker ps --filter ancestor=rabbitmq:4.3.4-management-alpine --format '{{.ID}}' | head -n 1)
+          test -n "$container_id"
+          docker exec "$container_id" rabbitmqctl set_policy -p / --priority 20 --apply-to queues \
+            equipai-v2-at-least-once-dlx '^equipai\.v2\.' \
+            '{"dead-letter-strategy":"at-least-once","overflow":"reject-publish"}'
+          docker exec "$container_id" rabbitmqctl list_policies -p /
+
       - name: 运行集成测试（采集覆盖率）
         run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s tests/coverage.runsettings --results-directory ./coverage-results
+        env:
+          RUN_RABBITMQ_INTEGRATION_TESTS: 'true'
+          RABBITMQ_TEST_HOST: 127.0.0.1
+          RABBITMQ_TEST_PORT: '5672'
+          RABBITMQ_TEST_USERNAME: equipai_test
+          RABBITMQ_TEST_PASSWORD: equipai_test_password
 
       # 合并单元 + 集成覆盖率为单份 Cobertura XML，供门禁脚本读取
       - name: 合并覆盖率报告

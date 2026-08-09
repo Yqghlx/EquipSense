@@ -19,6 +19,8 @@ All notable changes to this project will be documented in this file. The format 
 
 - README 和运行文档同步四级 AI 分析链及正式模拟器入口。
 - ECharts 改为按需注册，减少生产前端包体积。
+- 生产事件总线默认改为 RabbitMQ 4.3.4；v2 拓扑按处理器隔离主队列、重试和死信，发布启用 mandatory、Publisher Confirms 与通道互斥。
+- RabbitMQ 故障纳入 readiness 而不影响 liveness；CI 使用真实 broker 验证多处理器隔离、有限重试、并发确认发布和重启恢复。
 
 ## [1.2.0] - 2026-06-06
 
