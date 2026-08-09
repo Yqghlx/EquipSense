@@ -35,7 +35,9 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=1
 #    - 数据库连接失败 → 检查 PostgreSQL 容器 + 密码
 #    - 端口冲突 → netstat -tlnp | grep 8080
 #    - 内存不足 → docker stats
-#    - JWT_SECRET 未配 → 检查 .env
+#    - JWT/TOTP/AutoMapper/事件总线配置门禁失败 → 运行 validate-env.sh 并检查日志中的变量名
+
+bash docker/validate-env.sh docker/.env --check-runtime-files
 
 # 4. 重启
 docker compose --env-file docker/.env -f docker/docker-compose.yml restart backend

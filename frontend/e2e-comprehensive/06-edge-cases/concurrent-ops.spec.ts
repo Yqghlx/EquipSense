@@ -16,6 +16,7 @@ import {
   BASE_URL,
   login,
   captureErrors,
+  getCurrentUserId,
   getToken,
   navigateViaSidebar,
   createDeviceViaAPI,
@@ -199,12 +200,13 @@ test.describe('并发操作', () => {
 
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     const woId = wo.id as string;
+    const currentUserId = await getCurrentUserId(page);
 
     // 同时发送多个状态变更请求
     const results = await Promise.allSettled([
       page.request.put(`${BASE_URL}/api/v1/work-orders/${woId}/assign`, {
         headers,
-        data: { assigneeId: 'ad2d83f0-558c-4858-bffd-3bd98cb371dc' },
+        data: { assignedTo: currentUserId },
       }),
       page.request.put(`${BASE_URL}/api/v1/work-orders/${woId}/start`, {
         headers,

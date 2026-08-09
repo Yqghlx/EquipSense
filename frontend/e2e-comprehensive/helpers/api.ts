@@ -6,7 +6,7 @@
  * 所有请求自动获取 Token 并携带认证头。
  */
 import { expect, type Page } from '@playwright/test';
-import { getToken } from './auth';
+import { getCurrentUserId, getToken } from './auth';
 import { BASE_URL } from './auth';
 
 // ---------------------------------------------------------------------------
@@ -387,7 +387,7 @@ export async function createWorkOrderViaAPI(
  * @param token - 认证 Token
  * @param id - 工单 ID
  * @param action - 流转动作（assign / start / complete / close / cancel）
- * @param data - 附带数据（如 assigneeId、resolution 等）
+ * @param data - 附带数据（如 assignedTo、resolution 等）
  * @returns API 响应
  */
 export async function transitionWorkOrder(
@@ -410,15 +410,17 @@ export async function transitionWorkOrder(
  *
  * @param page - Playwright Page 实例
  * @param woId - 工单 ID
- * @param userId - 被指派人用户 ID
+ * @param userId - 被指派人用户 ID；省略时使用当前已认证用户
  */
 export async function assignWorkOrder(
   page: Page,
   woId: string,
-  userId: string,
+  userId?: string,
 ): Promise<void> {
   const token = await getToken(page);
-  await transitionWorkOrder(page, token, woId, 'assign', { assigneeId: userId });
+  const assignedTo = userId ?? await getCurrentUserId(page);
+  const response = await transitionWorkOrder(page, token, woId, 'assign', { assignedTo });
+  expect(response.ok()).toBeTruthy();
 }
 
 /**

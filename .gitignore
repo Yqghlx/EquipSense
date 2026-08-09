@@ -491,6 +491,8 @@ $RECYCLE.BIN/
 # Frontend test artifacts
 frontend/playwright-report/
 frontend/test-results/
+# Playwright CLI 真实浏览器验收产物（截图、网络日志和 trace）
+output/playwright/
 
 # Claude Code worktrees
 .claude/worktrees/

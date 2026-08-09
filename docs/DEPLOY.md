@@ -26,6 +26,7 @@ cp docker/.env.example docker/.env
 PG_PASSWORD=<强密码，至少16位>
 JWT_SECRET=<随机密钥，至少32位>
 TOTP_ENCRYPTION_KEY=<openssl rand -base64 32 生成的 AES-256 密钥>
+AUTOMAPPER_LICENSE_KEY=<Lucky Penny Software 签发的 AutoMapper 15+ 许可证密钥>
 MQTT_USERNAME=<MQTT用户名>
 MQTT_PASSWORD=<MQTT强密码>
 GATEWAY_AUTH_KEY=<至少32位的纯ASCII网关认证密钥>
@@ -146,6 +147,7 @@ curl http://localhost:8080/api/v1/system/info
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码（每项至少 16 个字符，不得使用占位值或公开默认值） | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `TOTP_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256 TOTP 密钥，必须由外部密钥管理系统保存 | - | 生产环境必填 |
+| `AUTOMAPPER_LICENSE_KEY` | AutoMapper 15+ 供应商签发的许可证密钥，通过密钥管理系统注入 | - | 生产环境必填 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
 | `LLM_MODEL` | LLM 模型 | `qwen-plus` | 否 |
 | `LLM_ENDPOINT` | LLM 端点 | DashScope | 否 |
@@ -168,6 +170,8 @@ curl http://localhost:8080/api/v1/system/info
 管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符且不得包含占位值；所有种子用户首次登录后必须修改密码。
 
 `TOTP_ENCRYPTION_KEY` 用于保护数据库中的 MFA 密钥，应用启动时会校验它必须解码为 32 字节；该密钥必须与数据库备份分开保存并纳入密钥管理系统的备份策略。密钥丢失后，历史 MFA 密钥无法恢复；轮换前必须先制定批量重新加密和回滚方案。
+
+`AUTOMAPPER_LICENSE_KEY` 用于 AutoMapper 15+ 的生产许可证验证。部署前需完成采购或适用许可证资格审核，从供应商获取真实密钥后注入；应用和部署脚本都会拒绝缺失、模板占位或过短值。密钥不得提交到仓库，可参考 [Lucky Penny Software 许可证 FAQ](https://luckypennysoftware.com/faq)。当前固定的 AutoMapper 15.1.3 已包含递归拒绝服务漏洞修复，禁止为规避许可证而降级到受影响版本；漏洞范围见 [GHSA-rvv3-g6hj-g44x](https://github.com/advisories/GHSA-rvv3-g6hj-g44x)。
 
 生产环境默认要求系统管理员和维保主管启用 TOTP MFA。首次登录或公开注册完成后，页面会进入 MFA 注册向导：使用 Authenticator 扫描二维码、输入 6 位验证码，验证成功后才会建立正式会话；注册令牌只在 Redis 中保留 10 分钟，成功后立即删除。注册成功会显示 8 个一次性恢复码，必须在离开页面前保存；登录时可使用恢复码代替 TOTP，每个恢复码成功使用后立即失效。已登录用户可在“安全与 MFA”中输入当前 TOTP 重新生成恢复码，旧码会全部失效。若覆盖 `Security__Mfa__RequiredRoles__*`，仍必须保留 `SystemAdmin` 和 `MaintenanceLead`，否则应用拒绝启动。
 
@@ -213,9 +217,7 @@ cd "$DEPLOY_PATH"
 
 ### 依赖审计说明
 
-CI 会执行 `frontend/scripts/check-production-audit.mjs`，对生产依赖中的 high/critical 漏洞逐项阻断。当前仅登记一项 React Router 例外：官方公告影响不稳定的 RSC API，而本项目是使用 `BrowserRouter` 的 SPA，不使用该 API；脚本同时锁定 `react-router` 与 `react-router-dom` 的实际安装版本为 `7.18.x`，并校验公告 URL，其他漏洞仍会阻断流水线。详见 [React Router 安全公告](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)。
-
-React Router DOM 包尚未提供对应的 `8.3.0` 修复版本，因此当前不降级到旧版本（旧版本会引入其他漏洞），待 DOM 包提供修复版本后重新评估升级路径。
+CI 会执行 `frontend/scripts/check-production-audit.mjs`，对生产依赖中的 high/critical 漏洞逐项阻断。脚本保留一个严格限定的 React Router RSC-only 公告应急例外：仅当包名、`7.18.x` 实际安装版本和公告 URL 全部精确匹配，且项目继续使用不涉及 RSC 的 `BrowserRouter` SPA 架构时才可接受；其他漏洞仍会阻断。npm 返回网络、鉴权或无效报告时同样 fail-closed，不能把审计失败误报成零漏洞。2026-08-09 当前锁文件的联网审计结果为 0 个漏洞，该例外未被实际触发。详见 [React Router 安全公告](https://github.com/advisories/GHSA-qwww-vcr4-c8h2)。
 
 ## 功能配置（按需启用）
 

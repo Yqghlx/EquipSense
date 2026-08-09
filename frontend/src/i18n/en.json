@@ -379,7 +379,9 @@
       "accepted": "Accepted",
       "rejected": "Rejected",
       "closed": "Closed",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "statusChanged": "Status changed",
+      "commentAdded": "Comment added"
     },
     "typeOptions": {
       "corrective": "Corrective Maintenance",
@@ -397,7 +399,8 @@
       "closed": "Closed",
       "cancelled": "Cancelled"
     },
-    "noTechnicians": "No available technicians"
+    "noTechnicians": "No available technicians",
+    "unknownAssignee": "Deleted or unavailable user"
   },
   "analysis": {
     "title": "AI Analysis",

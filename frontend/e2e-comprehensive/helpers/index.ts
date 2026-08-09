@@ -17,6 +17,7 @@ export {
   getAuthState,
   isLoggedIn,
   verifyAuthCookie,
+  getCurrentUserId,
 } from './auth';
 
 // API 请求封装

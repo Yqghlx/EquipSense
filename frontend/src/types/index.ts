@@ -379,6 +379,8 @@ export interface WorkOrder {
   requiredParts?: string;
   /** 被指派人 ID */
   assignedTo?: string;
+  /** 被指派人的显示名称，未配置显示名称时由后端回退到用户名 */
+  assignedToName?: string;
   /** 截止时间（ISO 8601） */
   dueDate?: string;
   /** 完成时间（ISO 8601） */

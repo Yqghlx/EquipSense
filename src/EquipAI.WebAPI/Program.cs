@@ -16,6 +16,7 @@ using EquipAI.Infrastructure.Messaging;
 using Microsoft.EntityFrameworkCore;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
+using EquipAI.Infrastructure.Security;
 using EquipAI.Application.Security;
 using EquipAI.WebAPI.Extensions;
 using EquipAI.WebAPI.Metrics;
@@ -57,6 +58,9 @@ try
     EventBusConfiguration.ValidateForEnvironment(
         builder.Configuration,
         builder.Environment.EnvironmentName);
+    AutoMapperLicenseConfigurationValidator.Validate(
+        builder.Environment.EnvironmentName,
+        builder.Configuration["AutoMapper:LicenseKey"]);
     if (builder.Environment.IsProduction()
         && EventBusConfiguration.ResolveProvider(builder.Configuration) == EventBusProvider.InMemory)
     {
@@ -66,7 +70,7 @@ try
 
     // 分层注册：基础设施层 → 应用层 → 认证 → Swagger
     builder.Services.AddInfrastructure(builder.Configuration);
-    builder.Services.AddApplication();
+    builder.Services.AddApplication(builder.Configuration);
     builder.Services.AddJwtAuthentication(builder.Configuration);
     builder.Services.AddSwagger();
     builder.Services.AddControllers(options =>

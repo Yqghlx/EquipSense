@@ -274,7 +274,8 @@ public static class ServiceCollectionExtensions
     /// 注册应用层服务：业务服务、RBAC、事件总线和 AutoMapper
     /// </summary>
     /// <param name="services">DI 服务集合</param>
-    public static void AddApplication(this IServiceCollection services)
+    /// <param name="configuration">应用配置，用于注入 AutoMapper 许可证等运行时设置</param>
+    public static void AddApplication(this IServiceCollection services, IConfiguration configuration)
     {
         // 业务服务注册为 Scoped，随请求创建，支持注入 Scoped 的 DbContext
         services.AddScoped<IAuthService, AuthService>();
@@ -291,9 +292,16 @@ public static class ServiceCollectionExtensions
         // RBAC 权限校验服务注册为 Singleton，内部使用静态权限矩阵，无状态
         services.AddSingleton<IRbacService, RbacService>();
 
-        // AutoMapper 映射配置，扫描 MappingProfile 所在程序集
-        // AutoMapper 15 要求显式传入配置委托，再指定需要扫描的程序集。
-        services.AddAutoMapper(_ => { }, typeof(MappingProfile).Assembly);
+        // 使用已修复高危递归 DoS 的 AutoMapper 15.1.3，并从外部密钥管理注入许可证。
+        // 开发/测试环境允许留空；生产环境已由启动校验器强制要求真实密钥。
+        var autoMapperLicenseKey = configuration["AutoMapper:LicenseKey"];
+        services.AddAutoMapper(options =>
+        {
+            if (!string.IsNullOrWhiteSpace(autoMapperLicenseKey))
+            {
+                options.LicenseKey = autoMapperLicenseKey;
+            }
+        }, typeof(MappingProfile).Assembly);
 
         // 遥测数据服务（Singleton — 内部维护定时器和队列）。
         // RabbitMQ 模式下 IEventBus 是 Scoped 事务 Outbox 包装器，不能直接注入 Singleton；

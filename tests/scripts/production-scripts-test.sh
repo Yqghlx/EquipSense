@@ -32,6 +32,7 @@ test_validate_env_accepts_complete_config() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
@@ -47,6 +48,19 @@ test_validate_env_accepts_complete_config() {
 
   bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" >/dev/null
 
+  local placeholder_env_file="$TEST_ROOT/placeholder-license.env"
+  sed 's/^AUTOMAPPER_LICENSE_KEY=.*/AUTOMAPPER_LICENSE_KEY=CHANGE_ME_AUTOMAPPER_LICENSE_KEY_1234567890/' \
+    "$env_file" > "$placeholder_env_file"
+  chmod 600 "$placeholder_env_file"
+  local placeholder_output
+  local placeholder_result_code
+  set +e
+  placeholder_output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$placeholder_env_file" 2>&1)"
+  placeholder_result_code=$?
+  set -e
+  [[ "$placeholder_result_code" -ne 0 ]] || fail "AutoMapper 长占位许可证密钥不应通过生产环境校验"
+  assert_contains "$placeholder_output" "AUTOMAPPER_LICENSE_KEY"
+
   chmod 644 "$env_file"
   local output
   local result_code
@@ -56,6 +70,40 @@ test_validate_env_accepts_complete_config() {
   set -e
   [[ "$result_code" -ne 0 ]] || fail "权限为 644 的 .env 不应通过校验"
   assert_contains "$output" ".env 文件权限不安全"
+}
+
+test_validate_env_rejects_missing_automapper_license() {
+  local env_file="$TEST_ROOT/missing-automapper-license.env"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' > "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "缺少 AutoMapper 许可证密钥时生产环境校验不应通过"
+  assert_contains "$output" "AUTOMAPPER_LICENSE_KEY"
 }
 
 test_validate_env_rejects_weak_production_config() {
@@ -68,6 +116,7 @@ test_validate_env_rejects_weak_production_config() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=short' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=short' \
@@ -93,6 +142,7 @@ test_validate_env_rejects_weak_production_config() {
   assert_contains "$output" "REDIS_PASSWORD 长度不足"
   assert_contains "$output" "MQTT_PASSWORD 长度不足"
   assert_contains "$output" "SEED_ADMIN_PASSWORD 长度不足"
+  assert_contains "$output" "AUTOMAPPER_LICENSE_KEY 长度不足"
   assert_contains "$output" "FRONTEND_URL 必须使用 HTTPS"
   assert_contains "$output" "SEQ_ADMIN_PASSWORD 长度不足"
   assert_contains "$output" "GRAFANA_PASSWORD 长度不足"
@@ -111,6 +161,7 @@ test_validate_runtime_files_gate() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
@@ -776,6 +827,26 @@ test_deploy_has_fail_closed_preflight() {
     || fail "CI 不应再维护未经行为测试的内联部署副本"
 }
 
+test_production_dependency_audit_fails_closed_on_registry_error() {
+  local case_dir="$TEST_ROOT/npm-audit-registry-error"
+  mkdir -p "$case_dir/bin"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf '\''%s\n'\'' '\''{"message":"audit endpoint unavailable","error":{"summary":"","detail":""}}'\''' \
+    'exit 1' > "$case_dir/bin/npm"
+  chmod +x "$case_dir/bin/npm"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$PROJECT_ROOT/frontend" && PATH="$case_dir/bin:$PATH" node scripts/check-production-audit.mjs 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "npm 漏洞源不可用时生产依赖审计必须失败关闭"
+  assert_contains "$output" "npm audit"
+}
+
 test_bluegreen_router_does_not_cross_color_dependency() {
   local router_block
   router_block="$(sed -n '/^  router:/,/^networks:/p' "$PROJECT_ROOT/docker/docker-compose.bluegreen.yml")"
@@ -828,6 +899,7 @@ test_bluegreen_colors_do_not_inherit_public_entry_ports() {
 test_production_internal_ports_bind_loopback_by_default() {
   local compose_content
   compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  assert_contains "$compose_content" 'AutoMapper__LicenseKey: "${AUTOMAPPER_LICENSE_KEY:?请在 .env 中设置 AUTOMAPPER_LICENSE_KEY}"'
   assert_contains "$compose_content" '${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${PG_PORT:-5432}:5432'
   assert_contains "$compose_content" '${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379'
   assert_contains "$compose_content" '${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672'
@@ -850,6 +922,7 @@ test_development_internal_ports_bind_loopback_by_default() {
 case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
+    test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_weak_production_config
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
@@ -880,9 +953,11 @@ case "${1:-all}" in
   ci)
     test_release_waits_for_quality_gates
     test_deploy_has_fail_closed_preflight
+    test_production_dependency_audit_fails_closed_on_registry_error
     ;;
   all)
     test_validate_env_accepts_complete_config
+    test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_weak_production_config
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
@@ -905,6 +980,7 @@ case "${1:-all}" in
     test_deploy_rollback_health_failure_is_critical
     test_release_waits_for_quality_gates
     test_deploy_has_fail_closed_preflight
+    test_production_dependency_audit_fails_closed_on_registry_error
     test_bluegreen_router_does_not_cross_color_dependency
     test_bluegreen_has_fail_closed_preflight
     test_bluegreen_colors_do_not_inherit_public_entry_ports

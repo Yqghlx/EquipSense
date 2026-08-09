@@ -52,6 +52,7 @@ else
     "RABBITMQ_PASSWORD"
     "JWT_SECRET"
     "TOTP_ENCRYPTION_KEY"
+    "AUTOMAPPER_LICENSE_KEY"
     "GATEWAY_AUTH_KEY"
     "MQTT_USERNAME"
     "MQTT_PASSWORD"
@@ -67,7 +68,13 @@ else
 
   for key in "${REQUIRED_ENV_VARS[@]}"; do
     value="$(read_env_value "$key")"
-    if [ -z "$value" ] || [[ "$value" == *"请修改"* ]] || [[ "$value" == *"PLEASE_CHANGE"* ]] || { [ "$key" = "MQTT_USERNAME" ] && [ "$value" = "device" ]; } || { [ "$key" = "MQTT_PASSWORD" ] && [ "$value" = "device123" ]; }; then
+    if [ -z "$value" ] \
+      || [[ "$value" == *"请修改"* ]] \
+      || [[ "$value" == *"PLEASE_CHANGE"* ]] \
+      || [[ "$value" == *"CHANGE_ME"* ]] \
+      || [[ "$value" == *"SET_VIA_ENVIRONMENT"* ]] \
+      || { [ "$key" = "MQTT_USERNAME" ] && [ "$value" = "device" ]; } \
+      || { [ "$key" = "MQTT_PASSWORD" ] && [ "$value" = "device123" ]; }; then
       error "必填环境变量 $key 缺失或仍为占位值（不会打印其内容）"
     fi
   done
@@ -80,6 +87,14 @@ else
   totp_encryption_key="$(read_env_value TOTP_ENCRYPTION_KEY)"
   if [ -n "$totp_encryption_key" ] && [[ "$totp_encryption_key" != *"请修改"* ]] && ! [[ "$totp_encryption_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
     error "TOTP_ENCRYPTION_KEY 必须是 Base64 编码的 32 字节密钥"
+  fi
+
+  automapper_license_key="$(read_env_value AUTOMAPPER_LICENSE_KEY)"
+  if [ -n "$automapper_license_key" ] \
+    && [[ "$automapper_license_key" != *"请修改"* ]] \
+    && [[ "$automapper_license_key" != *"PLEASE_CHANGE"* ]] \
+    && [ "${#automapper_license_key}" -lt 32 ]; then
+    error "AUTOMAPPER_LICENSE_KEY 长度不足 32 个字符"
   fi
 
   gateway_auth_key="$(read_env_value GATEWAY_AUTH_KEY)"

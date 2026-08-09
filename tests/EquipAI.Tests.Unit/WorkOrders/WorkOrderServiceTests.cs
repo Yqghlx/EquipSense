@@ -1,6 +1,7 @@
 using EquipAI.Application.Approvals;
 using EquipAI.Application.WorkOrders;
 using EquipAI.Application.WorkOrders.DTOs;
+using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
@@ -23,6 +24,7 @@ namespace EquipAI.Tests.Unit.WorkOrders;
 public class WorkOrderServiceTests
 {
     private readonly Guid _tenantId = Guid.NewGuid();
+    private readonly Guid _technicianId = Guid.NewGuid();
 
     /// <summary>
     /// 为每个测试创建独立的数据库和服务实例
@@ -34,6 +36,17 @@ public class WorkOrderServiceTests
             .Options;
 
         var db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        db.Users.Add(new User
+        {
+            Id = _technicianId,
+            TenantId = _tenantId,
+            Username = "default-technician",
+            DisplayName = "默认技术员",
+            PasswordHash = "测试密码摘要",
+            Role = UserRole.Technician,
+            IsActive = true
+        });
+        db.SaveChanges();
         var eventBus = new Mock<IEventBus>();
         eventBus
             .Setup(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()))
@@ -147,7 +160,7 @@ public class WorkOrderServiceTests
         var (db, _, service) = CreateSut();
         var wo = await service.CreateAsync(_tenantId, MakeCreateRequest(), ct: CancellationToken.None);
 
-        var assignee = Guid.NewGuid();
+        var assignee = _technicianId;
         var result = await service.AssignAsync(
             _tenantId, wo.Id, new AssignWorkOrderRequest { AssignedTo = assignee },
             Guid.NewGuid(), CancellationToken.None);
@@ -157,12 +170,78 @@ public class WorkOrderServiceTests
     }
 
     [Fact]
+    public async Task AssignAsync_执行人不存在_跨租户或已停用时均应拒绝()
+    {
+        var (db, _, service) = CreateSut();
+        var otherTenantUser = new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            Username = "other-tenant-technician",
+            PasswordHash = "测试密码摘要",
+            Role = UserRole.Technician,
+            IsActive = true
+        };
+        var inactiveUser = new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            Username = "inactive-technician",
+            PasswordHash = "测试密码摘要",
+            Role = UserRole.Technician,
+            IsActive = false
+        };
+        db.Users.AddRange(otherTenantUser, inactiveUser);
+        await db.SaveChangesAsync();
+
+        var workOrder = await service.CreateAsync(_tenantId, MakeCreateRequest());
+
+        foreach (var invalidAssigneeId in new[] { Guid.NewGuid(), otherTenantUser.Id, inactiveUser.Id })
+        {
+            var act = () => service.AssignAsync(
+                _tenantId,
+                workOrder.Id,
+                new AssignWorkOrderRequest { AssignedTo = invalidAssigneeId },
+                Guid.NewGuid());
+
+            await act.Should()
+                .ThrowAsync<ArgumentException>()
+                .WithMessage("*执行人不存在或已停用*");
+        }
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_已派工时应返回执行人显示名称()
+    {
+        var (db, _, service) = CreateSut();
+        var technician = new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            Username = "technician",
+            DisplayName = "张工",
+            PasswordHash = "测试密码摘要",
+            Role = UserRole.Technician
+        };
+        db.Users.Add(technician);
+
+        var created = await service.CreateAsync(_tenantId, MakeCreateRequest());
+        var entity = await db.WorkOrders.FirstAsync(workOrder => workOrder.Id == created.Id);
+        entity.AssignedTo = technician.Id;
+        await db.SaveChangesAsync();
+
+        var result = await service.GetByIdAsync(_tenantId, created.Id);
+
+        result.AssignedToName.Should().Be("张工", "工单详情不能把内部用户 UUID 直接展示给现场人员");
+    }
+
+    [Fact]
     public async Task StartAsync_应将状态从Assigned变更为InProgress()
     {
         var (db, _, service) = CreateSut();
         var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
         await service.AssignAsync(_tenantId, wo.Id,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, Guid.NewGuid());
 
         var result = await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid(), CancellationToken.None);
 
@@ -175,7 +254,7 @@ public class WorkOrderServiceTests
         var (db, _, service) = CreateSut();
         var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
         await service.AssignAsync(_tenantId, wo.Id,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, Guid.NewGuid());
         await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid());
 
         var result = await service.CompleteAsync(
@@ -195,7 +274,7 @@ public class WorkOrderServiceTests
         // 创建 → 派工 → 开始执行（StartAsync 设 StartedAt）
         var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
         await service.AssignAsync(_tenantId, wo.Id,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, Guid.NewGuid());
         await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid());
 
         // 把开始时间拉到 2 小时前（StartAsync 设的是 now），制造可测的时间差
@@ -221,7 +300,7 @@ public class WorkOrderServiceTests
         var (db, _, service) = CreateSut();
         var wo = await service.CreateAsync(_tenantId, MakeCreateRequest());
         await service.AssignAsync(_tenantId, wo.Id,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, Guid.NewGuid());
         await service.StartAsync(_tenantId, wo.Id, Guid.NewGuid());
 
         var result = await service.CompleteAsync(
@@ -329,7 +408,7 @@ public class WorkOrderServiceTests
 
         var act = () => service.AssignAsync(
             _tenantId, woId,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() },
+            new AssignWorkOrderRequest { AssignedTo = _technicianId },
             Guid.NewGuid(), CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
@@ -393,7 +472,7 @@ public class WorkOrderServiceTests
         await service.CancelAsync(_tenantId, woId, Guid.NewGuid());
 
         var act = () => service.AssignAsync(_tenantId, woId,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, Guid.NewGuid());
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, Guid.NewGuid());
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
 
@@ -441,7 +520,7 @@ public class WorkOrderServiceTests
         eventBus.Verify(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()), Times.Once);
 
         await service.AssignAsync(_tenantId, wo.Id,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, userId);
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, userId);
         eventBus.Verify(e => e.PublishAsync(It.IsAny<WorkOrderStatusChangedEvent>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -453,7 +532,7 @@ public class WorkOrderServiceTests
         var wo = await service.CreateAsync(_tenantId, MakeCreateRequest(), userId);
 
         await service.AssignAsync(_tenantId, wo.Id,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, userId);
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, userId);
 
         var logs = await db.WorkOrderLogs.IgnoreQueryFilters().ToListAsync();
         logs.Should().HaveCount(2); // Created + StatusChanged
@@ -524,7 +603,7 @@ public class WorkOrderServiceTests
         if (targetStatus == WorkOrderStatus.PendingDispatch) return woId;
 
         await service.AssignAsync(_tenantId, woId,
-            new AssignWorkOrderRequest { AssignedTo = Guid.NewGuid() }, userId);
+            new AssignWorkOrderRequest { AssignedTo = _technicianId }, userId);
         if (targetStatus == WorkOrderStatus.Assigned) return woId;
 
         await service.StartAsync(_tenantId, woId, userId);

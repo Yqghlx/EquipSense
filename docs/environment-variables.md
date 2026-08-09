@@ -45,6 +45,16 @@ Security__Mfa__RequiredRoles__1=MaintenanceLead
 
 高权限账户首次登录或公开注册后不会直接获得 JWT，而是进入 10 分钟的 MFA 注册流程；扫码并验证成功后才会建立会话，并只显示一次 8 个一次性恢复码。登录时可用恢复码代替 TOTP，普通角色仍可在“安全与 MFA”页面自助启用，强制角色不能禁用 MFA。
 
+## 依赖许可证
+
+项目固定使用已修复递归拒绝服务漏洞的 AutoMapper 15.1.3。AutoMapper 15+ 的生产使用需要完成许可证治理，密钥必须由供应商控制台签发并通过密钥管理系统注入；不要把密钥写进镜像、仓库或日志。应用启动门禁与 `docker/validate-env.sh` 会拒绝缺失、占位或少于 32 个字符的值。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `AUTOMAPPER_LICENSE_KEY` / `AutoMapper__LicenseKey` | AutoMapper 15+ 供应商签发的许可证密钥 | — | 生产环境必填 |
+
+许可证政策见 [Lucky Penny Software FAQ](https://luckypennysoftware.com/faq)，版本安全状态见 [GHSA-rvv3-g6hj-g44x](https://github.com/advisories/GHSA-rvv3-g6hj-g44x)。
+
 ## Redis
 
 | 变量名 | 说明 | 默认值 | 必填 |

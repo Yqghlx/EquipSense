@@ -28,6 +28,12 @@ public class WorkOrderDto
     public string? RequiredParts { get; set; }
 
     public Guid? AssignedTo { get; set; }
+
+    /// <summary>
+    /// 被指派人的可读名称，优先使用显示名称，未配置时回退到登录用户名。
+    /// </summary>
+    public string? AssignedToName { get; set; }
+
     public DateTime? DueDate { get; set; }
     public DateTime? CompletedAt { get; set; }
 

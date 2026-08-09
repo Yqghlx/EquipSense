@@ -193,7 +193,8 @@ public class WorkOrderService : IWorkOrderService
             throw new KeyNotFoundException($"工单不存在: {id}");
         }
 
-        return MapToDto(workOrder);
+        var assignedToNames = await LoadAssignedToNamesAsync(dbContext, tenantId, [workOrder], ct);
+        return MapToDto(workOrder, ResolveAssignedToName(workOrder, assignedToNames));
     }
 
     /// <inheritdoc />
@@ -228,10 +229,15 @@ public class WorkOrderService : IWorkOrderService
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
+        var assignedToNames = await LoadAssignedToNamesAsync(dbContext, tenantId, items, ct);
 
         return new PagedResult<WorkOrderDto>
         {
-            Items = items.Select(MapToDto).ToList(),
+            Items = items
+                .Select(workOrder => MapToDto(
+                    workOrder,
+                    ResolveAssignedToName(workOrder, assignedToNames)))
+                .ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize
@@ -250,6 +256,20 @@ public class WorkOrderService : IWorkOrderService
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
+        }
+
+        // 工单只允许指派给当前租户内仍启用的真实用户，避免写入孤儿 UUID，
+        // 让后续通知、审计和知识沉淀都能可靠关联到执行人。
+        var assignee = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == request.AssignedTo
+                && user.TenantId == tenantId
+                && user.IsActive)
+            .Select(user => new { user.Username, user.DisplayName })
+            .FirstOrDefaultAsync(ct);
+        if (assignee == null)
+        {
+            throw new ArgumentException("指定的执行人不存在或已停用。", nameof(request.AssignedTo));
         }
 
         var oldStatus = workOrder.Status;
@@ -271,7 +291,10 @@ public class WorkOrderService : IWorkOrderService
         _logger.LogInformation("工单 {WorkOrderCode} 已派工给 {AssignedTo}", workOrder.WorkOrderCode, request.AssignedTo);
 
         // 发布状态变更事件
-        return MapToDto(workOrder);
+        var assignedToName = string.IsNullOrWhiteSpace(assignee.DisplayName)
+            ? assignee.Username
+            : assignee.DisplayName;
+        return MapToDto(workOrder, assignedToName);
     }
 
     /// <inheritdoc />
@@ -627,10 +650,55 @@ public class WorkOrderService : IWorkOrderService
         serviceProvider.GetService<IEventBus>() ?? _eventBus;
 
     /// <summary>
+    /// 批量加载工单执行人名称，避免列表查询出现 N+1。
+    /// 显式限定 tenantId，与全局过滤器共同构成多租户纵深隔离。
+    /// </summary>
+    private static async Task<Dictionary<Guid, string>> LoadAssignedToNamesAsync(
+        AppDbContext dbContext,
+        Guid tenantId,
+        IEnumerable<WorkOrder> workOrders,
+        CancellationToken ct)
+    {
+        var assignedUserIds = workOrders
+            .Where(workOrder => workOrder.AssignedTo.HasValue)
+            .Select(workOrder => workOrder.AssignedTo!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (assignedUserIds.Length == 0)
+        {
+            return [];
+        }
+
+        var users = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.TenantId == tenantId && assignedUserIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.Username, user.DisplayName })
+            .ToListAsync(ct);
+
+        return users.ToDictionary(
+            user => user.Id,
+            user => string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName);
+    }
+
+    /// <summary>
+    /// 从批量加载结果中解析单个工单的执行人名称。
+    /// </summary>
+    private static string? ResolveAssignedToName(
+        WorkOrder workOrder,
+        IReadOnlyDictionary<Guid, string> assignedToNames)
+    {
+        return workOrder.AssignedTo.HasValue
+            && assignedToNames.TryGetValue(workOrder.AssignedTo.Value, out var assignedToName)
+                ? assignedToName
+                : null;
+    }
+
+    /// <summary>
     /// 手动映射 WorkOrder 实体为 WorkOrderDto
     /// 将枚举字段转换为字符串，避免依赖 AutoMapper 映射配置
     /// </summary>
-    private static WorkOrderDto MapToDto(WorkOrder workOrder)
+    private static WorkOrderDto MapToDto(WorkOrder workOrder, string? assignedToName = null)
     {
         return new WorkOrderDto
         {
@@ -648,6 +716,7 @@ public class WorkOrderService : IWorkOrderService
             ExecutionReport = workOrder.ExecutionReport,
             RequiredParts = workOrder.RequiredParts,
             AssignedTo = workOrder.AssignedTo,
+            AssignedToName = assignedToName,
             DueDate = workOrder.DueDate,
             CompletedAt = workOrder.CompletedAt,
             ActualHours = workOrder.ActualHours,

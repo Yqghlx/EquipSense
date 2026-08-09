@@ -1,6 +1,7 @@
 using System.Reflection;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace EquipAI.Tests.Unit.Infrastructure;
@@ -29,5 +30,23 @@ public sealed class MigrationMetadataTests
 
         missingMetadata.Should().BeEmpty(
             "缺少 MigrationAttribute 的迁移不会被 EF Core 发现，启动时会静默产生数据库结构漂移");
+
+        var invalidDbContextMetadata = migrationTypes
+            .Where(type => type.GetCustomAttribute<DbContextAttribute>()?.ContextType != typeof(AppDbContext))
+            .Select(type => type.FullName)
+            .ToArray();
+
+        invalidDbContextMetadata.Should().BeEmpty(
+            "迁移必须通过 DbContextAttribute 绑定 AppDbContext，否则运行时不会把它加入待执行迁移集合");
+
+        var duplicateMigrationIds = migrationTypes
+            .Select(type => type.GetCustomAttribute<MigrationAttribute>()?.Id)
+            .Where(id => id is not null)
+            .GroupBy(id => id)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+
+        duplicateMigrationIds.Should().BeEmpty("重复的迁移标识会让 EF Core 无法确定数据库升级顺序");
     }
 }

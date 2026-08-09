@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.DTOs.Devices;
+using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Core.Models;
 using EquipAI.Tests.Integration.Infrastructure;
@@ -62,6 +63,18 @@ public class WorkOrdersControllerTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var device = await response.Content.ReadFromJsonAsync<DeviceDto>();
         return device!.Id;
+    }
+
+    /// <summary>
+    /// 获取当前已认证种子用户 ID，避免测试把过期硬编码或随机 UUID 写入工单关联字段。
+    /// </summary>
+    private static async Task<Guid> GetCurrentUserIdAsync(HttpClient client)
+    {
+        var response = await client.GetAsync("/api/v1/auth/me");
+        response.EnsureSuccessStatusCode();
+        var user = await response.Content.ReadFromJsonAsync<UserDto>();
+        user.Should().NotBeNull();
+        return user!.Id;
     }
 
     /// <summary>
@@ -179,9 +192,10 @@ public class WorkOrdersControllerTests
         var created = await createResponse.Content.ReadFromJsonAsync<WorkOrderDto>();
 
         // 派工
+        var assigneeId = await GetCurrentUserIdAsync(client);
         var assignRequest = new AssignWorkOrderRequest
         {
-            AssignedTo = Guid.NewGuid(), // 模拟指派给某技术人员
+            AssignedTo = assigneeId,
             Note = "请尽快处理"
         };
         var assignResponse = await client.PutAsJsonAsync(
@@ -215,9 +229,10 @@ public class WorkOrdersControllerTests
         var created = await createResponse.Content.ReadFromJsonAsync<WorkOrderDto>();
 
         // 先派工
+        var assigneeId = await GetCurrentUserIdAsync(client);
         var assignRequest = new AssignWorkOrderRequest
         {
-            AssignedTo = Guid.NewGuid()
+            AssignedTo = assigneeId
         };
         var assignResponse = await client.PutAsJsonAsync(
             $"/api/v1/work-orders/{created!.Id}/assign", assignRequest);
@@ -255,9 +270,10 @@ public class WorkOrdersControllerTests
         var created = await createResponse.Content.ReadFromJsonAsync<WorkOrderDto>();
 
         // 2. 派工
+        var assigneeId = await GetCurrentUserIdAsync(client);
         var assignRequest = new AssignWorkOrderRequest
         {
-            AssignedTo = Guid.NewGuid()
+            AssignedTo = assigneeId
         };
         var assignResponse = await client.PutAsJsonAsync(
             $"/api/v1/work-orders/{created!.Id}/assign", assignRequest);

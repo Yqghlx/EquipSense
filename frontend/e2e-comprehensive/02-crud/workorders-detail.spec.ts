@@ -18,6 +18,7 @@ import { test, expect } from '@playwright/test';
 import {
   login,
   captureErrors,
+  getCurrentUserId,
   getToken,
   gotoWorkOrderDetail,
   createTestWorkOrder,
@@ -197,7 +198,7 @@ test.describe('工单详情页', () => {
     const wo = await createTestWorkOrder(page, 'E2E有关联信息测试');
 
     // 派工 -> 开始 -> 完成
-    const adminId = 'ad2d83f0-558c-4858-bffd-3bd98cb371dc';
+    const adminId = await getCurrentUserId(page);
     await transitionWorkOrder(page, token, wo.id as string, 'assign', { assignedTo: adminId });
     await transitionWorkOrder(page, token, wo.id as string, 'start');
     await transitionWorkOrder(page, token, wo.id as string, 'complete', { resolution: 'E2E测试解决措施' });
@@ -255,7 +256,7 @@ test.describe('工单详情页', () => {
     const wo = await createTestWorkOrder(page, 'E2E进行中状态测试');
 
     // 推进到进行中状态
-    const adminId = 'ad2d83f0-558c-4858-bffd-3bd98cb371dc';
+    const adminId = await getCurrentUserId(page);
     await transitionWorkOrder(page, token, wo.id as string, 'assign', { assignedTo: adminId });
     await transitionWorkOrder(page, token, wo.id as string, 'start');
 
@@ -278,7 +279,7 @@ test.describe('工单详情页', () => {
     const token = await getToken(page);
     const wo = await createTestWorkOrder(page, 'E2E填写解决措施测试');
 
-    const adminId = 'ad2d83f0-558c-4858-bffd-3bd98cb371dc';
+    const adminId = await getCurrentUserId(page);
     await transitionWorkOrder(page, token, wo.id as string, 'assign', { assignedTo: adminId });
     await transitionWorkOrder(page, token, wo.id as string, 'start');
 
@@ -304,7 +305,7 @@ test.describe('工单详情页', () => {
     const token = await getToken(page);
     const wo = await createTestWorkOrder(page, 'E2E已完成状态测试');
 
-    const adminId = 'ad2d83f0-558c-4858-bffd-3bd98cb371dc';
+    const adminId = await getCurrentUserId(page);
     await transitionWorkOrder(page, token, wo.id as string, 'assign', { assignedTo: adminId });
     await transitionWorkOrder(page, token, wo.id as string, 'start');
     await transitionWorkOrder(page, token, wo.id as string, 'complete', { resolution: '已完成' });

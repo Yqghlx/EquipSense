@@ -26,14 +26,9 @@ import {
   startWorkOrder,
   completeWorkOrder,
   closeWorkOrder,
-  getSeedData,
 } from '../helpers';
 
 test.describe('04-工单完整生命周期', () => {
-  // 种子数据中的管理员用户 ID，用于派工操作
-  const seedData = getSeedData();
-  const adminUserId = seedData.adminUserId || 'ad2d83f0-558c-4858-bffd-3bd98cb371dc';
-
   test('1. 创建工单进入待处理状态 — 通过 UI 创建工单', async ({ page }) => {
     const errors = captureErrors(page);
 
@@ -117,12 +112,12 @@ test.describe('04-工单完整生命周期', () => {
         const assignedText = page.getByText(/已派工|assigned|待执行/i);
         const ok = await assignedText.first().isVisible({ timeout: 5000 }).catch(() => false);
         if (!ok) {
-          await assignWorkOrder(page, woId, adminUserId);
+          await assignWorkOrder(page, woId);
         }
       }
     } else {
       // 如果 UI 没有派工按钮，通过 API 完成派工
-      await assignWorkOrder(page, woId, adminUserId);
+      await assignWorkOrder(page, woId);
     }
 
     expect(errors).toEqual([]);
@@ -134,7 +129,7 @@ test.describe('04-工单完整生命周期', () => {
     // 创建并派工
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-执行测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
 
     // 导航到工单详情
     await login(page);
@@ -165,7 +160,7 @@ test.describe('04-工单完整生命周期', () => {
     // 创建、派工、开始执行
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-记录测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
     await startWorkOrder(page, woId);
 
     // 导航到工单详情
@@ -207,7 +202,7 @@ test.describe('04-工单完整生命周期', () => {
     // 创建完整前置流转
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-完成测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
     await startWorkOrder(page, woId);
 
     // 导航到工单详情
@@ -258,7 +253,7 @@ test.describe('04-工单完整生命周期', () => {
     // 创建完整前置流转（到待验收状态）
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-验收测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
     await startWorkOrder(page, woId);
     await completeWorkOrder(page, woId, 'E2E 测试：设备已修复');
 
@@ -299,7 +294,7 @@ test.describe('04-工单完整生命周期', () => {
     // 创建完整前置流转（到已验收状态）
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-关闭测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
     await startWorkOrder(page, woId);
     await completeWorkOrder(page, woId, 'E2E 测试：设备已修复');
     // 验收（通过 API）
@@ -345,7 +340,7 @@ test.describe('04-工单完整生命周期', () => {
     // 通过 API 执行完整生命周期
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-日志测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
     await startWorkOrder(page, woId);
     await completeWorkOrder(page, woId, 'E2E 测试：设备已修复');
     const token = await getToken(page);
@@ -389,7 +384,7 @@ test.describe('04-工单完整生命周期', () => {
     // 通过 API 创建并关闭工单
     const workOrder = await createTestWorkOrder(page, 'E2E-LIFECYCLE-已关闭测试');
     const woId = workOrder.id as string;
-    await assignWorkOrder(page, woId, adminUserId);
+    await assignWorkOrder(page, woId);
     await startWorkOrder(page, woId);
     await completeWorkOrder(page, woId, '已修复');
     const token = await getToken(page);

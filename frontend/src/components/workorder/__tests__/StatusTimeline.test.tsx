@@ -92,8 +92,8 @@ describe('StatusTimeline', () => {
 
     render(<StatusTimeline logs={logs} />);
 
-    // 验证状态转换文本（格式为 "旧状态 → 新状态"）
-    expect(screen.getByText(/PendingDispatch → Assigned/)).toBeInTheDocument();
+    // 状态枚举必须先本地化，再按“旧状态 → 新状态”展示。
+    expect(screen.getByText('workorder.status.pendingDispatch → workorder.status.assigned')).toBeInTheDocument();
   });
 
   it('只有新状态无旧状态时应只显示新状态', () => {
@@ -107,8 +107,8 @@ describe('StatusTimeline', () => {
 
     render(<StatusTimeline logs={logs} />);
 
-    // 不应包含箭头，直接显示新状态
-    expect(screen.getByText('PendingDispatch')).toBeInTheDocument();
+    // 不应包含箭头，直接显示本地化后的新状态。
+    expect(screen.getByText('workorder.status.pendingDispatch')).toBeInTheDocument();
     // 不应包含箭头符号
     const elements = screen.queryAllByText(/→/);
     expect(elements).toHaveLength(0);
@@ -125,5 +125,20 @@ describe('StatusTimeline', () => {
     render(<StatusTimeline logs={logs} />);
 
     expect(screen.getByText('指派给张三进行维修')).toBeInTheDocument();
+  });
+
+  it('应把后端 PascalCase 动作和状态转换为本地化标签', () => {
+    const logs = [
+      createLog({
+        action: 'StatusChanged',
+        oldStatus: 'Assigned',
+        newStatus: 'InProgress',
+      }),
+    ];
+
+    render(<StatusTimeline logs={logs} />);
+
+    expect(screen.getByText('workorder.action.statusChanged')).toBeInTheDocument();
+    expect(screen.getByText('workorder.status.assigned → workorder.status.inProgress')).toBeInTheDocument();
   });
 });

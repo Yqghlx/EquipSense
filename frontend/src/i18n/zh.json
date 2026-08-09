@@ -395,9 +395,12 @@
       "accepted": "验收通过",
       "rejected": "验收不通过",
       "closed": "关闭",
-      "cancelled": "取消"
+      "cancelled": "取消",
+      "statusChanged": "状态变更",
+      "commentAdded": "添加备注"
     },
-    "noTechnicians": "暂无可用技术人员"
+    "noTechnicians": "暂无可用技术人员",
+    "unknownAssignee": "已删除或不可用用户"
   },
   "analysis": {
     "title": "AI 分析",

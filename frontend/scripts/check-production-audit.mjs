@@ -24,22 +24,41 @@ function readInstalledVersion(packageName) {
  * 这里保留报告内容，以便对已评估的例外做精确匹配。
  */
 function runAudit() {
+  let output;
   try {
-    return JSON.parse(
-      execFileSync("npm", ["audit", "--omit=dev", "--json"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "inherit"],
-      }),
-    );
+    output = execFileSync("npm", ["audit", "--omit=dev", "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "inherit"],
+    });
   } catch (error) {
-    const output = error.stdout?.toString() ?? "";
-    try {
-      return JSON.parse(output);
-    } catch {
-      console.error("npm audit 未返回可解析的 JSON 报告，阻断流水线。\n", output);
-      process.exit(1);
-    }
+    output = error.stdout?.toString() ?? "";
   }
+
+  let report;
+  try {
+    report = JSON.parse(output);
+  } catch {
+    console.error("npm audit 未返回可解析的 JSON 报告，阻断流水线。");
+    process.exit(1);
+  }
+
+  // 漏洞报告即使发现问题也会以退出码 1 结束；网络/鉴权错误同样返回 1，
+  // 但只包含 message/error。必须验证报告结构，不能把审计失败误判成零漏洞。
+  if (
+    report === null ||
+    typeof report !== "object" ||
+    report.error !== undefined ||
+    report.auditReportVersion === undefined ||
+    typeof report.vulnerabilities !== "object" ||
+    report.vulnerabilities === null ||
+    typeof report.metadata !== "object" ||
+    report.metadata === null
+  ) {
+    console.error("npm audit 执行失败或返回了无效报告，阻断流水线。");
+    process.exit(1);
+  }
+
+  return report;
 }
 
 const report = runAudit();

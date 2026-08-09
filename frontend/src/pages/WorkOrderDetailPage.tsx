@@ -13,12 +13,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { PriorityBadge } from '../components/workorder/PriorityBadge';
 import { SlaCountdown } from '../components/workorder/SlaCountdown';
 import { ApprovalProgressPanel } from '../components/workorder/ApprovalProgressPanel';
+import { StatusTimeline } from '../components/workorder/StatusTimeline';
 import { OfflineSyncPanel } from '../components/workorder/OfflineSyncPanel';
 import AttachmentUpload from '../components/workorder/AttachmentUpload';
 import { OfflineStatusBadge } from '../components/workorder/OfflineStatusBadge';
 import { useOfflineQueue } from '../hooks/useOfflineQueue';
 import {
   useWorkOrder,
+  useWorkOrderLogs,
   useStartWorkOrder,
   useCompleteWorkOrder,
   useAcceptWorkOrder,
@@ -60,6 +62,7 @@ export default function WorkOrderDetailPage() {
   const [selectedTechnician, setSelectedTechnician] = useState('');
 
   const { data: workOrder, isLoading } = useWorkOrder(id ?? '');
+  const { data: logs = [], isLoading: logsLoading } = useWorkOrderLogs(id ?? '');
   const { data: approvals } = useWorkOrderApprovals(id);
   const startOrder = useStartWorkOrder();
   const completeOrder = useCompleteWorkOrder();
@@ -101,7 +104,13 @@ export default function WorkOrderDetailPage() {
             <p className="text-sm text-muted-foreground">{t('common.status')}</p>
             <Badge variant="outline">{statusLabels[workOrder.status]}</Badge>
           </div>
-          <div><p className="text-sm text-muted-foreground">{t('workorder.assignedTo')}</p><p className="font-medium">{workOrder.assignedTo ?? '-'}</p></div>
+          <div>
+            <p className="text-sm text-muted-foreground">{t('workorder.assignedTo')}</p>
+            <p className="font-medium">
+              {workOrder.assignedToName
+                ?? (workOrder.assignedTo ? t('workorder.unknownAssignee') : '-')}
+            </p>
+          </div>
           <div><p className="text-sm text-muted-foreground">{t('workorder.dueDate')}</p><div className="font-medium"><SlaCountdown dueDate={workOrder.dueDate} createdAt={workOrder.createdAt} status={workOrder.status} showRawDateWhenTerminal /></div></div>
           <div><p className="text-sm text-muted-foreground">{t('common.createdAt')}</p><p className="font-medium">{new Date(workOrder.createdAt).toLocaleString()}</p></div>
           {workOrder.completedAt && (
@@ -176,7 +185,9 @@ export default function WorkOrderDetailPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">{t('workorder.operationRecords')}</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">{t('workorder.noOperationRecords')}</p>
+            {logsLoading
+              ? <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+              : <StatusTimeline logs={logs} />}
           </CardContent>
         </Card>
       </div>

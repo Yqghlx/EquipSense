@@ -137,6 +137,8 @@ EquipSense/
 |------|------|------|--------|
 | `PG_PASSWORD` | PostgreSQL 密码 | 是 | - |
 | `JWT_SECRET` | JWT 签名密钥（≥32 字符） | 是 | - |
+| `TOTP_ENCRYPTION_KEY` | Base64 编码的 32 字节 MFA 密钥保护密钥 | 生产环境必填 | - |
+| `AUTOMAPPER_LICENSE_KEY` | AutoMapper 15+ 供应商签发的许可证密钥 | 生产环境必填 | - |
 | `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（≥32 位纯 ASCII） | 使用网关时必填 | - |
 | `PG_DB` | 数据库名 | 否 | `equipai` |
 | `PG_USER` | 数据库用户 | 否 | `postgres` |
@@ -145,6 +147,8 @@ EquipSense/
 | `LLM_API_KEY` | LLM API 密钥 | 否 | 空（AI 分析降级为通用经验诊断） |
 | `LLM_MODEL` | LLM 模型 ID | 否 | `qwen-plus` |
 | `LLM_ENDPOINT` | LLM API 端点 | 否 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+
+完整的生产变量、密钥轮换和校验规则见 [`docs/environment-variables.md`](docs/environment-variables.md)；上线前必须执行 `bash docker/validate-env.sh docker/.env --check-runtime-files` 并确保以 0 退出。
 
 ## API 概览
 

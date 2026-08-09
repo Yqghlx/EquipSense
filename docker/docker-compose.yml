@@ -162,6 +162,8 @@ services:
       Jwt__Secret: "${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}"
       # AES-256-GCM TOTP 密钥必须来自外部密钥管理并在重启间保持不变
       Security__TotpEncryptionKey: "${TOTP_ENCRYPTION_KEY:?请在 .env 中设置 TOTP_ENCRYPTION_KEY}"
+      # AutoMapper 15+ 生产许可证由外部密钥管理注入，不写入镜像或配置文件
+      AutoMapper__LicenseKey: "${AUTOMAPPER_LICENSE_KEY:?请在 .env 中设置 AUTOMAPPER_LICENSE_KEY}"
       Jwt__Issuer: "EquipAI"
       Jwt__Audience: "EquipAI"
       # 网关认证密钥：必须与 edgegateway 服务使用同一变量，保证两侧一致

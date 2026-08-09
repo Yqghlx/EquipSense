@@ -73,6 +73,29 @@ export async function verifyAuthCookie(page: Page): Promise<APIResponse> {
   return page.request.get(`${BASE_URL}/api/v1/auth/me`);
 }
 
+/**
+ * 获取当前已认证用户 ID。
+ *
+ * 工单派工等 E2E 操作必须使用服务端真实存在的用户，不能依赖会随数据库重建变化的硬编码 UUID。
+ *
+ * @param page - Playwright Page 实例（复用其认证 Cookie）
+ * @returns 当前用户 UUID
+ */
+export async function getCurrentUserId(page: Page): Promise<string> {
+  const response = await verifyAuthCookie(page);
+  if (!response.ok()) {
+    throw new Error(`获取当前用户失败：HTTP ${response.status()}`);
+  }
+
+  const body = await response.json() as Record<string, unknown>;
+  const id = body.id ?? body.Id;
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new Error('当前用户响应中缺少有效 ID');
+  }
+
+  return id;
+}
+
 /** 角色到登录凭证的映射 */
 const ROLE_CREDENTIALS: Record<string, { username: string; password: string }> = {
   admin: { username: 'admin', password: 'Admin@123' },
