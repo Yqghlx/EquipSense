@@ -25,6 +25,7 @@ cp docker/.env.example docker/.env
 # 必须修改
 PG_PASSWORD=<强密码，至少16位>
 JWT_SECRET=<随机密钥，至少32位>
+TOTP_ENCRYPTION_KEY=<openssl rand -base64 32 生成的 AES-256 密钥>
 MQTT_USERNAME=<MQTT用户名>
 MQTT_PASSWORD=<MQTT强密码>
 GATEWAY_AUTH_KEY=<至少32位的纯ASCII网关认证密钥>
@@ -144,6 +145,7 @@ curl http://localhost:8080/api/v1/system/info
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码（每项至少 16 个字符，不得使用占位值或公开默认值） | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
+| `TOTP_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256 TOTP 密钥，必须由外部密钥管理系统保存 | - | 生产环境必填 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
 | `LLM_MODEL` | LLM 模型 | `qwen-plus` | 否 |
 | `LLM_ENDPOINT` | LLM 端点 | DashScope | 否 |
@@ -164,6 +166,10 @@ curl http://localhost:8080/api/v1/system/info
 工单附件写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机或 Kubernetes 部署时应改用 S3/MinIO 等共享对象存储，并将数据库备份与附件卷分别纳入备份策略。
 
 管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符且不得包含占位值；所有种子用户首次登录后必须修改密码。
+
+`TOTP_ENCRYPTION_KEY` 用于保护数据库中的 MFA 密钥，应用启动时会校验它必须解码为 32 字节；该密钥必须与数据库备份分开保存并纳入密钥管理系统的备份策略。密钥丢失后，历史 MFA 密钥无法恢复；轮换前必须先制定批量重新加密和回滚方案。
+
+生产环境默认要求系统管理员和维保主管启用 TOTP MFA。首次登录或公开注册完成后，页面会进入 MFA 注册向导：使用 Authenticator 扫描二维码、输入 6 位验证码，验证成功后才会建立正式会话；注册令牌只在 Redis 中保留 10 分钟，成功后立即删除。若覆盖 `Security__Mfa__RequiredRoles__*`，仍必须保留 `SystemAdmin` 和 `MaintenanceLead`，否则应用拒绝启动。
 
 > `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。
 

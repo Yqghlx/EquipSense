@@ -59,6 +59,10 @@ export interface AuthResponse {
   mfaRequired?: boolean;
   /** MFA 挑战令牌（mfaRequired=true 时返回，传递给 /auth/mfa/verify） */
   mfaChallengeToken?: string;
+  /** 是否必须先完成 MFA 注册（为 true 时不颁发 JWT） */
+  mfaEnrollmentRequired?: boolean;
+  /** MFA 首次注册令牌（mfaEnrollmentRequired=true 时返回） */
+  mfaEnrollmentToken?: string;
 }
 
 /** MFA 初始化响应（/auth/mfa/setup） */

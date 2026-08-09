@@ -12,7 +12,8 @@ import { ChangePasswordDialog } from '../components/auth/ChangePasswordDialog';
 import api from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import { persistTokenExpiry } from '../lib/tokenExpiry';
-import type { AuthResponse } from '../types';
+import type { AuthResponse, MfaSetupResponse } from '../types';
+import QRCode from 'qrcode';
 
 /** 登录表单数据类型 */
 type LoginFormData = {
@@ -23,6 +24,13 @@ type LoginFormData = {
 /** TOTP 验证码表单数据类型 */
 type TotpFormData = {
   totpCode: string;
+};
+
+/** 登录页路由状态，注册完成后可携带强制 MFA enrollment 流程继续操作 */
+type LoginLocationState = {
+  from?: string;
+  mfaEnrollmentToken?: string;
+  mfaEnrollmentUserInfo?: AuthResponse['userInfo'];
 };
 
 /**
@@ -39,6 +47,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const initialLocationState = (location.state ?? {}) as LoginLocationState;
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -46,6 +55,15 @@ export default function LoginPage() {
   // MFA 阶段状态
   const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
   const [mfaUserInfo, setMfaUserInfo] = useState<AuthResponse['userInfo'] | null>(null);
+
+  // 高权限角色首次登录的强制 MFA 注册状态
+  const [mfaEnrollmentToken, setMfaEnrollmentToken] = useState<string | null>(initialLocationState.mfaEnrollmentToken ?? null);
+  const [mfaEnrollmentUserInfo, setMfaEnrollmentUserInfo] = useState<AuthResponse['userInfo'] | null>(
+    initialLocationState.mfaEnrollmentUserInfo ?? null,
+  );
+  const [mfaEnrollmentSetup, setMfaEnrollmentSetup] = useState<MfaSetupResponse | null>(null);
+  const [mfaEnrollmentQrCode, setMfaEnrollmentQrCode] = useState<string | null>(null);
+  const [mfaEnrollmentCode, setMfaEnrollmentCode] = useState('');
 
   /** 登录表单校验规则 */
   const loginSchema = z.object({
@@ -89,6 +107,14 @@ export default function LoginPage() {
         return;
       }
 
+      // 生产高权限账户首次登录必须先完成 MFA 注册，整个流程仍不持有 JWT。
+      if (response.data.mfaEnrollmentRequired && response.data.mfaEnrollmentToken) {
+        setMfaEnrollmentToken(response.data.mfaEnrollmentToken);
+        setMfaEnrollmentUserInfo(response.data.userInfo);
+        setLoading(false);
+        return;
+      }
+
       // 无需 MFA，直接完成登录
       setAuth(response.data.userInfo);
       // 持久化令牌【绝对过期时间戳】，供 useTokenRefresh 计算主动刷新时机。
@@ -104,6 +130,56 @@ export default function LoginPage() {
       }
     } catch {
       setError(t('auth.loginError'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** 生成强制 MFA 注册二维码 */
+  const setupMfaEnrollment = async () => {
+    if (!mfaEnrollmentToken) return;
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.post<MfaSetupResponse>('/auth/mfa/enroll/setup', {
+        enrollmentToken: mfaEnrollmentToken,
+      });
+      setMfaEnrollmentSetup(response.data);
+      const dataUrl = await QRCode.toDataURL(response.data.qrCodeUri, {
+        width: 240,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' },
+        errorCorrectionLevel: 'M',
+      });
+      setMfaEnrollmentQrCode(dataUrl);
+    } catch {
+      setError(t('mfa.enrollmentSetupFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** 确认强制 MFA 注册并完成登录 */
+  const onMfaEnrollmentSubmit = async () => {
+    if (!mfaEnrollmentToken) return;
+    if (!/^\d{6}$/.test(mfaEnrollmentCode)) {
+      setError(t('mfa.codeInvalid'));
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const response = await api.post<AuthResponse>('/auth/mfa/enroll/confirm', {
+        enrollmentToken: mfaEnrollmentToken,
+        totpCode: mfaEnrollmentCode,
+      });
+      setAuth(response.data.userInfo);
+      persistTokenExpiry(response.data.expiresIn);
+      const from = (location.state as { from?: string })?.from || '/dashboard';
+      navigate(from, { replace: true });
+    } catch {
+      setError(t('mfa.enrollmentConfirmFailed'));
     } finally {
       setLoading(false);
     }
@@ -137,6 +213,75 @@ export default function LoginPage() {
     setMfaUserInfo(null);
     setError('');
   };
+
+  /** 取消强制 MFA 注册并重新输入密码 */
+  const backFromMfaEnrollment = () => {
+    setMfaEnrollmentToken(null);
+    setMfaEnrollmentUserInfo(null);
+    setMfaEnrollmentSetup(null);
+    setMfaEnrollmentQrCode(null);
+    setMfaEnrollmentCode('');
+    setError('');
+  };
+
+  // 强制 MFA 注册阶段 UI
+  if (mfaEnrollmentToken) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('mfa.enrollmentTitle')}</CardTitle>
+          <CardDescription>
+            {t('mfa.enrollmentDesc')}
+            {mfaEnrollmentUserInfo && (
+              <span className="block text-xs">
+                {mfaEnrollmentUserInfo.displayName || mfaEnrollmentUserInfo.username}
+              </span>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!mfaEnrollmentSetup ? (
+            <Button onClick={setupMfaEnrollment} className="w-full" disabled={loading}>
+              {loading ? t('common.loading') : t('mfa.enrollmentSetup')}
+            </Button>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">{t('mfa.enrollmentConfigDesc')}</p>
+              {mfaEnrollmentQrCode && (
+                <div className="flex justify-center">
+                  <img src={mfaEnrollmentQrCode} alt={t('mfa.qrAlt')} className="rounded border" />
+                </div>
+              )}
+              <div className="rounded bg-muted px-3 py-2 text-xs">
+                <span className="text-muted-foreground">{t('mfa.manualKeyLabel')}</span>
+                <code className="mt-1 block break-all font-mono">{mfaEnrollmentSetup.secret}</code>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="mfaEnrollmentCode">{t('mfa.codeLabel')}</Label>
+                <Input
+                  id="mfaEnrollmentCode"
+                  value={mfaEnrollmentCode}
+                  onChange={(event) => setMfaEnrollmentCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                />
+              </div>
+              <Button onClick={onMfaEnrollmentSubmit} className="w-full" disabled={loading || mfaEnrollmentCode.length !== 6}>
+                {loading ? t('common.loading') : t('mfa.enrollmentConfirm')}
+              </Button>
+            </>
+          )}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <Button type="button" variant="ghost" className="w-full" onClick={backFromMfaEnrollment} disabled={loading}>
+            {t('mfa.enrollmentBack')}
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   // MFA 验证阶段 UI
   if (mfaChallengeToken) {

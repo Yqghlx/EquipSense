@@ -124,6 +124,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<JwtTokenService>();
         // TOTP 多因素认证服务（无状态，密钥通过参数传入，可安全作为单例）
         services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpService, EquipAI.Infrastructure.Identity.TotpService>();
+        // TOTP 密钥保护器（单例）：AES-GCM 密钥由外部配置注入，避免把可生成验证码的密钥明文写入数据库。
+        services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpSecretProtector, EquipAI.Infrastructure.Identity.TotpSecretProtector>();
 
         // 通用仓储注册，Scoped 生命周期，随请求创建和释放
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));

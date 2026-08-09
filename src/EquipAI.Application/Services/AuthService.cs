@@ -1,4 +1,5 @@
 using AutoMapper;
+using System.Security.Cryptography;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
@@ -9,7 +10,9 @@ using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
+using EquipAI.Application.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace EquipAI.Application.Services;
@@ -29,6 +32,8 @@ public class AuthService : IAuthService
     private readonly IAuditLogService _auditLogService;
     private readonly SmtpEmailNotificationService _emailService;
     private readonly ITotpService _totpService;
+    private readonly ITotpSecretProtector _totpSecretProtector;
+    private readonly MfaPolicyOptions _mfaPolicy;
 
     /// <summary>
     /// 连续登录失败达到此数值时自动锁定账户
@@ -56,6 +61,23 @@ public class AuthService : IAuthService
     /// 有效期：5 分钟，一次性使用
     /// </summary>
     private const string MfaChallengeKeyPrefix = "mfa_challenge:";
+
+    /// <summary>
+    /// MFA 首次注册令牌在 Redis 中的键前缀。
+    /// 键格式：mfa_enrollment:{token} → userId。
+    /// </summary>
+    private const string MfaEnrollmentKeyPrefix = "mfa_enrollment:";
+
+    /// <summary>
+    /// MFA 首次注册临时密钥在 Redis 中的键前缀。
+    /// 键格式：mfa_enrollment_setup:{token} → secret。
+    /// </summary>
+    private const string MfaEnrollmentSetupKeyPrefix = "mfa_enrollment_setup:";
+
+    /// <summary>
+    /// MFA 首次注册令牌有效期（分钟）。
+    /// </summary>
+    private const int MfaEnrollmentTokenMinutes = 10;
 
     /// <summary>
     /// MFA 设置流程的临时 TOTP 密钥在 Redis 中的键前缀
@@ -96,7 +118,9 @@ public class AuthService : IAuthService
         ILogger<AuthService> logger,
         IAuditLogService auditLogService,
         SmtpEmailNotificationService emailService,
-        ITotpService totpService)
+        ITotpService totpService,
+        IConfiguration configuration,
+        ITotpSecretProtector totpSecretProtector)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
@@ -106,6 +130,8 @@ public class AuthService : IAuthService
         _auditLogService = auditLogService;
         _emailService = emailService;
         _totpService = totpService;
+        _totpSecretProtector = totpSecretProtector;
+        _mfaPolicy = MfaPolicyOptions.FromConfiguration(configuration);
     }
 
     /// <summary>
@@ -183,9 +209,31 @@ public class AuthService : IAuthService
         user.AccessFailedCount = 0;
         user.LockoutEnd = null;
 
+        // 生产高权限账户在完成 MFA 注册前不得获得任何 JWT。
+        // 通过短期 enrollment token 引导首次配置，避免运维人员直接改库或把安全策略变成不可用的硬拒绝。
+        if (_mfaPolicy.IsRequiredFor(user.Role) && !HasConfiguredMfa(user))
+        {
+            var enrollmentToken = Guid.NewGuid().ToString("N");
+            await _redisService.SetStringAsync(
+                $"{MfaEnrollmentKeyPrefix}{enrollmentToken}",
+                user.Id.ToString(),
+                TimeSpan.FromMinutes(MfaEnrollmentTokenMinutes));
+
+            await _dbContext.SaveChangesAsync();
+            await _auditLogService.LogAsync(user.TenantId, "AuthMfaEnrollmentRequired", "User", user.Id.ToString(),
+                $"用户 {user.Username} 通过密码验证，必须先完成 MFA 注册", default);
+
+            return new AuthResponse
+            {
+                MfaEnrollmentRequired = true,
+                MfaEnrollmentToken = enrollmentToken,
+                UserInfo = _mapper.Map<UserDto>(user)!,
+            };
+        }
+
         // MFA 二步验证检查：若用户启用了 TOTP，不直接颁发令牌，而是返回挑战令牌
         // 客户端需携带挑战令牌 + TOTP 验证码调用 /auth/mfa/verify 完成登录
-        if (user.MfaEnabled && !string.IsNullOrEmpty(user.TotpSecret))
+        if (HasConfiguredMfa(user))
         {
             // 生成一次性挑战令牌（GUID 去掉连字符），存入 Redis 与 userId 绑定
             var challengeToken = Guid.NewGuid().ToString("N");
@@ -237,6 +285,12 @@ public class AuthService : IAuthService
     }
 
     /// <summary>
+    /// 判断用户是否已经完成可用的 MFA 配置。
+    /// </summary>
+    private static bool HasConfiguredMfa(Core.Entities.User user)
+        => user.MfaEnabled && !string.IsNullOrWhiteSpace(user.TotpSecret);
+
+    /// <summary>
     /// 使用 Refresh Token 刷新 Access Token
     /// 验证 Redis 中存储的刷新令牌是否匹配，匹配则颁发新令牌对并更新 Redis
     /// </summary>
@@ -284,6 +338,15 @@ public class AuthService : IAuthService
             _logger.LogWarning("刷新令牌对应用户 {UserId} 不存在或已禁用，清理残留索引", userId);
             await _redisService.RemoveRefreshTokenAsync(userId);
             throw new UnauthorizedAccessException("刷新令牌无效或已过期");
+        }
+
+        // 角色策略可能在用户已有会话期间被启用；刷新时再次检查，避免旧 Refresh Token 绕过 MFA 门禁。
+        if (_mfaPolicy.IsRequiredFor(matchedUser.Role) && !HasConfiguredMfa(matchedUser))
+        {
+            await _redisService.RemoveRefreshTokenAsync(matchedUser.Id);
+            await _auditLogService.LogAsync(matchedUser.TenantId, "AuthMfaPolicyBlocked", "User",
+                matchedUser.Id.ToString(), "高权限账户未完成 MFA 注册，刷新令牌已吊销", default);
+            throw new UnauthorizedAccessException("该高权限账户必须先完成 MFA 注册");
         }
 
         // 验证正向索引与反向索引一致性（防止 Redis 数据不一致）
@@ -349,13 +412,28 @@ public class AuthService : IAuthService
         }
 
         // 校验 TOTP 验证码
-        if (!_totpService.VerifyCode(user.TotpSecret, totpCode))
+        string plainTotpSecret;
+        try
+        {
+            plainTotpSecret = _totpSecretProtector.Unprotect(user.TotpSecret);
+        }
+        catch (CryptographicException ex)
+        {
+            _logger.LogError(ex, "用户 {UserId} 的 TOTP 密钥无法解密，拒绝 MFA 登录", user.Id);
+            throw new UnauthorizedAccessException("MFA 配置不可用，请联系系统管理员重置", ex);
+        }
+
+        if (!_totpService.VerifyCode(plainTotpSecret, totpCode))
         {
             _logger.LogWarning("MFA 验证失败：用户 {Username} TOTP 验证码错误", user.Username);
             await _auditLogService.LogAsync(user.TenantId, "AuthMfaFailed", "User", user.Id.ToString(),
                 $"用户 {user.Username} MFA 验证码错误", default);
             throw new UnauthorizedAccessException("验证码错误，请重试");
         }
+
+        // 历史明文密钥在第一次成功验证后自动升级为密文；新密钥也重新使用随机 nonce 保护。
+        user.TotpSecret = _totpSecretProtector.Protect(plainTotpSecret);
+        await _dbContext.SaveChangesAsync();
 
         // MFA 验证通过：颁发令牌（与正常登录相同流程）
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
@@ -373,6 +451,107 @@ public class AuthService : IAuthService
             ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
             UserInfo = _mapper.Map<UserDto>(user)!,
         };
+    }
+
+    /// <summary>
+    /// 使用首次登录注册令牌初始化强制 MFA 设置。
+    /// 注册令牌本身只证明用户刚刚完成密码验证，不颁发任何业务访问权限。
+    /// </summary>
+    public async Task<MfaSetupResponse> SetupMfaEnrollmentAsync(string enrollmentToken)
+    {
+        var (_, user) = await GetMfaEnrollmentUserAsync(enrollmentToken);
+        var secret = _totpService.GenerateSecret();
+
+        await _redisService.SetStringAsync(
+            $"{MfaEnrollmentSetupKeyPrefix}{enrollmentToken}",
+            secret,
+            TimeSpan.FromMinutes(MfaEnrollmentTokenMinutes));
+
+        var account = user.Email ?? user.Username;
+        return new MfaSetupResponse
+        {
+            Secret = secret,
+            QrCodeUri = _totpService.BuildQrCodeUri(secret, account, "EquipSense"),
+        };
+    }
+
+    /// <summary>
+    /// 确认强制 MFA 设置并完成登录。
+    /// 验证码错误时保留注册令牌，允许用户在短期窗口内重试；成功后同时删除注册令牌和临时密钥。
+    /// </summary>
+    public async Task<AuthResponse> ConfirmMfaEnrollmentAsync(string enrollmentToken, string totpCode)
+    {
+        var (enrollmentKey, user) = await GetMfaEnrollmentUserAsync(enrollmentToken);
+        var setupKey = $"{MfaEnrollmentSetupKeyPrefix}{enrollmentToken}";
+        var secret = await _redisService.GetStringAsync(setupKey);
+
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            throw new UnauthorizedAccessException("MFA 注册已过期，请重新登录并初始化设置");
+        }
+
+        if (!_totpService.VerifyCode(secret, totpCode))
+        {
+            await _auditLogService.LogAsync(user.TenantId, "AuthMfaEnrollmentFailed", "User", user.Id.ToString(),
+                $"用户 {user.Username} 确认 MFA 注册失败：验证码错误", default);
+            throw new UnauthorizedAccessException("验证码错误，请检查 authenticator 应用中的时间是否准确");
+        }
+
+        user.TotpSecret = _totpSecretProtector.Protect(secret);
+        user.MfaEnabled = true;
+        await _dbContext.SaveChangesAsync();
+
+        // 成功确认后令牌立即失效，防止同一注册凭据被重复使用。
+        await _redisService.RemoveKeyAsync(enrollmentKey);
+        await _redisService.RemoveKeyAsync(setupKey);
+
+        var accessToken = _jwtTokenService.GenerateAccessToken(user);
+        var refreshToken = _jwtTokenService.GenerateRefreshToken();
+        await _redisService.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
+
+        user.LastLoginAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync();
+
+        await _auditLogService.LogAsync(user.TenantId, "AuthMfaEnrollmentSuccess", "User", user.Id.ToString(),
+            $"用户 {user.Username} 完成强制 MFA 注册并登录成功", default);
+
+        return new AuthResponse
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
+            UserInfo = _mapper.Map<UserDto>(user)!,
+        };
+    }
+
+    /// <summary>
+    /// 解析并校验强制 MFA 注册令牌。
+    /// </summary>
+    private async Task<(string EnrollmentKey, Core.Entities.User User)> GetMfaEnrollmentUserAsync(string enrollmentToken)
+    {
+        if (string.IsNullOrWhiteSpace(enrollmentToken))
+        {
+            throw new UnauthorizedAccessException("MFA 注册令牌不能为空");
+        }
+
+        var enrollmentKey = $"{MfaEnrollmentKeyPrefix}{enrollmentToken}";
+        var userIdValue = await _redisService.GetStringAsync(enrollmentKey);
+        if (userIdValue == null || !Guid.TryParse(userIdValue, out var userId))
+        {
+            throw new UnauthorizedAccessException("MFA 注册令牌无效或已过期，请重新登录");
+        }
+
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(candidate => candidate.Id == userId && candidate.IsActive);
+
+        if (user == null
+            || !_mfaPolicy.IsRequiredFor(user.Role)
+            || HasConfiguredMfa(user))
+        {
+            throw new UnauthorizedAccessException("用户状态不允许进行 MFA 注册，请重新登录");
+        }
+
+        return (enrollmentKey, user);
     }
 
     /// <summary>
@@ -437,7 +616,7 @@ public class AuthService : IAuthService
             .FirstOrDefaultAsync(u => u.Id == userId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
-        user.TotpSecret = secret;
+        user.TotpSecret = _totpSecretProtector.Protect(secret);
         user.MfaEnabled = true;
         await _dbContext.SaveChangesAsync();
 
@@ -457,6 +636,13 @@ public class AuthService : IAuthService
         var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
             .FirstOrDefaultAsync(u => u.Id == userId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
+
+        if (_mfaPolicy.IsRequiredFor(user.Role))
+        {
+            await _auditLogService.LogAsync(user.TenantId, "MfaDisableBlocked", "User", user.Id.ToString(),
+                $"用户 {user.Username} 所属角色必须启用 MFA，拒绝禁用操作", default);
+            throw new InvalidOperationException("该角色在生产环境必须启用 MFA，不能禁用");
+        }
 
         user.TotpSecret = null;
         user.MfaEnabled = false;
@@ -714,6 +900,26 @@ public class AuthService : IAuthService
         _logger.LogInformation(
             "新租户注册成功：{TenantName}（Slug={Slug}, Plan={Plan}），管理员：{Username}",
             request.TenantName, request.Slug, plan, request.Username);
+
+        // 公开注册直接创建 SystemAdmin，生产环境同样必须先完成 MFA enrollment，
+        // 不能因为这是注册接口就绕过登录阶段的高权限安全策略。
+        if (_mfaPolicy.IsRequiredFor(adminUser.Role))
+        {
+            var enrollmentToken = Guid.NewGuid().ToString("N");
+            await _redisService.SetStringAsync(
+                $"{MfaEnrollmentKeyPrefix}{enrollmentToken}",
+                adminUser.Id.ToString(),
+                TimeSpan.FromMinutes(MfaEnrollmentTokenMinutes));
+            await _auditLogService.LogAsync(adminUser.TenantId, "AuthMfaEnrollmentRequired", "User",
+                adminUser.Id.ToString(), "新注册的系统管理员必须先完成 MFA 注册", default);
+
+            return new AuthResponse
+            {
+                MfaEnrollmentRequired = true,
+                MfaEnrollmentToken = enrollmentToken,
+                UserInfo = _mapper.Map<UserDto>(adminUser)!,
+            };
+        }
 
         // 7. 自动登录，生成 JWT
         var accessToken = _jwtTokenService.GenerateAccessToken(adminUser);

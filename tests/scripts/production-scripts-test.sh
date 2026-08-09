@@ -31,6 +31,7 @@ test_validate_env_accepts_complete_config() {
     'RABBITMQ_USER=equipai' \
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
@@ -66,6 +67,7 @@ test_validate_env_rejects_weak_production_config() {
     'RABBITMQ_USER=equipai' \
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=short' \
@@ -108,6 +110,7 @@ test_validate_runtime_files_gate() {
     'RABBITMQ_USER=equipai' \
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \

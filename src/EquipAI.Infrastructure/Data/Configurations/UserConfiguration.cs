@@ -103,6 +103,10 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("totp_secret")
             .HasMaxLength(200);
 
+        builder.Property(e => e.MfaRecoveryCodes)
+            .HasColumnName("mfa_recovery_codes")
+            .HasColumnType("jsonb");
+
         // 唯一复合索引 — 确保同一租户内用户名唯一
         builder.HasIndex(e => new { e.TenantId, e.Username }).IsUnique();
 

@@ -160,6 +160,8 @@ services:
       ConnectionStrings__ReadOnly: "Host=${READONLY_DB_HOST:-postgres};Port=${READONLY_DB_PORT:-5432};Database=${PG_DB:-equipai};Username=${PG_USER:-postgres};Password=${PG_PASSWORD}"
       Redis__ConnectionString: "redis:6379${REDIS_PASSWORD:+,password=${REDIS_PASSWORD}}"
       Jwt__Secret: "${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}"
+      # AES-256-GCM TOTP 密钥必须来自外部密钥管理并在重启间保持不变
+      Security__TotpEncryptionKey: "${TOTP_ENCRYPTION_KEY:?请在 .env 中设置 TOTP_ENCRYPTION_KEY}"
       Jwt__Issuer: "EquipAI"
       Jwt__Audience: "EquipAI"
       # 网关认证密钥：必须与 edgegateway 服务使用同一变量，保证两侧一致

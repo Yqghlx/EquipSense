@@ -51,6 +51,7 @@ else
     "RABBITMQ_IMAGE"
     "RABBITMQ_PASSWORD"
     "JWT_SECRET"
+    "TOTP_ENCRYPTION_KEY"
     "GATEWAY_AUTH_KEY"
     "MQTT_USERNAME"
     "MQTT_PASSWORD"
@@ -74,6 +75,11 @@ else
   jwt_value="$(read_env_value JWT_SECRET)"
   if [ -n "$jwt_value" ] && [[ "$jwt_value" != *"请修改"* ]] && [ "${#jwt_value}" -lt 32 ]; then
     error "JWT_SECRET 长度不足 32 个字符"
+  fi
+
+  totp_encryption_key="$(read_env_value TOTP_ENCRYPTION_KEY)"
+  if [ -n "$totp_encryption_key" ] && [[ "$totp_encryption_key" != *"请修改"* ]] && ! [[ "$totp_encryption_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+    error "TOTP_ENCRYPTION_KEY 必须是 Base64 编码的 32 字节密钥"
   fi
 
   gateway_auth_key="$(read_env_value GATEWAY_AUTH_KEY)"

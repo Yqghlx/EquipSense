@@ -24,6 +24,27 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | `Jwt__Audience` | JWT 受众 | `EquipAI` | 否 |
 | `Jwt__AccessTokenExpirationMinutes` | 访问令牌有效期（分钟） | `120` | 否 |
 
+TOTP 密钥使用 AES-256-GCM 加密后写入数据库。生产环境必须注入稳定的外部密钥；密钥丢失会导致已保存的 MFA 密钥无法解密，密钥轮换必须配套停机窗口、重新加密和回滚方案：
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `TOTP_ENCRYPTION_KEY` / `Security__TotpEncryptionKey` | Base64 编码的 32 字节 AES-256 密钥；通过密钥管理系统注入，不进入镜像或数据库备份 | — | 生产环境必填 |
+
+生成示例：
+
+```bash
+openssl rand -base64 32
+```
+
+生产环境 `appsettings.Production.json` 默认强制 `SystemAdmin` 和 `MaintenanceLead` 启用 TOTP MFA。也可以使用配置数组环境变量覆盖角色列表，但生产门禁要求这两个高权限角色都必须保留：
+
+```bash
+Security__Mfa__RequiredRoles__0=SystemAdmin
+Security__Mfa__RequiredRoles__1=MaintenanceLead
+```
+
+高权限账户首次登录或公开注册后不会直接获得 JWT，而是进入 10 分钟的 MFA 注册流程；扫码并验证成功后才会建立会话。普通角色仍可在“安全与 MFA”页面自助启用，强制角色不能禁用 MFA。
+
 ## Redis
 
 | 变量名 | 说明 | 默认值 | 必填 |

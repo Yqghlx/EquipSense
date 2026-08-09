@@ -223,6 +223,54 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// 初始化首次登录的强制 MFA 设置。
+    /// 该接口仅接受密码验证阶段签发的短期注册令牌，不会授予业务访问权限。
+    /// </summary>
+    /// <param name="request">MFA 注册令牌请求。</param>
+    [HttpPost("mfa/enroll/setup")]
+    [EnableRateLimiting("auth")]
+    [SkipAudit]
+    [ProducesResponseType(typeof(MfaSetupResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<MfaSetupResponse>> SetupMfaEnrollment([FromBody] MfaEnrollmentRequest request)
+    {
+        try
+        {
+            var response = await _authService.SetupMfaEnrollmentAsync(request.EnrollmentToken);
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { code = 401, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 确认首次登录的强制 MFA 设置并完成登录。
+    /// </summary>
+    /// <param name="request">MFA 注册令牌和 TOTP 验证码。</param>
+    [HttpPost("mfa/enroll/confirm")]
+    [EnableRateLimiting("auth")]
+    [SkipAudit]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> ConfirmMfaEnrollment([FromBody] MfaEnrollmentConfirmRequest request)
+    {
+        try
+        {
+            var response = await _authService.ConfirmMfaEnrollmentAsync(
+                request.EnrollmentToken,
+                request.TotpCode);
+            SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { code = 401, message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// 初始化 MFA 设置：生成 TOTP 密钥和 QR 码 URI
     /// 前端根据 QrCodeUri 生成 QR 码图片，用户用 authenticator 应用扫描
     /// </summary>
@@ -293,8 +341,15 @@ public class AuthController : ControllerBase
             return Unauthorized(new { code = 401, message = "无法识别用户身份" });
         }
 
-        await _authService.DisableMfaAsync(userId);
-        return Ok(new { message = "MFA 已成功禁用" });
+        try
+        {
+            await _authService.DisableMfaAsync(userId);
+            return Ok(new { message = "MFA 已成功禁用" });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { code = 400, message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -442,6 +497,33 @@ public class MfaConfirmRequest
 {
     /// <summary>
     /// 用户 authenticator 应用生成的 6 位数字 TOTP 验证码（用于首次验证密钥正确性）
+    /// </summary>
+    public string TotpCode { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 强制 MFA 注册初始化请求 DTO。
+/// </summary>
+public class MfaEnrollmentRequest
+{
+    /// <summary>
+    /// 密码验证成功后返回的短期注册令牌。
+    /// </summary>
+    public string EnrollmentToken { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 强制 MFA 注册确认请求 DTO。
+/// </summary>
+public class MfaEnrollmentConfirmRequest
+{
+    /// <summary>
+    /// 密码验证成功后返回的短期注册令牌。
+    /// </summary>
+    public string EnrollmentToken { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Authenticator 应用生成的 6 位数字验证码。
     /// </summary>
     public string TotpCode { get; set; } = string.Empty;
 }

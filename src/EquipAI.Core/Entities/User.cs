@@ -106,6 +106,12 @@ public class User : BaseEntity
     /// </summary>
     public string? TotpSecret { get; set; }
 
+    /// <summary>
+    /// MFA 一次性恢复码摘要列表（JSON 数组）。
+    /// 只保存 SHA-256 摘要，不保存可直接使用的明文恢复码；每次成功消费后删除对应摘要。
+    /// </summary>
+    public string? MfaRecoveryCodes { get; set; }
+
     // 导航属性
 
     /// <summary>

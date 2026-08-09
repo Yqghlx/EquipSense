@@ -10,6 +10,7 @@ import { Label } from '../components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { useAuthStore } from '../stores/authStore';
 import { usePlans, useRegister } from '../hooks/useRegister';
+import { persistTokenExpiry } from '../lib/tokenExpiry';
 import type { PlanInfo } from '../types';
 
 /**
@@ -107,8 +108,22 @@ export default function RegisterPage() {
         plan: selectedPlan,
       });
 
-      // 注册成功，自动登录
+      // 生产高权限管理员需要先完成 MFA enrollment；将短期令牌放入路由内存状态，
+      // 不写入 localStorage/sessionStorage，避免把未完成认证的凭据长期留在浏览器。
+      if (authResponse.mfaEnrollmentRequired && authResponse.mfaEnrollmentToken) {
+        navigate('/login', {
+          replace: true,
+          state: {
+            mfaEnrollmentToken: authResponse.mfaEnrollmentToken,
+            mfaEnrollmentUserInfo: authResponse.userInfo,
+          },
+        });
+        return;
+      }
+
+      // 非强制 MFA 环境保持原有注册即登录行为，并同步保存令牌刷新时间。
       setAuth(authResponse.userInfo);
+      persistTokenExpiry(authResponse.expiresIn);
       navigate('/dashboard', { replace: true });
     } catch {
       setError(t('register.registerError'));

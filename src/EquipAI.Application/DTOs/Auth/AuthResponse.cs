@@ -53,4 +53,16 @@ public class AuthResponse
     /// 有效期 5 分钟，单次使用，防止重放攻击
     /// </summary>
     public string? MfaChallengeToken { get; set; }
+
+    /// <summary>
+    /// 是否必须先完成 MFA 注册。
+    /// 为 true 时不颁发 JWT，客户端需使用 MfaEnrollmentToken 完成首次 MFA 配置。
+    /// </summary>
+    public bool MfaEnrollmentRequired { get; set; }
+
+    /// <summary>
+    /// MFA 首次注册令牌（MfaEnrollmentRequired=true 时返回）。
+    /// 令牌仅存活 10 分钟，完成注册后立即失效。
+    /// </summary>
+    public string? MfaEnrollmentToken { get; set; }
 }

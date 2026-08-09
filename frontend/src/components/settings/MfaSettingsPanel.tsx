@@ -92,8 +92,8 @@ export default function MfaSettingsPanel() {
     try {
       await disableMutation.mutateAsync();
       setSuccess(t('mfa.disableSuccess'));
-    } catch {
-      setError(t('mfa.disableFailed'));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('mfa.disableFailed'));
     }
   };
 

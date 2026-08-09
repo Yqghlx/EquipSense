@@ -27,6 +27,7 @@ public class AuthServiceTests : IAsyncDisposable
     private readonly StubRedisService _stubRedis;
     private readonly JwtTokenService _jwtService;
     private readonly Guid _tenantId;
+    private readonly IConfigurationRoot _configuration;
 
     public AuthServiceTests()
     {
@@ -41,6 +42,7 @@ public class AuthServiceTests : IAsyncDisposable
                 ["Jwt:Audience"] = "Test"
             })
             .Build();
+        _configuration = config;
 
         _jwtService = new JwtTokenService(config);
 
@@ -53,6 +55,7 @@ public class AuthServiceTests : IAsyncDisposable
 
         // 注册 InMemory 数据库，模拟租户上下文
         services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddSingleton<IConfiguration>(_configuration);
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
 
         // 注册 AutoMapper，使用项目实际的 MappingProfile
@@ -66,6 +69,8 @@ public class AuthServiceTests : IAsyncDisposable
         services.AddScoped<IAuditLogService, StubAuditLogService>();
         // 注册 TOTP 服务 Stub（默认接受任意 6 位验证码，测试 MFA 流程）
         services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpService>(new StubTotpService());
+        // 测试保护器使用可逆前缀模拟加密，断言不会把 TOTP 密钥明文写入实体。
+        services.AddSingleton<ITotpSecretProtector, StubTotpSecretProtector>();
         // 注册邮件服务（测试中 SendAsync 会因无 SMTP 配置进入 catch，不影响测试逻辑）
         services.Configure<EquipAI.Application.Notifications.SmtpOptions>(_ => { });
         services.AddScoped<EquipAI.Application.Notifications.SmtpEmailNotificationService>();
@@ -75,6 +80,89 @@ public class AuthServiceTests : IAsyncDisposable
     }
 
     // ==================== LoginAsync ====================
+
+    [Fact]
+    public async Task LoginAsync_生产策略要求高权限Mfa且用户未启用_应返回注册挑战而不颁发令牌()
+    {
+        // Arrange：生产策略通过配置要求系统管理员必须完成 MFA 注册。
+        _configuration["Security:Mfa:RequiredRoles:0"] = nameof(UserRole.SystemAdmin);
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        const string password = "password123";
+        var user = CreateTestUser("mfaenrollmentuser", _tenantId, password, UserRole.SystemAdmin);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        var result = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = password
+        });
+
+        // Assert：先用反射锁定新增响应字段，保证测试在实现缺失时以可读断言失败，
+        // 而不是因为测试代码无法编译而掩盖真正的行为缺口。
+        var enrollmentRequiredProperty = result.GetType().GetProperty("MfaEnrollmentRequired");
+        enrollmentRequiredProperty.Should().NotBeNull();
+        ((bool)enrollmentRequiredProperty!.GetValue(result)!).Should().BeTrue();
+
+        var enrollmentTokenProperty = result.GetType().GetProperty("MfaEnrollmentToken");
+        enrollmentTokenProperty.Should().NotBeNull();
+        enrollmentTokenProperty!.GetValue(result).Should().NotBeNull();
+        result.AccessToken.Should().BeEmpty();
+        result.RefreshToken.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MfaEnrollment_有效注册令牌完成确认_应启用Mfa并返回完整令牌()
+    {
+        // Arrange：先完成密码阶段，拿到不包含 JWT 的首次 MFA 注册令牌。
+        _configuration["Security:Mfa:RequiredRoles:0"] = nameof(UserRole.SystemAdmin);
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        const string password = "password123";
+        var user = CreateTestUser("mfaenrollmentflow", _tenantId, password, UserRole.SystemAdmin);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var loginResult = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = password
+        });
+        var enrollmentToken = loginResult.GetType().GetProperty("MfaEnrollmentToken")?.GetValue(loginResult) as string;
+        enrollmentToken.Should().NotBeNullOrWhiteSpace();
+
+        // Act：通过反射调用尚未实现的 enrollment API，先锁定其行为契约而不让测试因缺少方法无法编译。
+        var setupMethod = typeof(AuthService).GetMethod("SetupMfaEnrollmentAsync");
+        setupMethod.Should().NotBeNull();
+        var setupTask = (Task)setupMethod!.Invoke(service, new object[] { enrollmentToken! })!;
+        await setupTask;
+        var setupResult = setupTask.GetType().GetProperty("Result")!.GetValue(setupTask)!;
+        (setupResult.GetType().GetProperty("Secret")!.GetValue(setupResult) as string).Should().NotBeNullOrWhiteSpace();
+        (setupResult.GetType().GetProperty("QrCodeUri")!.GetValue(setupResult) as string).Should().NotBeNullOrWhiteSpace();
+
+        var confirmMethod = typeof(AuthService).GetMethod("ConfirmMfaEnrollmentAsync");
+        confirmMethod.Should().NotBeNull();
+        var confirmTask = (Task)confirmMethod!.Invoke(
+            service,
+            new object[] { enrollmentToken!, "123456" })!;
+        await confirmTask;
+        var confirmResult = confirmTask.GetType().GetProperty("Result")!.GetValue(confirmTask)!;
+
+        // Assert：确认后才落库启用 MFA，并且只在完整二次认证完成后颁发令牌。
+        user.MfaEnabled.Should().BeTrue();
+        user.TotpSecret.Should().NotBeNullOrWhiteSpace();
+        user.TotpSecret.Should().NotBe("JBSWY3DPEHPK3PXP", "TOTP 密钥不应以明文持久化");
+        (confirmResult.GetType().GetProperty("AccessToken")!.GetValue(confirmResult) as string).Should().NotBeNullOrWhiteSpace();
+        (confirmResult.GetType().GetProperty("RefreshToken")!.GetValue(confirmResult) as string).Should().NotBeNullOrWhiteSpace();
+        _stubRedis.GetStringKeyStartingWith("mfa_enrollment:").Should().BeNull();
+        _stubRedis.GetStringKeyStartingWith("mfa_enrollment_setup:").Should().BeNull();
+    }
 
     [Fact]
     public async Task LoginAsync_正确凭据_应返回AuthResponse()
@@ -303,6 +391,50 @@ public class AuthServiceTests : IAsyncDisposable
     }
 
     // ==================== RefreshTokenAsync ====================
+
+    [Fact]
+    public async Task RefreshTokenAsync_生产强制角色未完成Mfa_应拒绝刷新并吊销会话()
+    {
+        // Arrange：模拟策略上线后，旧会话仍持有刷新令牌但账户尚未完成 MFA 注册。
+        _configuration["Security:Mfa:RequiredRoles:0"] = nameof(UserRole.SystemAdmin);
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("mfarefreshblocked", _tenantId, "password123", UserRole.SystemAdmin);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        const string refreshToken = "mfa-policy-old-refresh-token";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
+
+        // Act & Assert：策略不能只拦截新登录，旧刷新会话也必须失效。
+        var act = () => service.RefreshTokenAsync(refreshToken);
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        _stubRedis.GetStoredRefreshToken(user.Id).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DisableMfaAsync_生产强制角色_应拒绝禁用()
+    {
+        // Arrange：系统管理员已经启用 MFA，生产策略要求其持续保持启用状态。
+        _configuration["Security:Mfa:RequiredRoles:0"] = nameof(UserRole.SystemAdmin);
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("mfadisableblocked", _tenantId, "password123", UserRole.SystemAdmin);
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act & Assert
+        var act = () => service.DisableMfaAsync(user.Id);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        user.MfaEnabled.Should().BeTrue();
+        user.TotpSecret.Should().NotBeNullOrWhiteSpace();
+    }
 
     [Fact]
     public async Task RefreshTokenAsync_有效token_应返回新令牌()
@@ -775,6 +907,34 @@ public class AuthServiceTests : IAsyncDisposable
     // ==================== RegisterAsync ====================
 
     [Fact]
+    public async Task RegisterAsync_生产强制Mfa_不应通过自动登录绕过注册流程()
+    {
+        // Arrange：公开注册创建的管理员同样属于 SystemAdmin，不能绕过 MFA 门禁直接拿 JWT。
+        _configuration["Security:Mfa:RequiredRoles:0"] = nameof(UserRole.SystemAdmin);
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+
+        // Act
+        var result = await service.RegisterAsync(new RegisterRequest
+        {
+            TenantName = "MFA 企业",
+            Slug = "mfa-company",
+            Username = "mfa-admin",
+            Password = "AdminPass123",
+            Email = "mfa-admin@example.com",
+            Plan = "Trial"
+        });
+
+        // Assert：注册接口也必须返回 enrollment token，而不是直接建立完整会话。
+        var enrollmentRequiredProperty = result.GetType().GetProperty("MfaEnrollmentRequired");
+        enrollmentRequiredProperty.Should().NotBeNull();
+        ((bool)enrollmentRequiredProperty!.GetValue(result)!).Should().BeTrue();
+        result.GetType().GetProperty("MfaEnrollmentToken")!.GetValue(result).Should().NotBeNull();
+        result.AccessToken.Should().BeEmpty();
+        result.RefreshToken.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RegisterAsync_应创建租户和用户()
     {
         // Arrange
@@ -1112,6 +1272,19 @@ public class AuthServiceTests : IAsyncDisposable
 
         /// <summary>设置后续 VerifyCode 的返回值（用于测试验证码错误场景）</summary>
         public void SetVerifyResult(bool result) => _verifyResult = result;
+    }
+
+    /// <summary>
+    /// TOTP 密钥保护器测试替身，模拟“落库值不是明文、验证时可还原”的契约。
+    /// </summary>
+    private sealed class StubTotpSecretProtector : ITotpSecretProtector
+    {
+        public string Protect(string plainTextSecret) => $"protected:{plainTextSecret}";
+
+        public string Unprotect(string storedSecret)
+            => storedSecret.StartsWith("protected:", StringComparison.Ordinal)
+                ? storedSecret["protected:".Length..]
+                : storedSecret;
     }
 
     public async ValueTask DisposeAsync() => await _sp.DisposeAsync();

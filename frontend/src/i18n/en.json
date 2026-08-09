@@ -981,6 +981,14 @@
     "manualKeyLabel": "Can't scan? Enter the key manually:",
     "copied": "Key copied to clipboard",
     "copy": "Copy",
-    "qrAlt": "MFA QR Code"
+    "qrAlt": "MFA QR Code",
+    "enrollmentTitle": "Multi-factor authentication required",
+    "enrollmentDesc": "This privileged account must enroll in MFA before first access is granted.",
+    "enrollmentSetup": "Generate MFA setup QR code",
+    "enrollmentSetupFailed": "Failed to initialize MFA setup. Please sign in again and retry.",
+    "enrollmentConfigDesc": "Scan the QR code with Google Authenticator or Microsoft Authenticator, then enter the 6-digit code.",
+    "enrollmentConfirm": "Finish setup and sign in",
+    "enrollmentConfirmFailed": "The code is invalid or enrollment expired. Check the time and retry.",
+    "enrollmentBack": "Back to sign in"
   }
 }

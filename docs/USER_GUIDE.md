@@ -6,7 +6,9 @@ EquipSense 是工业设备智能监控与预测维护平台。核心能力：**�
 
 ## 登录
 
-访问系统首页，输入用户名和密码登录。默认管理员账号：`admin / Admin@123`。
+访问系统首页，输入用户名和密码登录。生产环境没有通用默认密码，管理员初始密码由部署时的 `SEED_ADMIN_PASSWORD` 注入；首次登录后必须修改密码。
+
+系统生产环境默认要求 `SystemAdmin` 和 `MaintenanceLead` 完成 MFA：首次输入正确密码后，页面会引导使用 Google Authenticator 或 Microsoft Authenticator 扫描二维码并输入 6 位验证码。MFA 注册完成前不会授予系统访问权限；普通角色可在“设置 → 安全与 MFA”中自助启用，强制角色不能禁用。
 
 ## 功能模块
 

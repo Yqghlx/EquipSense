@@ -76,6 +76,21 @@ public interface IAuthService
     Task<AuthResponse> VerifyMfaAsync(string challengeToken, string totpCode);
 
     /// <summary>
+    /// 使用首次登录注册令牌初始化强制 MFA 设置。
+    /// </summary>
+    /// <param name="enrollmentToken">密码验证后签发的短期 MFA 注册令牌。</param>
+    /// <returns>临时 TOTP 密钥和 QR 码 URI。</returns>
+    Task<MfaSetupResponse> SetupMfaEnrollmentAsync(string enrollmentToken);
+
+    /// <summary>
+    /// 使用首次登录注册令牌确认 MFA，并完成登录。
+    /// </summary>
+    /// <param name="enrollmentToken">密码验证后签发的短期 MFA 注册令牌。</param>
+    /// <param name="totpCode">Authenticator 生成的 6 位验证码。</param>
+    /// <returns>完整的认证响应（含 Access Token 和 Refresh Token）。</returns>
+    Task<AuthResponse> ConfirmMfaEnrollmentAsync(string enrollmentToken, string totpCode);
+
+    /// <summary>
     /// 初始化 MFA 设置：生成 TOTP 密钥和 QR 码 URI
     /// 此阶段仅生成临时密钥（存 Redis），不写入数据库；用户需调用 ConfirmMfaSetupAsync 确认启用
     /// </summary>

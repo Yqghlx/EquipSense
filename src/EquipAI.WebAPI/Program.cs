@@ -16,6 +16,7 @@ using EquipAI.Infrastructure.Messaging;
 using Microsoft.EntityFrameworkCore;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
+using EquipAI.Application.Security;
 using EquipAI.WebAPI.Extensions;
 using EquipAI.WebAPI.Metrics;
 using EquipAI.WebAPI.Middleware;
@@ -47,6 +48,12 @@ try
     builder.Services.AddHttpContextAccessor();
 
     // 在注册任何事件发布后台服务前完成配置校验，避免未知 Provider 或生产弱配置静默降级。
+    MfaPolicyValidator.ValidateForEnvironment(
+        builder.Configuration,
+        builder.Environment.EnvironmentName);
+    TotpSecretProtectionValidator.ValidateForEnvironment(
+        builder.Configuration,
+        builder.Environment.EnvironmentName);
     EventBusConfiguration.ValidateForEnvironment(
         builder.Configuration,
         builder.Environment.EnvironmentName);
