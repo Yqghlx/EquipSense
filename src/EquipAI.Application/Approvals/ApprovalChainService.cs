@@ -223,6 +223,7 @@ public class ApprovalChainService : IApprovalChainService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
         // 获取当前待审批的步骤（按步骤顺序取第一个 Pending 的记录）
         var currentApproval = await dbContext.WorkOrderApprovals
@@ -261,10 +262,9 @@ public class ApprovalChainService : IApprovalChainService
                 _logger.LogInformation(
                     "工单 {WorkOrderId} 所有审批步骤已通过，状态变更为 Accepted", workOrderId);
 
-                await dbContext.SaveChangesAsync(ct);
-
                 // 发布工单状态变更事件
-                await PublishStatusChangedEvent(tenantId, workOrderId, oldStatus, workOrder.Status, approverId, ct);
+                await PublishStatusChangedEvent(eventBus, tenantId, workOrderId, oldStatus, workOrder.Status, approverId, ct);
+                await dbContext.SaveChangesAsync(ct);
             }
             else
             {
@@ -287,6 +287,7 @@ public class ApprovalChainService : IApprovalChainService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
         // 获取当前待审批的步骤
         var currentApproval = await dbContext.WorkOrderApprovals
@@ -327,10 +328,9 @@ public class ApprovalChainService : IApprovalChainService
                 "工单 {WorkOrderId} 第 {StepOrder} 步审批被驳回（审批人: {ApproverId}），工单回到 InProgress",
                 workOrderId, currentApproval.StepOrder, approverId);
 
-            await dbContext.SaveChangesAsync(ct);
-
             // 发布工单状态变更事件
-            await PublishStatusChangedEvent(tenantId, workOrderId, oldStatus, workOrder.Status, approverId, ct);
+            await PublishStatusChangedEvent(eventBus, tenantId, workOrderId, oldStatus, workOrder.Status, approverId, ct);
+            await dbContext.SaveChangesAsync(ct);
         }
         else
         {
@@ -426,13 +426,14 @@ public class ApprovalChainService : IApprovalChainService
     /// 发布工单状态变更事件
     /// </summary>
     private async Task PublishStatusChangedEvent(
+        IEventBus eventBus,
         Guid tenantId, Guid workOrderId, WorkOrderStatus oldStatus,
         WorkOrderStatus newStatus, Guid? operatorId, CancellationToken ct)
     {
         var evt = new WorkOrderStatusChangedEvent(
             Guid.NewGuid(), DateTime.UtcNow, tenantId,
             workOrderId, oldStatus.ToString(), newStatus.ToString(), operatorId);
-        await _eventBus.PublishAsync(evt, ct);
+        await eventBus.PublishAsync(evt, ct);
     }
 
     /// <summary>

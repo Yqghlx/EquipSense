@@ -42,20 +42,23 @@ services:
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
 
-  # RabbitMQ：事件总线（可选，默认进程内事件总线即可运行）
-  # 启用方式：.env 设 EventBus__Provider=RabbitMQ，backend 依赖此服务
-  # 含 management 插件，访问 http://localhost:15672（guest/guest）查看队列/消息/死信
+  # RabbitMQ：事件总线测试依赖；含 management 插件，访问 http://localhost:15672 查看队列/消息/死信。
   rabbitmq:
     image: "${RABBITMQ_IMAGE:-rabbitmq:4.3.4-management-alpine}"
     container_name: equipai-rabbitmq
     ports:
       - "5672:5672"    # AMQP
       - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RABBITMQ_TEST_USERNAME:-equipai_test}"
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_TEST_PASSWORD:-equipai_test_password}"
     volumes:
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq/start.sh:/usr/local/bin/equipai-rabbitmq-start.sh:ro
+    command: ["/bin/bash", "/usr/local/bin/equipai-rabbitmq-start.sh"]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 15s
       timeout: 10s
       retries: 5

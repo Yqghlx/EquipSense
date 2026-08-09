@@ -143,17 +143,24 @@ public static class ServiceCollectionExtensions
         if (eventBusProvider == EventBusProvider.RabbitMQ)
         {
             services.Configure<RabbitMqOptions>(configuration.GetSection("EventBus:RabbitMq"));
+            services.Configure<OutboxOptions>(configuration.GetSection("EventBus:Outbox"));
             services.AddSingleton<RabbitMqEventBus>();
-            services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<RabbitMqEventBus>());
+            services.AddSingleton<IEventBusTransport>(provider => provider.GetRequiredService<RabbitMqEventBus>());
+            services.AddScoped<IEventBus, TransactionalEventBus>();
+            services.AddScoped<OutboxMessageStore>();
+            services.AddScoped<InboxMessageStore>();
             services.AddSingleton<IRabbitMqConnectionState>(provider => provider.GetRequiredService<RabbitMqEventBus>());
             services.AddSingleton<IHostedService>(provider => provider.GetRequiredService<RabbitMqEventBus>());
+            services.AddHostedService<OutboxDispatcher>();
             services.AddHealthChecks().AddCheck<RabbitMqHealthCheck>(
                 "rabbitmq-eventbus",
                 tags: ["ready"]);
         }
         else
         {
-            services.AddSingleton<IEventBus, InMemoryEventBus>();
+            services.AddSingleton<InMemoryEventBus>();
+            services.AddSingleton<IEventBus>(provider => provider.GetRequiredService<InMemoryEventBus>());
+            services.AddSingleton<IEventBusTransport>(provider => provider.GetRequiredService<InMemoryEventBus>());
         }
 
         // MQTT 客户端服务（Singleton — 共享连接）
@@ -278,8 +285,13 @@ public static class ServiceCollectionExtensions
         // AutoMapper 15 要求显式传入配置委托，再指定需要扫描的程序集。
         services.AddAutoMapper(_ => { }, typeof(MappingProfile).Assembly);
 
-        // 遥测数据服务（Singleton — 内部维护定时器和队列）
-        services.AddSingleton<ITelemetryService, TelemetryService>();
+        // 遥测数据服务（Singleton — 内部维护定时器和队列）。
+        // RabbitMQ 模式下 IEventBus 是 Scoped 事务 Outbox 包装器，不能直接注入 Singleton；
+        // 构造时只注入 Singleton 传输层作为无作用域回退，实际 flush 会在自己的 scope 解析事务总线。
+        services.AddSingleton<ITelemetryService>(sp => new TelemetryService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<IEventBusTransport>(),
+            sp.GetRequiredService<ILogger<TelemetryService>>()));
 
         // 遥测数据查询服务（Scoped — 需要 DbContext）
         services.AddScoped<TelemetryQueryService>();

@@ -319,7 +319,8 @@ try
     }
 
     // 注册事件订阅：遥测数据 → 告警评估
-    var eventBus = app.Services.GetRequiredService<IEventBus>();
+    // 订阅必须登记在 RabbitMQ 单例传输层；生产业务代码解析到的 IEventBus 是事务 Outbox 包装器。
+    var eventBus = app.Services.GetRequiredService<IEventBusTransport>();
     eventBus.Subscribe<TelemetryReceivedEvent, TelemetryEventHandler>();
     eventBus.Subscribe<AlertTriggeredEvent, AlertEventHandler>();
     eventBus.Subscribe<AlertTriggeredEvent, RootCauseAnalysisHandler>();

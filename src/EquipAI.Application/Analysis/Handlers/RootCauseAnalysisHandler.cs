@@ -91,11 +91,30 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
                 baseline,
                 cancellationToken);
 
-            // 持久化分析结果到数据库
+            // 持久化分析结果与 AnalysisCompletedEvent 的 Outbox 登记必须使用同一作用域。
+            // 处理器作用域内解析的事务事件总线会在发布前把分析实体和事件一起提交。
+            IEventBus eventBus;
             using (var scope = _scopeFactory.CreateScope())
             {
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 dbContext.Analyses.Add(analysis);
+
+                eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
+                await eventBus.PublishAsync(new AnalysisCompletedEvent(
+                    EventId: Guid.NewGuid(),
+                    OccurredAt: DateTime.UtcNow,
+                    TenantId: @event.TenantId,
+                    AnalysisId: analysis.Id,
+                    AlertId: @event.AlertId,
+                    DeviceId: @event.DeviceId,
+                    Metric: @event.Metric,
+                    Level: analysis.Level,
+                    Confidence: analysis.Confidence,
+                    RootCause: analysis.RootCause,
+                    Suggestion: analysis.Suggestion
+                ), cancellationToken);
+                // InMemory/测试事件总线只负责投递，不会替当前作用域提交分析实体。
+                // RabbitMQ 事务总线已经在上面的发布动作中保存，重复 SaveChanges 不产生额外写入。
                 await dbContext.SaveChangesAsync(cancellationToken);
             }
 
@@ -104,20 +123,6 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
                 analysis.Id, analysis.Level, analysis.Confidence, analysis.ProcessingTimeMs);
 
             // 发布分析完成事件，供工单模块等下游消费者使用
-            await _eventBus.PublishAsync(new AnalysisCompletedEvent(
-                EventId: Guid.NewGuid(),
-                OccurredAt: DateTime.UtcNow,
-                TenantId: @event.TenantId,
-                AnalysisId: analysis.Id,
-                AlertId: @event.AlertId,
-                DeviceId: @event.DeviceId,
-                Metric: @event.Metric,
-                Level: analysis.Level,
-                Confidence: analysis.Confidence,
-                RootCause: analysis.RootCause,
-                Suggestion: analysis.Suggestion
-            ), cancellationToken);
-
             _logger.LogDebug("已发布 AnalysisCompletedEvent: AnalysisId={AnalysisId}", analysis.Id);
 
             // 分析完成后自动生成候选规则（置信度 >= 0.7 且根因非空）

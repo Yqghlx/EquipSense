@@ -103,12 +103,20 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `EventBus__AllowInMemoryInProduction` | 允许生产紧急降级到进程内总线 | `false` | 否 |
 | `EventBus__RabbitMq__Host` | RabbitMQ 主机 | `localhost` | Provider=RabbitMQ 时必填 |
 | `EventBus__RabbitMq__Port` | RabbitMQ AMQP 端口 | `5672` | 否 |
+| `EventBus__RabbitMq__ConnectionTimeoutSeconds` | 初始连接超时（秒） | `10` | 否 |
 | `EventBus__RabbitMq__Username` | RabbitMQ 用户名；生产禁止 guest | `guest` | Provider=RabbitMQ 时必填 |
 | `EventBus__RabbitMq__Password` | RabbitMQ 密码；生产至少 16 字符且禁止 guest | `guest` | Provider=RabbitMQ 时必填 |
 | `EventBus__RabbitMq__MaxRetryCount` | 最大重试次数（含首次） | `5` | 否 |
 | `EventBus__RabbitMq__RetryIntervalSeconds` | 重试间隔（秒） | `30` | 否 |
+| `EventBus__Outbox__Enabled` | 启用事务 Outbox 后台分发器 | `true` | 生产必须保持开启 |
+| `EventBus__Outbox__PollIntervalSeconds` | Outbox 轮询间隔（秒） | `1` | 否 |
+| `EventBus__Outbox__BatchSize` | 每轮最多分发的消息数 | `50` | 否 |
+| `EventBus__Outbox__LeaseSeconds` | 单条消息分发租约（秒） | `60` | 否 |
+| `EventBus__Outbox__MaxBackoffSeconds` | 发布失败最大退避（秒） | `300` | 否 |
+| `EventBus__Outbox__RetentionDays` | 已发布 Outbox 保留天数 | `7` | 否 |
 | `RABBITMQ_PASSWORD` | docker-compose RabbitMQ 服务密码（服务始终启动，禁止使用公开默认值） | — | Docker 生产必填 |
 | `RABBITMQ_IMAGE` | RabbitMQ 精确镜像版本 | 无默认值 | Docker 生产必填 |
+| `ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION` | Compose 生产紧急降级开关 | `false` | 否 |
 | `RABBITMQ_USER` | docker-compose rabbitmq 服务默认用户 | `equipai` | 否 |
 | `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | — | Docker 生产必填 |
 | `GRAFANA_PASSWORD` | Grafana 管理员密码 | — | Docker 生产必填 |

@@ -96,8 +96,6 @@ public class AlertQueryService
         alert.AcknowledgedAt = DateTime.UtcNow;
         alert.AcknowledgementNote = note;
 
-        await _dbContext.SaveChangesAsync(ct);
-
         // 发布告警确认事件 → SignalR 推送，让其他在线用户实时看到该告警已被接管
         // 显式 CancellationToken.None：即便发起方断开，状态变更仍须通知其他在线用户
         await _eventBus.PublishAsync(new AlertAcknowledgedEvent(
@@ -107,6 +105,9 @@ public class AlertQueryService
             AlertId: id,
             AcknowledgedBy: _tenantContext.UserId,
             Note: note), CancellationToken.None);
+        // 生产 RabbitMQ 模式下，事务事件总线会把状态和 Outbox 一起提交；
+        // InMemory/单元测试模式下此处仍由原有 DbContext 完成保存。
+        await _dbContext.SaveChangesAsync(ct);
 
         return (_mapper.Map<AlertDto>(alert), null);
     }
@@ -129,8 +130,6 @@ public class AlertQueryService
         alert.ResolvedAt = DateTime.UtcNow;
         alert.Resolution = resolution;
 
-        await _dbContext.SaveChangesAsync(ct);
-
         // 发布告警解决事件 → SignalR 推送 + 持久化通知 + Web Push
         await _eventBus.PublishAsync(new AlertResolvedEvent(
             EventId: Guid.NewGuid(),
@@ -139,6 +138,7 @@ public class AlertQueryService
             AlertId: id,
             ResolvedBy: _tenantContext.UserId,
             Resolution: resolution), CancellationToken.None);
+        await _dbContext.SaveChangesAsync(ct);
 
         return (_mapper.Map<AlertDto>(alert), null);
     }

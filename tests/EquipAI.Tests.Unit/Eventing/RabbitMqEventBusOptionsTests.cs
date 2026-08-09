@@ -25,6 +25,7 @@ public class RabbitMqEventBusOptionsTests
         opts.Password.Should().Be("guest");
         opts.HeartbeatSeconds.Should().Be(30);
         opts.AutomaticRecoveryEnabled.Should().BeTrue();
+        opts.ConnectionTimeoutSeconds.Should().Be(10);
         opts.PrefetchCount.Should().Be(50);
         opts.HandlerTimeoutSeconds.Should().Be(120);
         opts.MaxRetryCount.Should().Be(5);
@@ -41,6 +42,7 @@ public class RabbitMqEventBusOptionsTests
                 ["EventBus:RabbitMq:Port"] = "5673",
                 ["EventBus:RabbitMq:Username"] = "equipai",
                 ["EventBus:RabbitMq:Password"] = "s3cret",
+                ["EventBus:RabbitMq:ConnectionTimeoutSeconds"] = "15",
                 ["EventBus:RabbitMq:MaxRetryCount"] = "10",
                 ["EventBus:RabbitMq:RetryIntervalSeconds"] = "60",
             })
@@ -53,6 +55,7 @@ public class RabbitMqEventBusOptionsTests
         opts.Port.Should().Be(5673);
         opts.Username.Should().Be("equipai");
         opts.Password.Should().Be("s3cret");
+        opts.ConnectionTimeoutSeconds.Should().Be(15);
         opts.MaxRetryCount.Should().Be(10);
         opts.RetryIntervalSeconds.Should().Be(60);
     }

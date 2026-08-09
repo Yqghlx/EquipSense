@@ -47,12 +47,30 @@ public sealed class RabbitMqEventBusLifecycleTests
     [InlineData(1, 3, false)]
     [InlineData(2, 3, true)]
     [InlineData(3, 3, true)]
+    [InlineData(int.MaxValue, 3, true)]
     public void ShouldDeadLetter_最大次数包含首次处理_边界准确(
         int previousRejectedCount,
         int maxRetryCount,
         bool expected)
     {
         RabbitMqEventBus.ShouldDeadLetter(previousRejectedCount, maxRetryCount)
+            .Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    public void ShouldLeaveUnackedForShutdown_只有停机引起的取消才交给Broker重投(
+        bool lifetimeCancellationRequested,
+        bool operationCanceled,
+        bool expected)
+    {
+        Exception exception = operationCanceled
+            ? new OperationCanceledException("应用正在停止")
+            : new InvalidOperationException("业务处理失败");
+
+        RabbitMqEventBus.ShouldLeaveUnackedForShutdown(exception, lifetimeCancellationRequested)
             .Should().Be(expected);
     }
 

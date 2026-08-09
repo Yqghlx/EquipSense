@@ -68,8 +68,9 @@ jobs:
           RABBITMQ_DEFAULT_PASS: equipai_test_password
         ports:
           - 5672:5672
+          - 15672:15672
         options: >-
-          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-cmd "rabbitmq-diagnostics -q check_running"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
@@ -105,7 +106,13 @@ jobs:
           docker exec "$container_id" rabbitmqctl set_policy -p / --priority 20 --apply-to queues \
             equipai-v2-at-least-once-dlx '^equipai\.v2\.' \
             '{"dead-letter-strategy":"at-least-once","overflow":"reject-publish"}'
-          docker exec "$container_id" rabbitmqctl list_policies -p /
+          policies=$(docker exec "$container_id" rabbitmqctl list_policies -p / --formatter json)
+          [[ "$policies" == *'equipai-v2-at-least-once-dlx'* ]]
+          [[ "$policies" == *'at-least-once'* ]]
+          [[ "$policies" == *'reject-publish'* ]]
+
+      - name: 验证 RabbitMQ Compose 启动编排
+        run: bash scripts/check-rabbitmq-startup.sh
 
       - name: 运行集成测试（采集覆盖率）
         run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s tests/coverage.runsettings --results-directory ./coverage-results
@@ -115,6 +122,7 @@ jobs:
           RABBITMQ_TEST_PORT: '5672'
           RABBITMQ_TEST_USERNAME: equipai_test
           RABBITMQ_TEST_PASSWORD: equipai_test_password
+          RABBITMQ_TEST_MANAGEMENT_PORT: '15672'
 
       # 合并单元 + 集成覆盖率为单份 Cobertura XML，供门禁脚本读取
       - name: 合并覆盖率报告

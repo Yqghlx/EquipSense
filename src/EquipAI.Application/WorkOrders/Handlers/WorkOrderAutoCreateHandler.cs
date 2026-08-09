@@ -43,6 +43,7 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
 
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
         // 查询告警规则，检查是否配置了自动创建工单
         // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
@@ -55,16 +56,30 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
             return;
         }
 
-        // 防重复：同一告警不重复创建活跃工单（未关闭、未取消的工单视为活跃）
+        // 防重复：同一告警不重复创建活跃工单（未关闭、未取消的工单视为活跃）。
+        // 但不能只返回：旧实例可能已经把工单写入数据库，却在写入 WorkOrderCreatedEvent
+        // 前宕机。重试时必须使用同一个事件 ID 幂等补发，才能避免“有工单、无通知”的断链。
         var existingActiveWorkOrder = await dbContext.WorkOrders
             .IgnoreQueryFilters()
-            .AnyAsync(wo => wo.AlertId == @event.AlertId
+            .Where(wo => wo.TenantId == @event.TenantId
+                && wo.AlertId == @event.AlertId
                 && wo.Status != WorkOrderStatus.Closed
-                && wo.Status != WorkOrderStatus.Cancelled, cancellationToken);
-        if (existingActiveWorkOrder)
+                && wo.Status != WorkOrderStatus.Cancelled)
+            .OrderBy(wo => wo.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existingActiveWorkOrder is not null)
         {
             _logger.LogInformation(
-                "告警已有关联的活跃工单，跳过创建: AlertId={AlertId}", @event.AlertId);
+                "告警已有关联的活跃工单，将幂等补发创建事件: AlertId={AlertId}, WorkOrderId={WorkOrderId}",
+                @event.AlertId, existingActiveWorkOrder.Id);
+            await eventBus.PublishAsync(new WorkOrderCreatedEvent(
+                EventId: existingActiveWorkOrder.Id,
+                OccurredAt: existingActiveWorkOrder.CreatedAt,
+                TenantId: existingActiveWorkOrder.TenantId,
+                WorkOrderId: existingActiveWorkOrder.Id,
+                DeviceId: existingActiveWorkOrder.DeviceId,
+                Title: existingActiveWorkOrder.Title,
+                Priority: existingActiveWorkOrder.Priority.ToString()), cancellationToken);
             return;
         }
 
@@ -113,12 +128,13 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
             savedWorkOrder.Id, savedWorkOrder.WorkOrderCode, @event.AlertId);
 
         // 发布工单创建事件，供 SignalR 推送等下游模块消费
-        await _eventBus.PublishAsync(new WorkOrderCreatedEvent(
-            EventId: Guid.NewGuid(),
-            OccurredAt: DateTime.UtcNow,
-            TenantId: @event.TenantId,
+        await eventBus.PublishAsync(new WorkOrderCreatedEvent(
+            // 工单创建事件的一次性语义由工单 ID 稳定标识；消费失败重试时可安全补发。
+            EventId: savedWorkOrder.Id,
+            OccurredAt: savedWorkOrder.CreatedAt,
+            TenantId: savedWorkOrder.TenantId,
             WorkOrderId: savedWorkOrder.Id,
-            DeviceId: @event.DeviceId,
+            DeviceId: savedWorkOrder.DeviceId,
             Title: savedWorkOrder.Title,
             Priority: savedWorkOrder.Priority.ToString()
         ), cancellationToken);

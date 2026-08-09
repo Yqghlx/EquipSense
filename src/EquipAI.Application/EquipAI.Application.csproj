@@ -12,6 +12,8 @@
   <ItemGroup>
     <PackageReference Include="AutoMapper" Version="15.1.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.29" />
+    <!-- 与基础设施层统一 EF Core Relational 版本，避免 Npgsql 传递旧版本导致构建警告。 -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.29" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.8" />

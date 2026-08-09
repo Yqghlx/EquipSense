@@ -801,7 +801,7 @@ services:
     ports:
       - 5672:5672
     options: >-
-      --health-cmd "rabbitmq-diagnostics -q ping"
+      --health-cmd "rabbitmq-diagnostics -q check_running"
       --health-interval 10s
       --health-timeout 5s
       --health-retries 12

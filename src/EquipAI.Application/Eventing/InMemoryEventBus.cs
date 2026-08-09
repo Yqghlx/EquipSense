@@ -9,7 +9,7 @@ namespace EquipAI.Application.Eventing;
 /// 进程内事件总线实现，基于 Channel 实现生产者-消费者模式
 /// Phase 1 使用此进程内实现，后续可替换为 RabbitMQ 等消息队列
 /// </summary>
-public class InMemoryEventBus : IEventBus, IDisposable
+public class InMemoryEventBus : IEventBusTransport, IDisposable
 {
     /// <summary>
     /// 事件通道有界容量。扩容到 10000：原 1000 在告警风暴或批量遥测下极易打满，
@@ -71,12 +71,25 @@ public class InMemoryEventBus : IEventBus, IDisposable
     /// <typeparam name="TEvent">事件类型</typeparam>
     /// <param name="event">待发布的事件</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
-        where TEvent : IIntegrationEvent
+    public Task PublishAsync<TEvent>(TEvent @event, CancellationToken cancellationToken = default)
+        where TEvent : IIntegrationEvent =>
+        PublishRuntimeAsync(@event, typeof(TEvent), cancellationToken);
+
+    /// <inheritdoc />
+    public Task PublishAsync(IIntegrationEvent @event, CancellationToken cancellationToken = default)
     {
-        if (!_handlerRegistry.TryGetValue(typeof(TEvent), out var handlers) || handlers.Count == 0)
+        ArgumentNullException.ThrowIfNull(@event);
+        return PublishRuntimeAsync(@event, @event.GetType(), cancellationToken);
+    }
+
+    private async Task PublishRuntimeAsync(
+        IIntegrationEvent @event,
+        Type eventType,
+        CancellationToken cancellationToken)
+    {
+        if (!_handlerRegistry.TryGetValue(eventType, out var handlers) || handlers.Count == 0)
         {
-            _logger.LogDebug("事件 {EventType} 没有注册的处理器，跳过发布", typeof(TEvent).Name);
+            _logger.LogDebug("事件 {EventType} 没有注册的处理器，跳过发布", eventType.Name);
             return;
         }
 
@@ -89,14 +102,14 @@ public class InMemoryEventBus : IEventBus, IDisposable
         try
         {
             await _channel.Writer.WriteAsync(@event, linkedCts.Token);
-            _logger.LogDebug("事件 {EventType} 已发布 (EventId: {EventId})", typeof(TEvent).Name, @event.EventId);
+            _logger.LogDebug("事件 {EventType} 已发布 (EventId: {EventId})", eventType.Name, @event.EventId);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             // 超时（非调用方取消）：通道持续满 5s，消费者已严重滞后。记录而非吞掉，便于运维发现。
             _logger.LogError(
                 "事件 {EventType} (EventId: {EventId}) 发布超时：事件通道已满 {Capacity} 且消费滞后超过 {Timeout}s，事件被丢弃",
-                typeof(TEvent).Name, @event.EventId, ChannelCapacity, PublishFullTimeout.TotalSeconds);
+                eventType.Name, @event.EventId, ChannelCapacity, PublishFullTimeout.TotalSeconds);
         }
     }
 

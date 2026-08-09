@@ -62,6 +62,7 @@ public sealed class EventBusConfigurationTests
     [InlineData("EventBus:RabbitMq:Port", "0")]
     [InlineData("EventBus:RabbitMq:Port", "65536")]
     [InlineData("EventBus:RabbitMq:PrefetchCount", "0")]
+    [InlineData("EventBus:RabbitMq:ConnectionTimeoutSeconds", "0")]
     [InlineData("EventBus:RabbitMq:HandlerTimeoutSeconds", "0")]
     [InlineData("EventBus:RabbitMq:MaxRetryCount", "0")]
     [InlineData("EventBus:RabbitMq:RetryIntervalSeconds", "0")]
@@ -95,6 +96,32 @@ public sealed class EventBusConfigurationTests
     }
 
     [Fact]
+    public void ValidateForEnvironment_生产RabbitMq关闭自动恢复_拒绝启动()
+    {
+        var values = ValidRabbitMqValues();
+        values["EventBus:RabbitMq:AutomaticRecoveryEnabled"] = "false";
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+        var action = () => EventBusConfiguration.ValidateForEnvironment(configuration, "Production");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AutomaticRecoveryEnabled*");
+    }
+
+    [Fact]
+    public void ValidateForEnvironment_生产RabbitMq主机仍为占位符_拒绝启动()
+    {
+        var values = ValidRabbitMqValues();
+        values["EventBus:RabbitMq:Host"] = "SET_VIA_ENVIRONMENT";
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+        var action = () => EventBusConfiguration.ValidateForEnvironment(configuration, "Production");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Host*");
+    }
+
+    [Fact]
     public void ValidateForEnvironment_开发使用InMemory_无需RabbitMq配置()
     {
         var configuration = BuildConfiguration(("EventBus:Provider", "InMemory"));
@@ -118,6 +145,8 @@ public sealed class EventBusConfigurationTests
         ["EventBus:RabbitMq:Username"] = "equipai",
         ["EventBus:RabbitMq:Password"] = "strong-production-password",
         ["EventBus:RabbitMq:HeartbeatSeconds"] = "30",
+        ["EventBus:RabbitMq:AutomaticRecoveryEnabled"] = "true",
+        ["EventBus:RabbitMq:ConnectionTimeoutSeconds"] = "10",
         ["EventBus:RabbitMq:PrefetchCount"] = "50",
         ["EventBus:RabbitMq:HandlerTimeoutSeconds"] = "120",
         ["EventBus:RabbitMq:MaxRetryCount"] = "5",

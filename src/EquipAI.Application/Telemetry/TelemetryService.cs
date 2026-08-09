@@ -134,6 +134,9 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
             {
                 using var scope = _scopeFactory.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                // TelemetryService 是 Singleton，不能把构造时解析的事件总线与当前写入 DbContext 混用。
+                // 生产模式解析当前作用域的 Outbox 总线，测试/兼容容器没有注册时回退到注入实例。
+                var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
                 // 去重（批内 + DB 已存在）：见 DedupBatchAsync。放在循环内，覆盖写入重试的"模糊成功"场景
                 // ——上一次 INSERT 已提交落库但响应未送达客户端，重试时的存在性查询会排除已落库行，
@@ -163,7 +166,7 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
                         item.Metric, item.Value,
                         item.Timestamp, item.Quality);
 
-                    await _eventBus.PublishAsync(evt);
+                    await eventBus.PublishAsync(evt);
                 }
 
                 return; // 写入成功，退出重试循环

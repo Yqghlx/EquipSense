@@ -175,6 +175,16 @@ public class AppDbContext : DbContext
     /// </summary>
     public DbSet<Core.Entities.BillingRecord> BillingRecords => Set<Core.Entities.BillingRecord>();
 
+    /// <summary>
+    /// 事务 Outbox 消息表。
+    /// </summary>
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    /// <summary>
+    /// 事务 Inbox 消息表。
+    /// </summary>
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);

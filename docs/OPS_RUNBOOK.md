@@ -284,9 +284,9 @@ curl http://localhost:8080/health
 
 ### 6.4 RabbitMQ 不可用或版本升级
 
-1. 先检查 `docker compose ps rabbitmq`、`rabbitmq-diagnostics -q ping` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
+1. 先检查 `docker compose ps rabbitmq`、`rabbitmq-diagnostics -q check_running` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
 2. 验证 v2 policy：`rabbitmqctl list_policies -p /`，并用 `rabbitmqctl list_queues -p / name durable arguments policy` 检查 `equipai.v2.*` 队列。
 3. 既有 3.13 数据卷需要保留时，先完整备份，排空旧 `equipai.events.*` 主/retry 队列，再按官方支持路径升级到 4.2、启用稳定 feature flags，最后升级到 4.3.4。
 4. v2 切换后保留旧 dead 队列供人工核对；应用和脚本不得自动删除旧队列或 `rabbitmq_data` 卷。
 5. 回滚应用版本时保留 v2 队列和数据卷。只有在确认没有业务队列数据且备份可恢复时，运维人员才可显式重建 broker。
-6. 极端情况下可显式设置 `EventBus__Provider=InMemory` 与 `EventBus__AllowInMemoryInProduction=true` 应急启动；该模式重启会丢事件，恢复 RabbitMQ 后立即撤销。
+6. 极端情况下可在 Compose 环境中设置 `EVENTBUS_PROVIDER=InMemory` 与 `ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION=true` 应急启动；直接运行应用时使用对应的 `EventBus__*` 配置。该模式重启会丢事件，恢复 RabbitMQ 后立即撤销。

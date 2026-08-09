@@ -143,6 +143,47 @@ public class WorkOrderAutoCreateHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_已有活跃工单但创建事件缺失时_应使用工单ID幂等补发事件()
+    {
+        var (db, eventBus, handler) = CreateSut();
+        var ruleId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var workOrderId = Guid.NewGuid();
+
+        db.AlertRules.Add(new AlertRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "自动创建规则",
+            Metric = "temperature", Conditions = "[]",
+            Severity = AlertSeverity.High, AutoCreateWorkorder = true
+        });
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = _tenantId,
+            AlertId = alertId,
+            DeviceId = Guid.NewGuid(),
+            Title = "已落库但事件缺失的工单",
+            Priority = WorkOrderPriority.High,
+            Status = WorkOrderStatus.InProgress
+        });
+        await db.SaveChangesAsync();
+
+        await handler.HandleAsync(
+            new AlertTriggeredEvent(
+                Guid.NewGuid(), DateTime.UtcNow, _tenantId,
+                alertId, Guid.NewGuid(), ruleId, "temperature", 100.0, "High"),
+            CancellationToken.None);
+
+        eventBus.Verify(
+            e => e.PublishAsync(
+                It.Is<WorkOrderCreatedEvent>(created =>
+                    created.EventId == workOrderId
+                    && created.WorkOrderId == workOrderId),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task HandleAsync_Critical严重级别应映射为Critical优先级()
     {
         var (db, _, handler) = CreateSut();

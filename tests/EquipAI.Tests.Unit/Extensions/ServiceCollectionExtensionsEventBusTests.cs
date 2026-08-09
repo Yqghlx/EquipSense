@@ -16,24 +16,30 @@ namespace EquipAI.Tests.Unit.Extensions;
 public sealed class ServiceCollectionExtensionsEventBusTests
 {
     [Fact]
-    public void AddInfrastructure_RabbitMq模式_各接口解析为同一单例()
+    public void AddInfrastructure_RabbitMq模式_传输层保持单例业务总线使用事务包装()
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddHttpContextAccessor();
         services.AddInfrastructure(BuildConfiguration("RabbitMQ"));
         using var provider = services.BuildServiceProvider();
 
         var concrete = provider.GetRequiredService<RabbitMqEventBus>();
-        var eventBus = provider.GetRequiredService<IEventBus>();
+        var transport = provider.GetRequiredService<IEventBusTransport>();
         var state = provider.GetRequiredService<IRabbitMqConnectionState>();
         var hostedDescriptor = services.Single(descriptor =>
             descriptor.ServiceType == typeof(IHostedService)
             && descriptor.ImplementationFactory is not null);
         var hosted = hostedDescriptor.ImplementationFactory!(provider);
 
-        eventBus.Should().BeSameAs(concrete);
+        using var scope = provider.CreateScope();
+        var eventBus = scope.ServiceProvider.GetRequiredService<IEventBus>();
+
+        transport.Should().BeSameAs(concrete);
         state.Should().BeSameAs(concrete);
         hosted.Should().BeSameAs(concrete);
+        eventBus.Should().BeOfType<TransactionalEventBus>();
+        eventBus.Should().NotBeSameAs(concrete);
     }
 
     [Fact]

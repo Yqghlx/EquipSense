@@ -77,12 +77,24 @@ public static class EventBusConfiguration
         RequireText(options.Username, nameof(options.Username));
         RequireText(options.Password, nameof(options.Password));
         RequireRange(options.HeartbeatSeconds, 1, ushort.MaxValue, nameof(options.HeartbeatSeconds));
+        RequireRange(options.ConnectionTimeoutSeconds, 1, 120, nameof(options.ConnectionTimeoutSeconds));
         RequireRange(options.PrefetchCount, 1, ushort.MaxValue, nameof(options.PrefetchCount));
         RequireRange(options.HandlerTimeoutSeconds, 1, 3600, nameof(options.HandlerTimeoutSeconds));
         RequireRange(options.MaxRetryCount, 1, 100, nameof(options.MaxRetryCount));
         RequireRange(options.RetryIntervalSeconds, 1, 86400, nameof(options.RetryIntervalSeconds));
 
         if (!isProduction) return;
+
+        if (IsPlaceholder(options.Host))
+        {
+            throw new InvalidOperationException("生产环境 RabbitMQ Host 仍是未解析占位符");
+        }
+
+        if (!options.AutomaticRecoveryEnabled)
+        {
+            throw new InvalidOperationException(
+                "生产环境 RabbitMQ AutomaticRecoveryEnabled 必须为 true");
+        }
 
         if (options.Username.Equals("guest", StringComparison.OrdinalIgnoreCase))
         {
@@ -113,4 +125,10 @@ public static class EventBusConfiguration
                 $"RabbitMQ {fieldName} 必须在 {minimum} 到 {maximum} 之间");
         }
     }
+
+    private static bool IsPlaceholder(string value) =>
+        value.Equals("SET_VIA_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("CHANGE_ME", StringComparison.OrdinalIgnoreCase)
+        || value.Contains('<', StringComparison.Ordinal)
+        || value.Contains('>', StringComparison.Ordinal);
 }

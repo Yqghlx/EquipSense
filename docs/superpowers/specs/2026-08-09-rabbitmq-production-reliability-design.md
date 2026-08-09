@@ -226,7 +226,7 @@ equipai.v2.events.{event-key}                         fanout 事件交换机
 
 ### 7.2 真实 RabbitMQ 集成测试
 
-CI backend job 启动 `rabbitmq:4.3.4-alpine` 服务并等待 `rabbitmq-diagnostics -q ping`。测试通过专用环境变量启用；本地没有 broker 时明确标记 Skip，不影响常规开发测试。
+CI backend job 启动 `rabbitmq:4.3.4-alpine` 服务并等待 `rabbitmq-diagnostics -q check_running`。测试通过专用环境变量启用；本地没有 broker 时明确标记 Skip，不影响常规开发测试。
 
 必须覆盖：
 

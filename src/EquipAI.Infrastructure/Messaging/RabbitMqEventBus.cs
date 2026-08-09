@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using EquipAI.Infrastructure.Metrics;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -21,7 +22,7 @@ namespace EquipAI.Infrastructure.Messaging;
 /// 失败导致其他处理器重复执行。
 /// </remarks>
 public sealed class RabbitMqEventBus :
-    IEventBus,
+    IEventBusTransport,
     IHostedService,
     IRabbitMqConnectionState,
     IAsyncDisposable,
@@ -33,6 +34,7 @@ public sealed class RabbitMqEventBus :
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ConcurrentDictionary<SubscriptionKey, SubscriptionRegistration> _subscriptions = new();
     private readonly List<IChannel> _consumerChannels = [];
+    private readonly object _consumerChannelsLock = new();
     private readonly SemaphoreSlim _publishLock = new(1, 1);
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private IConnection? _connection;
@@ -56,9 +58,7 @@ public sealed class RabbitMqEventBus :
     }
 
     /// <inheritdoc />
-    public bool IsReady => Volatile.Read(ref _ready) == 1
-        && _connection?.IsOpen == true
-        && _publishChannel?.IsOpen == true;
+    public bool IsReady => Volatile.Read(ref _ready) == 1 && BrokerResourcesAreOpen();
 
     /// <inheritdoc />
     public string StatusDescription => IsReady
@@ -142,19 +142,32 @@ public sealed class RabbitMqEventBus :
     }
 
     /// <inheritdoc />
-    public async Task PublishAsync<TEvent>(
+    public Task PublishAsync<TEvent>(
         TEvent @event,
         CancellationToken cancellationToken = default)
-        where TEvent : IIntegrationEvent
+        where TEvent : IIntegrationEvent =>
+        PublishRuntimeAsync(@event, typeof(TEvent), cancellationToken);
+
+    /// <inheritdoc />
+    public Task PublishAsync(
+        IIntegrationEvent @event,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(@event);
+        return PublishRuntimeAsync(@event, @event.GetType(), cancellationToken);
+    }
+
+    private async Task PublishRuntimeAsync(
+        IIntegrationEvent @event,
+        Type eventType,
+        CancellationToken cancellationToken)
+    {
         ThrowIfDisposed();
         if (!IsReady)
         {
             throw new InvalidOperationException("RabbitMQ 事件总线尚未就绪，无法发布事件");
         }
 
-        var eventType = typeof(TEvent);
         if (!_subscriptions.Keys.Any(key => key.EventType == eventType))
         {
             throw new InvalidOperationException(
@@ -186,7 +199,15 @@ public sealed class RabbitMqEventBus :
     /// 判断当前处理失败是否已经达到总尝试次数上限。
     /// </summary>
     internal static bool ShouldDeadLetter(int previousRejectedCount, int maxRetryCount) =>
-        previousRejectedCount + 1 >= maxRetryCount;
+        (long)previousRejectedCount + 1 >= maxRetryCount;
+
+    /// <summary>
+    /// 判断处理取消是否由应用正常停机触发；此时应让关闭通道交由 broker 重投未确认消息。
+    /// </summary>
+    internal static bool ShouldLeaveUnackedForShutdown(
+        Exception exception,
+        bool lifetimeCancellationRequested) =>
+        lifetimeCancellationRequested && exception is OperationCanceledException;
 
     private ConnectionFactory CreateConnectionFactory() => new()
     {
@@ -196,6 +217,7 @@ public sealed class RabbitMqEventBus :
         UserName = _options.Username,
         Password = _options.Password,
         RequestedHeartbeat = TimeSpan.FromSeconds(_options.HeartbeatSeconds),
+        RequestedConnectionTimeout = TimeSpan.FromSeconds(_options.ConnectionTimeoutSeconds),
         AutomaticRecoveryEnabled = _options.AutomaticRecoveryEnabled,
         TopologyRecoveryEnabled = _options.AutomaticRecoveryEnabled,
         NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
@@ -220,8 +242,16 @@ public sealed class RabbitMqEventBus :
         };
         connection.RecoverySucceededAsync += (_, _) =>
         {
-            Volatile.Write(ref _ready, 1);
-            _logger.LogInformation("RabbitMQ 连接和 v2 消费拓扑已自动恢复");
+            var recovered = BrokerResourcesAreOpen();
+            Volatile.Write(ref _ready, recovered ? 1 : 0);
+            if (recovered)
+            {
+                _logger.LogInformation("RabbitMQ 连接和 v2 消费拓扑已自动恢复");
+            }
+            else
+            {
+                _logger.LogError("RabbitMQ 连接恢复完成，但发布通道或消费者通道仍未全部就绪");
+            }
             return Task.CompletedTask;
         };
     }
@@ -300,12 +330,30 @@ public sealed class RabbitMqEventBus :
         var consumer = new AsyncEventingBasicConsumer(consumerChannel);
         consumer.ReceivedAsync += (_, eventArgs) =>
             HandleMessageAsync(registration, eventArgs, consumerChannel);
+        consumer.ShutdownAsync += (_, eventArgs) =>
+        {
+            MarkConsumerUnavailable(registration, eventArgs.ReplyText);
+            return Task.CompletedTask;
+        };
+        consumer.UnregisteredAsync += (_, _) =>
+        {
+            MarkConsumerUnavailable(registration, "消费者已取消注册");
+            return Task.CompletedTask;
+        };
+        consumerChannel.ChannelShutdownAsync += (_, eventArgs) =>
+        {
+            MarkConsumerUnavailable(registration, eventArgs.ReplyText);
+            return Task.CompletedTask;
+        };
         await consumerChannel.BasicConsumeAsync(
             mainQueue,
             autoAck: false,
             consumer,
             cancellationToken);
-        _consumerChannels.Add(consumerChannel);
+        lock (_consumerChannelsLock)
+        {
+            _consumerChannels.Add(consumerChannel);
+        }
     }
 
     private async Task HandleMessageAsync(
@@ -329,37 +377,69 @@ public sealed class RabbitMqEventBus :
                     registration.EventType,
                     _jsonOptions)
                 ?? throw new InvalidOperationException("事件反序列化返回 null");
-            await InvokeHandlerAsync(registration, integrationEvent, linkedCancellation.Token);
+            var handled = await InvokeHandlerAsync(registration, integrationEvent, linkedCancellation.Token);
             await consumeChannel.BasicAckAsync(
                 eventArgs.DeliveryTag,
                 multiple: false,
                 CancellationToken.None);
             _logger.LogDebug(
-                "事件 {EventType} 已由处理器 {HandlerType} 成功处理，EventId={EventId}",
+                handled
+                    ? "事件 {EventType} 已由处理器 {HandlerType} 成功处理，EventId={EventId}"
+                    : "事件 {EventType} 已由处理器 {HandlerType} 幂等跳过，EventId={EventId}",
                 registration.EventType.Name,
                 registration.HandlerType.Name,
                 ((IIntegrationEvent)integrationEvent).EventId);
+            if (handled)
+            {
+                BusinessMetrics.InboxProcessed
+                    .WithLabels(registration.HandlerType.FullName ?? registration.HandlerType.Name)
+                    .Inc();
+            }
+            else
+            {
+                BusinessMetrics.InboxDuplicates
+                    .WithLabels(registration.HandlerType.FullName ?? registration.HandlerType.Name)
+                    .Inc();
+            }
         }
         catch (Exception exception)
         {
+            BusinessMetrics.InboxFailures
+                .WithLabels(registration.HandlerType.FullName ?? registration.HandlerType.Name)
+                .Inc();
             var rootException = Unwrap(exception);
+            if (ShouldLeaveUnackedForShutdown(
+                    rootException,
+                    _lifetimeCancellation.IsCancellationRequested))
+            {
+                // 不 ack/nack：StopAsync 随后关闭通道，broker 会把未确认消息原样重投，
+                // 不增加 x-death 计数，也不会把正常部署停机误判为业务失败。
+                _logger.LogInformation(
+                    "应用停止期间取消事件 {EventType} 的处理器 {HandlerType}，未确认消息交由 RabbitMQ 重投",
+                    registration.EventType.Name,
+                    registration.HandlerType.Name);
+                return;
+            }
             var rejectedCount = RabbitMqRetryCountReader.GetRejectedCount(
                 eventArgs.BasicProperties.Headers,
                 mainQueue);
             var attempt = rejectedCount + 1;
             if (ShouldDeadLetter(rejectedCount, _options.MaxRetryCount))
             {
-                await MoveToDeadLetterAsync(
+                var movedToDeadLetter = await MoveToDeadLetterAsync(
                     registration,
                     eventArgs,
                     rootException,
                     consumeChannel);
-                _logger.LogWarning(
-                    rootException,
-                    "事件 {EventType} 的处理器 {HandlerType} 在第 {Attempt} 次失败后已进入独立死信队列",
-                    registration.EventType.Name,
-                    registration.HandlerType.Name,
-                    attempt);
+                if (movedToDeadLetter)
+                {
+                    _logger.LogWarning(
+                        rootException,
+                        "事件 {EventType} 的处理器 {HandlerType} 在第 {Attempt} 次失败后已进入独立死信队列",
+                        registration.EventType.Name,
+                        registration.HandlerType.Name,
+                        attempt);
+                }
                 return;
             }
 
@@ -377,24 +457,93 @@ public sealed class RabbitMqEventBus :
         }
     }
 
-    private async Task InvokeHandlerAsync(
+    private async Task<bool> InvokeHandlerAsync(
         SubscriptionRegistration registration,
         object integrationEvent,
         CancellationToken cancellationToken)
     {
         using var scope = _serviceProvider.CreateScope();
+        var typedEvent = (IIntegrationEvent)integrationEvent;
+        var handlerKey = registration.HandlerType.FullName ?? registration.HandlerType.Name;
+        var inboxStore = scope.ServiceProvider.GetService<InboxMessageStore>();
+        InboxClaim? inboxClaim = null;
+        if (inboxStore is not null)
+        {
+            inboxClaim = await inboxStore.TryClaimAsync(
+                typedEvent,
+                handlerKey,
+                DateTime.UtcNow,
+                TimeSpan.FromSeconds(Math.Max(1, _options.HandlerTimeoutSeconds) * 2),
+                cancellationToken);
+            if (inboxClaim.Status == InboxClaimStatus.AlreadyProcessed)
+            {
+                return false;
+            }
+
+            if (inboxClaim.Status == InboxClaimStatus.Locked)
+            {
+                throw new InvalidOperationException(
+                    $"Inbox 消费租约仍由其他实例持有：{typedEvent.EventId}/{handlerKey}");
+            }
+        }
+
         var handler = scope.ServiceProvider.GetRequiredService(registration.HandlerType);
         var method = registration.HandlerType.GetMethod(
             "HandleAsync",
             [registration.EventType, typeof(CancellationToken)])
             ?? throw new InvalidOperationException(
                 $"处理器缺少 HandleAsync：{registration.HandlerType.FullName}");
-        var task = method.Invoke(handler, [integrationEvent, cancellationToken]) as Task
-            ?? throw new InvalidOperationException("事件处理器返回了 null Task");
-        await task.WaitAsync(cancellationToken);
+        try
+        {
+            var task = method.Invoke(handler, [integrationEvent, cancellationToken]) as Task
+                ?? throw new InvalidOperationException("事件处理器返回了 null Task");
+            await task.WaitAsync(cancellationToken);
+
+            if (inboxStore is not null && inboxClaim is not null)
+            {
+                var marked = await inboxStore.MarkProcessedAsync(
+                    typedEvent.EventId,
+                    handlerKey,
+                    inboxClaim.LockToken,
+                    DateTime.UtcNow,
+                    CancellationToken.None);
+                if (!marked)
+                {
+                    throw new InvalidOperationException(
+                        $"Inbox 处理租约已失效，拒绝确认事件：{typedEvent.EventId}/{handlerKey}");
+                }
+            }
+
+            return true;
+        }
+        catch (Exception exception)
+        {
+            if (inboxStore is not null && inboxClaim is { Status: InboxClaimStatus.Claimed })
+            {
+                try
+                {
+                    await inboxStore.MarkFailedAsync(
+                        typedEvent.EventId,
+                        handlerKey,
+                        inboxClaim.LockToken,
+                        exception.Message,
+                        CancellationToken.None);
+                }
+                catch (Exception markFailedException)
+                {
+                    _logger.LogError(
+                        markFailedException,
+                        "Inbox 失败状态写入异常，将依赖租约过期恢复：EventId={EventId}, Handler={HandlerKey}",
+                        typedEvent.EventId,
+                        handlerKey);
+                }
+            }
+
+            throw;
+        }
     }
 
-    private async Task MoveToDeadLetterAsync(
+    private async Task<bool> MoveToDeadLetterAsync(
         SubscriptionRegistration registration,
         BasicDeliverEventArgs eventArgs,
         Exception exception,
@@ -433,23 +582,30 @@ public sealed class RabbitMqEventBus :
                 eventArgs.DeliveryTag,
                 multiple: false,
                 CancellationToken.None);
+            return true;
         }
         catch (Exception deadLetterException)
         {
-            // 死信尚未获得 broker 确认时绝不能确认原消息；关闭通道后由 broker 重新投递未确认消息。
+            // 死信尚未获得 broker 确认时绝不能确认原消息。再次 nack 到独立重试队列，
+            // 让后续投递重新尝试写死信，同时避免关闭单个消费者后 readiness 仍被误判为健康。
             _logger.LogCritical(
                 deadLetterException,
-                "事件 {EventType} 的处理器 {HandlerType} 写入死信队列失败，原消息保持未确认",
+                "事件 {EventType} 的处理器 {HandlerType} 写入死信队列失败，将在重试间隔后再次尝试",
                 registration.EventType.Name,
                 registration.HandlerType.Name);
             try
             {
-                await consumeChannel.CloseAsync(CancellationToken.None);
+                await consumeChannel.BasicNackAsync(
+                    eventArgs.DeliveryTag,
+                    multiple: false,
+                    requeue: false,
+                    CancellationToken.None);
             }
-            catch (Exception closeException)
+            catch (Exception nackException)
             {
-                _logger.LogError(closeException, "死信写入失败后关闭消费通道时发生异常");
+                _logger.LogError(nackException, "死信写入失败后拒绝原消息时发生异常，等待连接恢复重新投递");
             }
+            return false;
         }
     }
 
@@ -493,9 +649,42 @@ public sealed class RabbitMqEventBus :
             ? invocationException.InnerException!
             : exception;
 
+    private bool BrokerResourcesAreOpen()
+    {
+        IChannel[] consumerChannels;
+        lock (_consumerChannelsLock)
+        {
+            if (_consumerChannels.Count != _subscriptions.Count) return false;
+            consumerChannels = [.. _consumerChannels];
+        }
+
+        return _connection?.IsOpen == true
+            && _publishChannel?.IsOpen == true
+            && consumerChannels.All(channel => channel.IsOpen);
+    }
+
+    private void MarkConsumerUnavailable(
+        SubscriptionRegistration registration,
+        string reason)
+    {
+        Volatile.Write(ref _ready, 0);
+        if (Volatile.Read(ref _lifecycleState) == 2) return;
+        _logger.LogError(
+            "RabbitMQ 消费者不可用：{EventType} -> {HandlerType}，原因：{Reason}",
+            registration.EventType.Name,
+            registration.HandlerType.Name,
+            reason);
+    }
+
     private async Task DisposeBrokerResourcesAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var channel in _consumerChannels)
+        IChannel[] consumerChannels;
+        lock (_consumerChannelsLock)
+        {
+            consumerChannels = [.. _consumerChannels];
+            _consumerChannels.Clear();
+        }
+        foreach (var channel in consumerChannels)
         {
             try
             {
@@ -507,8 +696,6 @@ public sealed class RabbitMqEventBus :
             }
             await channel.DisposeAsync();
         }
-        _consumerChannels.Clear();
-
         if (_publishChannel is not null)
         {
             try
@@ -559,8 +746,13 @@ public sealed class RabbitMqEventBus :
         Volatile.Write(ref _ready, 0);
         Interlocked.Exchange(ref _lifecycleState, 2);
         _lifetimeCancellation.Cancel();
-        foreach (var channel in _consumerChannels) channel.Dispose();
-        _consumerChannels.Clear();
+        IChannel[] consumerChannels;
+        lock (_consumerChannelsLock)
+        {
+            consumerChannels = [.. _consumerChannels];
+            _consumerChannels.Clear();
+        }
+        foreach (var channel in consumerChannels) channel.Dispose();
         _publishChannel?.Dispose();
         _connection?.Dispose();
         _lifetimeCancellation.Dispose();

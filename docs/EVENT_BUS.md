@@ -4,13 +4,13 @@ EquipSense 通过 `IEventBus` 解耦告警、分析、工单和通知模块。�
 
 ## 运行模式
 
-| 维度 | InMemoryEventBus | RabbitMqEventBus |
+| 维度 | InMemoryEventBus | RabbitMqEventBus + Outbox/Inbox |
 |---|---|---|
 | 适用环境 | 开发、测试、生产紧急降级 | 生产默认 |
-| 持久化 | 无，进程重启会丢未处理事件 | 持久化消息 + quorum queue |
+| 持久化 | 无，进程重启会丢未处理事件 | 数据库事务 Outbox + 持久化消息 + quorum queue |
 | 多处理器语义 | 进程内广播 | 每个处理器独立队列和确认 |
-| 失败处理 | 日志记录 | 有限重试 + 独立死信队列 |
-| 发布成功语义 | 已写入进程内队列 | broker 已确认且至少路由到一个队列 |
+| 失败处理 | 日志记录 | Outbox 指数退避 + RabbitMQ 有限重试 + 独立死信队列 |
+| 发布成功语义 | 已写入进程内队列 | 事件已写入 Outbox；后台等待 broker 确认后标记完成 |
 
 只接受 `InMemory` 和 `RabbitMQ` 两个 Provider，拼写错误会拒绝启动。生产环境使用 InMemory 还必须显式设置：
 
@@ -75,4 +75,6 @@ RabbitMQ 镜像变量是必填项，目的是让已有部署在变更容器前�
 
 ## 可靠性边界
 
-当前实现提供 RabbitMQ 内的 at-least-once 投递，不提供恰好一次。单节点 quorum queue 只增强重启恢复能力，不等同于多节点高可用。业务数据库提交和消息发布仍不是同一原子事务；下一阶段必须通过事务 Outbox、幂等 Inbox 和消费者副作用去重补齐这一窗口。
+生产 RabbitMQ 模式现已使用事务 Outbox 和幂等 Inbox：业务状态与事件登记在同一 `AppDbContext` 保存，Outbox 分发器在发布确认后标记消息；消费者按“事件 ID + 处理器”取得租约，成功后写入 Inbox 完成标记，重复投递直接确认跳过。手工建单还将编码生成、审计日志与 Outbox 登记包进关系型数据库事务；告警自动建单对编码器先落库的历史边界使用稳定工单 ID 和活跃工单恢复逻辑兜底。详细数据模型和故障边界见 [`superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md`](superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md)。
+
+系统仍提供 at-least-once 语义，不提供恰好一次。发布确认成功但 Outbox 状态更新前崩溃时可能再次发布同一事件，因此消费者业务副作用必须保持幂等；单节点 quorum queue 只增强重启恢复能力，不等同于多节点高可用。

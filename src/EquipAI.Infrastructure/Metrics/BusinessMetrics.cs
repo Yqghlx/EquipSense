@@ -165,4 +165,33 @@ public static class BusinessMetrics
     public static readonly Counter PendingRuleReviews = Prometheus.Metrics
         .CreateCounter("equipai_pending_rule_reviews_total", "候选规则审批总数",
             new CounterConfiguration { LabelNames = new[] { "result" } });
+
+    // ========================================================================
+    // 事务消息指标
+    // ========================================================================
+
+    /// <summary>Outbox 成功获得 RabbitMQ 发布确认的消息数。</summary>
+    public static readonly Counter OutboxPublished = Prometheus.Metrics
+        .CreateCounter("equipai_outbox_published_total", "Outbox 成功发布消息数",
+            new CounterConfiguration { LabelNames = new[] { "event_type" } });
+
+    /// <summary>Outbox 发布失败次数；消息仍保留在数据库中等待退避重试。</summary>
+    public static readonly Counter OutboxPublishFailures = Prometheus.Metrics
+        .CreateCounter("equipai_outbox_publish_failures_total", "Outbox 发布失败次数",
+            new CounterConfiguration { LabelNames = new[] { "event_type" } });
+
+    /// <summary>Inbox 处理器成功完成的消息数。</summary>
+    public static readonly Counter InboxProcessed = Prometheus.Metrics
+        .CreateCounter("equipai_inbox_processed_total", "Inbox 成功处理消息数",
+            new CounterConfiguration { LabelNames = new[] { "handler" } });
+
+    /// <summary>Inbox 因重复投递而跳过的消息数。</summary>
+    public static readonly Counter InboxDuplicates = Prometheus.Metrics
+        .CreateCounter("equipai_inbox_duplicates_total", "Inbox 重复投递跳过数",
+            new CounterConfiguration { LabelNames = new[] { "handler" } });
+
+    /// <summary>Inbox 处理失败次数。</summary>
+    public static readonly Counter InboxFailures = Prometheus.Metrics
+        .CreateCounter("equipai_inbox_failures_total", "Inbox 处理失败次数",
+            new CounterConfiguration { LabelNames = new[] { "handler" } });
 }

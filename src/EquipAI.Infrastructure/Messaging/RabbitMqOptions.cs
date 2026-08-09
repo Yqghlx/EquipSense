@@ -49,6 +49,11 @@ public sealed class RabbitMqOptions
     public bool AutomaticRecoveryEnabled { get; set; } = true;
 
     /// <summary>
+    /// 初始 TCP/AMQP 连接超时（秒）。较短的有界值可让错误主机或网络配置在启动阶段快速失败。
+    /// </summary>
+    public int ConnectionTimeoutSeconds { get; set; } = 10;
+
+    /// <summary>
     /// 消费预取数。限制未确认消息数，避免单个消费者被压垮。
     /// 业务事件吞吐不高（告警/工单/分析，非遥测），50 足够且留余量。
     /// </summary>

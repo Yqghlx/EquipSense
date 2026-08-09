@@ -6,6 +6,7 @@ using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -97,6 +98,47 @@ public class WorkOrderServiceTests
         var logs = await db.WorkOrderLogs.IgnoreQueryFilters().ToListAsync();
         logs.Should().ContainSingle();
         logs[0].Action.Should().Be(WorkOrderLogAction.Created);
+    }
+
+    [Fact]
+    public async Task CreateAsync_创建事件失败时_工单和审计日志应一起回滚()
+    {
+        // InMemory 提供程序不会真正执行数据库事务；这里使用 SQLite 内存库，验证与生产一致的回滚语义。
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        await db.Database.EnsureCreatedAsync();
+
+        var eventBus = new Mock<IEventBus>();
+        eventBus
+            .Setup(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        eventBus
+            .Setup(e => e.PublishAsync(
+                It.IsAny<WorkOrderCreatedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("事件发布失败"));
+
+        var approvalMock = new Mock<IApprovalChainService>();
+        var spMock = new Mock<IServiceProvider>();
+        spMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(spMock.Object);
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+        var logger = LoggerFactory.Create(_ => { }).CreateLogger<WorkOrderService>();
+        var service = new WorkOrderService(
+            scopeFactoryMock.Object, eventBus.Object, logger, approvalMock.Object);
+
+        var act = () => service.CreateAsync(
+            _tenantId, MakeCreateRequest(), ct: CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await db.WorkOrders.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await db.WorkOrderLogs.IgnoreQueryFilters().CountAsync()).Should().Be(0);
     }
 
     [Fact]

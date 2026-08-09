@@ -119,8 +119,10 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
+      - ./rabbitmq/start.sh:/usr/local/bin/equipai-rabbitmq-start.sh:ro
+    command: ["/bin/bash", "/usr/local/bin/equipai-rabbitmq-start.sh"]
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -201,10 +203,18 @@ services:
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
       # 生产默认使用 RabbitMQ；InMemory 只允许通过应用级 break-glass 开关显式启用。
       EventBus__Provider: "${EVENTBUS_PROVIDER:-RabbitMQ}"
+      EventBus__AllowInMemoryInProduction: "${ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION:-false}"
       EventBus__RabbitMq__Host: "rabbitmq"
       EventBus__RabbitMq__Port: "5672"
+      EventBus__RabbitMq__ConnectionTimeoutSeconds: "10"
       EventBus__RabbitMq__Username: "${RABBITMQ_USER:-equipai}"
       EventBus__RabbitMq__Password: "${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}"
+      EventBus__Outbox__Enabled: "${EVENTBUS_OUTBOX_ENABLED:-true}"
+      EventBus__Outbox__PollIntervalSeconds: "${EVENTBUS_OUTBOX_POLL_INTERVAL_SECONDS:-1}"
+      EventBus__Outbox__BatchSize: "${EVENTBUS_OUTBOX_BATCH_SIZE:-50}"
+      EventBus__Outbox__LeaseSeconds: "${EVENTBUS_OUTBOX_LEASE_SECONDS:-60}"
+      EventBus__Outbox__MaxBackoffSeconds: "${EVENTBUS_OUTBOX_MAX_BACKOFF_SECONDS:-300}"
+      EventBus__Outbox__RetentionDays: "${EVENTBUS_OUTBOX_RETENTION_DAYS:-7}"
     volumes:
       - ./mqtt-certs:/etc/equipai/mqtt-certs:ro
     depends_on:

@@ -24,3 +24,17 @@ public interface IEventBus
         where TEvent : IIntegrationEvent
         where THandler : IEventHandler<TEvent>;
 }
+
+/// <summary>
+/// 可靠事件传输接口。
+/// 生产环境由 RabbitMQ 实现，Outbox 分发器只依赖此接口，避免把已经落库的事件再次写回 Outbox。
+/// </summary>
+public interface IEventBusTransport : IEventBus
+{
+    /// <summary>
+    /// 按事件运行时类型发布已经从 Outbox 恢复的事件。
+    /// </summary>
+    /// <param name="event">待发布的集成事件</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    Task PublishAsync(IIntegrationEvent @event, CancellationToken cancellationToken = default);
+}

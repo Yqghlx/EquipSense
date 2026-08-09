@@ -47,6 +47,9 @@ public class AlertEvaluationService : IAlertEvaluationService
         // 使用独立作用域获取 DbContext，避免长生命周期导致的连接泄漏
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 生产 RabbitMQ 模式下必须使用与本次评估相同作用域的事务事件总线，
+        // 否则 Outbox 会写入外层请求 DbContext，无法与告警状态一起提交。
+        var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
         // 查询当前设备当前指标的基线数据，供 BaselineEvaluator 使用
         // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
@@ -161,7 +164,10 @@ public class AlertEvaluationService : IAlertEvaluationService
                             Guid.NewGuid(), DateTime.UtcNow, tenantId,
                             alert.Id, deviceId, rule.Id,
                             metric, value, rule.Severity.ToString());
-                        await _eventBus.PublishAsync(evt, cancellationToken);
+                        await eventBus.PublishAsync(evt, cancellationToken);
+                        // InMemory/测试总线不会替当前 DbContext 保存实体；生产事务总线已在发布时保存，
+                        // 此处再次调用是无害的，用于保持两种运行模式的持久化语义一致。
+                        await dbContext.SaveChangesAsync(cancellationToken);
                     }
                 }
             }
@@ -179,10 +185,11 @@ public class AlertEvaluationService : IAlertEvaluationService
                     var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
                     if (alert != null)
                     {
-                        await _eventBus.PublishAsync(new AlertTriggeredEvent(
+                        await eventBus.PublishAsync(new AlertTriggeredEvent(
                             Guid.NewGuid(), DateTime.UtcNow, tenantId,
                             alert.Id, deviceId, rule.Id,
                             metric, value, rule.Severity.ToString()), cancellationToken);
+                        await dbContext.SaveChangesAsync(cancellationToken);
                     }
                     BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
                 }
@@ -224,8 +231,9 @@ public class AlertEvaluationService : IAlertEvaluationService
             WindowStartAt = DateTime.UtcNow
         };
 
+        // 不在这里单独提交。调用方会先登记 AlertTriggeredEvent，
+        // 由事务事件总线一次性保存告警和 Outbox，避免“告警已落库但事件尚未登记”的窗口。
         dbContext.Alerts.Add(alert);
-        await dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("告警已创建: {AlertCode}", alertCode);
         return alert;

@@ -10,6 +10,7 @@ using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Metrics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -65,6 +66,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         // 解析枚举字段，解析失败时使用默认值
         var type = Enum.TryParse<WorkOrderType>(request.Type, ignoreCase: true, out var t)
@@ -72,54 +74,110 @@ public class WorkOrderService : IWorkOrderService
         var priority = Enum.TryParse<WorkOrderPriority>(request.Priority, ignoreCase: true, out var p)
             ? p : WorkOrderPriority.Medium;
 
-        // 生成唯一工单编码并持久化（带并发冲突重试）
-        // 与 WorkOrderAutoCreateHandler 共用 WorkOrderCodeGenerator，保证两条路径行为一致：
-        // 同样 IgnoreQueryFilters 读跨租户最大序号、同样在唯一约束冲突时重试。
-        // 注意：审计日志在重试成功后写入（持久化之前的 Add 不算落库），避免冲突回滚后残留孤立日志。
-        var workOrder = await WorkOrderCodeGenerator.CreateWithUniqueCodeAsync(
-            dbContext,
-            code => new WorkOrder
+        // 编码生成器内部需要先 SaveChanges 才能捕获唯一约束冲突；把整个编码重试、
+        // 审计日志和 Outbox 登记包进同一数据库事务，避免“工单已落库但创建事件未登记”的崩溃窗口。
+        // Npgsql 启用了瞬时故障重试，因此必须由 execution strategy 包装用户事务。
+        // InMemory 仅用于快速单元测试且不支持事务，跳过事务只影响测试提供程序，不改变生产路径。
+        WorkOrder? workOrder = null;
+        async Task PersistCreateAsync()
+        {
+            IDbContextTransaction? transaction = null;
+            try
             {
-                TenantId = tenantId,
-                WorkOrderCode = code,
-                Title = request.Title,
-                Type = type,
-                Priority = priority,
-                Status = WorkOrderStatus.PendingDispatch,
-                DeviceId = request.DeviceId,
-                AlertId = request.AlertId,
-                RootCause = request.RootCause,
-                AssignedTo = null,
-                // JSON 反序列化的 DueDate 可能 Kind=Unspecified，入库 timestamptz 列前需转 Utc
-                DueDate = request.DueDate.ToSafeUtc(),
-                CreatedBy = userId
-            },
-            _logger,
-            ct);
+                if (dbContext.Database.IsRelational())
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(ct);
+                }
+
+                // 生成唯一工单编码并持久化（带并发冲突重试）。
+                // 与 WorkOrderAutoCreateHandler 共用 WorkOrderCodeGenerator，保证两条路径行为一致：
+                // 同样 IgnoreQueryFilters 读跨租户最大序号、同样在唯一约束冲突时重试。
+                workOrder = await WorkOrderCodeGenerator.CreateWithUniqueCodeAsync(
+                    dbContext,
+                    code => new WorkOrder
+                    {
+                        TenantId = tenantId,
+                        WorkOrderCode = code,
+                        Title = request.Title,
+                        Type = type,
+                        Priority = priority,
+                        Status = WorkOrderStatus.PendingDispatch,
+                        DeviceId = request.DeviceId,
+                        AlertId = request.AlertId,
+                        RootCause = request.RootCause,
+                        AssignedTo = null,
+                        // JSON 反序列化的 DueDate 可能 Kind=Unspecified，入库 timestamptz 列前需转 Utc
+                        DueDate = request.DueDate.ToSafeUtc(),
+                        CreatedBy = userId
+                    },
+                    _logger,
+                    ct);
+
+                if (workOrder is null)
+                {
+                    // 3 次重试后仍冲突：极少见（需同秒内 3 次并发），向上层暴露为可重试的冲突错误。
+                    throw new InvalidOperationException("工单编码生成失败：并发冲突，请稍后重试。");
+                }
+
+                // 审计日志在编码重试成功后写入，避免冲突回滚后残留孤立日志。
+                await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.Created,
+                    oldStatus: null, newStatus: WorkOrderStatus.PendingDispatch.ToString(),
+                    operatorId: userId, note: null, ct: ct);
+
+                // 事务总线会在当前事务内登记 Outbox；InMemory/测试总线则由下面的 SaveChanges 持久化工单和日志。
+                var createdEvent = new WorkOrderCreatedEvent(
+                    // 工单创建事件使用稳定的工单 ID，客户端重试或消费者重投时可由 Inbox 去重。
+                    workOrder.Id, workOrder.CreatedAt, workOrder.TenantId,
+                    workOrder.Id, workOrder.DeviceId, workOrder.Title, workOrder.Priority.ToString());
+                await eventBus.PublishAsync(createdEvent, ct);
+                await dbContext.SaveChangesAsync(ct);
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(ct);
+                }
+            }
+            catch
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(ct);
+                }
+
+                throw;
+            }
+            finally
+            {
+                if (transaction is not null)
+                {
+                    await transaction.DisposeAsync();
+                }
+            }
+        }
+
+        if (dbContext.Database.IsRelational())
+        {
+            // 生产数据库需要执行策略包裹显式事务，瞬时故障重试时由策略重新创建事务。
+            var executionStrategy = dbContext.Database.CreateExecutionStrategy();
+            await executionStrategy.ExecuteAsync(PersistCreateAsync);
+        }
+        else
+        {
+            // InMemory 不支持事务，仅执行相同的业务步骤，避免测试被提供程序警告阻断。
+            await PersistCreateAsync();
+        }
 
         if (workOrder is null)
         {
-            // 3 次重试后仍冲突：极少见（需同秒内 3 次并发），向上层暴露为可重试的冲突错误。
-            throw new InvalidOperationException("工单编码生成失败：并发冲突，请稍后重试。");
+            throw new InvalidOperationException("工单创建失败：事务未返回工单实体。");
         }
-
-        // 写入创建审计日志（在工单落库后单独保存；重试阶段不写日志，避免冲突回滚产生孤立日志）
-        await WriteLogAsync(dbContext, workOrder.Id, WorkOrderLogAction.Created,
-            oldStatus: null, newStatus: WorkOrderStatus.PendingDispatch.ToString(),
-            operatorId: userId, note: null, ct: ct);
-        await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单已创建: {WorkOrderCode}（设备: {DeviceId}, 优先级: {Priority}）",
             workOrder.WorkOrderCode, request.DeviceId, priority);
 
         BusinessMetrics.WorkOrdersCreated.WithLabels(type.ToString(), priority.ToString()).Inc();
 
-        // 发布工单创建事件，供 SignalR 推送、通知等下游模块消费
-        var createdEvent = new WorkOrderCreatedEvent(
-            Guid.NewGuid(), DateTime.UtcNow, tenantId,
-            workOrder.Id, request.DeviceId, request.Title, priority.ToString());
-        await _eventBus.PublishAsync(createdEvent, ct);
-
+        // 返回已提交的工单；创建事件由 Outbox 分发器异步投递给下游模块。
         return MapToDto(workOrder);
     }
 
@@ -186,6 +244,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -206,13 +265,12 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.Assigned.ToString(),
             userId, request.Note, ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 已派工给 {AssignedTo}", workOrder.WorkOrderCode, request.AssignedTo);
 
         // 发布状态变更事件
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
-
         return MapToDto(workOrder);
     }
 
@@ -222,6 +280,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -240,11 +299,10 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.InProgress.ToString(),
             userId, note: null, ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 已开始执行", workOrder.WorkOrderCode);
-
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -255,6 +313,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -280,12 +339,11 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.Completed.ToString(),
             userId, note: $"解决措施: {request.Resolution}", ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 已完成（解决措施: {Resolution}）",
             workOrder.WorkOrderCode, request.Resolution);
-
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -296,6 +354,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -311,11 +370,10 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.Accepted.ToString(),
             userId, note, ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 已验收通过", workOrder.WorkOrderCode);
-
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -326,6 +384,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -341,11 +400,10 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.Rejected.ToString(),
             userId, note ?? "验收不通过，返工", ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 验收不通过，已返工", workOrder.WorkOrderCode);
-
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -356,6 +414,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -374,11 +433,10 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.Closed.ToString(),
             userId, note, ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 已关闭", workOrder.WorkOrderCode);
-
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -389,6 +447,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -404,11 +463,10 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.Cancelled.ToString(),
             userId, note ?? "工单已取消", ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderCode} 已取消", workOrder.WorkOrderCode);
-
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -419,6 +477,7 @@ public class WorkOrderService : IWorkOrderService
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventBus = ResolveEventBus(scope.ServiceProvider);
 
         var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
         if (workOrder == null)
@@ -460,6 +519,7 @@ public class WorkOrderService : IWorkOrderService
             oldStatus.ToString(), WorkOrderStatus.SubmittedForApproval.ToString(),
             userId, note: $"提交验收（解决措施: {request.Resolution}）", ct);
 
+        await PublishStatusChangedEvent(eventBus, tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
         await dbContext.SaveChangesAsync(ct);
 
         // 匹配审批链模板并创建审批记录（仅创建记录，状态流转已由本方法完成，单一职责）
@@ -469,10 +529,6 @@ public class WorkOrderService : IWorkOrderService
         _logger.LogInformation(
             "工单 {WorkOrderCode} 已提交验收（解决措施: {Resolution}）",
             workOrder.WorkOrderCode, request.Resolution);
-
-        // 发布状态变更事件（与 Assign/Start/Complete/Accept/Reject/Close/Cancel 兄弟方法一致），
-        // 供 SignalR 实时推送 → Dashboard/工单列表/详情页实时刷新
-        await PublishStatusChangedEvent(tenantId, workOrder.Id, oldStatus, workOrder.Status, userId, ct);
 
         return MapToDto(workOrder);
     }
@@ -551,6 +607,7 @@ public class WorkOrderService : IWorkOrderService
     /// 事件通过 IEventBus 发布，供 SignalR 推送、通知模块等下游消费者处理
     /// </summary>
     private async Task PublishStatusChangedEvent(
+        IEventBus eventBus,
         Guid tenantId, Guid workOrderId, WorkOrderStatus oldStatus,
         WorkOrderStatus newStatus, Guid operatorId, CancellationToken ct)
     {
@@ -559,8 +616,15 @@ public class WorkOrderService : IWorkOrderService
         var evt = new WorkOrderStatusChangedEvent(
             Guid.NewGuid(), DateTime.UtcNow, tenantId,
             workOrderId, oldStatus.ToString(), newStatus.ToString(), operatorId);
-        await _eventBus.PublishAsync(evt, ct);
+        await eventBus.PublishAsync(evt, ct);
     }
+
+    /// <summary>
+    /// 解析当前数据库作用域的事件总线。
+    /// 单元测试和旧宿主没有在子作用域注册事件总线时回退到构造函数注入实例。
+    /// </summary>
+    private IEventBus ResolveEventBus(IServiceProvider serviceProvider) =>
+        serviceProvider.GetService<IEventBus>() ?? _eventBus;
 
     /// <summary>
     /// 手动映射 WorkOrder 实体为 WorkOrderDto
