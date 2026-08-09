@@ -1,0 +1,123 @@
+import axios from "/node_modules/.vite/deps/axios.js?v=1d2f6f90";
+import { useNotificationStore } from "/src/stores/notificationStore.ts";
+import { useAuthStore } from "/src/stores/authStore.ts";
+/**
+* 显示全局错误提示（通过 toast 通知）
+* 静态导入：notificationStore 仅依赖 zustand + 类型，无循环依赖。
+* 防御性 try/catch 保留，store 未初始化时静默降级。
+*/
+async function showGlobalError(message) {
+	try {
+		useNotificationStore.getState().push({
+			type: "system",
+			title: "操作失败",
+			message
+		});
+	} catch {}
+}
+const api = axios.create({
+	baseURL: "/api/v1",
+	headers: { "Content-Type": "application/json" },
+	// 开发环境前后端不同源（前端 :5173 / 后端 :8080），需显式启用 withCredentials 以携带认证 Cookie
+	// 生产环境通过 Nginx 同源代理，浏览器自动携带，此配置无害
+	withCredentials: true
+});
+// 是否正在刷新令牌（防止并发刷新）
+let isRefreshing = false;
+// 等待令牌刷新完成的请求队列（刷新期间到达的 401 请求排队等待）
+let pendingRequests = [];
+/** 通知所有排队请求：刷新完成，可以重试 */
+function processPendingRequests(error) {
+	pendingRequests.forEach(({ resolve, reject }) => {
+		if (error) reject(error);
+		else resolve();
+	});
+	pendingRequests = [];
+}
+// 请求拦截器：认证 Cookie 由浏览器自动携带（withCredentials: true），无需手动设置 Authorization 头
+// 响应拦截器：全局错误处理 + 401 时尝试刷新令牌
+api.interceptors.response.use((response) => response, async (error) => {
+	const status = error.response?.status;
+	const data = error.response?.data;
+	// 关键修复：网络层错误（无 response）— 浏览器无法到达服务器
+	// 工业现场 WiFi 不稳定是常态，axios 抛 ERR_NETWORK/ECONNABORTED/ECONNREFUSED 时
+	// error.response 为 undefined，原代码所有 status 分支都不命中，操作静默失败。
+	if (!error.response) {
+		const code = error.code;
+		let msg = "网络连接失败，请检查网络后重试";
+		if (code === "ECONNABORTED") {
+			msg = "请求超时，服务器响应过慢或网络不稳定，请稍后重试";
+		} else if (code === "ERR_NETWORK") {
+			msg = "无法连接到服务器，请检查网络连接（可能被防火墙拦截或服务器未启动）";
+		}
+		showGlobalError(msg);
+	} else if (status === 403) {
+		const msg = data?.message || "您没有权限执行此操作";
+		showGlobalError(msg);
+	} else if (status === 404) {
+		const msg = data?.message || "请求的资源不存在";
+		showGlobalError(msg);
+	} else if (status === 429) {
+		showGlobalError("操作过于频繁，请稍后再试");
+	} else if (status === 500) {
+		showGlobalError("服务器内部错误，请稍后重试");
+	} else if (status === 502 || status === 503 || status === 504) {
+		showGlobalError("服务暂时不可用，可能正在维护或过载，请稍后重试");
+	}
+	const originalRequest = error.config;
+	// 非 401 或已重试过，直接拒绝
+	if (status !== 401 || originalRequest._retry) {
+		return Promise.reject(error);
+	}
+	// 登录和刷新请求本身失败，不重试
+	if (originalRequest.url?.includes("/auth/login") || originalRequest.url?.includes("/auth/refresh")) {
+		return Promise.reject(error);
+	}
+	// 无存储的用户信息，说明未登录，直接跳转登录页
+	const storedUser = sessionStorage.getItem("user");
+	if (!storedUser) {
+		sessionStorage.clear();
+		window.location.href = "/login";
+		return Promise.reject(error);
+	}
+	// 防止并发刷新：第一个 401 触发刷新，后续请求排队等待
+	if (isRefreshing) {
+		return new Promise((resolve, reject) => {
+			pendingRequests.push({
+				resolve,
+				reject
+			});
+		}).then(() => {
+			// Cookie 已由后端更新（Set-Cookie），重发原始请求时浏览器自动携带新 access_token
+			return api(originalRequest);
+		});
+	}
+	originalRequest._retry = true;
+	isRefreshing = true;
+	try {
+		// 刷新请求不传 body：HttpOnly Cookie 中 refresh_token 由浏览器自动携带，
+		// 后端 Refresh 端点在 body 为空时自动从 Cookie 读取
+		// 注意：v1.3.0 起响应体不再返回 accessToken（[JsonIgnore]），只返回 expiresIn + userInfo
+		const response = await axios.post("/api/v1/auth/refresh", {}, { withCredentials: true });
+		const { userInfo } = response.data;
+		// 更新 authStore（同步 Zustand 内存状态，Cookie 由浏览器管理）
+		if (userInfo) {
+			useAuthStore.getState().setAuth(userInfo);
+		}
+		// 通知排队请求重试
+		processPendingRequests();
+		// 重发原始请求（浏览器自动携带新 access_token Cookie）
+		return api(originalRequest);
+	} catch (refreshError) {
+		// 刷新失败（refresh_token 也过期或被吊销），清除会话并跳转登录
+		processPendingRequests(refreshError);
+		sessionStorage.clear();
+		window.location.href = "/login";
+		return Promise.reject(refreshError);
+	} finally {
+		isRefreshing = false;
+	}
+});
+export default api;
+
+//# sourceMappingURL=data:application/json;base64,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LGVBQWU7Q0FDakI7QUFDRixDQUNGO0FBRUEsZUFBZSIsIm5hbWVzIjpbXSwic291cmNlcyI6WyJhcGkudHMiXSwidmVyc2lvbiI6Mywic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IGF4aW9zIGZyb20gJ2F4aW9zJztcbmltcG9ydCB7IHVzZU5vdGlmaWNhdGlvblN0b3JlIH0gZnJvbSAnLi4vc3RvcmVzL25vdGlmaWNhdGlvblN0b3JlJztcbmltcG9ydCB7IHVzZUF1dGhTdG9yZSB9IGZyb20gJy4uL3N0b3Jlcy9hdXRoU3RvcmUnO1xuXG4vKipcbiAqIOaYvuekuuWFqOWxgOmUmeivr+aPkOekuu+8iOmAmui/hyB0b2FzdCDpgJrnn6XvvIlcbiAqIOmdmeaAgeWvvOWFpe+8mm5vdGlmaWNhdGlvblN0b3JlIOS7heS+nei1liB6dXN0YW5kICsg57G75Z6L77yM5peg5b6q546v5L6d6LWW44CCXG4gKiDpmLLlvqHmgKcgdHJ5L2NhdGNoIOS/neeVme+8jHN0b3JlIOacquWIneWni+WMluaXtumdmem7mOmZjee6p+OAglxuICovXG5hc3luYyBmdW5jdGlvbiBzaG93R2xvYmFsRXJyb3IobWVzc2FnZTogc3RyaW5nKTogUHJvbWlzZTx2b2lkPiB7XG4gIHRyeSB7XG4gICAgdXNlTm90aWZpY2F0aW9uU3RvcmUuZ2V0U3RhdGUoKS5wdXNoKHtcbiAgICAgIHR5cGU6ICdzeXN0ZW0nLFxuICAgICAgdGl0bGU6ICfmk43kvZzlpLHotKUnLFxuICAgICAgbWVzc2FnZSxcbiAgICB9KTtcbiAgfSBjYXRjaCB7XG4gICAgLy8gc3RvcmUg5pyq5Yid5aeL5YyW5pe26Z2Z6buY5aSE55CGXG4gIH1cbn1cblxuY29uc3QgYXBpID0gYXhpb3MuY3JlYXRlKHtcbiAgYmFzZVVSTDogJy9hcGkvdjEnLFxuICBoZWFkZXJzOiB7ICdDb250ZW50LVR5cGUnOiAnYXBwbGljYXRpb24vanNvbicgfSxcbiAgLy8g5byA5Y+R546v5aKD5YmN5ZCO56uv5LiN5ZCM5rqQ77yI5YmN56uvIDo1MTczIC8g5ZCO56uvIDo4MDgw77yJ77yM6ZyA5pi+5byP5ZCv55SoIHdpdGhDcmVkZW50aWFscyDku6XmkLrluKborqTor4EgQ29va2llXG4gIC8vIOeUn+S6p+eOr+Wig+mAmui/hyBOZ2lueCDlkIzmupDku6PnkIbvvIzmtY/op4jlmajoh6rliqjmkLrluKbvvIzmraTphY3nva7ml6DlrrNcbiAgd2l0aENyZWRlbnRpYWxzOiB0cnVlLFxufSk7XG5cbi8vIOaYr+WQpuato+WcqOWIt+aWsOS7pOeJjO+8iOmYsuatouW5tuWPkeWIt+aWsO+8iVxubGV0IGlzUmVmcmVzaGluZyA9IGZhbHNlO1xuLy8g562J5b6F5Luk54mM5Yi35paw5a6M5oiQ55qE6K+35rGC6Zif5YiX77yI5Yi35paw5pyf6Ze05Yiw6L6+55qEIDQwMSDor7fmsYLmjpLpmJ/nrYnlvoXvvIlcbmxldCBwZW5kaW5nUmVxdWVzdHM6IEFycmF5PHtcbiAgcmVzb2x2ZTogKHZhbHVlPzogdW5rbm93bikgPT4gdm9pZDtcbiAgcmVqZWN0OiAoZXJyb3I6IHVua25vd24pID0+IHZvaWQ7XG59PiA9IFtdO1xuXG4vKiog6YCa55+l5omA5pyJ5o6S6Zif6K+35rGC77ya5Yi35paw5a6M5oiQ77yM5Y+v5Lul6YeN6K+VICovXG5mdW5jdGlvbiBwcm9jZXNzUGVuZGluZ1JlcXVlc3RzKGVycm9yPzogdW5rbm93bikge1xuICBwZW5kaW5nUmVxdWVzdHMuZm9yRWFjaCgoeyByZXNvbHZlLCByZWplY3QgfSkgPT4ge1xuICAgIGlmIChlcnJvcikgcmVqZWN0KGVycm9yKTtcbiAgICBlbHNlIHJlc29sdmUoKTtcbiAgfSk7XG4gIHBlbmRpbmdSZXF1ZXN0cyA9IFtdO1xufVxuXG4vLyDor7fmsYLmi6bmiKrlmajvvJrorqTor4EgQ29va2llIOeUsea1j+iniOWZqOiHquWKqOaQuuW4pu+8iHdpdGhDcmVkZW50aWFsczogdHJ1Ze+8ie+8jOaXoOmcgOaJi+WKqOiuvue9riBBdXRob3JpemF0aW9uIOWktFxuXG4vLyDlk43lupTmi6bmiKrlmajvvJrlhajlsYDplJnor6/lpITnkIYgKyA0MDEg5pe25bCd6K+V5Yi35paw5Luk54mMXG5hcGkuaW50ZXJjZXB0b3JzLnJlc3BvbnNlLnVzZShcbiAgKHJlc3BvbnNlKSA9PiByZXNwb25zZSxcbiAgYXN5bmMgKGVycm9yKSA9PiB7XG4gICAgY29uc3Qgc3RhdHVzID0gZXJyb3IucmVzcG9uc2U/LnN0YXR1cztcbiAgICBjb25zdCBkYXRhID0gZXJyb3IucmVzcG9uc2U/LmRhdGE7XG5cbiAgICAvLyDlhbPplK7kv67lpI3vvJrnvZHnu5zlsYLplJnor6/vvIjml6AgcmVzcG9uc2XvvInigJQg5rWP6KeI5Zmo5peg5rOV5Yiw6L6+5pyN5Yqh5ZmoXG4gICAgLy8g5bel5Lia546w5Zy6IFdpRmkg5LiN56iz5a6a5piv5bi45oCB77yMYXhpb3Mg5oqbIEVSUl9ORVRXT1JLL0VDT05OQUJPUlRFRC9FQ09OTlJFRlVTRUQg5pe2XG4gICAgLy8gZXJyb3IucmVzcG9uc2Ug5Li6IHVuZGVmaW5lZO+8jOWOn+S7o+eggeaJgOaciSBzdGF0dXMg5YiG5pSv6YO95LiN5ZG95Lit77yM5pON5L2c6Z2Z6buY5aSx6LSl44CCXG4gICAgaWYgKCFlcnJvci5yZXNwb25zZSkge1xuICAgICAgY29uc3QgY29kZSA9IGVycm9yLmNvZGU7XG4gICAgICBsZXQgbXNnID0gJ+e9kee7nOi/nuaOpeWksei0pe+8jOivt+ajgOafpee9kee7nOWQjumHjeivlSc7XG4gICAgICBpZiAoY29kZSA9PT0gJ0VDT05OQUJPUlRFRCcpIHtcbiAgICAgICAgbXNnID0gJ+ivt+axgui2heaXtu+8jOacjeWKoeWZqOWTjeW6lOi/h+aFouaIlue9kee7nOS4jeeos+Wumu+8jOivt+eojeWQjumHjeivlSc7XG4gICAgICB9IGVsc2UgaWYgKGNvZGUgPT09ICdFUlJfTkVUV09SSycpIHtcbiAgICAgICAgbXNnID0gJ+aXoOazlei/nuaOpeWIsOacjeWKoeWZqO+8jOivt+ajgOafpee9kee7nOi/nuaOpe+8iOWPr+iDveiiq+mYsueBq+WimeaLpuaIquaIluacjeWKoeWZqOacquWQr+WKqO+8iSc7XG4gICAgICB9XG4gICAgICBzaG93R2xvYmFsRXJyb3IobXNnKTtcbiAgICB9XG4gICAgLy8gNDAzIOadg+mZkOS4jei2s++8muaYvuekuuWPi+WlveaPkOekulxuICAgIGVsc2UgaWYgKHN0YXR1cyA9PT0gNDAzKSB7XG4gICAgICBjb25zdCBtc2cgPSBkYXRhPy5tZXNzYWdlIHx8ICfmgqjmsqHmnInmnYPpmZDmiafooYzmraTmk43kvZwnO1xuICAgICAgc2hvd0dsb2JhbEVycm9yKG1zZyk7XG4gICAgfVxuICAgIC8vIDQwNCDotYTmupDkuI3lrZjlnKjvvJrmmL7npLrlj4vlpb3mj5DnpLpcbiAgICBlbHNlIGlmIChzdGF0dXMgPT09IDQwNCkge1xuICAgICAgY29uc3QgbXNnID0gZGF0YT8ubWVzc2FnZSB8fCAn6K+35rGC55qE6LWE5rqQ5LiN5a2Y5ZyoJztcbiAgICAgIHNob3dHbG9iYWxFcnJvcihtc2cpO1xuICAgIH1cbiAgICAvLyA0Mjkg6ZmQ5rWB77ya5o+Q56S655So5oi356iN5ZCO5YaN6K+V77yI5ZCO56uvIElQL+enn+aIt+mZkOa1geWRveS4re+8iVxuICAgIGVsc2UgaWYgKHN0YXR1cyA9PT0gNDI5KSB7XG4gICAgICBzaG93R2xvYmFsRXJyb3IoJ+aTjeS9nOi/h+S6jumikee5ge+8jOivt+eojeWQjuWGjeivlScpO1xuICAgIH1cbiAgICAvLyA1MDAg5pyN5Yqh5Zmo6ZSZ6K+v77ya5pi+56S65Y+L5aW95o+Q56S6XG4gICAgZWxzZSBpZiAoc3RhdHVzID09PSA1MDApIHtcbiAgICAgIHNob3dHbG9iYWxFcnJvcign5pyN5Yqh5Zmo5YaF6YOo6ZSZ6K+v77yM6K+356iN5ZCO6YeN6K+VJyk7XG4gICAgfVxuICAgIC8vIDUwMi81MDMvNTA0IOe9keWFs+mUmeivr++8muWPjeWQkeS7o+eQhuaIluWQjuerr+S4jeWPr+eUqFxuICAgIGVsc2UgaWYgKHN0YXR1cyA9PT0gNTAyIHx8IHN0YXR1cyA9PT0gNTAzIHx8IHN0YXR1cyA9PT0gNTA0KSB7XG4gICAgICBzaG93R2xvYmFsRXJyb3IoJ+acjeWKoeaaguaXtuS4jeWPr+eUqO+8jOWPr+iDveato+WcqOe7tOaKpOaIlui/h+i9ve+8jOivt+eojeWQjumHjeivlScpO1xuICAgIH1cblxuICAgIGNvbnN0IG9yaWdpbmFsUmVxdWVzdCA9IGVycm9yLmNvbmZpZztcblxuICAgIC8vIOmdniA0MDEg5oiW5bey6YeN6K+V6L+H77yM55u05o6l5ouS57udXG4gICAgaWYgKHN0YXR1cyAhPT0gNDAxIHx8IG9yaWdpbmFsUmVxdWVzdC5fcmV0cnkpIHtcbiAgICAgIHJldHVybiBQcm9taXNlLnJlamVjdChlcnJvcik7XG4gICAgfVxuXG4gICAgLy8g55m75b2V5ZKM5Yi35paw6K+35rGC5pys6Lqr5aSx6LSl77yM5LiN6YeN6K+VXG4gICAgaWYgKG9yaWdpbmFsUmVxdWVzdC51cmw/LmluY2x1ZGVzKCcvYXV0aC9sb2dpbicpIHx8IG9yaWdpbmFsUmVxdWVzdC51cmw/LmluY2x1ZGVzKCcvYXV0aC9yZWZyZXNoJykpIHtcbiAgICAgIHJldHVybiBQcm9taXNlLnJlamVjdChlcnJvcik7XG4gICAgfVxuXG4gICAgLy8g5peg5a2Y5YKo55qE55So5oi35L+h5oGv77yM6K+05piO5pyq55m75b2V77yM55u05o6l6Lez6L2s55m75b2V6aG1XG4gICAgY29uc3Qgc3RvcmVkVXNlciA9IHNlc3Npb25TdG9yYWdlLmdldEl0ZW0oJ3VzZXInKTtcbiAgICBpZiAoIXN0b3JlZFVzZXIpIHtcbiAgICAgIHNlc3Npb25TdG9yYWdlLmNsZWFyKCk7XG4gICAgICB3aW5kb3cubG9jYXRpb24uaHJlZiA9ICcvbG9naW4nO1xuICAgICAgcmV0dXJuIFByb21pc2UucmVqZWN0KGVycm9yKTtcbiAgICB9XG5cbiAgICAvLyDpmLLmraLlubblj5HliLfmlrDvvJrnrKzkuIDkuKogNDAxIOinpuWPkeWIt+aWsO+8jOWQjue7reivt+axguaOkumYn+etieW+hVxuICAgIGlmIChpc1JlZnJlc2hpbmcpIHtcbiAgICAgIHJldHVybiBuZXcgUHJvbWlzZSgocmVzb2x2ZSwgcmVqZWN0KSA9PiB7XG4gICAgICAgIHBlbmRpbmdSZXF1ZXN0cy5wdXNoKHsgcmVzb2x2ZSwgcmVqZWN0IH0pO1xuICAgICAgfSkudGhlbigoKSA9PiB7XG4gICAgICAgIC8vIENvb2tpZSDlt7LnlLHlkI7nq6/mm7TmlrDvvIhTZXQtQ29va2ll77yJ77yM6YeN5Y+R5Y6f5aeL6K+35rGC5pe25rWP6KeI5Zmo6Ieq5Yqo5pC65bim5pawIGFjY2Vzc190b2tlblxuICAgICAgICByZXR1cm4gYXBpKG9yaWdpbmFsUmVxdWVzdCk7XG4gICAgICB9KTtcbiAgICB9XG5cbiAgICBvcmlnaW5hbFJlcXVlc3QuX3JldHJ5ID0gdHJ1ZTtcbiAgICBpc1JlZnJlc2hpbmcgPSB0cnVlO1xuXG4gICAgdHJ5IHtcbiAgICAgIC8vIOWIt+aWsOivt+axguS4jeS8oCBib2R577yaSHR0cE9ubHkgQ29va2llIOS4rSByZWZyZXNoX3Rva2VuIOeUsea1j+iniOWZqOiHquWKqOaQuuW4pu+8jFxuICAgICAgLy8g5ZCO56uvIFJlZnJlc2gg56uv54K55ZyoIGJvZHkg5Li656m65pe26Ieq5Yqo5LuOIENvb2tpZSDor7vlj5ZcbiAgICAgIC8vIOazqOaEj++8mnYxLjMuMCDotbflk43lupTkvZPkuI3lho3ov5Tlm54gYWNjZXNzVG9rZW7vvIhbSnNvbklnbm9yZV3vvInvvIzlj6rov5Tlm54gZXhwaXJlc0luICsgdXNlckluZm9cbiAgICAgIGNvbnN0IHJlc3BvbnNlID0gYXdhaXQgYXhpb3MucG9zdCgnL2FwaS92MS9hdXRoL3JlZnJlc2gnLCB7fSwgeyB3aXRoQ3JlZGVudGlhbHM6IHRydWUgfSk7XG4gICAgICBjb25zdCB7IHVzZXJJbmZvIH0gPSByZXNwb25zZS5kYXRhO1xuXG4gICAgICAvLyDmm7TmlrAgYXV0aFN0b3Jl77yI5ZCM5q2lIFp1c3RhbmQg5YaF5a2Y54q25oCB77yMQ29va2llIOeUsea1j+iniOWZqOeuoeeQhu+8iVxuICAgICAgaWYgKHVzZXJJbmZvKSB7XG4gICAgICAgIHVzZUF1dGhTdG9yZS5nZXRTdGF0ZSgpLnNldEF1dGgodXNlckluZm8pO1xuICAgICAgfVxuXG4gICAgICAvLyDpgJrnn6XmjpLpmJ/or7fmsYLph43or5VcbiAgICAgIHByb2Nlc3NQZW5kaW5nUmVxdWVzdHMoKTtcblxuICAgICAgLy8g6YeN5Y+R5Y6f5aeL6K+35rGC77yI5rWP6KeI5Zmo6Ieq5Yqo5pC65bim5pawIGFjY2Vzc190b2tlbiBDb29raWXvvIlcbiAgICAgIHJldHVybiBhcGkob3JpZ2luYWxSZXF1ZXN0KTtcbiAgICB9IGNhdGNoIChyZWZyZXNoRXJyb3IpIHtcbiAgICAgIC8vIOWIt+aWsOWksei0pe+8iHJlZnJlc2hfdG9rZW4g5Lmf6L+H5pyf5oiW6KKr5ZCK6ZSA77yJ77yM5riF6Zmk5Lya6K+d5bm26Lez6L2s55m75b2VXG4gICAgICBwcm9jZXNzUGVuZGluZ1JlcXVlc3RzKHJlZnJlc2hFcnJvcik7XG4gICAgICBzZXNzaW9uU3RvcmFnZS5jbGVhcigpO1xuICAgICAgd2luZG93LmxvY2F0aW9uLmhyZWYgPSAnL2xvZ2luJztcbiAgICAgIHJldHVybiBQcm9taXNlLnJlamVjdChyZWZyZXNoRXJyb3IpO1xuICAgIH0gZmluYWxseSB7XG4gICAgICBpc1JlZnJlc2hpbmcgPSBmYWxzZTtcbiAgICB9XG4gIH0sXG4pO1xuXG5leHBvcnQgZGVmYXVsdCBhcGk7XG4iXX0=

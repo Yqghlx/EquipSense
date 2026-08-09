@@ -1,0 +1,218 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: EquipSense
+      - button "收起侧边栏" [ref=f1e7]
+    - navigation [ref=f1e10]:
+      - link "仪表盘" [ref=f1e11] [cursor=pointer]:
+        - /url: /dashboard
+      - link "设备管理" [ref=f1e18] [cursor=pointer]:
+        - /url: /devices
+      - link "网关状态" [ref=f1e22] [cursor=pointer]:
+        - /url: /gateways
+      - link "告警中心" [ref=f1e29] [cursor=pointer]:
+        - /url: /alerts
+      - link "告警规则" [ref=f1e33] [cursor=pointer]:
+        - /url: /alert-rules
+      - link "工单管理" [active] [ref=f1e38] [cursor=pointer]:
+        - /url: /work-orders
+      - link "待审批" [ref=f1e43] [cursor=pointer]:
+        - /url: /pending-approvals
+      - link "派工看板" [ref=f1e49] [cursor=pointer]:
+        - /url: /dispatch
+      - link "AI 分析" [ref=f1e56] [cursor=pointer]:
+        - /url: /analyses
+      - link "知识库" [ref=f1e66] [cursor=pointer]:
+        - /url: /knowledge
+      - link "FMEA 故障模式库" [ref=f1e70] [cursor=pointer]:
+        - /url: /fmea
+      - link "诊断评估" [ref=f1e74] [cursor=pointer]:
+        - /url: /evaluation
+      - link "审计日志" [ref=f1e80] [cursor=pointer]:
+        - /url: /audit-logs
+      - link "系统设置" [ref=f1e84] [cursor=pointer]:
+        - /url: /settings
+      - link "用户管理" [ref=f1e89] [cursor=pointer]:
+        - /url: /users
+      - link "租户管理" [ref=f1e103] [cursor=pointer]:
+        - /url: /admin/tenants
+    - button "通知 99+" [ref=f1e110]:
+      - generic [ref=f1e114]: 通知
+      - generic [ref=f1e115]: 99+
+  - generic [ref=f1e116]:
+    - banner [ref=f1e117]:
+      - generic [ref=f1e118]: EquipSense
+      - generic [ref=f1e120]:
+        - status "实时连接正常" [ref=f1e137]
+        - button [ref=f1e124]
+        - button "切换主题" [ref=f1e128]
+        - button "切换语言" [ref=f1e129]
+        - button "admin" [ref=f1e130]
+    - main [ref=f1e134]:
+      - generic [ref=f1e524]:
+        - generic [ref=f1e525]:
+          - heading "工单管理" [level=1] [ref=f1e526]
+          - generic [ref=f1e527]:
+            - button "导出" [ref=f1e528]
+            - button "新建" [ref=f1e529]
+        - generic [ref=f1e530]:
+          - textbox "搜索..." [ref=f1e535]
+          - combobox [ref=f1e536]:
+            - generic [ref=f1e537]: 状态
+            - img: ▼
+          - textbox [ref=f1e538]
+        - table [ref=f1e540]:
+          - rowgroup [ref=f1e541]:
+            - row [ref=f1e542]:
+              - columnheader "工单编码" [ref=f1e543]
+              - columnheader "标题" [ref=f1e544]
+              - columnheader "状态" [ref=f1e545]
+              - columnheader "优先级" [ref=f1e546]
+              - columnheader "创建时间" [ref=f1e547]
+              - columnheader "截止日期" [ref=f1e548]
+          - rowgroup [ref=f1e549]:
+            - row [ref=f1e550] [cursor=pointer]:
+              - cell "WO-20260809-0044" [ref=f1e551]
+              - cell "E2E-BADGE-WO" [ref=f1e552]
+              - cell "待派工" [ref=f1e553]
+              - cell "High" [ref=f1e555]
+              - cell "8/9/2026, 4:25:01 PM" [ref=f1e557]
+              - cell "-" [ref=f1e558]
+            - row [ref=f1e559] [cursor=pointer]:
+              - cell "WO-20260809-0043" [ref=f1e560]
+              - cell "告警工单：vibration 异常" [ref=f1e561]
+              - cell "待派工" [ref=f1e562]
+              - cell "Critical" [ref=f1e564]
+              - cell "8/9/2026, 4:22:31 PM" [ref=f1e566]
+              - cell "逾期 1 小时" [ref=f1e567]
+            - row [ref=f1e568] [cursor=pointer]:
+              - cell "WO-20260809-0042" [ref=f1e569]
+              - cell "E2E-BADGE-WO" [ref=f1e570]
+              - cell "待派工" [ref=f1e571]
+              - cell "High" [ref=f1e573]
+              - cell "8/9/2026, 4:03:28 PM" [ref=f1e575]
+              - cell "-" [ref=f1e576]
+            - row [ref=f1e577] [cursor=pointer]:
+              - cell "WO-20260809-0041" [ref=f1e578]
+              - cell "告警工单：vibration 异常" [ref=f1e579]
+              - cell "待派工" [ref=f1e580]
+              - cell "Critical" [ref=f1e582]
+              - cell "8/9/2026, 4:02:35 PM" [ref=f1e584]
+              - cell "逾期 1 小时" [ref=f1e585]
+            - row [ref=f1e586] [cursor=pointer]:
+              - cell "WO-20260809-0040" [ref=f1e587]
+              - cell "E2E行点击跳转测试" [ref=f1e588]
+              - cell "待派工" [ref=f1e589]
+              - cell "High" [ref=f1e591]
+              - cell "8/9/2026, 4:01:54 PM" [ref=f1e593]
+              - cell "-" [ref=f1e594]
+            - row [ref=f1e595] [cursor=pointer]:
+              - cell "WO-20260809-0039" [ref=f1e596]
+              - cell "E2E排序测试工单" [ref=f1e597]
+              - cell "待派工" [ref=f1e598]
+              - cell "Medium" [ref=f1e600]
+              - cell "8/9/2026, 4:01:46 PM" [ref=f1e602]
+              - cell "-" [ref=f1e603]
+            - row [ref=f1e604] [cursor=pointer]:
+              - cell "WO-20260809-0038" [ref=f1e605]
+              - cell "E2E-WO-mslikn9d" [ref=f1e606]
+              - cell "待派工" [ref=f1e607]
+              - cell "High" [ref=f1e609]
+              - cell "8/9/2026, 4:01:41 PM" [ref=f1e611]
+              - cell "-" [ref=f1e612]
+            - row [ref=f1e613] [cursor=pointer]:
+              - cell "WO-20260809-0037" [ref=f1e614]
+              - cell "E2E-WO-mslikjug" [ref=f1e615]
+              - cell "待派工" [ref=f1e616]
+              - cell "High" [ref=f1e618]
+              - cell "8/9/2026, 4:01:37 PM" [ref=f1e620]
+              - cell "-" [ref=f1e621]
+            - row [ref=f1e622] [cursor=pointer]:
+              - cell "WO-20260809-0036" [ref=f1e623]
+              - cell "E2E优先级展示测试" [ref=f1e624]
+              - cell "待派工" [ref=f1e625]
+              - cell "High" [ref=f1e627]
+              - cell "8/9/2026, 4:01:35 PM" [ref=f1e629]
+              - cell "-" [ref=f1e630]
+            - row [ref=f1e631] [cursor=pointer]:
+              - cell "WO-20260809-0035" [ref=f1e632]
+              - cell "E2E-WO-mslikgfz" [ref=f1e633]
+              - cell "已完成" [ref=f1e634]
+              - cell "High" [ref=f1e636]
+              - cell "8/9/2026, 4:01:32 PM" [ref=f1e638]
+              - cell "-" [ref=f1e639]
+            - row [ref=f1e640] [cursor=pointer]:
+              - cell "WO-20260809-0034" [ref=f1e641]
+              - cell "E2E-WO-mslikcl9" [ref=f1e642]
+              - cell "执行中" [ref=f1e643]
+              - cell "High" [ref=f1e645]
+              - cell "8/9/2026, 4:01:27 PM" [ref=f1e647]
+              - cell "-" [ref=f1e648]
+            - row [ref=f1e649] [cursor=pointer]:
+              - cell "WO-20260809-0033" [ref=f1e650]
+              - cell "E2E-WO-mslik93h" [ref=f1e651]
+              - cell "执行中" [ref=f1e652]
+              - cell "High" [ref=f1e654]
+              - cell "8/9/2026, 4:01:23 PM" [ref=f1e656]
+              - cell "-" [ref=f1e657]
+            - row [ref=f1e658] [cursor=pointer]:
+              - cell "WO-20260809-0032" [ref=f1e659]
+              - cell "E2E搜索测试工单CRUD" [ref=f1e660]
+              - cell "待派工" [ref=f1e661]
+              - cell "High" [ref=f1e663]
+              - cell "8/9/2026, 4:01:22 PM" [ref=f1e665]
+              - cell "-" [ref=f1e666]
+            - row [ref=f1e667] [cursor=pointer]:
+              - cell "WO-20260809-0031" [ref=f1e668]
+              - cell "E2E-WO-mslik4n8" [ref=f1e669]
+              - cell "待派工" [ref=f1e670]
+              - cell "High" [ref=f1e672]
+              - cell "8/9/2026, 4:01:17 PM" [ref=f1e674]
+              - cell "-" [ref=f1e675]
+            - row [ref=f1e676] [cursor=pointer]:
+              - cell "WO-20260809-0030" [ref=f1e677]
+              - cell "E2E-WO-mslik199" [ref=f1e678]
+              - cell "待派工" [ref=f1e679]
+              - cell "High" [ref=f1e681]
+              - cell "8/9/2026, 4:01:13 PM" [ref=f1e683]
+              - cell "-" [ref=f1e684]
+            - row [ref=f1e685] [cursor=pointer]:
+              - cell "WO-20260809-0029" [ref=f1e686]
+              - cell "E2E-WO-mslijxup" [ref=f1e687]
+              - cell "已完成" [ref=f1e688]
+              - cell "High" [ref=f1e690]
+              - cell "8/9/2026, 4:01:08 PM" [ref=f1e692]
+              - cell "-" [ref=f1e693]
+            - row [ref=f1e694] [cursor=pointer]:
+              - cell "WO-20260809-0028" [ref=f1e695]
+              - cell "E2E-WO-mslijucu" [ref=f1e696]
+              - cell "待派工" [ref=f1e697]
+              - cell "High" [ref=f1e699]
+              - cell "8/9/2026, 4:01:04 PM" [ref=f1e701]
+              - cell "-" [ref=f1e702]
+            - row [ref=f1e703] [cursor=pointer]:
+              - cell "WO-20260809-0027" [ref=f1e704]
+              - cell "E2E-WO-mslijqyy" [ref=f1e705]
+              - cell "待派工" [ref=f1e706]
+              - cell "High" [ref=f1e708]
+              - cell "8/9/2026, 4:00:59 PM" [ref=f1e710]
+              - cell "-" [ref=f1e711]
+            - row [ref=f1e712] [cursor=pointer]:
+              - cell "WO-20260809-0026" [ref=f1e713]
+              - cell "E2E-WO-mslijnko" [ref=f1e714]
+              - cell "待派工" [ref=f1e715]
+              - cell "High" [ref=f1e717]
+              - cell "8/9/2026, 4:00:55 PM" [ref=f1e719]
+              - cell "-" [ref=f1e720]
+            - row [ref=f1e721] [cursor=pointer]:
+              - cell "WO-20260809-0025" [ref=f1e722]
+              - cell "E2E-WO-mslijgb4" [ref=f1e723]
+              - cell "待派工" [ref=f1e724]
+              - cell "High" [ref=f1e726]
+              - cell "8/9/2026, 4:00:45 PM" [ref=f1e728]
+              - cell "-" [ref=f1e729]
+        - generic [ref=f1e730]:
+          - generic [ref=f1e731]: 共 46 条
+          - generic [ref=f1e732]:
+            - button "上一页" [disabled]
+            - button "下一页" [ref=f1e733]

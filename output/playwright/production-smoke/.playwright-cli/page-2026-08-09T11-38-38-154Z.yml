@@ -1,0 +1,195 @@
+- generic [ref=e46]:
+  - complementary [ref=e47]:
+    - generic [ref=e48]:
+      - generic [ref=e49]: EquipSense
+      - button "收起侧边栏" [ref=e50]
+    - navigation [ref=e53]:
+      - link "仪表盘" [ref=e54] [cursor=pointer]:
+        - /url: /dashboard
+      - link "设备管理" [ref=e61] [cursor=pointer]:
+        - /url: /devices
+      - link "网关状态" [ref=e65] [cursor=pointer]:
+        - /url: /gateways
+      - link "告警中心" [ref=e72] [cursor=pointer]:
+        - /url: /alerts
+      - link "告警规则" [ref=e76] [cursor=pointer]:
+        - /url: /alert-rules
+      - link "工单管理" [ref=e81] [cursor=pointer]:
+        - /url: /work-orders
+      - link "待审批" [ref=e86] [cursor=pointer]:
+        - /url: /pending-approvals
+      - link "派工看板" [ref=e92] [cursor=pointer]:
+        - /url: /dispatch
+      - link "AI 分析" [ref=e99] [cursor=pointer]:
+        - /url: /analyses
+      - link "知识库" [ref=e109] [cursor=pointer]:
+        - /url: /knowledge
+      - link "FMEA 故障模式库" [ref=e113] [cursor=pointer]:
+        - /url: /fmea
+      - link "诊断评估" [ref=e117] [cursor=pointer]:
+        - /url: /evaluation
+      - link "审计日志" [ref=e123] [cursor=pointer]:
+        - /url: /audit-logs
+      - link "系统设置" [ref=e127] [cursor=pointer]:
+        - /url: /settings
+      - link "用户管理" [ref=e132] [cursor=pointer]:
+        - /url: /users
+      - link "租户管理" [ref=e146] [cursor=pointer]:
+        - /url: /admin/tenants
+    - button "通知 99+" [ref=e153]:
+      - generic [ref=e157]: 通知
+      - generic [ref=e158]: 99+
+  - generic [ref=e159]:
+    - banner [ref=e160]:
+      - generic [ref=e161]: EquipSense
+      - generic [ref=e163]:
+        - status "实时连接正常" [ref=e164]
+        - button [ref=e166]
+        - button "切换主题" [ref=e170]
+        - button "切换语言" [ref=e171]
+        - button "admin" [ref=e172]
+    - main [ref=e176]:
+      - generic [ref=e177]:
+        - heading "仪表盘" [level=1] [ref=e178]
+        - generic [ref=e180]:
+          - heading "全局统计" [level=3] [ref=e181]
+          - generic [ref=e182]:
+            - generic [ref=e188]:
+              - paragraph [ref=e189]: "6"
+              - paragraph [ref=e190]: 总租户
+            - generic [ref=e196]:
+              - paragraph [ref=e197]: "5"
+              - paragraph [ref=e198]: 活跃租户
+            - generic [ref=e204]:
+              - paragraph [ref=e205]: "3"
+              - paragraph [ref=e206]: 试用租户
+            - generic [ref=e221]:
+              - paragraph [ref=e222]: "1"
+              - paragraph [ref=e223]: 冻结租户
+            - generic [ref=e227]:
+              - paragraph [ref=e228]: "17"
+              - paragraph [ref=e229]: 总设备
+            - generic [ref=e236]:
+              - paragraph [ref=e237]: "11"
+              - paragraph [ref=e238]: 总用户
+        - generic [ref=e239]:
+          - generic [ref=e245] [cursor=pointer]:
+            - paragraph [ref=e246]: "0"
+            - paragraph [ref=e247]: 在线
+          - generic [ref=e253] [cursor=pointer]:
+            - paragraph [ref=e254]: "47"
+            - paragraph [ref=e255]: 活跃
+          - generic [ref=e262] [cursor=pointer]:
+            - paragraph [ref=e263]: "42"
+            - paragraph [ref=e264]: 待处理工单
+          - generic [ref=e270] [cursor=pointer]:
+            - paragraph [ref=e271]: 0%
+            - paragraph [ref=e272]: 设备可用率
+        - generic [ref=e274]:
+          - generic [ref=e275]:
+            - generic [ref=e276]:
+              - heading "设备综合效率 (OEE)" [level=3] [ref=e277]
+              - 'generic "availability: 瞬时在线设备比例（非真实计划运行时间） performance: 最近 50 条 air_flow 均值 / 标称产能 quality: 无 Critical 活跃告警设备占比（非真实良品率）" [ref=e278]': 近似估算
+            - paragraph [ref=e279]: OEE = 可用率 × 性能 × 质量
+          - generic [ref=e280]:
+            - generic [ref=e281]:
+              - paragraph [ref=e282]: 综合 OEE
+              - paragraph [ref=e283]: 0%
+            - generic [ref=e284]:
+              - paragraph [ref=e285]: 可用率
+              - paragraph [ref=e286]: 0%
+              - paragraph [ref=e288]: 0/17 在线
+            - generic [ref=e289]:
+              - paragraph [ref=e290]: 性能
+              - paragraph [ref=e291]: 99.5%
+              - paragraph [ref=e294]: 产能达标率
+            - generic [ref=e295]:
+              - paragraph [ref=e296]: 质量
+              - paragraph [ref=e297]: 100%
+              - paragraph [ref=e300]: 无严重故障占比
+        - generic [ref=e323]:
+          - generic [ref=e325]:
+            - heading "工单状态分布" [level=3] [ref=e326]
+            - generic [ref=e327]:
+              - generic [ref=e328]:
+                - generic [ref=e329]: 待派工
+                - generic [ref=e330]: "42"
+              - generic [ref=e331]:
+                - generic [ref=e332]: 已完成
+                - generic [ref=e333]: "2"
+              - generic [ref=e334]:
+                - generic [ref=e335]: 执行中
+                - generic [ref=e336]: "2"
+          - generic [ref=e338]:
+            - heading "最近告警" [level=3] [ref=e339]
+            - generic [ref=e340]:
+              - generic [ref=e341]:
+                - generic [ref=e342]:
+                  - generic [ref=e343]: 高
+                  - generic [ref=e344]:
+                    - paragraph [ref=e345]: f2978b5e… — temperature
+                    - paragraph [ref=e346]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e347]: "100"
+              - generic [ref=e348]:
+                - generic [ref=e349]:
+                  - generic [ref=e350]: 高
+                  - generic [ref=e351]:
+                    - paragraph [ref=e352]: f2978b5e… — temperature
+                    - paragraph [ref=e353]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e354]: "100"
+              - generic [ref=e355]:
+                - generic [ref=e356]:
+                  - generic [ref=e357]: 高
+                  - generic [ref=e358]:
+                    - paragraph [ref=e359]: f2978b5e… — temperature
+                    - paragraph [ref=e360]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e361]: "100"
+              - generic [ref=e362]:
+                - generic [ref=e363]:
+                  - generic [ref=e364]: 高
+                  - generic [ref=e365]:
+                    - paragraph [ref=e366]: f2978b5e… — temperature
+                    - paragraph [ref=e367]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e368]: "100"
+              - generic [ref=e369]:
+                - generic [ref=e370]:
+                  - generic [ref=e371]: 高
+                  - generic [ref=e372]:
+                    - paragraph [ref=e373]: f2978b5e… — temperature
+                    - paragraph [ref=e374]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e375]: "100"
+              - generic [ref=e376]:
+                - generic [ref=e377]:
+                  - generic [ref=e378]: 高
+                  - generic [ref=e379]:
+                    - paragraph [ref=e380]: f2978b5e… — temperature
+                    - paragraph [ref=e381]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e382]: "100"
+              - generic [ref=e383]:
+                - generic [ref=e384]:
+                  - generic [ref=e385]: 高
+                  - generic [ref=e386]:
+                    - paragraph [ref=e387]: f2978b5e… — temperature
+                    - paragraph [ref=e388]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e389]: "100"
+              - generic [ref=e390]:
+                - generic [ref=e391]:
+                  - generic [ref=e392]: 高
+                  - generic [ref=e393]:
+                    - paragraph [ref=e394]: f2978b5e… — temperature
+                    - paragraph [ref=e395]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e396]: "100"
+              - generic [ref=e397]:
+                - generic [ref=e398]:
+                  - generic [ref=e399]: 高
+                  - generic [ref=e400]:
+                    - paragraph [ref=e401]: f2978b5e… — temperature
+                    - paragraph [ref=e402]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e403]: "100"
+              - generic [ref=e404]:
+                - generic [ref=e405]:
+                  - generic [ref=e406]: 高
+                  - generic [ref=e407]:
+                    - paragraph [ref=e408]: f2978b5e… — temperature
+                    - paragraph [ref=e409]: 8/9/2026, 4:20:07 PM
+                - generic [ref=e410]: "100"

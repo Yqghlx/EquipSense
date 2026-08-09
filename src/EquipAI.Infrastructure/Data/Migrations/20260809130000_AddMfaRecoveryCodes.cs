@@ -1,3 +1,5 @@
+using EquipAI.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -7,6 +9,8 @@ namespace EquipAI.Infrastructure.Data.Migrations;
 /// <summary>
 /// 为用户增加 MFA 一次性恢复码摘要存储。
 /// </summary>
+[DbContext(typeof(AppDbContext))]
+[Migration("20260809130000_AddMfaRecoveryCodes")]
 public partial class AddMfaRecoveryCodes : Migration
 {
     /// <inheritdoc />

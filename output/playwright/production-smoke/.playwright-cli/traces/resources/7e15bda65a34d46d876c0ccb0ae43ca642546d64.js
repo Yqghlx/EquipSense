@@ -1,0 +1,14 @@
+import { t as useRenderElement } from "/node_modules/.vite/deps/useRenderElement-BXRg5SAf.js?v=1d2f6f90";
+//#region node_modules/@base-ui/react/esm/use-render/useRender.js
+/**
+* Renders a Base UI element.
+*
+* @public
+*/
+function useRender(params) {
+	return useRenderElement(params.defaultTagName ?? "div", params, params);
+}
+//#endregion
+export { useRender };
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiQGJhc2UtdWlfcmVhY3RfdXNlLXJlbmRlci5qcyIsIm5hbWVzIjpbXSwic291cmNlcyI6WyIuLi8uLi9AYmFzZS11aS9yZWFjdC9lc20vdXNlLXJlbmRlci91c2VSZW5kZXIuanMiXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgdXNlUmVuZGVyRWxlbWVudCB9IGZyb20gXCIuLi9pbnRlcm5hbHMvdXNlUmVuZGVyRWxlbWVudC5qc1wiO1xuLyoqXG4gKiBSZW5kZXJzIGEgQmFzZSBVSSBlbGVtZW50LlxuICpcbiAqIEBwdWJsaWNcbiAqL1xuZXhwb3J0IGZ1bmN0aW9uIHVzZVJlbmRlcihwYXJhbXMpIHtcbiAgcmV0dXJuIHVzZVJlbmRlckVsZW1lbnQocGFyYW1zLmRlZmF1bHRUYWdOYW1lID8/ICdkaXYnLCBwYXJhbXMsIHBhcmFtcyk7XG59Il0sIm1hcHBpbmdzIjoiOzs7Ozs7O0FBTUEsU0FBZ0IsVUFBVSxRQUFRO0NBQ2hDLE9BQU8saUJBQWlCLE9BQU8sa0JBQWtCLE9BQU8sUUFBUSxNQUFNO0FBQ3hFIiwieF9nb29nbGVfaWdub3JlTGlzdCI6WzBdfQ==

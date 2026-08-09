@@ -1,0 +1,36 @@
+const useState = __vite__cjsImport0_react["useState"]; const useEffect = __vite__cjsImport0_react["useEffect"]; const useCallback = __vite__cjsImport0_react["useCallback"];import __vite__cjsImport0_react from "/node_modules/.vite/deps/react.js?v=1d2f6f90";
+/**
+* 网络状态 Hook
+*
+* 监听浏览器的 online/offline 事件，提供当前网络状态。
+*/
+export function useOfflineStatus() {
+	const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+	const [lastChangedAt, setLastChangedAt] = useState(0);
+	const handleOnline = useCallback(() => {
+		setIsOnline(true);
+		setLastChangedAt(Date.now());
+	}, []);
+	const handleOffline = useCallback(() => {
+		setIsOnline(false);
+		setLastChangedAt(Date.now());
+	}, []);
+	useEffect(() => {
+		window.addEventListener("online", handleOnline);
+		window.addEventListener("offline", handleOffline);
+		return () => {
+			window.removeEventListener("online", handleOnline);
+			window.removeEventListener("offline", handleOffline);
+		};
+	}, [handleOnline, handleOffline]);
+	return {
+		/** 当前是否在线 */
+		isOnline,
+		/** 当前是否离线 */
+		isOffline: !isOnline,
+		/** 最近一次网络状态变化的时间戳 */
+		lastChangedAt
+	};
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxVQUFVLFdBQVcsbUJBQW1COzs7Ozs7QUFPakQsT0FBTyxTQUFTLG1CQUFtQjtDQUNqQyxNQUFNLENBQUMsVUFBVSxlQUFlLFNBQzlCLE9BQU8sY0FBYyxjQUFjLFVBQVUsU0FBUyxJQUN4RDtDQUNBLE1BQU0sQ0FBQyxlQUFlLG9CQUFvQixTQUFpQixDQUFDO0NBRTVELE1BQU0sZUFBZSxrQkFBa0I7RUFDckMsWUFBWSxJQUFJO0VBQ2hCLGlCQUFpQixLQUFLLElBQUksQ0FBQztDQUM3QixHQUFHLENBQUMsQ0FBQztDQUVMLE1BQU0sZ0JBQWdCLGtCQUFrQjtFQUN0QyxZQUFZLEtBQUs7RUFDakIsaUJBQWlCLEtBQUssSUFBSSxDQUFDO0NBQzdCLEdBQUcsQ0FBQyxDQUFDO0NBRUwsZ0JBQWdCO0VBQ2QsT0FBTyxpQkFBaUIsVUFBVSxZQUFZO0VBQzlDLE9BQU8saUJBQWlCLFdBQVcsYUFBYTtFQUVoRCxhQUFhO0dBQ1gsT0FBTyxvQkFBb0IsVUFBVSxZQUFZO0dBQ2pELE9BQU8sb0JBQW9CLFdBQVcsYUFBYTtFQUNyRDtDQUNGLEdBQUcsQ0FBQyxjQUFjLGFBQWEsQ0FBQztDQUVoQyxPQUFPOztFQUVMOztFQUVBLFdBQVcsQ0FBQzs7RUFFWjtDQUNGO0FBQ0YiLCJuYW1lcyI6W10sInNvdXJjZXMiOlsidXNlT2ZmbGluZVN0YXR1cy50cyJdLCJ2ZXJzaW9uIjozLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgeyB1c2VTdGF0ZSwgdXNlRWZmZWN0LCB1c2VDYWxsYmFjayB9IGZyb20gJ3JlYWN0JztcblxuLyoqXG4gKiDnvZHnu5znirbmgIEgSG9va1xuICpcbiAqIOebkeWQrOa1j+iniOWZqOeahCBvbmxpbmUvb2ZmbGluZSDkuovku7bvvIzmj5DkvpvlvZPliY3nvZHnu5znirbmgIHjgIJcbiAqL1xuZXhwb3J0IGZ1bmN0aW9uIHVzZU9mZmxpbmVTdGF0dXMoKSB7XG4gIGNvbnN0IFtpc09ubGluZSwgc2V0SXNPbmxpbmVdID0gdXNlU3RhdGU8Ym9vbGVhbj4oXG4gICAgdHlwZW9mIG5hdmlnYXRvciAhPT0gJ3VuZGVmaW5lZCcgPyBuYXZpZ2F0b3Iub25MaW5lIDogdHJ1ZSxcbiAgKTtcbiAgY29uc3QgW2xhc3RDaGFuZ2VkQXQsIHNldExhc3RDaGFuZ2VkQXRdID0gdXNlU3RhdGU8bnVtYmVyPigwKTtcblxuICBjb25zdCBoYW5kbGVPbmxpbmUgPSB1c2VDYWxsYmFjaygoKSA9PiB7XG4gICAgc2V0SXNPbmxpbmUodHJ1ZSk7XG4gICAgc2V0TGFzdENoYW5nZWRBdChEYXRlLm5vdygpKTtcbiAgfSwgW10pO1xuXG4gIGNvbnN0IGhhbmRsZU9mZmxpbmUgPSB1c2VDYWxsYmFjaygoKSA9PiB7XG4gICAgc2V0SXNPbmxpbmUoZmFsc2UpO1xuICAgIHNldExhc3RDaGFuZ2VkQXQoRGF0ZS5ub3coKSk7XG4gIH0sIFtdKTtcblxuICB1c2VFZmZlY3QoKCkgPT4ge1xuICAgIHdpbmRvdy5hZGRFdmVudExpc3RlbmVyKCdvbmxpbmUnLCBoYW5kbGVPbmxpbmUpO1xuICAgIHdpbmRvdy5hZGRFdmVudExpc3RlbmVyKCdvZmZsaW5lJywgaGFuZGxlT2ZmbGluZSk7XG5cbiAgICByZXR1cm4gKCkgPT4ge1xuICAgICAgd2luZG93LnJlbW92ZUV2ZW50TGlzdGVuZXIoJ29ubGluZScsIGhhbmRsZU9ubGluZSk7XG4gICAgICB3aW5kb3cucmVtb3ZlRXZlbnRMaXN0ZW5lcignb2ZmbGluZScsIGhhbmRsZU9mZmxpbmUpO1xuICAgIH07XG4gIH0sIFtoYW5kbGVPbmxpbmUsIGhhbmRsZU9mZmxpbmVdKTtcblxuICByZXR1cm4ge1xuICAgIC8qKiDlvZPliY3mmK/lkKblnKjnur8gKi9cbiAgICBpc09ubGluZSxcbiAgICAvKiog5b2T5YmN5piv5ZCm56a757q/ICovXG4gICAgaXNPZmZsaW5lOiAhaXNPbmxpbmUsXG4gICAgLyoqIOacgOi/keS4gOasoee9kee7nOeKtuaAgeWPmOWMlueahOaXtumXtOaIsyAqL1xuICAgIGxhc3RDaGFuZ2VkQXQsXG4gIH07XG59XG4iXX0=

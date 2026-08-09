@@ -329,33 +329,451 @@ test_backup_rejects_requested_redis_failure() {
   assert_contains "$output" "Redis BGSAVE 失败"
 }
 
+create_restore_fixtures() {
+  local case_dir="$1"
+  local attachment_root="$case_dir/attachment-source"
+  mkdir -p "$attachment_root"
+  : > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  printf '%s\n' '恢复测试 SQL' | gzip > "$case_dir/database.sql.gz"
+  printf '%s\n' '恢复测试附件' > "$attachment_root/report.txt"
+  tar -C "$attachment_root" -czf "$case_dir/attachments.tar.gz" .
+  chmod 600 "$case_dir/database.sql.gz" "$case_dir/attachments.tar.gz"
+}
+
+test_restore_dry_run_does_not_mutate_services() {
+  local case_dir="$TEST_ROOT/restore-dry-run"
+  mkdir -p "$case_dir/bin"
+  create_restore_fixtures "$case_dir"
+
+  # dry-run 不应调用 Docker；若调用则立即失败并留下可检查的标记。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "docker-called\n" > "$RESTORE_DOCKER_CALLED"' \
+    'exit 99' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$case_dir/docker-called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments.tar.gz" 2>&1)" \
+    || fail "合法备份的 dry-run 应成功"
+
+  assert_contains "$output" "dry-run"
+  [[ ! -f "$case_dir/docker-called" ]] || fail "dry-run 不应调用 Docker 或修改服务"
+}
+
+test_restore_confirm_cleans_attachments_without_running_backend() {
+  local case_dir="$TEST_ROOT/restore-confirm"
+  local docker_log="$case_dir/docker.log"
+  mkdir -p "$case_dir/bin"
+  create_restore_fixtures "$case_dir"
+  : > "$case_dir/compose.yml"
+  : > "$case_dir/compose.prod.yml"
+  printf 'REDIS0009' > "$case_dir/redis.rdb"
+  chmod 600 "$case_dir/redis.rdb"
+
+  # 模拟所有 Compose 动作；PostgreSQL exec 同时消费恢复输入并在连通性检查时返回 1。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$RESTORE_DOCKER_LOG"' \
+    'if [[ "${1:-}" = "inspect" ]]; then printf "true\\n"; exit 0; fi' \
+    '[[ "${1:-}" = "compose" ]] || exit 1' \
+    'if [[ "$*" == *" ps -q postgres"* ]]; then printf "fake-postgres\\n"; exit 0; fi' \
+    'if [[ "$*" == *" exec -T postgres "* ]]; then cat >/dev/null; printf "1\\n"; exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/curl"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/curl"
+
+  local output
+  if ! output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_LOG="$docker_log" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --compose-file "$case_dir/compose.yml" \
+      --compose-file "$case_dir/compose.prod.yml" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments.tar.gz" \
+      --redis-backup "$case_dir/redis.rdb" \
+      --confirm 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "合法备份的 confirm 恢复应成功完成模拟流程"
+  fi
+
+  assert_contains "$output" "恢复完成"
+  grep -q 'compose.yml.*compose.prod.yml' "$docker_log" \
+    || fail "确认恢复应同时传递基础 Compose 和生产覆盖文件"
+  grep -q 'DROP DATABASE' "$docker_log" \
+    || fail "恢复 PostgreSQL 前应重建目标数据库以清理 TimescaleDB 内部 schema"
+  grep -q 'run --rm --no-deps --entrypoint /bin/sh backend' "$docker_log" \
+    || fail "后端停止时应使用一次性任务容器清理共享附件卷"
+  ! grep -q 'exec -T backend.*mkdir' "$docker_log" \
+    || fail "后端停止时不应使用 exec 清理附件目录"
+  grep -q 'run --rm --no-deps --user root --entrypoint /bin/sh redis' "$docker_log" \
+    || fail "Redis 恢复应使用 root 一次性容器修正 RDB 权限并清理旧 AOF"
+  grep -q 'appendonly' "$docker_log" \
+    || fail "Redis 恢复应清理旧 AOF，确保 dump.rdb 会被加载"
+}
+
+test_restore_rejects_corrupted_archive() {
+  local case_dir="$TEST_ROOT/restore-corrupt"
+  mkdir -p "$case_dir"
+  : > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  printf '%s\n' '不是 gzip' > "$case_dir/database.sql.gz"
+  printf '%s\n' '占位附件' > "$case_dir/attachments.tar.gz"
+  chmod 600 "$case_dir/database.sql.gz" "$case_dir/attachments.tar.gz"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/restore.sh" \
+    --env-file "$case_dir/.env" \
+    --db-backup "$case_dir/database.sql.gz" \
+    --attachments-backup "$case_dir/attachments.tar.gz" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "损坏的 gzip 备份不应通过恢复前校验"
+  assert_contains "$output" "gzip"
+}
+
+test_restore_rejects_unsafe_attachment_archive() {
+  local case_dir="$TEST_ROOT/restore-unsafe-attachment"
+  local attachment_root="$case_dir/attachment-source"
+  mkdir -p "$attachment_root"
+  : > "$case_dir/.env"
+  : > "$case_dir/compose.yml"
+  chmod 600 "$case_dir/.env"
+  printf '%s\n' '恢复测试 SQL' | gzip > "$case_dir/database.sql.gz"
+  ln -s /tmp "$attachment_root/outside-link"
+  tar -C "$attachment_root" -czf "$case_dir/attachments.tar.gz" .
+  chmod 600 "$case_dir/database.sql.gz" "$case_dir/attachments.tar.gz"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/restore.sh" \
+    --env-file "$case_dir/.env" \
+    --compose-file "$case_dir/compose.yml" \
+    --db-backup "$case_dir/database.sql.gz" \
+    --attachments-backup "$case_dir/attachments.tar.gz" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "包含符号链接的附件归档不应通过恢复前校验"
+  assert_contains "$output" "不允许"
+}
+
+test_restore_rejects_corrupted_redis_backup() {
+  local case_dir="$TEST_ROOT/restore-corrupt-redis"
+  mkdir -p "$case_dir"
+  create_restore_fixtures "$case_dir"
+  printf '%s\n' '不是 Redis RDB' > "$case_dir/redis.rdb"
+  chmod 600 "$case_dir/redis.rdb"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/restore.sh" \
+    --env-file "$case_dir/.env" \
+    --db-backup "$case_dir/database.sql.gz" \
+    --attachments-backup "$case_dir/attachments.tar.gz" \
+    --redis-backup "$case_dir/redis.rdb" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "损坏的 Redis RDB 备份不应通过恢复前校验"
+  assert_contains "$output" "RDB"
+}
+
+create_deploy_fixtures() {
+  local case_dir="$1"
+  mkdir -p "$case_dir/bin"
+  : > "$case_dir/.env"
+  : > "$case_dir/docker-compose.yml"
+  : > "$case_dir/docker-compose.prod.yml"
+  chmod 600 "$case_dir/.env"
+}
+
+create_deploy_runtime_doubles() {
+  local case_dir="$1"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/validate-env.sh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s|%s\\n" "${TAG:-unset}" "$*" >> "$DEPLOY_DOCKER_LOG"' \
+    'if [[ "${1:-}" = "login" ]]; then cat >/dev/null; exit 0; fi' \
+    'if [[ "${1:-}" = "inspect" ]]; then' \
+    '  counter=0' \
+    '  if [[ -f "$DEPLOY_INSPECT_COUNTER" ]]; then counter="$(cat "$DEPLOY_INSPECT_COUNTER")"; fi' \
+    '  counter=$((counter + 1))' \
+    '  printf "%s\\n" "$counter" > "$DEPLOY_INSPECT_COUNTER"' \
+    '  status="$(printf "%s" "${DEPLOY_FRONTEND_STATUSES:-healthy}" | cut -d, -f"$counter")"' \
+    '  [[ -n "$status" ]] || status="missing"' \
+    '  printf "%s\\n" "$status"' \
+    '  exit 0' \
+    'fi' \
+    '[[ "${1:-}" = "compose" ]] || exit 1' \
+    'if [[ "$*" == *" ps -q frontend"* ]]; then printf "fake-frontend\\n"; exit 0; fi' \
+    'if [[ -n "${DEPLOY_FAIL_FINAL_PS:-}" && "$*" == *" ps backend frontend"* ]]; then exit 43; fi' \
+    'if [[ -n "${DEPLOY_FAIL_TARGET_UP:-}" && "${TAG:-}" = "$DEPLOY_FAIL_TARGET_UP" && "$*" == *" up "* ]]; then exit 42; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$DEPLOY_CURL_LOG"' \
+    'counter=0' \
+    'if [[ -f "$DEPLOY_CURL_COUNTER" ]]; then counter="$(cat "$DEPLOY_CURL_COUNTER")"; fi' \
+    'counter=$((counter + 1))' \
+    'printf "%s\\n" "$counter" > "$DEPLOY_CURL_COUNTER"' \
+    'code="$(printf "%s" "${DEPLOY_CURL_CODES:-200}" | cut -d, -f"$counter")"' \
+    '[[ -n "$code" ]] || code="000"' \
+    'printf "%s" "$code"' > "$case_dir/bin/curl"
+  chmod +x "$case_dir/validate-env.sh" "$case_dir/bin/docker" "$case_dir/bin/curl"
+}
+
+run_deploy_fixture() {
+  local case_dir="$1"
+  local target_tag="$2"
+  PATH="$case_dir/bin:$PATH" \
+    COMPOSE_DIR="$case_dir" \
+    DEPLOY_DOCKER_LOG="$case_dir/docker.log" \
+    DEPLOY_INSPECT_COUNTER="$case_dir/inspect-counter" \
+    DEPLOY_CURL_COUNTER="$case_dir/curl-counter" \
+    DEPLOY_CURL_LOG="$case_dir/curl.log" \
+    DEPLOY_MAX_ATTEMPTS=1 \
+    DEPLOY_INITIAL_DELAY_SECONDS=0 \
+    DEPLOY_ROLLBACK_INITIAL_DELAY_SECONDS=0 \
+    DEPLOY_POLL_INTERVAL_SECONDS=0 \
+    GHCR_PULL_USER="test-user" \
+    GHCR_PULL_TOKEN="test-token" \
+    bash "$PROJECT_ROOT/docker/deploy-production.sh" "$target_tag"
+}
+
+test_deploy_preflight_failure_does_not_mutate_services() {
+  local case_dir="$TEST_ROOT/deploy-preflight"
+  local docker_log="$case_dir/docker.log"
+  local validate_marker="$case_dir/validate-called"
+  create_deploy_fixtures "$case_dir"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$DEPLOY_VALIDATE_CALLED"' \
+    'exit 1' > "$case_dir/validate-env.sh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\\n" "$*" >> "$DEPLOY_DOCKER_LOG"' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/validate-env.sh" "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" \
+    COMPOSE_DIR="$case_dir" \
+    DEPLOY_DOCKER_LOG="$docker_log" \
+    DEPLOY_VALIDATE_CALLED="$validate_marker" \
+    GHCR_PULL_USER="test-user" \
+    GHCR_PULL_TOKEN="test-token" \
+    bash "$PROJECT_ROOT/docker/deploy-production.sh" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产配置预检失败时部署不应成功"
+  [[ -f "$validate_marker" ]] || fail "部署必须调用生产环境验证器"
+  [[ ! -s "$docker_log" ]] || fail "生产配置预检失败时不应调用 Docker"
+  [[ "$output" != *"部署成功"* ]] || fail "预检失败时不应报告部署成功"
+}
+
+test_deploy_success_updates_version_atomically() {
+  local case_dir="$TEST_ROOT/deploy-success"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  if ! output="$(DEPLOY_CURL_CODES=200 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "目标版本健康时生产部署应成功"
+  fi
+
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "2.0.0" ]] \
+    || fail "成功部署后应原子记录目标版本"
+  assert_contains "$output" "部署成功"
+  grep -q '^2.0.0|.* pull backend frontend' "$case_dir/docker.log" \
+    || fail "部署应使用目标 tag 拉取 backend/frontend"
+  grep -q '^2.0.0|.* up .*--pull never.*backend frontend' "$case_dir/docker.log" \
+    || fail "目标镜像已拉取后，容器重建不应再次依赖镜像仓库"
+  grep -q -- '--max-time 5' "$case_dir/curl.log" \
+    || fail "健康探测必须设置请求超时，避免部署无限挂起"
+  ! grep -q '^1.0.0|.*--pull never' "$case_dir/docker.log" \
+    || fail "目标版本健康时不应回滚"
+}
+
+test_deploy_final_status_display_failure_does_not_reverse_success() {
+  local case_dir="$TEST_ROOT/deploy-final-status-warning"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  if ! output="$(DEPLOY_FAIL_FINAL_PS=1 DEPLOY_CURL_CODES=200 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "健康验证和版本记录均成功后，状态展示失败不应把部署误报为失败"
+  fi
+
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "2.0.0" ]] \
+    || fail "状态展示失败不应撤销已验证的版本记录"
+  assert_contains "$output" "无法展示容器状态"
+}
+
+test_deploy_health_failure_rolls_back_and_verifies_health() {
+  local case_dir="$TEST_ROOT/deploy-health-rollback"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=503,200 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "目标版本健康失败后部署必须返回非零"
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "1.0.0" ]] \
+    || fail "回滚后版本记录必须保持旧版本"
+  assert_contains "$output" "回滚验证通过"
+  grep -q '^1.0.0|.* up .*--pull never.*backend frontend' "$case_dir/docker.log" \
+    || fail "健康失败后应使用本机旧镜像回滚 backend/frontend"
+  [[ "$(cat "$case_dir/curl-counter")" = "2" ]] \
+    || fail "目标失败后必须再次探测回滚版本健康"
+}
+
+test_deploy_frontend_health_failure_also_rolls_back() {
+  local case_dir="$TEST_ROOT/deploy-frontend-health-rollback"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=200,200 DEPLOY_FRONTEND_STATUSES=unhealthy,healthy \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "前端不健康时部署必须失败并回滚"
+  assert_contains "$output" "回滚验证通过"
+  grep -q '^1.0.0|.* up .*--pull never.*backend frontend' "$case_dir/docker.log" \
+    || fail "前端健康失败后也必须回滚 backend/frontend"
+  [[ "$(cat "$case_dir/inspect-counter")" = "2" ]] \
+    || fail "目标和回滚版本都必须验证前端容器健康"
+}
+
+test_deploy_same_healthy_tag_is_idempotent() {
+  local case_dir="$TEST_ROOT/deploy-idempotent"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '2.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  if ! output="$(DEPLOY_CURL_CODES=200 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "同版本且健康时部署应幂等成功"
+  fi
+
+  assert_contains "$output" "无需重复部署"
+  ! grep -Eq '^2\.0\.0\|(login|.* (pull|up) )' "$case_dir/docker.log" \
+    || fail "同版本且健康时不应登录仓库、拉取镜像或重建服务"
+}
+
+test_deploy_compose_failure_rolls_back() {
+  local case_dir="$TEST_ROOT/deploy-command-rollback"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_FAIL_TARGET_UP=2.0.0 DEPLOY_CURL_CODES=200 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "目标 compose up 失败后部署必须返回非零"
+  assert_contains "$output" "回滚验证通过"
+  grep -q '^1.0.0|.* up .*--pull never.*backend frontend' "$case_dir/docker.log" \
+    || fail "compose up 中途失败也必须进入统一回滚"
+}
+
+test_deploy_without_history_never_rolls_back_to_unknown_tag() {
+  local case_dir="$TEST_ROOT/deploy-no-history"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=503 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "首次部署失败且没有历史版本时必须返回非零"
+  assert_contains "$output" "没有可用的历史版本"
+  ! grep -q '^unknown|' "$case_dir/docker.log" \
+    || fail "没有版本记录时绝不能把 unknown 当作真实镜像 tag"
+  [[ "$(cat "$case_dir/curl-counter")" = "1" ]] \
+    || fail "没有历史版本时不应执行伪回滚健康探测"
+}
+
+test_deploy_rollback_health_failure_is_critical() {
+  local case_dir="$TEST_ROOT/deploy-rollback-critical"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=503,503 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "目标和回滚版本都不健康时部署必须失败"
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "1.0.0" ]] \
+    || fail "回滚失败时不得更新版本记录"
+  assert_contains "$output" "严重"
+  assert_contains "$output" "回滚健康检查失败"
+}
+
 test_release_waits_for_quality_gates() {
   local release_block
   release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$release_block" "needs: [backend, frontend]"
 
   local deploy_block
-  deploy_block="$(sed -n '/^  deploy:/,$p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  assert_contains "$deploy_block" "http://localhost:8080/health/ready"
-  assert_contains "$deploy_block" "docker inspect"
-  assert_contains "$deploy_block" '!= "unknown"'
+  deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$deploy_block" "needs: [release]"
 }
 
 test_deploy_has_fail_closed_preflight() {
   local deploy_block
-  deploy_block="$(sed -n '/^  deploy:/,$p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  assert_contains "$deploy_block" 'COMPOSE="docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml"'
-  assert_contains "$deploy_block" 'bash ./validate-env.sh .env --check-runtime-files'
-  assert_contains "$deploy_block" '$COMPOSE config --quiet'
-  assert_contains "$deploy_block" '${GHCR_PULL_TOKEN:-}'
-  assert_contains "$deploy_block" '${GHCR_PULL_USER:-}'
-
-  local preflight_line
-  local login_line
-  preflight_line="$(printf '%s\n' "$deploy_block" | grep -n 'bash ./validate-env.sh .env --check-runtime-files' | cut -d: -f1 | head -n1)"
-  login_line="$(printf '%s\n' "$deploy_block" | grep -n 'docker login ghcr.io' | cut -d: -f1 | head -n1)"
-  [[ -n "$preflight_line" && -n "$login_line" && "$preflight_line" -lt "$login_line" ]] \
-    || fail "部署前置校验必须发生在 GHCR 登录和拉取镜像之前"
+  deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$deploy_block" 'test -f ./deploy-production.sh'
+  assert_contains "$deploy_block" 'bash ./deploy-production.sh "$TARGET_VERSION"'
+  [[ "$deploy_block" != *'docker compose --env-file .env'* ]] \
+    || fail "CI 不应再维护未经行为测试的内联部署副本"
 }
 
 test_bluegreen_router_does_not_cross_color_dependency() {
@@ -441,6 +859,24 @@ case "${1:-all}" in
     test_backup_rejects_missing_remote_target
     test_backup_rejects_requested_redis_failure
     ;;
+  restore)
+    test_restore_dry_run_does_not_mutate_services
+    test_restore_confirm_cleans_attachments_without_running_backend
+    test_restore_rejects_corrupted_archive
+    test_restore_rejects_unsafe_attachment_archive
+    test_restore_rejects_corrupted_redis_backup
+    ;;
+  deploy)
+    test_deploy_preflight_failure_does_not_mutate_services
+    test_deploy_success_updates_version_atomically
+    test_deploy_final_status_display_failure_does_not_reverse_success
+    test_deploy_health_failure_rolls_back_and_verifies_health
+    test_deploy_frontend_health_failure_also_rolls_back
+    test_deploy_same_healthy_tag_is_idempotent
+    test_deploy_compose_failure_rolls_back
+    test_deploy_without_history_never_rolls_back_to_unknown_tag
+    test_deploy_rollback_health_failure_is_critical
+    ;;
   ci)
     test_release_waits_for_quality_gates
     test_deploy_has_fail_closed_preflight
@@ -453,6 +889,20 @@ case "${1:-all}" in
     test_backup_includes_attachments
     test_backup_rejects_missing_remote_target
     test_backup_rejects_requested_redis_failure
+    test_restore_dry_run_does_not_mutate_services
+    test_restore_confirm_cleans_attachments_without_running_backend
+    test_restore_rejects_corrupted_archive
+    test_restore_rejects_unsafe_attachment_archive
+    test_restore_rejects_corrupted_redis_backup
+    test_deploy_preflight_failure_does_not_mutate_services
+    test_deploy_success_updates_version_atomically
+    test_deploy_final_status_display_failure_does_not_reverse_success
+    test_deploy_health_failure_rolls_back_and_verifies_health
+    test_deploy_frontend_health_failure_also_rolls_back
+    test_deploy_same_healthy_tag_is_idempotent
+    test_deploy_compose_failure_rolls_back
+    test_deploy_without_history_never_rolls_back_to_unknown_tag
+    test_deploy_rollback_health_failure_is_critical
     test_release_waits_for_quality_gates
     test_deploy_has_fail_closed_preflight
     test_bluegreen_router_does_not_cross_color_dependency
@@ -462,7 +912,7 @@ case "${1:-all}" in
     test_development_internal_ports_bind_loopback_by_default
     ;;
   *)
-    fail "用法：$0 [setup|backup|ci|all]"
+    fail "用法：$0 [setup|backup|restore|deploy|ci|all]"
     ;;
 esac
 echo "生产脚本测试通过"

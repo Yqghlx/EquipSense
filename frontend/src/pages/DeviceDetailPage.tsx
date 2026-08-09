@@ -18,7 +18,7 @@ import { TrendChart } from '../components/charts/TrendChart';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
 import { DataQualityOverviewCard } from '../components/dataquality/DataQualityOverview';
 import { useDevice, useUpdateDevice, useRefreshHealthScore } from '../hooks/useDevices';
-import { useTelemetry, type TelemetryDataPoint } from '../hooks/useTelemetry';
+import { useRecentTelemetry, type TelemetryDataPoint } from '../hooks/useTelemetry';
 import { useAlerts } from '../hooks/useAlerts';
 import {
   useGatewayDevices,
@@ -38,15 +38,14 @@ const protocolMeta: Record<string, { label: string; icon: React.ReactNode; color
   'modbus-rtu': { label: 'Modbus RTU', icon: <Radio className="h-4 w-4" />, color: 'bg-orange-500/10 text-orange-600' },
 };
 
-/** 根据时间范围标识计算起始时间的 ISO 字符串 */
-function getTimeRangeStart(range: string): string {
-  const now = new Date();
+/** 根据时间范围标识返回滚动窗口长度，避免把动态时间戳放进查询键造成请求风暴。 */
+function getTimeRangeDurationMilliseconds(range: string): number {
   switch (range) {
-    case '1h': return new Date(now.getTime() - 3600000).toISOString();
-    case '6h': return new Date(now.getTime() - 21600000).toISOString();
-    case '24h': return new Date(now.getTime() - 86400000).toISOString();
-    case '7d': return new Date(now.getTime() - 604800000).toISOString();
-    default: return new Date(now.getTime() - 3600000).toISOString();
+    case '1h': return 3_600_000;
+    case '6h': return 21_600_000;
+    case '24h': return 86_400_000;
+    case '7d': return 604_800_000;
+    default: return 3_600_000;
   }
 }
 
@@ -59,11 +58,10 @@ export default function DeviceDetailPage() {
 
   const { data: device, isLoading } = useDevice(id ?? '');
   const refreshHealth = useRefreshHealthScore();
-  const { data: telemetry } = useTelemetry(
+  const { data: telemetry } = useRecentTelemetry(
     id ?? '',
     selectedMetric,
-    getTimeRangeStart(timeRange),
-    new Date().toISOString(),
+    getTimeRangeDurationMilliseconds(timeRange),
   );
   const { data: alertsData } = useAlerts({ page: 1, pageSize: 20 }, { deviceId: id });
 

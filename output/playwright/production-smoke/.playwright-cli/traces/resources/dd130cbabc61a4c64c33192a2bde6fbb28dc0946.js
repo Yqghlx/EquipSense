@@ -1,0 +1,35 @@
+import { clsx } from "/node_modules/.vite/deps/clsx.js?v=1d2f6f90";
+import { twMerge } from "/node_modules/.vite/deps/tailwind-merge.js?v=1d2f6f90";
+export function cn(...inputs) {
+	return twMerge(clsx(inputs));
+}
+/** 安全格式化日期字符串，undefined/null 时返回占位符 */
+export function formatDate(dateStr) {
+	if (!dateStr) return "—";
+	const d = new Date(dateStr);
+	return isNaN(d.getTime()) ? "—" : d.toLocaleString();
+}
+/**
+* 触发浏览器下载二进制数据
+*
+* 封装 createObjectURL → createElement('a') → click → revoke 的样板流程，
+* 统一各导出 hook（设备/知识/工单/审计/报表 CSV 下载）的下载实现。
+*
+* @param data 二进制数据（通常是 axios responseType:'blob' 的 response.data）
+* @param filename 下载文件名（含扩展名）
+* @param mimeType MIME 类型，默认 text/csv；后端响应头已带正确类型时可不传
+*/
+export function downloadBlob(data, filename, mimeType = "text/csv;charset=utf-8") {
+	const blob = data instanceof Blob ? data : new Blob([data], { type: mimeType });
+	const url = URL.createObjectURL(blob);
+	const link = document.createElement("a");
+	link.href = url;
+	link.download = filename;
+	// appendChild + removeChild：Firefox 旧版要求链接在 DOM 中才会触发下载，现代浏览器可省略
+	document.body.appendChild(link);
+	link.click();
+	document.body.removeChild(link);
+	URL.revokeObjectURL(url);
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxZQUE2QjtBQUN0QyxTQUFTLGVBQWU7QUFFeEIsT0FBTyxTQUFTLEdBQUcsR0FBRyxRQUFzQjtDQUMxQyxPQUFPLFFBQVEsS0FBSyxNQUFNLENBQUM7QUFDN0I7O0FBR0EsT0FBTyxTQUFTLFdBQVcsU0FBaUM7Q0FDMUQsSUFBSSxDQUFDLFNBQVMsT0FBTztDQUNyQixNQUFNLElBQUksSUFBSSxLQUFLLE9BQU87Q0FDMUIsT0FBTyxNQUFNLEVBQUUsUUFBUSxDQUFDLElBQUksTUFBTSxFQUFFLGVBQWU7QUFDckQ7Ozs7Ozs7Ozs7O0FBWUEsT0FBTyxTQUFTLGFBQWEsTUFBZ0IsVUFBa0IsV0FBVywwQkFBZ0M7Q0FDeEcsTUFBTSxPQUFPLGdCQUFnQixPQUFPLE9BQU8sSUFBSSxLQUFLLENBQUMsSUFBSSxHQUFHLEVBQUUsTUFBTSxTQUFTLENBQUM7Q0FDOUUsTUFBTSxNQUFNLElBQUksZ0JBQWdCLElBQUk7Q0FDcEMsTUFBTSxPQUFPLFNBQVMsY0FBYyxHQUFHO0NBQ3ZDLEtBQUssT0FBTztDQUNaLEtBQUssV0FBVzs7Q0FFaEIsU0FBUyxLQUFLLFlBQVksSUFBSTtDQUM5QixLQUFLLE1BQU07Q0FDWCxTQUFTLEtBQUssWUFBWSxJQUFJO0NBQzlCLElBQUksZ0JBQWdCLEdBQUc7QUFDekIiLCJuYW1lcyI6W10sInNvdXJjZXMiOlsidXRpbHMudHMiXSwidmVyc2lvbiI6Mywic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgY2xzeCwgdHlwZSBDbGFzc1ZhbHVlIH0gZnJvbSBcImNsc3hcIlxuaW1wb3J0IHsgdHdNZXJnZSB9IGZyb20gXCJ0YWlsd2luZC1tZXJnZVwiXG5cbmV4cG9ydCBmdW5jdGlvbiBjbiguLi5pbnB1dHM6IENsYXNzVmFsdWVbXSkge1xuICByZXR1cm4gdHdNZXJnZShjbHN4KGlucHV0cykpXG59XG5cbi8qKiDlronlhajmoLzlvI/ljJbml6XmnJ/lrZfnrKbkuLLvvIx1bmRlZmluZWQvbnVsbCDml7bov5Tlm57ljaDkvY3nrKYgKi9cbmV4cG9ydCBmdW5jdGlvbiBmb3JtYXREYXRlKGRhdGVTdHI/OiBzdHJpbmcgfCBudWxsKTogc3RyaW5nIHtcbiAgaWYgKCFkYXRlU3RyKSByZXR1cm4gJ+KAlCc7XG4gIGNvbnN0IGQgPSBuZXcgRGF0ZShkYXRlU3RyKTtcbiAgcmV0dXJuIGlzTmFOKGQuZ2V0VGltZSgpKSA/ICfigJQnIDogZC50b0xvY2FsZVN0cmluZygpO1xufVxuXG4vKipcbiAqIOinpuWPkea1j+iniOWZqOS4i+i9veS6jOi/m+WItuaVsOaNrlxuICpcbiAqIOWwgeijhSBjcmVhdGVPYmplY3RVUkwg4oaSIGNyZWF0ZUVsZW1lbnQoJ2EnKSDihpIgY2xpY2sg4oaSIHJldm9rZSDnmoTmoLfmnb/mtYHnqIvvvIxcbiAqIOe7n+S4gOWQhOWvvOWHuiBob29r77yI6K6+5aSHL+efpeivhi/lt6XljZUv5a6h6K6hL+aKpeihqCBDU1Yg5LiL6L2977yJ55qE5LiL6L295a6e546w44CCXG4gKlxuICogQHBhcmFtIGRhdGEg5LqM6L+b5Yi25pWw5o2u77yI6YCa5bi45pivIGF4aW9zIHJlc3BvbnNlVHlwZTonYmxvYicg55qEIHJlc3BvbnNlLmRhdGHvvIlcbiAqIEBwYXJhbSBmaWxlbmFtZSDkuIvovb3mlofku7blkI3vvIjlkKvmianlsZXlkI3vvIlcbiAqIEBwYXJhbSBtaW1lVHlwZSBNSU1FIOexu+Wei++8jOm7mOiupCB0ZXh0L2Nzdu+8m+WQjuerr+WTjeW6lOWktOW3suW4puato+ehruexu+Wei+aXtuWPr+S4jeS8oFxuICovXG5leHBvcnQgZnVuY3Rpb24gZG93bmxvYWRCbG9iKGRhdGE6IEJsb2JQYXJ0LCBmaWxlbmFtZTogc3RyaW5nLCBtaW1lVHlwZSA9ICd0ZXh0L2NzdjtjaGFyc2V0PXV0Zi04Jyk6IHZvaWQge1xuICBjb25zdCBibG9iID0gZGF0YSBpbnN0YW5jZW9mIEJsb2IgPyBkYXRhIDogbmV3IEJsb2IoW2RhdGFdLCB7IHR5cGU6IG1pbWVUeXBlIH0pO1xuICBjb25zdCB1cmwgPSBVUkwuY3JlYXRlT2JqZWN0VVJMKGJsb2IpO1xuICBjb25zdCBsaW5rID0gZG9jdW1lbnQuY3JlYXRlRWxlbWVudCgnYScpO1xuICBsaW5rLmhyZWYgPSB1cmw7XG4gIGxpbmsuZG93bmxvYWQgPSBmaWxlbmFtZTtcbiAgLy8gYXBwZW5kQ2hpbGQgKyByZW1vdmVDaGlsZO+8mkZpcmVmb3gg5pen54mI6KaB5rGC6ZO+5o6l5ZyoIERPTSDkuK3miY3kvJrop6blj5HkuIvovb3vvIznjrDku6PmtY/op4jlmajlj6/nnIHnlaVcbiAgZG9jdW1lbnQuYm9keS5hcHBlbmRDaGlsZChsaW5rKTtcbiAgbGluay5jbGljaygpO1xuICBkb2N1bWVudC5ib2R5LnJlbW92ZUNoaWxkKGxpbmspO1xuICBVUkwucmV2b2tlT2JqZWN0VVJMKHVybCk7XG59XG4iXX0=

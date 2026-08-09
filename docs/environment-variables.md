@@ -113,7 +113,10 @@ Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名�
 
 ## 备份
 
-`docker/backup.sh` 默认备份 PostgreSQL 和工单附件；Redis 为可选缓存备份。跨主机部署时应将备份目录同步到 S3/OSS，并定期执行恢复演练。
+`docker/backup.sh` 默认备份 PostgreSQL 和工单附件；Redis 为可选缓存备份。恢复统一使用
+`docker/restore.sh`：它默认只执行备份完整性校验和 dry-run，必须显式传入 `--confirm`
+才会停止服务、覆盖数据库和附件。跨主机部署时应将备份目录同步到 S3/OSS，并定期在
+隔离环境执行恢复演练、记录 RTO/RPO。
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|

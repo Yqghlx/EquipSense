@@ -1,0 +1,157 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: EquipSense
+      - button "收起侧边栏" [ref=f1e7]
+    - navigation [ref=f1e10]:
+      - link "仪表盘" [ref=f1e11] [cursor=pointer]:
+        - /url: /dashboard
+      - link "设备管理" [ref=f1e18] [cursor=pointer]:
+        - /url: /devices
+      - link "网关状态" [ref=f1e22] [cursor=pointer]:
+        - /url: /gateways
+      - link "告警中心" [ref=f1e29] [cursor=pointer]:
+        - /url: /alerts
+      - link "告警规则" [ref=f1e33] [cursor=pointer]:
+        - /url: /alert-rules
+      - link "工单管理" [ref=f1e38] [cursor=pointer]:
+        - /url: /work-orders
+      - link "待审批" [ref=f1e43] [cursor=pointer]:
+        - /url: /pending-approvals
+      - link "派工看板" [ref=f1e49] [cursor=pointer]:
+        - /url: /dispatch
+      - link "AI 分析" [ref=f1e56] [cursor=pointer]:
+        - /url: /analyses
+      - link "知识库" [ref=f1e66] [cursor=pointer]:
+        - /url: /knowledge
+      - link "FMEA 故障模式库" [ref=f1e70] [cursor=pointer]:
+        - /url: /fmea
+      - link "诊断评估" [ref=f1e74] [cursor=pointer]:
+        - /url: /evaluation
+      - link "审计日志" [ref=f1e80] [cursor=pointer]:
+        - /url: /audit-logs
+      - link "系统设置" [active] [ref=f1e84] [cursor=pointer]:
+        - /url: /settings
+      - link "用户管理" [ref=f1e89] [cursor=pointer]:
+        - /url: /users
+      - link "租户管理" [ref=f1e103] [cursor=pointer]:
+        - /url: /admin/tenants
+    - button "通知 99+" [ref=f1e110]:
+      - generic [ref=f1e114]: 通知
+      - generic [ref=f1e115]: 99+
+  - generic [ref=f1e116]:
+    - banner [ref=f1e117]:
+      - generic [ref=f1e118]: EquipSense
+      - generic [ref=f1e120]:
+        - status "实时连接正常" [ref=f1e137]
+        - button [ref=f1e124]
+        - button "切换主题" [ref=f1e128]
+        - button "切换语言" [ref=f1e129]
+        - button "admin" [ref=f1e130]
+    - main [ref=f1e134]:
+      - generic [ref=f1e796]:
+        - heading "系统设置" [level=1] [ref=f1e797]
+        - generic [ref=f1e798]:
+          - tablist [ref=f1e799]:
+            - tab "用户管理" [selected] [ref=f1e800]
+            - tab "角色权限" [ref=f1e801]
+            - tab "LLM 配置" [ref=f1e802]
+            - tab "系统参数" [ref=f1e803]
+            - tab "外部集成" [ref=f1e804]
+            - tab "审批链配置" [ref=f1e805]
+            - tab "订阅管理" [ref=f1e806]
+            - tab "通知偏好" [ref=f1e807]
+            - tab "安全与 MFA" [ref=f1e808]
+          - tabpanel "用户管理" [ref=f1e810]:
+            - generic [ref=f1e811]:
+              - generic [ref=f1e813]:
+                - generic [ref=f1e814]:
+                  - generic [ref=f1e815]: 用户管理
+                  - generic [ref=f1e816]: 管理系统用户账号
+                - button "创建用户" [ref=f1e817]
+              - generic [ref=f1e818]:
+                - generic [ref=f1e819]:
+                  - textbox "搜索用户名或显示名称..." [ref=f1e820]
+                  - button [ref=f1e821]
+                - table [ref=f1e823]:
+                  - rowgroup [ref=f1e824]:
+                    - row [ref=f1e825]:
+                      - columnheader "用户名" [ref=f1e826]
+                      - columnheader "显示名称" [ref=f1e827]
+                      - columnheader "角色" [ref=f1e828]
+                      - columnheader "联系方式" [ref=f1e829]
+                      - columnheader "状态" [ref=f1e830]
+                      - columnheader "创建时间" [ref=f1e831]
+                      - columnheader "操作" [ref=f1e832]
+                  - rowgroup [ref=f1e833]:
+                    - row [ref=f1e834]:
+                      - cell "e2e_user_msliha25" [ref=f1e835]
+                      - cell "E2E测试用户" [ref=f1e836]
+                      - cell "观察者" [ref=f1e837]
+                      - cell "—" [ref=f1e839]
+                      - cell "禁用" [ref=f1e840]
+                      - cell "8/9/2026, 3:59:06 PM" [ref=f1e842]
+                      - cell [ref=f1e843]:
+                        - generic [ref=f1e844]:
+                          - button "编辑" [ref=f1e845]
+                          - button "变更角色" [ref=f1e846]
+                    - row [ref=f1e847]:
+                      - cell "viewer" [ref=f1e848]
+                      - cell "观察者" [ref=f1e849]
+                      - cell "观察者" [ref=f1e850]
+                      - cell "—" [ref=f1e852]
+                      - cell "启用" [ref=f1e853]
+                      - cell "6/14/2026, 1:46:47 PM" [ref=f1e855]
+                      - cell [ref=f1e856]:
+                        - generic [ref=f1e857]:
+                          - button "编辑" [ref=f1e858]
+                          - button "变更角色" [ref=f1e859]
+                          - button "停用用户" [ref=f1e860]
+                    - row [ref=f1e861]:
+                      - cell "operator" [ref=f1e862]
+                      - cell "操作员" [ref=f1e863]
+                      - cell "操作员" [ref=f1e864]
+                      - cell "—" [ref=f1e866]
+                      - cell "启用" [ref=f1e867]
+                      - cell "6/14/2026, 1:46:47 PM" [ref=f1e869]
+                      - cell [ref=f1e870]:
+                        - generic [ref=f1e871]:
+                          - button "编辑" [ref=f1e872]
+                          - button "变更角色" [ref=f1e873]
+                          - button "停用用户" [ref=f1e874]
+                    - row [ref=f1e875]:
+                      - cell "tech" [ref=f1e876]
+                      - cell "技术员" [ref=f1e877]
+                      - cell "技术员" [ref=f1e878]
+                      - cell "—" [ref=f1e880]
+                      - cell "启用" [ref=f1e881]
+                      - cell "6/14/2026, 1:46:47 PM" [ref=f1e883]
+                      - cell [ref=f1e884]:
+                        - generic [ref=f1e885]:
+                          - button "编辑" [ref=f1e886]
+                          - button "变更角色" [ref=f1e887]
+                          - button "停用用户" [ref=f1e888]
+                    - row [ref=f1e889]:
+                      - cell "lead" [ref=f1e890]
+                      - cell "维保主管" [ref=f1e891]
+                      - cell "维保主管" [ref=f1e892]
+                      - cell "—" [ref=f1e894]
+                      - cell "启用" [ref=f1e895]
+                      - cell "6/14/2026, 1:46:47 PM" [ref=f1e897]
+                      - cell [ref=f1e898]:
+                        - generic [ref=f1e899]:
+                          - button "编辑" [ref=f1e900]
+                          - button "变更角色" [ref=f1e901]
+                          - button "停用用户" [ref=f1e902]
+                    - row [ref=f1e903]:
+                      - cell "admin" [ref=f1e904]
+                      - cell "系统管理员" [ref=f1e905]
+                      - cell "系统管理员" [ref=f1e906]
+                      - cell "—" [ref=f1e908]
+                      - cell "启用" [ref=f1e909]
+                      - cell "6/14/2026, 1:46:47 PM" [ref=f1e911]
+                      - cell [ref=f1e912]:
+                        - generic [ref=f1e913]:
+                          - button "编辑" [ref=f1e914]
+                          - button "变更角色" [ref=f1e915]
+                          - button "停用用户" [ref=f1e916]

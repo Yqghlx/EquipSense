@@ -115,7 +115,7 @@ public interface IAuthService
     Task<MfaRecoveryCodesResponse> RegenerateMfaRecoveryCodesAsync(Guid userId, string totpCode);
 
     /// <summary>
-    /// 禁用 MFA：清除用户的 TOTP 密钥并标记 MfaEnabled=false
+    /// 禁用 MFA：普通角色清除用户的 TOTP 密钥并标记 MfaEnabled=false；生产强制角色会被拒绝
     /// </summary>
     /// <param name="userId">目标用户 ID</param>
     Task DisableMfaAsync(Guid userId);

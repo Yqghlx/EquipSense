@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import api from '../../lib/api';
-import { useTelemetry } from '../useTelemetry';
+import { useRecentTelemetry, useTelemetry } from '../useTelemetry';
 import type { TelemetryDataPoint } from '../useTelemetry';
 
 // Mock axios api 模块
@@ -86,5 +86,36 @@ describe('useTelemetry', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(result.current.error).toBeDefined();
+  });
+
+  it('滚动时间窗在重渲染时保持稳定且重新获取时更新边界', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(new Date('2026-01-01T09:00:00Z').getTime());
+    mockedApi.get.mockResolvedValue({ data: mockTelemetryData });
+
+    try {
+      const { result, rerender } = renderHook(
+        () => useRecentTelemetry('device-001', 'temperature', 60 * 60 * 1000),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      rerender();
+
+      expect(mockedApi.get).toHaveBeenCalledTimes(1);
+      const firstUrl = new URL(String(mockedApi.get.mock.calls[0][0]), 'http://localhost');
+      expect(firstUrl.searchParams.get('startTime')).toBe('2026-01-01T08:00:00.000Z');
+      expect(firstUrl.searchParams.get('endTime')).toBe('2026-01-01T09:00:00.000Z');
+
+      nowSpy.mockReturnValue(new Date('2026-01-01T10:00:00Z').getTime());
+      await result.current.refetch();
+
+      expect(mockedApi.get).toHaveBeenCalledTimes(2);
+      const refreshedUrl = new URL(String(mockedApi.get.mock.calls[1][0]), 'http://localhost');
+      expect(refreshedUrl.searchParams.get('startTime')).toBe('2026-01-01T09:00:00.000Z');
+      expect(refreshedUrl.searchParams.get('endTime')).toBe('2026-01-01T10:00:00.000Z');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });

@@ -1,0 +1,80 @@
+/**
+* MFA（多因素认证）TanStack Query Hooks
+*
+* 提供 MFA 登录验证、MFA 设置、确认和禁用的 mutation hooks。
+* MFA 登录流程：Login 返回 mfaRequired=true → 调用 verifyMfa 完成登录。
+* MFA 管理流程：setup 获取 QR 码 URI → 用户扫码 → confirm 输入验证码启用 → 普通角色可按策略禁用。
+*/
+import { useMutation, useQueryClient } from "/node_modules/.vite/deps/@tanstack_react-query.js?v=1d2f6f90";
+import api from "/src/lib/api.ts";
+/**
+* MFA 登录验证 Hook
+* 在 Login 返回 mfaRequired=true 后调用，携带挑战令牌 + TOTP 验证码完成登录
+* 成功后响应包含完整的 AuthResponse（含 Access Token），前端应存入 sessionStorage 并跳转 Dashboard
+*/
+export function useVerifyMfa() {
+	return useMutation({ mutationFn: async ({ challengeToken, totpCode }) => {
+		const response = await api.post("/auth/mfa/verify", {
+			challengeToken,
+			totpCode
+		});
+		return response.data;
+	} });
+}
+/**
+* MFA 初始化设置 Hook
+* 调用后端生成 TOTP 密钥和 QR 码 URI
+* 响应包含 secret（手动输入用）和 qrCodeUri（生成 QR 码图片用）
+*/
+export function useMfaSetup() {
+	return useMutation({ mutationFn: async () => {
+		const response = await api.post("/auth/mfa/setup");
+		return response.data;
+	} });
+}
+/**
+* MFA 确认设置 Hook
+* 用户扫码后输入 TOTP 验证码，后端验证通过后正式启用 MFA
+* 成功后自动刷新当前用户信息（/auth/me）
+*/
+export function useMfaConfirm() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async ({ totpCode }) => {
+			const response = await api.post("/auth/mfa/confirm", { totpCode });
+			return response.data;
+		},
+		onSuccess: () => {
+			// 刷新当前用户信息（mfaEnabled 状态已变更）
+			queryClient.invalidateQueries({ queryKey: ["me"] });
+		}
+	});
+}
+/**
+* 重新生成 MFA 一次性恢复码 Hook。
+* 后端要求输入当前 TOTP，成功后旧恢复码全部失效。
+*/
+export function useMfaRecoveryCodesRegenerate() {
+	return useMutation({ mutationFn: async ({ totpCode }) => {
+		const response = await api.post("/auth/mfa/recovery-codes/regenerate", { totpCode });
+		return response.data;
+	} });
+}
+/**
+* MFA 禁用 Hook
+* 清除用户的 TOTP 密钥并标记 MfaEnabled=false
+* 成功后自动刷新当前用户信息
+*/
+export function useMfaDisable() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: async () => {
+			await api.post("/auth/mfa/disable");
+		},
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: ["me"] });
+		}
+	});
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6Ijs7Ozs7OztBQU9BLFNBQVMsYUFBYSxzQkFBc0I7QUFDNUMsT0FBTyxTQUFTOzs7Ozs7QUFtQmhCLE9BQU8sU0FBUyxlQUFlO0NBQzdCLE9BQU8sWUFBWSxFQUNqQixZQUFZLE9BQU8sRUFBRSxnQkFBZ0IsZUFBZ0M7RUFDbkUsTUFBTSxXQUFXLE1BQU0sSUFBSSxLQUFtQixvQkFBb0I7R0FDaEU7R0FDQTtFQUNGLENBQUM7RUFDRCxPQUFPLFNBQVM7Q0FDbEIsRUFDRixDQUFDO0FBQ0g7Ozs7OztBQU9BLE9BQU8sU0FBUyxjQUFjO0NBQzVCLE9BQU8sWUFBWSxFQUNqQixZQUFZLFlBQVk7RUFDdEIsTUFBTSxXQUFXLE1BQU0sSUFBSSxLQUF1QixpQkFBaUI7RUFDbkUsT0FBTyxTQUFTO0NBQ2xCLEVBQ0YsQ0FBQztBQUNIOzs7Ozs7QUFPQSxPQUFPLFNBQVMsZ0JBQWdCO0NBQzlCLE1BQU0sY0FBYyxlQUFlO0NBQ25DLE9BQU8sWUFBWTtFQUNqQixZQUFZLE9BQU8sRUFBRSxlQUFpQztHQUNwRCxNQUFNLFdBQVcsTUFBTSxJQUFJLEtBQStCLHFCQUFxQixFQUFFLFNBQVMsQ0FBQztHQUMzRixPQUFPLFNBQVM7RUFDbEI7RUFDQSxpQkFBaUI7O0dBRWYsWUFBWSxrQkFBa0IsRUFBRSxVQUFVLENBQUMsSUFBSSxFQUFFLENBQUM7RUFDcEQ7Q0FDRixDQUFDO0FBQ0g7Ozs7O0FBTUEsT0FBTyxTQUFTLGdDQUFnQztDQUM5QyxPQUFPLFlBQVksRUFDakIsWUFBWSxPQUFPLEVBQUUsZUFBaUM7RUFDcEQsTUFBTSxXQUFXLE1BQU0sSUFBSSxLQUErQix1Q0FBdUMsRUFDL0YsU0FDRixDQUFDO0VBQ0QsT0FBTyxTQUFTO0NBQ2xCLEVBQ0YsQ0FBQztBQUNIOzs7Ozs7QUFPQSxPQUFPLFNBQVMsZ0JBQWdCO0NBQzlCLE1BQU0sY0FBYyxlQUFlO0NBQ25DLE9BQU8sWUFBWTtFQUNqQixZQUFZLFlBQVk7R0FDdEIsTUFBTSxJQUFJLEtBQUssbUJBQW1CO0VBQ3BDO0VBQ0EsaUJBQWlCO0dBQ2YsWUFBWSxrQkFBa0IsRUFBRSxVQUFVLENBQUMsSUFBSSxFQUFFLENBQUM7RUFDcEQ7Q0FDRixDQUFDO0FBQ0giLCJuYW1lcyI6W10sInNvdXJjZXMiOlsidXNlTWZhLnRzIl0sInZlcnNpb24iOjMsInNvdXJjZXNDb250ZW50IjpbIi8qKlxuICogTUZB77yI5aSa5Zug57Sg6K6k6K+B77yJVGFuU3RhY2sgUXVlcnkgSG9va3NcbiAqXG4gKiDmj5DkvpsgTUZBIOeZu+W9lemqjOivgeOAgU1GQSDorr7nva7jgIHnoa7orqTlkoznpoHnlKjnmoQgbXV0YXRpb24gaG9va3PjgIJcbiAqIE1GQSDnmbvlvZXmtYHnqIvvvJpMb2dpbiDov5Tlm54gbWZhUmVxdWlyZWQ9dHJ1ZSDihpIg6LCD55SoIHZlcmlmeU1mYSDlrozmiJDnmbvlvZXjgIJcbiAqIE1GQSDnrqHnkIbmtYHnqIvvvJpzZXR1cCDojrflj5YgUVIg56CBIFVSSSDihpIg55So5oi35omr56CBIOKGkiBjb25maXJtIOi+k+WFpemqjOivgeeggeWQr+eUqCDihpIg5pmu6YCa6KeS6Imy5Y+v5oyJ562W55Wl56aB55So44CCXG4gKi9cbmltcG9ydCB7IHVzZU11dGF0aW9uLCB1c2VRdWVyeUNsaWVudCB9IGZyb20gJ0B0YW5zdGFjay9yZWFjdC1xdWVyeSc7XG5pbXBvcnQgYXBpIGZyb20gJy4uL2xpYi9hcGknO1xuaW1wb3J0IHR5cGUgeyBBdXRoUmVzcG9uc2UsIE1mYVJlY292ZXJ5Q29kZXNSZXNwb25zZSwgTWZhU2V0dXBSZXNwb25zZSB9IGZyb20gJy4uL3R5cGVzJztcblxuLyoqIE1GQSDnmbvlvZXpqozor4Hor7fmsYLlj4LmlbAgKi9cbmludGVyZmFjZSBNZmFWZXJpZnlQYXJhbXMge1xuICBjaGFsbGVuZ2VUb2tlbjogc3RyaW5nO1xuICB0b3RwQ29kZTogc3RyaW5nO1xufVxuXG4vKiogTUZBIOehruiupOiuvue9ruivt+axguWPguaVsCAqL1xuaW50ZXJmYWNlIE1mYUNvbmZpcm1QYXJhbXMge1xuICB0b3RwQ29kZTogc3RyaW5nO1xufVxuXG4vKipcbiAqIE1GQSDnmbvlvZXpqozor4EgSG9va1xuICog5ZyoIExvZ2luIOi/lOWbniBtZmFSZXF1aXJlZD10cnVlIOWQjuiwg+eUqO+8jOaQuuW4puaMkeaImOS7pOeJjCArIFRPVFAg6aqM6K+B56CB5a6M5oiQ55m75b2VXG4gKiDmiJDlip/lkI7lk43lupTljIXlkKvlrozmlbTnmoQgQXV0aFJlc3BvbnNl77yI5ZCrIEFjY2VzcyBUb2tlbu+8ie+8jOWJjeerr+W6lOWtmOWFpSBzZXNzaW9uU3RvcmFnZSDlubbot7PovawgRGFzaGJvYXJkXG4gKi9cbmV4cG9ydCBmdW5jdGlvbiB1c2VWZXJpZnlNZmEoKSB7XG4gIHJldHVybiB1c2VNdXRhdGlvbih7XG4gICAgbXV0YXRpb25GbjogYXN5bmMgKHsgY2hhbGxlbmdlVG9rZW4sIHRvdHBDb2RlIH06IE1mYVZlcmlmeVBhcmFtcykgPT4ge1xuICAgICAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBhcGkucG9zdDxBdXRoUmVzcG9uc2U+KCcvYXV0aC9tZmEvdmVyaWZ5Jywge1xuICAgICAgICBjaGFsbGVuZ2VUb2tlbixcbiAgICAgICAgdG90cENvZGUsXG4gICAgICB9KTtcbiAgICAgIHJldHVybiByZXNwb25zZS5kYXRhO1xuICAgIH0sXG4gIH0pO1xufVxuXG4vKipcbiAqIE1GQSDliJ3lp4vljJborr7nva4gSG9va1xuICog6LCD55So5ZCO56uv55Sf5oiQIFRPVFAg5a+G6ZKl5ZKMIFFSIOeggSBVUklcbiAqIOWTjeW6lOWMheWQqyBzZWNyZXTvvIjmiYvliqjovpPlhaXnlKjvvInlkowgcXJDb2RlVXJp77yI55Sf5oiQIFFSIOeggeWbvueJh+eUqO+8iVxuICovXG5leHBvcnQgZnVuY3Rpb24gdXNlTWZhU2V0dXAoKSB7XG4gIHJldHVybiB1c2VNdXRhdGlvbih7XG4gICAgbXV0YXRpb25GbjogYXN5bmMgKCkgPT4ge1xuICAgICAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBhcGkucG9zdDxNZmFTZXR1cFJlc3BvbnNlPignL2F1dGgvbWZhL3NldHVwJyk7XG4gICAgICByZXR1cm4gcmVzcG9uc2UuZGF0YTtcbiAgICB9LFxuICB9KTtcbn1cblxuLyoqXG4gKiBNRkEg56Gu6K6k6K6+572uIEhvb2tcbiAqIOeUqOaIt+aJq+eggeWQjui+k+WFpSBUT1RQIOmqjOivgeegge+8jOWQjuerr+mqjOivgemAmui/h+WQjuato+W8j+WQr+eUqCBNRkFcbiAqIOaIkOWKn+WQjuiHquWKqOWIt+aWsOW9k+WJjeeUqOaIt+S/oeaBr++8iC9hdXRoL21l77yJXG4gKi9cbmV4cG9ydCBmdW5jdGlvbiB1c2VNZmFDb25maXJtKCkge1xuICBjb25zdCBxdWVyeUNsaWVudCA9IHVzZVF1ZXJ5Q2xpZW50KCk7XG4gIHJldHVybiB1c2VNdXRhdGlvbih7XG4gICAgbXV0YXRpb25GbjogYXN5bmMgKHsgdG90cENvZGUgfTogTWZhQ29uZmlybVBhcmFtcykgPT4ge1xuICAgICAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBhcGkucG9zdDxNZmFSZWNvdmVyeUNvZGVzUmVzcG9uc2U+KCcvYXV0aC9tZmEvY29uZmlybScsIHsgdG90cENvZGUgfSk7XG4gICAgICByZXR1cm4gcmVzcG9uc2UuZGF0YTtcbiAgICB9LFxuICAgIG9uU3VjY2VzczogKCkgPT4ge1xuICAgICAgLy8g5Yi35paw5b2T5YmN55So5oi35L+h5oGv77yIbWZhRW5hYmxlZCDnirbmgIHlt7Llj5jmm7TvvIlcbiAgICAgIHF1ZXJ5Q2xpZW50LmludmFsaWRhdGVRdWVyaWVzKHsgcXVlcnlLZXk6IFsnbWUnXSB9KTtcbiAgICB9LFxuICB9KTtcbn1cblxuLyoqXG4gKiDph43mlrDnlJ/miJAgTUZBIOS4gOasoeaAp+aBouWkjeeggSBIb29r44CCXG4gKiDlkI7nq6/opoHmsYLovpPlhaXlvZPliY0gVE9UUO+8jOaIkOWKn+WQjuaXp+aBouWkjeeggeWFqOmDqOWkseaViOOAglxuICovXG5leHBvcnQgZnVuY3Rpb24gdXNlTWZhUmVjb3ZlcnlDb2Rlc1JlZ2VuZXJhdGUoKSB7XG4gIHJldHVybiB1c2VNdXRhdGlvbih7XG4gICAgbXV0YXRpb25GbjogYXN5bmMgKHsgdG90cENvZGUgfTogTWZhQ29uZmlybVBhcmFtcykgPT4ge1xuICAgICAgY29uc3QgcmVzcG9uc2UgPSBhd2FpdCBhcGkucG9zdDxNZmFSZWNvdmVyeUNvZGVzUmVzcG9uc2U+KCcvYXV0aC9tZmEvcmVjb3ZlcnktY29kZXMvcmVnZW5lcmF0ZScsIHtcbiAgICAgICAgdG90cENvZGUsXG4gICAgICB9KTtcbiAgICAgIHJldHVybiByZXNwb25zZS5kYXRhO1xuICAgIH0sXG4gIH0pO1xufVxuXG4vKipcbiAqIE1GQSDnpoHnlKggSG9va1xuICog5riF6Zmk55So5oi355qEIFRPVFAg5a+G6ZKl5bm25qCH6K6wIE1mYUVuYWJsZWQ9ZmFsc2VcbiAqIOaIkOWKn+WQjuiHquWKqOWIt+aWsOW9k+WJjeeUqOaIt+S/oeaBr1xuICovXG5leHBvcnQgZnVuY3Rpb24gdXNlTWZhRGlzYWJsZSgpIHtcbiAgY29uc3QgcXVlcnlDbGllbnQgPSB1c2VRdWVyeUNsaWVudCgpO1xuICByZXR1cm4gdXNlTXV0YXRpb24oe1xuICAgIG11dGF0aW9uRm46IGFzeW5jICgpID0+IHtcbiAgICAgIGF3YWl0IGFwaS5wb3N0KCcvYXV0aC9tZmEvZGlzYWJsZScpO1xuICAgIH0sXG4gICAgb25TdWNjZXNzOiAoKSA9PiB7XG4gICAgICBxdWVyeUNsaWVudC5pbnZhbGlkYXRlUXVlcmllcyh7IHF1ZXJ5S2V5OiBbJ21lJ10gfSk7XG4gICAgfSxcbiAgfSk7XG59XG4iXX0=

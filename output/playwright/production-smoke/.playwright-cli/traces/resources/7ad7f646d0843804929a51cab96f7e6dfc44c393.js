@@ -1,0 +1,48 @@
+import { useQuery, useMutation, useQueryClient } from "/node_modules/.vite/deps/@tanstack_react-query.js?v=1d2f6f90";
+import api from "/src/lib/api.ts";
+/**
+* 获取当前租户的所有集成配置
+* GET /api/v1/settings/integrations
+*/
+export function useIntegrations() {
+	return useQuery({
+		queryKey: ["integrations"],
+		queryFn: async () => {
+			const { data } = await api.get("/settings/integrations");
+			// 从 { integrations: { ... } } 结构中提取集成配置
+			const integrations = data?.integrations ?? data;
+			return integrations;
+		}
+	});
+}
+/**
+* 更新指定集成类型的配置
+* PUT /api/v1/settings/integrations/{type}
+*/
+export function useUpdateIntegration() {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: async ({ type, enabled, config }) => {
+			const { data } = await api.put(`/settings/integrations/${type}`, {
+				enabled,
+				config
+			});
+			return data;
+		},
+		onSuccess: () => {
+			qc.invalidateQueries({ queryKey: ["integrations"] });
+		}
+	});
+}
+/**
+* 测试指定集成类型的连接
+* POST /api/v1/settings/integrations/{type}/test
+*/
+export function useTestIntegration() {
+	return useMutation({ mutationFn: async (type) => {
+		const { data } = await api.post(`/settings/integrations/${type}/test`);
+		return data;
+	} });
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxVQUFVLGFBQWEsc0JBQXNCO0FBQ3RELE9BQU8sU0FBUzs7Ozs7QUFPaEIsT0FBTyxTQUFTLGtCQUFrQjtDQUNoQyxPQUFPLFNBQVM7RUFDZCxVQUFVLENBQUMsY0FBYztFQUN6QixTQUFTLFlBQVk7R0FDbkIsTUFBTSxFQUFFLFNBQVMsTUFBTSxJQUFJLElBQUksd0JBQXdCOztHQUV2RCxNQUFNLGVBQWUsTUFBTSxnQkFBZ0I7R0FDM0MsT0FBTztFQUNUO0NBQ0YsQ0FBQztBQUNIOzs7OztBQU1BLE9BQU8sU0FBUyx1QkFBdUI7Q0FDckMsTUFBTSxLQUFLLGVBQWU7Q0FDMUIsT0FBTyxZQUFZO0VBQ2pCLFlBQVksT0FBTyxFQUFFLE1BQU0sU0FBUyxhQUFpRTtHQUNuRyxNQUFNLEVBQUUsU0FBUyxNQUFNLElBQUksSUFBSSwwQkFBMEIsUUFBUTtJQUFFO0lBQVM7R0FBTyxDQUFDO0dBQ3BGLE9BQU87RUFDVDtFQUNBLGlCQUFpQjtHQUNmLEdBQUcsa0JBQWtCLEVBQUUsVUFBVSxDQUFDLGNBQWMsRUFBRSxDQUFDO0VBQ3JEO0NBQ0YsQ0FBQztBQUNIOzs7OztBQU1BLE9BQU8sU0FBUyxxQkFBcUI7Q0FDbkMsT0FBTyxZQUFrRCxFQUN2RCxZQUFZLE9BQU8sU0FBaUI7RUFDbEMsTUFBTSxFQUFFLFNBQVMsTUFBTSxJQUFJLEtBQTRCLDBCQUEwQixLQUFLLE1BQU07RUFDNUYsT0FBTztDQUNULEVBQ0YsQ0FBQztBQUNIIiwibmFtZXMiOltdLCJzb3VyY2VzIjpbInVzZUludGVncmF0aW9uLnRzIl0sInZlcnNpb24iOjMsInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVF1ZXJ5LCB1c2VNdXRhdGlvbiwgdXNlUXVlcnlDbGllbnQgfSBmcm9tICdAdGFuc3RhY2svcmVhY3QtcXVlcnknO1xuaW1wb3J0IGFwaSBmcm9tICcuLi9saWIvYXBpJztcbmltcG9ydCB0eXBlIHsgSW50ZWdyYXRpb25zTWFwLCBJbnRlZ3JhdGlvblRlc3RSZXN1bHQgfSBmcm9tICcuLi90eXBlcy9pbnRlZ3JhdGlvbic7XG5cbi8qKlxuICog6I635Y+W5b2T5YmN56ef5oi355qE5omA5pyJ6ZuG5oiQ6YWN572uXG4gKiBHRVQgL2FwaS92MS9zZXR0aW5ncy9pbnRlZ3JhdGlvbnNcbiAqL1xuZXhwb3J0IGZ1bmN0aW9uIHVzZUludGVncmF0aW9ucygpIHtcbiAgcmV0dXJuIHVzZVF1ZXJ5KHtcbiAgICBxdWVyeUtleTogWydpbnRlZ3JhdGlvbnMnXSxcbiAgICBxdWVyeUZuOiBhc3luYyAoKSA9PiB7XG4gICAgICBjb25zdCB7IGRhdGEgfSA9IGF3YWl0IGFwaS5nZXQoJy9zZXR0aW5ncy9pbnRlZ3JhdGlvbnMnKTtcbiAgICAgIC8vIOS7jiB7IGludGVncmF0aW9uczogeyAuLi4gfSB9IOe7k+aehOS4reaPkOWPlumbhuaIkOmFjee9rlxuICAgICAgY29uc3QgaW50ZWdyYXRpb25zID0gZGF0YT8uaW50ZWdyYXRpb25zID8/IGRhdGE7XG4gICAgICByZXR1cm4gaW50ZWdyYXRpb25zIGFzIEludGVncmF0aW9uc01hcDtcbiAgICB9LFxuICB9KTtcbn1cblxuLyoqXG4gKiDmm7TmlrDmjIflrprpm4bmiJDnsbvlnovnmoTphY3nva5cbiAqIFBVVCAvYXBpL3YxL3NldHRpbmdzL2ludGVncmF0aW9ucy97dHlwZX1cbiAqL1xuZXhwb3J0IGZ1bmN0aW9uIHVzZVVwZGF0ZUludGVncmF0aW9uKCkge1xuICBjb25zdCBxYyA9IHVzZVF1ZXJ5Q2xpZW50KCk7XG4gIHJldHVybiB1c2VNdXRhdGlvbih7XG4gICAgbXV0YXRpb25GbjogYXN5bmMgKHsgdHlwZSwgZW5hYmxlZCwgY29uZmlnIH06IHsgdHlwZTogc3RyaW5nOyBlbmFibGVkOiBib29sZWFuOyBjb25maWc6IHN0cmluZyB9KSA9PiB7XG4gICAgICBjb25zdCB7IGRhdGEgfSA9IGF3YWl0IGFwaS5wdXQoYC9zZXR0aW5ncy9pbnRlZ3JhdGlvbnMvJHt0eXBlfWAsIHsgZW5hYmxlZCwgY29uZmlnIH0pO1xuICAgICAgcmV0dXJuIGRhdGE7XG4gICAgfSxcbiAgICBvblN1Y2Nlc3M6ICgpID0+IHtcbiAgICAgIHFjLmludmFsaWRhdGVRdWVyaWVzKHsgcXVlcnlLZXk6IFsnaW50ZWdyYXRpb25zJ10gfSk7XG4gICAgfSxcbiAgfSk7XG59XG5cbi8qKlxuICog5rWL6K+V5oyH5a6a6ZuG5oiQ57G75Z6L55qE6L+e5o6lXG4gKiBQT1NUIC9hcGkvdjEvc2V0dGluZ3MvaW50ZWdyYXRpb25zL3t0eXBlfS90ZXN0XG4gKi9cbmV4cG9ydCBmdW5jdGlvbiB1c2VUZXN0SW50ZWdyYXRpb24oKSB7XG4gIHJldHVybiB1c2VNdXRhdGlvbjxJbnRlZ3JhdGlvblRlc3RSZXN1bHQsIEVycm9yLCBzdHJpbmc+KHtcbiAgICBtdXRhdGlvbkZuOiBhc3luYyAodHlwZTogc3RyaW5nKSA9PiB7XG4gICAgICBjb25zdCB7IGRhdGEgfSA9IGF3YWl0IGFwaS5wb3N0PEludGVncmF0aW9uVGVzdFJlc3VsdD4oYC9zZXR0aW5ncy9pbnRlZ3JhdGlvbnMvJHt0eXBlfS90ZXN0YCk7XG4gICAgICByZXR1cm4gZGF0YTtcbiAgICB9LFxuICB9KTtcbn1cbiJdfQ==

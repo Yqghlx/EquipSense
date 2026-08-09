@@ -1,0 +1,281 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - generic [ref=f1e6]: EquipSense
+      - button "收起侧边栏" [ref=f1e7]
+    - navigation [ref=f1e10]:
+      - link "仪表盘" [ref=f1e11] [cursor=pointer]:
+        - /url: /dashboard
+      - link "设备管理" [ref=f1e18] [cursor=pointer]:
+        - /url: /devices
+      - link "网关状态" [ref=f1e22] [cursor=pointer]:
+        - /url: /gateways
+      - link "告警中心" [active] [ref=f1e29] [cursor=pointer]:
+        - /url: /alerts
+      - link "告警规则" [ref=f1e33] [cursor=pointer]:
+        - /url: /alert-rules
+      - link "工单管理" [ref=f1e38] [cursor=pointer]:
+        - /url: /work-orders
+      - link "待审批" [ref=f1e43] [cursor=pointer]:
+        - /url: /pending-approvals
+      - link "派工看板" [ref=f1e49] [cursor=pointer]:
+        - /url: /dispatch
+      - link "AI 分析" [ref=f1e56] [cursor=pointer]:
+        - /url: /analyses
+      - link "知识库" [ref=f1e66] [cursor=pointer]:
+        - /url: /knowledge
+      - link "FMEA 故障模式库" [ref=f1e70] [cursor=pointer]:
+        - /url: /fmea
+      - link "诊断评估" [ref=f1e74] [cursor=pointer]:
+        - /url: /evaluation
+      - link "审计日志" [ref=f1e80] [cursor=pointer]:
+        - /url: /audit-logs
+      - link "系统设置" [ref=f1e84] [cursor=pointer]:
+        - /url: /settings
+      - link "用户管理" [ref=f1e89] [cursor=pointer]:
+        - /url: /users
+      - link "租户管理" [ref=f1e103] [cursor=pointer]:
+        - /url: /admin/tenants
+    - button "通知 99+" [ref=f1e110]:
+      - generic [ref=f1e114]: 通知
+      - generic [ref=f1e115]: 99+
+  - generic [ref=f1e116]:
+    - banner [ref=f1e117]:
+      - generic [ref=f1e118]: EquipSense
+      - generic [ref=f1e120]:
+        - status "实时连接正常" [ref=f1e137]
+        - button [ref=f1e124]
+        - button "切换主题" [ref=f1e128]
+        - button "切换语言" [ref=f1e129]
+        - button "admin" [ref=f1e130]
+    - main [ref=f1e134]:
+      - generic [ref=f1e276]:
+        - generic [ref=f1e277]:
+          - heading "告警中心" [level=1] [ref=f1e278]
+          - button "导出" [ref=f1e279]
+        - generic [ref=f1e280]:
+          - combobox [ref=f1e281]:
+            - generic [ref=f1e282]: 状态
+            - img: ▼
+          - textbox [ref=f1e283]
+          - combobox [ref=f1e284]:
+            - generic [ref=f1e285]: 级别
+            - img: ▼
+          - textbox [ref=f1e286]
+        - table [ref=f1e288]:
+          - rowgroup [ref=f1e289]:
+            - row [ref=f1e290]:
+              - columnheader "告警编码" [ref=f1e291]
+              - columnheader "设备名称" [ref=f1e292]
+              - columnheader "指标" [ref=f1e293]
+              - columnheader "当前值" [ref=f1e294]
+              - columnheader "级别" [ref=f1e295]
+              - columnheader "状态" [ref=f1e296]
+              - columnheader "触发时间" [ref=f1e297]
+              - columnheader "操作" [ref=f1e298]
+          - rowgroup [ref=f1e299]:
+            - row [ref=f1e300] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-3d5f5bfb-20260809083833859-3a3d5f8c" [ref=f1e301]
+              - cell "ada194fb…" [ref=f1e302]
+              - cell "temperature" [ref=f1e303]
+              - cell "100" [ref=f1e304]
+              - cell "高" [ref=f1e305]
+              - cell [ref=f1e307]:
+                - button "已解决" [ref=f1e308]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e309]
+              - cell [ref=f1e310]
+            - row [ref=f1e311] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-7397ac0c-20260809083833856-f5551317" [ref=f1e312]
+              - cell "ada194fb…" [ref=f1e313]
+              - cell "temperature" [ref=f1e314]
+              - cell "100" [ref=f1e315]
+              - cell "高" [ref=f1e316]
+              - cell [ref=f1e318]:
+                - button "已解决" [ref=f1e319]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e320]
+              - cell [ref=f1e321]
+            - row [ref=f1e322] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-71daa4b4-20260809083833854-8bd542b1" [ref=f1e323]
+              - cell "ada194fb…" [ref=f1e324]
+              - cell "temperature" [ref=f1e325]
+              - cell "100" [ref=f1e326]
+              - cell "高" [ref=f1e327]
+              - cell [ref=f1e329]:
+                - button "已解决" [ref=f1e330]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e331]
+              - cell [ref=f1e332]
+            - row [ref=f1e333] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-00a704e9-20260809083833850-a51fac73" [ref=f1e334]
+              - cell "ada194fb…" [ref=f1e335]
+              - cell "temperature" [ref=f1e336]
+              - cell "100" [ref=f1e337]
+              - cell "高" [ref=f1e338]
+              - cell [ref=f1e340]:
+                - button "已解决" [ref=f1e341]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e342]
+              - cell [ref=f1e343]
+            - row [ref=f1e344] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-3e49e8df-20260809083833848-5968c52b" [ref=f1e345]
+              - cell "ada194fb…" [ref=f1e346]
+              - cell "temperature" [ref=f1e347]
+              - cell "100" [ref=f1e348]
+              - cell "高" [ref=f1e349]
+              - cell [ref=f1e351]:
+                - button "已解决" [ref=f1e352]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e353]
+              - cell [ref=f1e354]
+            - row [ref=f1e355] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-761972fe-20260809083833845-2545e21c" [ref=f1e356]
+              - cell "ada194fb…" [ref=f1e357]
+              - cell "temperature" [ref=f1e358]
+              - cell "100" [ref=f1e359]
+              - cell "高" [ref=f1e360]
+              - cell [ref=f1e362]:
+                - button "已解决" [ref=f1e363]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e364]
+              - cell [ref=f1e365]
+            - row [ref=f1e366] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-c9b4d194-20260809083833841-78d6d918" [ref=f1e367]
+              - cell "ada194fb…" [ref=f1e368]
+              - cell "temperature" [ref=f1e369]
+              - cell "100" [ref=f1e370]
+              - cell "高" [ref=f1e371]
+              - cell [ref=f1e373]:
+                - button "已解决" [ref=f1e374]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e375]
+              - cell [ref=f1e376]
+            - row [ref=f1e377] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-5271557a-20260809083833838-9b68b506" [ref=f1e378]
+              - cell "ada194fb…" [ref=f1e379]
+              - cell "temperature" [ref=f1e380]
+              - cell "100" [ref=f1e381]
+              - cell "高" [ref=f1e382]
+              - cell [ref=f1e384]:
+                - button "已解决" [ref=f1e385]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e386]
+              - cell [ref=f1e387]
+            - row [ref=f1e388] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-e77d5b94-20260809083833834-77287e75" [ref=f1e389]
+              - cell "ada194fb…" [ref=f1e390]
+              - cell "temperature" [ref=f1e391]
+              - cell "100" [ref=f1e392]
+              - cell "高" [ref=f1e393]
+              - cell [ref=f1e395]:
+                - button "已解决" [ref=f1e396]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e397]
+              - cell [ref=f1e398]
+            - row [ref=f1e399] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-6c3d7e36-20260809083833831-c6ebd591" [ref=f1e400]
+              - cell "ada194fb…" [ref=f1e401]
+              - cell "temperature" [ref=f1e402]
+              - cell "100" [ref=f1e403]
+              - cell "高" [ref=f1e404]
+              - cell [ref=f1e406]:
+                - button "已解决" [ref=f1e407]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e408]
+              - cell [ref=f1e409]
+            - row [ref=f1e410] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljw1qdn18b-temperature-4380d64c-20260809083833817-594fbe6a" [ref=f1e411]
+              - cell "ada194fb…" [ref=f1e412]
+              - cell "temperature" [ref=f1e413]
+              - cell "100" [ref=f1e414]
+              - cell "高" [ref=f1e415]
+              - cell [ref=f1e417]:
+                - button "已解决" [ref=f1e418]
+              - cell "8/9/2026, 4:38:35 PM" [ref=f1e419]
+              - cell [ref=f1e420]
+            - row [ref=f1e421] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-3d5f5bfb-2026080" [ref=f1e422]
+              - cell "8462f3d6…" [ref=f1e423]
+              - cell "temperature" [ref=f1e424]
+              - cell "102" [ref=f1e425]
+              - cell "高" [ref=f1e426]
+              - cell [ref=f1e428]:
+                - button "已解决" [ref=f1e429]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e430]
+              - cell [ref=f1e431]
+            - row [ref=f1e432] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-7397ac0c-2026080" [ref=f1e433]
+              - cell "8462f3d6…" [ref=f1e434]
+              - cell "temperature" [ref=f1e435]
+              - cell "102" [ref=f1e436]
+              - cell "高" [ref=f1e437]
+              - cell [ref=f1e439]:
+                - button "已解决" [ref=f1e440]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e441]
+              - cell [ref=f1e442]
+            - row [ref=f1e443] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-71daa4b4-2026080" [ref=f1e444]
+              - cell "8462f3d6…" [ref=f1e445]
+              - cell "temperature" [ref=f1e446]
+              - cell "102" [ref=f1e447]
+              - cell "高" [ref=f1e448]
+              - cell [ref=f1e450]:
+                - button "已解决" [ref=f1e451]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e452]
+              - cell [ref=f1e453]
+            - row [ref=f1e454] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-00a704e9-2026080" [ref=f1e455]
+              - cell "8462f3d6…" [ref=f1e456]
+              - cell "temperature" [ref=f1e457]
+              - cell "102" [ref=f1e458]
+              - cell "高" [ref=f1e459]
+              - cell [ref=f1e461]:
+                - button "已解决" [ref=f1e462]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e463]
+              - cell [ref=f1e464]
+            - row [ref=f1e465] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-3e49e8df-2026080" [ref=f1e466]
+              - cell "8462f3d6…" [ref=f1e467]
+              - cell "temperature" [ref=f1e468]
+              - cell "102" [ref=f1e469]
+              - cell "高" [ref=f1e470]
+              - cell [ref=f1e472]:
+                - button "已解决" [ref=f1e473]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e474]
+              - cell [ref=f1e475]
+            - row [ref=f1e476] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-761972fe-2026080" [ref=f1e477]
+              - cell "8462f3d6…" [ref=f1e478]
+              - cell "temperature" [ref=f1e479]
+              - cell "102" [ref=f1e480]
+              - cell "高" [ref=f1e481]
+              - cell [ref=f1e483]:
+                - button "已解决" [ref=f1e484]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e485]
+              - cell [ref=f1e486]
+            - row [ref=f1e487] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-c9b4d194-2026080" [ref=f1e488]
+              - cell "8462f3d6…" [ref=f1e489]
+              - cell "temperature" [ref=f1e490]
+              - cell "102" [ref=f1e491]
+              - cell "高" [ref=f1e492]
+              - cell [ref=f1e494]:
+                - button "已解决" [ref=f1e495]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e496]
+              - cell [ref=f1e497]
+            - row [ref=f1e498] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-5271557a-2026080" [ref=f1e499]
+              - cell "8462f3d6…" [ref=f1e500]
+              - cell "temperature" [ref=f1e501]
+              - cell "102" [ref=f1e502]
+              - cell "高" [ref=f1e503]
+              - cell [ref=f1e505]:
+                - button "已解决" [ref=f1e506]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e507]
+              - cell [ref=f1e508]
+            - row [ref=f1e509] [cursor=pointer]:
+              - cell "ALT-E2E-DEV-msljero9xg37-temperature-e77d5b94-2026080" [ref=f1e510]
+              - cell "8462f3d6…" [ref=f1e511]
+              - cell "temperature" [ref=f1e512]
+              - cell "102" [ref=f1e513]
+              - cell "高" [ref=f1e514]
+              - cell [ref=f1e516]:
+                - button "已解决" [ref=f1e517]
+              - cell "8/9/2026, 4:25:08 PM" [ref=f1e518]
+              - cell [ref=f1e519]
+        - generic [ref=f1e520]:
+          - generic [ref=f1e521]: 共 375 条
+          - generic [ref=f1e522]:
+            - button "上一页" [disabled]
+            - button "下一页" [ref=f1e523]

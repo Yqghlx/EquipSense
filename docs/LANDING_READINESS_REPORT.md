@@ -143,6 +143,7 @@
 - [ ] TLS 证书已挂载（`SSL_CERT_PATH` / `SSL_KEY_PATH`）
 - [ ] `GRAFANA_PASSWORD` 已修改
 - [ ] `attachments_data` 附件卷已纳入备份策略（跨主机部署改用 S3/MinIO）
+- [ ] 已在隔离数据库和临时附件卷使用 `docker/restore.sh --confirm` 完成恢复演练，并记录 RTO/RPO
 - [ ] 钉钉/飞书集成在租户 Settings 配置（如需机器人推送）
 - [ ] 首次启动验证：`/health` 返回 Healthy，使用 `SEED_ADMIN_PASSWORD` 配置的管理员初始密码登录后立即改密（不再使用公开默认密码）
 

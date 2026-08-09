@@ -26,6 +26,7 @@ public class AuthServiceTests : IAsyncDisposable
 {
     private readonly ServiceProvider _sp;
     private readonly StubRedisService _stubRedis;
+    private readonly RecordingDistributedLockProvider _lockProvider;
     private readonly JwtTokenService _jwtService;
     private readonly Guid _tenantId;
     private readonly IConfigurationRoot _configuration;
@@ -50,6 +51,7 @@ public class AuthServiceTests : IAsyncDisposable
         // 使用 Stub 替代真实 RedisService，避免构造函数连接 Redis
         // StubRedisService 继承 RedisService 并用内存字典模拟 Redis 行为
         _stubRedis = new StubRedisService();
+        _lockProvider = new RecordingDistributedLockProvider();
 
         var dbName = $"AuthServiceTest_{Guid.NewGuid()}";
         var services = new ServiceCollection();
@@ -67,6 +69,7 @@ public class AuthServiceTests : IAsyncDisposable
         // 注册 AuthService 的依赖项
         services.AddSingleton(_jwtService);
         services.AddSingleton<RedisService>(_stubRedis);  // 注册为基类 RedisService 类型
+        services.AddSingleton<IDistributedLockProvider>(_lockProvider);
         services.AddScoped<IAuditLogService, StubAuditLogService>();
         // 注册 TOTP 服务 Stub（默认接受任意 6 位验证码，测试 MFA 流程）
         services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpService>(new StubTotpService());
@@ -199,11 +202,16 @@ public class AuthServiceTests : IAsyncDisposable
             recoveryCodes.Codes[0]);
 
         result.AccessToken.Should().NotBeNullOrWhiteSpace();
-        user.MfaRecoveryCodes.Should().NotBeNullOrWhiteSpace();
+        var persistedUser = await db.Users.FindAsync(user.Id);
+        persistedUser.Should().NotBeNull();
+        persistedUser!.MfaRecoveryCodes.Should().NotBeNullOrWhiteSpace();
         MfaRecoveryCodeService.TryConsume(
-            user.MfaRecoveryCodes,
+            persistedUser.MfaRecoveryCodes,
             recoveryCodes.Codes[0],
             out _).Should().BeFalse();
+        _stubRedis.AtomicGetAndDeleteCount.Should().Be(1);
+        _lockProvider.AcquireCount.Should().Be(1);
+        _lockProvider.LastResource.Should().Be($"auth:mfa-recovery:{user.Id}");
     }
 
     [Fact]
@@ -1178,6 +1186,11 @@ public class AuthServiceTests : IAsyncDisposable
         private readonly Dictionary<string, string> _stringStore = new();
 
         /// <summary>
+        /// 记录一次性凭据是否通过原子读取删除接口消费。
+        /// </summary>
+        public int AtomicGetAndDeleteCount { get; private set; }
+
+        /// <summary>
         /// 无参构造函数 — 绕过基类需要 Redis 连接的构造函数
         /// 基类构造函数会尝试连接 Redis，此处传空配置会导致异常
         /// 因此使用一种技巧：通过反射或直接赋值来避免基类初始化
@@ -1283,6 +1296,14 @@ public class AuthServiceTests : IAsyncDisposable
             return Task.FromResult(value);
         }
 
+        public override Task<string?> GetAndDeleteStringAsync(string key)
+        {
+            AtomicGetAndDeleteCount++;
+            _stringStore.TryGetValue(key, out var value);
+            _stringStore.Remove(key);
+            return Task.FromResult(value);
+        }
+
         public override Task RemoveKeyAsync(string key)
         {
             _stringStore.Remove(key);
@@ -1352,6 +1373,39 @@ public class AuthServiceTests : IAsyncDisposable
             => storedSecret.StartsWith("protected:", StringComparison.Ordinal)
                 ? storedSecret["protected:".Length..]
                 : storedSecret;
+    }
+
+    /// <summary>
+    /// 记录认证流程使用的分布式锁，确保恢复码消费确实经过用户级互斥区。
+    /// </summary>
+    private sealed class RecordingDistributedLockProvider : IDistributedLockProvider
+    {
+        public int AcquireCount { get; private set; }
+
+        public string? LastResource { get; private set; }
+
+        public Task<IDistributedLockHandle> AcquireAsync(
+            string resource,
+            TimeSpan expiry,
+            TimeSpan waitTime,
+            CancellationToken ct = default)
+        {
+            AcquireCount++;
+            LastResource = resource;
+            return Task.FromResult<IDistributedLockHandle>(RecordingLockHandle.Instance);
+        }
+    }
+
+    /// <summary>
+    /// 测试用已获取锁句柄。
+    /// </summary>
+    private sealed class RecordingLockHandle : IDistributedLockHandle
+    {
+        public static readonly RecordingLockHandle Instance = new();
+
+        public bool IsAcquired => true;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync() => await _sp.DisposeAsync();

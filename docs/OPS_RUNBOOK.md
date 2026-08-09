@@ -215,59 +215,64 @@ docker stats equipai-backend --no-stream
 ### 4.1 手动备份
 
 ```bash
-# PostgreSQL 全量备份（含 TimescaleDB 扩展数据）
+# 生产环境应在仓库根目录执行，确保备份目录统一为 docker/backups
+cd /path/to/EquipSense
 ./docker/backup.sh
-# 默认同时归档工单附件；确认输出中存在 attachments_*.tar.gz
 
-# 或手动执行
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > backup_$(date +%Y%m%d).sql.gz
-
-# Redis RDB 快照（缓存数据非关键，可选；从密钥管理器临时注入密码）
-read -r -s -p "Redis 密码: " REDISCLI_AUTH
-export REDISCLI_AUTH
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T \
-  -e "REDISCLI_AUTH=$REDISCLI_AUTH" redis redis-cli BGSAVE
-docker compose --env-file docker/.env -f docker/docker-compose.yml cp redis:/data/dump.rdb ./redis_backup_$(date +%Y%m%d).rdb
-
-# Grafana 仪表盘配置（已版本化在 git，但用户自定义的需导出）
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T grafana grafana-cli admin export-dashboard
+# 检查本次生成的文件（数据库、附件，以及按配置生成的 Redis RDB）
+ls -lht docker/backups
 ```
+
+`backup.sh` 会逐个执行 gzip/tar 完整性校验；生产环境默认必须同时生成
+`*.sql.gz` 和 `attachments_*.tar.gz`。显式启用 `BACKUP_REDIS=true` 后，Redis
+快照或复制失败会使脚本返回非零；启用 `S3_SYNC=true` 后，异地目标缺失、未安装
+`aws-cli` 或同步失败也会返回非零。备份文件和目录应保持 600/700 权限，并在
+密钥管理系统之外单独保护 `TOTP_ENCRYPTION_KEY`。
 
 ### 4.2 恢复流程
 
+恢复会重建目标数据库并替换附件卷内容。必须在维护窗口内
+执行，并先在隔离环境完成演练；脚本默认只做校验和 dry-run，只有显式传入
+`--confirm` 才会停止服务并修改数据。
+
 ```bash
-# 1. 停止后端（避免恢复期间有写入）
-docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend
-
-# 2. 自动选择当前目录最近一次备份（也可手动替换为指定文件）
-LATEST_DB_BACKUP="$(ls -t backup_*.sql.gz | head -n1)"
-LATEST_ATTACHMENTS_BACKUP="$(ls -t attachments_*.tar.gz | head -n1)"
-LATEST_REDIS_BACKUP="$(ls -t redis_backup_*.rdb 2>/dev/null | head -n1 || true)"
-test -n "$LATEST_DB_BACKUP" && test -n "$LATEST_ATTACHMENTS_BACKUP"
-
-# 3. 恢复 PostgreSQL
-gunzip -c "$LATEST_DB_BACKUP" | docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-
-# 4. 恢复工单附件（先校验归档，再写回持久卷）
-ATTACHMENTS_TMP="$(mktemp -d)"
-tar -tzf "$LATEST_ATTACHMENTS_BACKUP" >/dev/null
-tar -xzf "$LATEST_ATTACHMENTS_BACKUP" -C "$ATTACHMENTS_TMP"
-docker compose --env-file docker/.env -f docker/docker-compose.yml cp \
-  "$ATTACHMENTS_TMP/." backend:/app/uploads/
-rm -rf "$ATTACHMENTS_TMP"
-
-# 5. 恢复 Redis（如需要）
-if test -n "$LATEST_REDIS_BACKUP"; then
-  docker cp "$LATEST_REDIS_BACKUP" equipai-redis:/data/dump.rdb
-  docker compose --env-file docker/.env -f docker/docker-compose.yml restart redis
+# 1. 明确选择同一时间点的备份，不要把数据库和附件混用不同批次
+DB_BACKUP="docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz"
+ATTACHMENTS_BACKUP="docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz"
+REDIS_BACKUP="docker/backups/redis_YYYYMMDD_HHMMSS.rdb"  # 没有则留空
+RESTORE_ARGS=(
+  --env-file docker/.env
+  --db-backup "$DB_BACKUP"
+  --attachments-backup "$ATTACHMENTS_BACKUP"
+)
+if [[ -n "$REDIS_BACKUP" ]]; then
+  RESTORE_ARGS+=(--redis-backup "$REDIS_BACKUP")
 fi
 
-# 6. 启动后端并验证
-docker compose --env-file docker/.env -f docker/docker-compose.yml start backend
-curl http://localhost:8080/health
+# 2. 先做恢复前校验；此处不会调用 Docker，也不会修改服务
+./docker/restore.sh "${RESTORE_ARGS[@]}"
+
+# 3. 确认维护窗口、备份批次和恢复计划后，显式执行真正恢复
+./docker/restore.sh "${RESTORE_ARGS[@]}" --confirm
 ```
+
+生产镜像部署还需叠加生产 Compose 覆盖文件；重复传入 `--compose-file`：
+
+```bash
+./docker/restore.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz \
+  --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
+  --confirm
+```
+
+如果业务允许暂不恢复附件，必须显式使用 `--skip-attachments`；不能静默跳过。
+提供 `--redis-backup` 时，脚本会先清理旧 AOF 并修正 RDB 属主，确保生产
+`appendonly` 配置不会覆盖 RDB。恢复失败时脚本返回非零：数据库导入使用单事务，
+附件替换不自动回滚，需保留原备份并按故障剧本处理。恢复完成后必须核对脚本输出的
+PostgreSQL、附件目录和 `/health` 检查结果，并记录实际 RTO/RPO。
 
 ### 4.3 RTO/RPO 目标
 
@@ -350,3 +355,34 @@ curl http://localhost:8080/health
 4. v2 切换后保留旧 dead 队列供人工核对；应用和脚本不得自动删除旧队列或 `rabbitmq_data` 卷。
 5. 回滚应用版本时保留 v2 队列和数据卷。只有在确认没有业务队列数据且备份可恢复时，运维人员才可显式重建 broker。
 6. 极端情况下可在 Compose 环境中设置 `EVENTBUS_PROVIDER=InMemory` 与 `ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION=true` 应急启动；直接运行应用时使用对应的 `EventBus__*` 配置。该模式重启会丢事件，恢复 RabbitMQ 后立即撤销。
+
+### 6.5 生产部署自动回滚失败
+
+默认滚动部署只重建 backend/frontend。目标版本异常时，`deploy-production.sh` 会使用
+`.last-deployed-tag` 对应的本机旧镜像回滚，并重新验证后端 readiness 与前端 health。
+若日志出现“严重：回滚健康检查失败”或“旧版本容器重建失败”，执行：
+
+```bash
+cd "$DEPLOY_PATH"
+
+# 核对版本记录；失败部署不会覆盖该文件
+cat .last-deployed-tag
+
+# 检查两个无状态服务及最近日志
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.prod.yml \
+  ps backend frontend
+docker compose --env-file .env \
+  -f docker-compose.yml -f docker-compose.prod.yml \
+  logs --tail=200 backend frontend
+
+# 验证后端依赖就绪；前端 health 仍需结合上面的 ps 输出
+curl --fail --show-error http://localhost:8080/health/ready
+```
+
+处置原则：
+
+1. 不要修改 `.last-deployed-tag`，除非旧版本容器和双健康门禁已经人工验证通过。
+2. 不要删除旧 backend/frontend 镜像；`--pull never` 回滚依赖本机已有旧镜像。
+3. 不要重建 PostgreSQL、Redis、RabbitMQ、Mosquitto 或数据卷；它们不属于应用版本回滚范围。
+4. 保留失败容器日志和目标 tag，排查镜像启动、配置迁移及依赖 readiness 后再重新发布。

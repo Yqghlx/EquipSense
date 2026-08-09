@@ -360,7 +360,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// 禁用 MFA：清除用户的 TOTP 密钥
+    /// 禁用 MFA：普通角色清除用户的 TOTP 密钥；生产强制角色会被拒绝
     /// </summary>
     [HttpPost("mfa/disable")]
     [Authorize]

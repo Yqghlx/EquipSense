@@ -1,0 +1,28 @@
+import { i as __toESM } from "/node_modules/.vite/deps/rolldown-runtime-B-lAHAz2.js?v=1d2f6f90";
+import { t as require_react } from "/node_modules/.vite/deps/react.js?v=1d2f6f90";
+import { t as useRenderElement } from "/node_modules/.vite/deps/useRenderElement-BXRg5SAf.js?v=1d2f6f90";
+import { t as useButton } from "/node_modules/.vite/deps/useButton-ydNp_PBX.js?v=1d2f6f90";
+/**
+* A button component that can be used to trigger actions.
+* Renders a `<button>` element.
+*
+* Documentation: [Base UI Button](https://base-ui.com/react/components/button)
+*/
+var Button = /*#__PURE__*/ (/* @__PURE__ */ __toESM(require_react(), 1)).forwardRef(function Button(componentProps, forwardedRef) {
+	const { render, className, disabled = false, focusableWhenDisabled = false, nativeButton = true, style, ...elementProps } = componentProps;
+	const { getButtonProps, buttonRef } = useButton({
+		disabled,
+		focusableWhenDisabled,
+		native: nativeButton
+	});
+	return useRenderElement("button", componentProps, {
+		state: { disabled },
+		ref: [forwardedRef, buttonRef],
+		props: [elementProps, getButtonProps]
+	});
+});
+Button.displayName = "Button";
+//#endregion
+export { Button };
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiQGJhc2UtdWlfcmVhY3RfYnV0dG9uLmpzIiwibmFtZXMiOltdLCJzb3VyY2VzIjpbIi4uLy4uL0BiYXNlLXVpL3JlYWN0L2VzbS9idXR0b24vQnV0dG9uLmpzIl0sInNvdXJjZXNDb250ZW50IjpbIid1c2UgY2xpZW50JztcblxuaW1wb3J0ICogYXMgUmVhY3QgZnJvbSAncmVhY3QnO1xuaW1wb3J0IHsgdXNlQnV0dG9uIH0gZnJvbSBcIi4uL2ludGVybmFscy91c2UtYnV0dG9uL3VzZUJ1dHRvbi5qc1wiO1xuaW1wb3J0IHsgdXNlUmVuZGVyRWxlbWVudCB9IGZyb20gXCIuLi9pbnRlcm5hbHMvdXNlUmVuZGVyRWxlbWVudC5qc1wiO1xuLyoqXG4gKiBBIGJ1dHRvbiBjb21wb25lbnQgdGhhdCBjYW4gYmUgdXNlZCB0byB0cmlnZ2VyIGFjdGlvbnMuXG4gKiBSZW5kZXJzIGEgYDxidXR0b24+YCBlbGVtZW50LlxuICpcbiAqIERvY3VtZW50YXRpb246IFtCYXNlIFVJIEJ1dHRvbl0oaHR0cHM6Ly9iYXNlLXVpLmNvbS9yZWFjdC9jb21wb25lbnRzL2J1dHRvbilcbiAqL1xuZXhwb3J0IGNvbnN0IEJ1dHRvbiA9IC8qI19fUFVSRV9fKi9SZWFjdC5mb3J3YXJkUmVmKGZ1bmN0aW9uIEJ1dHRvbihjb21wb25lbnRQcm9wcywgZm9yd2FyZGVkUmVmKSB7XG4gIGNvbnN0IHtcbiAgICByZW5kZXIsXG4gICAgY2xhc3NOYW1lLFxuICAgIGRpc2FibGVkID0gZmFsc2UsXG4gICAgZm9jdXNhYmxlV2hlbkRpc2FibGVkID0gZmFsc2UsXG4gICAgbmF0aXZlQnV0dG9uID0gdHJ1ZSxcbiAgICBzdHlsZSxcbiAgICAuLi5lbGVtZW50UHJvcHNcbiAgfSA9IGNvbXBvbmVudFByb3BzO1xuICBjb25zdCB7XG4gICAgZ2V0QnV0dG9uUHJvcHMsXG4gICAgYnV0dG9uUmVmXG4gIH0gPSB1c2VCdXR0b24oe1xuICAgIGRpc2FibGVkLFxuICAgIGZvY3VzYWJsZVdoZW5EaXNhYmxlZCxcbiAgICBuYXRpdmU6IG5hdGl2ZUJ1dHRvblxuICB9KTtcbiAgY29uc3Qgc3RhdGUgPSB7XG4gICAgZGlzYWJsZWRcbiAgfTtcbiAgcmV0dXJuIHVzZVJlbmRlckVsZW1lbnQoJ2J1dHRvbicsIGNvbXBvbmVudFByb3BzLCB7XG4gICAgc3RhdGUsXG4gICAgcmVmOiBbZm9yd2FyZGVkUmVmLCBidXR0b25SZWZdLFxuICAgIHByb3BzOiBbZWxlbWVudFByb3BzLCBnZXRCdXR0b25Qcm9wc11cbiAgfSk7XG59KTtcbmlmIChwcm9jZXNzLmVudi5OT0RFX0VOViAhPT0gXCJwcm9kdWN0aW9uXCIpIEJ1dHRvbi5kaXNwbGF5TmFtZSA9IFwiQnV0dG9uXCI7Il0sIm1hcHBpbmdzIjoiOzs7Ozs7Ozs7O0FBV0EsSUFBYSxTQUFzQix5REFBQSxFQUFBLENBQU0sV0FBVyxTQUFTLE9BQU8sZ0JBQWdCLGNBQWM7Q0FDaEcsTUFBTSxFQUNKLFFBQ0EsV0FDQSxXQUFXLE9BQ1gsd0JBQXdCLE9BQ3hCLGVBQWUsTUFDZixPQUNBLEdBQUcsaUJBQ0Q7Q0FDSixNQUFNLEVBQ0osZ0JBQ0EsY0FDRSxVQUFVO0VBQ1o7RUFDQTtFQUNBLFFBQVE7Q0FDVixDQUFDO0NBSUQsT0FBTyxpQkFBaUIsVUFBVSxnQkFBZ0I7RUFDaEQsT0FBQSxFQUhBLFNBR0k7RUFDSixLQUFLLENBQUMsY0FBYyxTQUFTO0VBQzdCLE9BQU8sQ0FBQyxjQUFjLGNBQWM7Q0FDdEMsQ0FBQztBQUNILENBQUM7QUFDMEMsT0FBTyxjQUFjIiwieF9nb29nbGVfaWdub3JlTGlzdCI6WzBdfQ==

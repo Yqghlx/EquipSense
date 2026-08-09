@@ -1,0 +1,7 @@
+/**
+* 只引入 echarts-for-react 的核心包装器，避免其默认入口同时引入完整 ECharts 包。
+* 具体图表能力由 ./echarts.ts 按需注册。
+*/
+export { default } from "/node_modules/.vite/deps/echarts-for-react_esm_core.js?v=1d2f6f90";
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6Ijs7OztBQUlBLFNBQVMsZUFBZSIsIm5hbWVzIjpbXSwic291cmNlcyI6WyJSZWFjdEVDaGFydHMudHMiXSwidmVyc2lvbiI6Mywic291cmNlc0NvbnRlbnQiOlsiLyoqXG4gKiDlj6rlvJXlhaUgZWNoYXJ0cy1mb3ItcmVhY3Qg55qE5qC45b+D5YyF6KOF5Zmo77yM6YG/5YWN5YW26buY6K6k5YWl5Y+j5ZCM5pe25byV5YWl5a6M5pW0IEVDaGFydHMg5YyF44CCXG4gKiDlhbfkvZPlm77ooajog73lipvnlLEgLi9lY2hhcnRzLnRzIOaMiemcgOazqOWGjOOAglxuICovXG5leHBvcnQgeyBkZWZhdWx0IH0gZnJvbSAnZWNoYXJ0cy1mb3ItcmVhY3QvZXNtL2NvcmUnO1xuIl19

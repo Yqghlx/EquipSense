@@ -1,0 +1,11 @@
+{"type":"send","time":1786275709232.829,"opcode":1,"data":"{\"protocol\":\"json\",\"version\":1}\u001e"}
+{"type":"receive","time":1786275709237.102,"opcode":1,"data":"{}\u001e"}
+{"type":"send","time":1786275709237.1501,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"receive","time":1786275724503.259,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"send","time":1786275724503.467,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"receive","time":1786275739502.6492,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"send","time":1786275739503.0132,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"receive","time":1786275755502.9111,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"send","time":1786275755503.1392,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"receive","time":1786275771501.4612,"opcode":1,"data":"{\"type\":6}\u001e"}
+{"type":"send","time":1786275771501.549,"opcode":1,"data":"{\"type\":6}\u001e"}

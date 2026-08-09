@@ -3,8 +3,9 @@
 > 零停机部署方案：新版本起在非活跃颜色实例上，健康检查通过后 Nginx 原子切换流量，
 > 切换中断 <1 秒。适用于对可用性有更高要求的部署（对应 [SLO-1 ≥99.9%](SLO.md)）。
 >
-> 默认 CI 部署（`.github/workflows/ci.yml` deploy job）使用**滚动重启 + 健康门禁 + 失败回滚**
-> 策略，已有秒级中断 + 自动回滚。蓝绿部署是其**零停机升级方案**，需服务器有双实例资源。
+> 默认 CI 部署通过 `docker/deploy-production.sh` 使用**滚动重启 + 双健康门禁 + 已验证回滚**
+> 策略，已有秒级中断；运行态变更后的失败会用本机旧镜像恢复并再次检查健康。蓝绿部署是其
+> **零停机升级方案**，需服务器有双实例资源。
 
 ---
 
@@ -43,6 +44,7 @@
 | `docker/nginx.bluegreen.conf` | router 容器 Nginx 配置（含 upstream_active include） |
 | `docker/upstream-active.conf` | 当前活跃色 upstream（由部署脚本维护，reload 生效） |
 | `docker/.active-color` | 当前活跃色记录（blue/green，首次部署默认 blue） |
+| `docker/deploy-production.sh` | 默认单实例滚动部署（预检 → 重建 → 双健康门禁 → 已验证回滚） |
 | `scripts/deploy-bluegreen.sh` | 部署编排脚本（拉镜像 → 健康 → 切换 → 停旧） |
 
 `router` 不对 `backend-blue` 或 `backend-green` 声明固定的 `depends_on`。蓝绿发布时只启动
@@ -167,7 +169,7 @@ script: |
 | 特性 | 滚动部署（默认） | 蓝绿部署（可选） |
 |------|----------------|----------------|
 | 中断时间 | 秒级（容器重启） | **<1 秒**（Nginx reload） |
-| 回滚速度 | 重拉旧镜像重启（分钟级） | **upstream 切回**（秒级） |
+| 回滚速度 | 本机旧镜像重建 + 双健康检查（分钟级） | **upstream 切回**（秒级） |
 | 资源占用 | 单实例 | 双实例（+1.3G） |
 | 复杂度 | 低 | 中（需 router + 编排脚本） |
 | 适用 | 通用 | 高可用要求场景 |

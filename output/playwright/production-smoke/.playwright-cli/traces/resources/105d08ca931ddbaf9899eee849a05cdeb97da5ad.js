@@ -1,0 +1,31 @@
+import { useQuery } from "/node_modules/.vite/deps/@tanstack_react-query.js?v=1d2f6f90";
+import api from "/src/lib/api.ts";
+/**
+* 设备遥测数据查询 Hook
+*
+* 支持按指标名称和时间范围过滤。
+* staleTime 设为 10 秒，遥测数据频繁更新时减少不必要的请求。
+*/
+export function useTelemetry(deviceId, metric, startTime, endTime) {
+	return useQuery({
+		queryKey: [
+			"telemetry",
+			deviceId,
+			metric,
+			startTime,
+			endTime
+		],
+		queryFn: async () => {
+			const params = new URLSearchParams();
+			if (metric) params.set("metric", metric);
+			if (startTime) params.set("startTime", startTime);
+			if (endTime) params.set("endTime", endTime);
+			const { data } = await api.get(`/telemetry/${deviceId}?${params}`);
+			return data;
+		},
+		enabled: !!deviceId,
+		staleTime: 1e4
+	});
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxnQkFBZ0I7QUFDekIsT0FBTyxTQUFTOzs7Ozs7O0FBZ0JoQixPQUFPLFNBQVMsYUFDZCxVQUNBLFFBQ0EsV0FDQSxTQUNBO0NBQ0EsT0FBTyxTQUFTO0VBQ2QsVUFBVTtHQUFDO0dBQWE7R0FBVTtHQUFRO0dBQVc7RUFBTztFQUM1RCxTQUFTLFlBQVk7R0FDbkIsTUFBTSxTQUFTLElBQUksZ0JBQWdCO0dBQ25DLElBQUksUUFBUSxPQUFPLElBQUksVUFBVSxNQUFNO0dBQ3ZDLElBQUksV0FBVyxPQUFPLElBQUksYUFBYSxTQUFTO0dBQ2hELElBQUksU0FBUyxPQUFPLElBQUksV0FBVyxPQUFPO0dBQzFDLE1BQU0sRUFBRSxTQUFTLE1BQU0sSUFBSSxJQUN6QixjQUFjLFNBQVMsR0FBRyxRQUM1QjtHQUNBLE9BQU87RUFDVDtFQUNBLFNBQVMsQ0FBQyxDQUFDO0VBQ1gsV0FBVztDQUNiLENBQUM7QUFDSCIsIm5hbWVzIjpbXSwic291cmNlcyI6WyJ1c2VUZWxlbWV0cnkudHMiXSwidmVyc2lvbiI6Mywic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgdXNlUXVlcnkgfSBmcm9tICdAdGFuc3RhY2svcmVhY3QtcXVlcnknO1xuaW1wb3J0IGFwaSBmcm9tICcuLi9saWIvYXBpJztcblxuLyoqIOmBpea1i+aVsOaNrueCue+8iOaXtuW6j+WbvuihqOS9v+eUqO+8iSAqL1xuZXhwb3J0IGludGVyZmFjZSBUZWxlbWV0cnlEYXRhUG9pbnQge1xuICAvKiog6YeH6ZuG5pe26Ze0ICovXG4gIHRpbWU6IHN0cmluZztcbiAgLyoqIOaMh+agh+WAvCAqL1xuICB2YWx1ZTogbnVtYmVyO1xufVxuXG4vKipcbiAqIOiuvuWkh+mBpea1i+aVsOaNruafpeivoiBIb29rXG4gKlxuICog5pSv5oyB5oyJ5oyH5qCH5ZCN56ew5ZKM5pe26Ze06IyD5Zu06L+H5ruk44CCXG4gKiBzdGFsZVRpbWUg6K6+5Li6IDEwIOenku+8jOmBpea1i+aVsOaNrumikee5geabtOaWsOaXtuWHj+WwkeS4jeW/heimgeeahOivt+axguOAglxuICovXG5leHBvcnQgZnVuY3Rpb24gdXNlVGVsZW1ldHJ5KFxuICBkZXZpY2VJZDogc3RyaW5nLFxuICBtZXRyaWM/OiBzdHJpbmcsXG4gIHN0YXJ0VGltZT86IHN0cmluZyxcbiAgZW5kVGltZT86IHN0cmluZyxcbikge1xuICByZXR1cm4gdXNlUXVlcnkoe1xuICAgIHF1ZXJ5S2V5OiBbJ3RlbGVtZXRyeScsIGRldmljZUlkLCBtZXRyaWMsIHN0YXJ0VGltZSwgZW5kVGltZV0sXG4gICAgcXVlcnlGbjogYXN5bmMgKCkgPT4ge1xuICAgICAgY29uc3QgcGFyYW1zID0gbmV3IFVSTFNlYXJjaFBhcmFtcygpO1xuICAgICAgaWYgKG1ldHJpYykgcGFyYW1zLnNldCgnbWV0cmljJywgbWV0cmljKTtcbiAgICAgIGlmIChzdGFydFRpbWUpIHBhcmFtcy5zZXQoJ3N0YXJ0VGltZScsIHN0YXJ0VGltZSk7XG4gICAgICBpZiAoZW5kVGltZSkgcGFyYW1zLnNldCgnZW5kVGltZScsIGVuZFRpbWUpO1xuICAgICAgY29uc3QgeyBkYXRhIH0gPSBhd2FpdCBhcGkuZ2V0PFRlbGVtZXRyeURhdGFQb2ludFtdIHwgUmVjb3JkPHN0cmluZywgbnVtYmVyPj4oXG4gICAgICAgIGAvdGVsZW1ldHJ5LyR7ZGV2aWNlSWR9PyR7cGFyYW1zfWAsXG4gICAgICApO1xuICAgICAgcmV0dXJuIGRhdGE7XG4gICAgfSxcbiAgICBlbmFibGVkOiAhIWRldmljZUlkLFxuICAgIHN0YWxlVGltZTogMTBfMDAwLFxuICB9KTtcbn1cbiJdfQ==

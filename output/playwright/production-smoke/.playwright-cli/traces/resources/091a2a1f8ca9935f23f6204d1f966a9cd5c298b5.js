@@ -1,0 +1,12 @@
+import { QueryClient } from "/node_modules/.vite/deps/@tanstack_react-query.js?v=1d2f6f90";
+export const queryClient = new QueryClient({ defaultOptions: { queries: {
+	// 5 分钟内数据视为新鲜，避免频繁请求
+	staleTime: 5 * 6e4,
+	// 10 分钟后清理未使用的缓存
+	gcTime: 10 * 6e4,
+	retry: 1,
+	// 关闭窗口聚焦时自动刷新，减少不必要的请求
+	refetchOnWindowFocus: false
+} } });
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxtQkFBbUI7QUFFNUIsT0FBTyxNQUFNLGNBQWMsSUFBSSxZQUFZLEVBQ3pDLGdCQUFnQixFQUNkLFNBQVM7O0NBRVAsV0FBVyxJQUFJOztDQUVmLFFBQVEsS0FBSztDQUNiLE9BQU87O0NBRVAsc0JBQXNCO0FBQ3hCLEVBQ0YsRUFDRixDQUFDIiwibmFtZXMiOltdLCJzb3VyY2VzIjpbInF1ZXJ5Q2xpZW50LnRzIl0sInZlcnNpb24iOjMsInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IFF1ZXJ5Q2xpZW50IH0gZnJvbSAnQHRhbnN0YWNrL3JlYWN0LXF1ZXJ5JztcblxuZXhwb3J0IGNvbnN0IHF1ZXJ5Q2xpZW50ID0gbmV3IFF1ZXJ5Q2xpZW50KHtcbiAgZGVmYXVsdE9wdGlvbnM6IHtcbiAgICBxdWVyaWVzOiB7XG4gICAgICAvLyA1IOWIhumSn+WGheaVsOaNruinhuS4uuaWsOmynO+8jOmBv+WFjemikee5geivt+axglxuICAgICAgc3RhbGVUaW1lOiA1ICogNjBfMDAwLFxuICAgICAgLy8gMTAg5YiG6ZKf5ZCO5riF55CG5pyq5L2/55So55qE57yT5a2YXG4gICAgICBnY1RpbWU6IDEwICogNjBfMDAwLFxuICAgICAgcmV0cnk6IDEsXG4gICAgICAvLyDlhbPpl63nqpflj6PogZrnhKbml7boh6rliqjliLfmlrDvvIzlh4/lsJHkuI3lv4XopoHnmoTor7fmsYJcbiAgICAgIHJlZmV0Y2hPbldpbmRvd0ZvY3VzOiBmYWxzZSxcbiAgICB9LFxuICB9LFxufSk7XG4iXX0=

@@ -244,4 +244,12 @@ internal class FakeRedisService : RedisService
         _store.TryGetValue(key, out var value);
         return Task.FromResult(value);
     }
+
+    /// <summary>
+    /// 一次性凭据的原子读取删除内存实现，保持与生产 Redis GETDEL 的语义一致。
+    /// </summary>
+    public override Task<string?> GetAndDeleteStringAsync(string key)
+    {
+        return Task.FromResult(_store.TryRemove(key, out var value) ? value : null);
+    }
 }

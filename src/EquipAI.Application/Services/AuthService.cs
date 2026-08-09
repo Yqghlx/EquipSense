@@ -33,6 +33,7 @@ public class AuthService : IAuthService
     private readonly SmtpEmailNotificationService _emailService;
     private readonly ITotpService _totpService;
     private readonly ITotpSecretProtector _totpSecretProtector;
+    private readonly IDistributedLockProvider _distributedLockProvider;
     private readonly MfaPolicyOptions _mfaPolicy;
 
     /// <summary>
@@ -87,6 +88,21 @@ public class AuthService : IAuthService
     private const string MfaSetupKeyPrefix = "mfa_setup:";
 
     /// <summary>
+    /// MFA 恢复码按用户加锁，避免并行挑战重复消费同一个一次性恢复码。
+    /// </summary>
+    private const string MfaRecoveryLockPrefix = "auth:mfa-recovery:";
+
+    /// <summary>
+    /// 恢复码消费和重新生成的锁租约时长，覆盖一次数据库瞬态重试窗口。
+    /// </summary>
+    private static readonly TimeSpan MfaRecoveryLockExpiry = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// 等待同一用户的另一个恢复码操作完成的最长时间。
+    /// </summary>
+    private static readonly TimeSpan MfaRecoveryLockWaitTime = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// 各套餐对应的配额限制（最大设备数、最大用户数、数据保留天数）
     /// 0 表示不限制
     /// </summary>
@@ -120,7 +136,8 @@ public class AuthService : IAuthService
         SmtpEmailNotificationService emailService,
         ITotpService totpService,
         IConfiguration configuration,
-        ITotpSecretProtector totpSecretProtector)
+        ITotpSecretProtector totpSecretProtector,
+        IDistributedLockProvider distributedLockProvider)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
@@ -131,6 +148,7 @@ public class AuthService : IAuthService
         _emailService = emailService;
         _totpService = totpService;
         _totpSecretProtector = totpSecretProtector;
+        _distributedLockProvider = distributedLockProvider;
         _mfaPolicy = MfaPolicyOptions.FromConfiguration(configuration);
     }
 
@@ -393,8 +411,7 @@ public class AuthService : IAuthService
 
         // 从 Redis 读取挑战令牌对应的 userId（读取后立即删除，实现一次性使用）
         var challengeKey = $"{MfaChallengeKeyPrefix}{challengeToken}";
-        var userIdStr = await _redisService.GetStringAsync(challengeKey);
-        await _redisService.RemoveKeyAsync(challengeKey); // 无论成败均删除，防重放
+        var userIdStr = await _redisService.GetAndDeleteStringAsync(challengeKey);
 
         if (userIdStr == null || !Guid.TryParse(userIdStr, out var userId))
         {
@@ -427,35 +444,77 @@ public class AuthService : IAuthService
         var recoveryCodeConsumed = false;
         if (!totpVerified)
         {
-            recoveryCodeConsumed = MfaRecoveryCodeService.TryConsume(
-                user.MfaRecoveryCodes,
-                totpCode,
-                out var remainingRecoveryCodes);
-
-            if (recoveryCodeConsumed)
+            // 恢复码是数据库中的一次性凭据，必须在共享锁内重新读取并保存，
+            // 否则两个并行 MFA 挑战可能同时读取同一份 JSON 并各自成功消费。
+            await using var recoveryLock = await _distributedLockProvider.AcquireAsync(
+                $"{MfaRecoveryLockPrefix}{user.Id}",
+                MfaRecoveryLockExpiry,
+                MfaRecoveryLockWaitTime);
+            if (!recoveryLock.IsAcquired)
             {
-                user.MfaRecoveryCodes = remainingRecoveryCodes;
-                await _auditLogService.LogAsync(
-                    user.TenantId,
-                    "AuthMfaRecoveryCodeUsed",
-                    "User",
-                    user.Id.ToString(),
-                    $"用户 {user.Username} 使用一次性 MFA 恢复码登录",
-                    default);
+                _logger.LogWarning("MFA 恢复码验证获取用户锁超时：{UserId}", user.Id);
+                throw new UnauthorizedAccessException("MFA 请求正在处理中，请重新登录后重试");
             }
-        }
 
-        if (!totpVerified && !recoveryCodeConsumed)
+            // 锁内重新查询，确保消费的是最新恢复码摘要；同时兼容另一个请求刚刚禁用 MFA 的情况。
+            _dbContext.Entry(user).State = EntityState.Detached;
+            user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+                .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+            if (user == null || !user.MfaEnabled || string.IsNullOrEmpty(user.TotpSecret))
+            {
+                throw new UnauthorizedAccessException("用户状态异常，请重新登录");
+            }
+
+            try
+            {
+                plainTotpSecret = _totpSecretProtector.Unprotect(user.TotpSecret);
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogError(ex, "用户 {UserId} 的 TOTP 密钥无法解密，拒绝 MFA 登录", user.Id);
+                throw new UnauthorizedAccessException("MFA 配置不可用，请联系系统管理员重置", ex);
+            }
+
+            // 等待锁期间验证码可能跨过时间窗口，再校验一次 TOTP，避免把有效验证码误判为恢复码。
+            totpVerified = _totpService.VerifyCode(plainTotpSecret, totpCode);
+            if (!totpVerified)
+            {
+                recoveryCodeConsumed = MfaRecoveryCodeService.TryConsume(
+                    user.MfaRecoveryCodes,
+                    totpCode,
+                    out var remainingRecoveryCodes);
+
+                if (recoveryCodeConsumed)
+                {
+                    user.MfaRecoveryCodes = remainingRecoveryCodes;
+                    await _auditLogService.LogAsync(
+                        user.TenantId,
+                        "AuthMfaRecoveryCodeUsed",
+                        "User",
+                        user.Id.ToString(),
+                        $"用户 {user.Username} 使用一次性 MFA 恢复码登录",
+                        default);
+                }
+            }
+
+            if (!totpVerified && !recoveryCodeConsumed)
+            {
+                _logger.LogWarning("MFA 验证失败：用户 {Username} TOTP 验证码错误", user.Username);
+                await _auditLogService.LogAsync(user.TenantId, "AuthMfaFailed", "User", user.Id.ToString(),
+                    $"用户 {user.Username} MFA 验证码错误", default);
+                throw new UnauthorizedAccessException("验证码错误，请重试");
+            }
+
+            // 在锁内提交恢复码消费，确保下一请求只能看到已删除当前摘要的最新值。
+            user.TotpSecret = _totpSecretProtector.Protect(plainTotpSecret);
+            await _dbContext.SaveChangesAsync();
+        }
+        else
         {
-            _logger.LogWarning("MFA 验证失败：用户 {Username} TOTP 验证码错误", user.Username);
-            await _auditLogService.LogAsync(user.TenantId, "AuthMfaFailed", "User", user.Id.ToString(),
-                $"用户 {user.Username} MFA 验证码错误", default);
-            throw new UnauthorizedAccessException("验证码错误，请重试");
+            // 历史明文密钥在第一次成功验证后自动升级为密文；新密钥也重新使用随机 nonce 保护。
+            user.TotpSecret = _totpSecretProtector.Protect(plainTotpSecret);
+            await _dbContext.SaveChangesAsync();
         }
-
-        // 历史明文密钥在第一次成功验证后自动升级为密文；新密钥也重新使用随机 nonce 保护。
-        user.TotpSecret = _totpSecretProtector.Protect(plainTotpSecret);
-        await _dbContext.SaveChangesAsync();
 
         // MFA 验证通过：颁发令牌（与正常登录相同流程）
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
@@ -671,6 +730,16 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("验证码不能为空");
         }
 
+        // 重新生成会使旧恢复码全部失效，必须和恢复码消费共用同一把用户级锁。
+        await using var recoveryLock = await _distributedLockProvider.AcquireAsync(
+            $"{MfaRecoveryLockPrefix}{userId}",
+            MfaRecoveryLockExpiry,
+            MfaRecoveryLockWaitTime);
+        if (!recoveryLock.IsAcquired)
+        {
+            throw new UnauthorizedAccessException("MFA 请求正在处理中，请稍后重试");
+        }
+
         var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
             .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive)
             ?? throw new UnauthorizedAccessException("用户不存在或已停用");
@@ -712,10 +781,20 @@ public class AuthService : IAuthService
     }
 
     /// <summary>
-    /// 禁用 MFA：清除用户的 TOTP 密钥并标记 MfaEnabled=false
+    /// 禁用 MFA：普通角色清除用户的 TOTP 密钥并标记 MfaEnabled=false；生产强制角色会被拒绝
     /// </summary>
     public async Task DisableMfaAsync(Guid userId)
     {
+        // 禁用 MFA 会清除恢复码，和恢复码登录/重新生成必须串行，避免并发请求产生状态覆盖。
+        await using var recoveryLock = await _distributedLockProvider.AcquireAsync(
+            $"{MfaRecoveryLockPrefix}{userId}",
+            MfaRecoveryLockExpiry,
+            MfaRecoveryLockWaitTime);
+        if (!recoveryLock.IsAcquired)
+        {
+            throw new InvalidOperationException("MFA 请求正在处理中，请稍后重试");
+        }
+
         var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
             .FirstOrDefaultAsync(u => u.Id == userId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
@@ -865,7 +944,8 @@ public class AuthService : IAuthService
     public async Task ResetPasswordAsync(string token, string newPassword, CancellationToken ct = default)
     {
         var key = $"{PasswordResetKeyPrefix}{token}";
-        var userIdStr = await _redisService.GetStringAsync(key);
+        // 密码重置令牌也是一次性凭据，使用 Redis GETDEL 避免并发请求重复使用同一链接。
+        var userIdStr = await _redisService.GetAndDeleteStringAsync(key);
 
         if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
             throw new UnauthorizedAccessException("重置链接无效或已过期，请重新申请");
@@ -881,8 +961,6 @@ public class AuthService : IAuthService
         user.AccessFailedCount = 0;   // 清除登录失败计数
         user.LockoutEnd = null;       // 解除锁定
 
-        // 删除重置 token（一次性使用）
-        await _redisService.RemoveKeyAsync(key);
         // 移除刷新令牌，强制重新登录
         await _redisService.RemoveRefreshTokenAsync(userId);
 

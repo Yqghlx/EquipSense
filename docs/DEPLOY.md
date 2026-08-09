@@ -188,9 +188,27 @@ GitHub Actions 的 `deploy` job 要求 `DEPLOY_PATH` 指向生产 Docker 文件�
 - `.env`（权限为 `600`，由密钥管理系统或人工安全注入）
 - `validate-env.sh`
 - `docker-compose.yml` 与 `docker-compose.prod.yml`
+- `deploy-production.sh`（与仓库 `docker/deploy-production.sh` 保持一致并具备执行权限）
 
-部署会先执行 `bash ./validate-env.sh .env --check-runtime-files` 和 `docker compose --env-file .env ... config --quiet`，
-只有生产凭据、镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重启容器。校验失败会在任何容器变更前退出。
+GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。脚本会先执行
+`bash ./validate-env.sh .env --check-runtime-files` 和 Compose 渲染门禁；只有生产凭据、
+镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重建容器。校验或
+镜像拉取失败发生在运行态变更前，不触发回滚。
+
+首次重建 backend/frontend 后的任何失败都会进入统一回滚：脚本使用
+`.last-deployed-tag` 对应的本机旧镜像（`--pull never`）恢复两个无状态服务，再次验证
+后端 `/health/ready` 与前端容器 health。只有目标版本健康通过后才以临时文件加原子
+`mv` 更新版本记录。同一 tag 重复触发时只验证现有服务健康，不重复重建。
+
+手动执行与 CI 使用同一入口：
+
+```bash
+cd "$DEPLOY_PATH"
+./deploy-production.sh 1.2.3
+```
+
+脚本不会停止或重建 PostgreSQL、Redis、RabbitMQ、Mosquitto 和任何数据卷。回滚失败时
+仍返回非零并保留旧版本记录，按 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md) 的部署回滚故障剧本处理。
 如需启用零停机蓝绿部署，再按 [`BLUE_GREEN_DEPLOY.md`](BLUE_GREEN_DEPLOY.md) 准备 `docker-compose.bluegreen.yml`、router 配置和部署脚本。
 
 ### 依赖审计说明
@@ -262,32 +280,36 @@ cd ..
 
 ### PostgreSQL 与附件恢复
 
+恢复请统一使用 [`docker/restore.sh`](../docker/restore.sh)，不要手工把 SQL
+追加到现有数据库或只覆盖附件而不清理旧文件。脚本默认只做 dry-run 校验；确认
+备份批次、维护窗口和回滚预案后，才追加 `--confirm`。生产镜像部署需要同时传入
+基础 Compose 与生产覆盖文件：
+
 ```bash
-# 1. 先停止后端，避免恢复过程中产生新写入
-docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend
+# 先校验（不会调用 Docker，也不会修改数据）
+./docker/restore.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz \
+  --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz
 
-# 2. 自动选择最近一次已生成的数据库和附件备份（也可手动替换为指定文件）
-LATEST_DB_BACKUP="$(ls -t docker/backups/equipai_*.sql.gz | head -n1)"
-LATEST_ATTACHMENTS_BACKUP="$(ls -t docker/backups/attachments_*.tar.gz | head -n1)"
-test -n "$LATEST_DB_BACKUP" && test -n "$LATEST_ATTACHMENTS_BACKUP"
-
-# 3. 恢复 PostgreSQL
-gunzip -c "$LATEST_DB_BACKUP" | \
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-
-# 4. 校验并解压附件备份到临时目录，再复制回持久卷
-ATTACHMENTS_TMP="$(mktemp -d)"
-tar -tzf "$LATEST_ATTACHMENTS_BACKUP" >/dev/null
-tar -xzf "$LATEST_ATTACHMENTS_BACKUP" -C "$ATTACHMENTS_TMP"
-docker compose --env-file docker/.env -f docker/docker-compose.yml cp \
-  "$ATTACHMENTS_TMP/." backend:/app/uploads/
-rm -rf "$ATTACHMENTS_TMP"
-
-# 5. 恢复 Redis（可选）并启动后端
-docker compose --env-file docker/.env -f docker/docker-compose.yml restart redis
-docker compose --env-file docker/.env -f docker/docker-compose.yml start backend
+# 确认后执行数据库、附件恢复及健康检查
+./docker/restore.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz \
+  --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
+  --confirm
 ```
+
+Redis RDB 恢复是可选的，在两条命令中都追加
+`--redis-backup docker/backups/redis_YYYYMMDD_HHMMSS.rdb`；脚本会清理旧 AOF
+并修正 RDB 属主后再启动 Redis。如果暂不恢复附件，
+必须显式使用 `--skip-attachments`。恢复会重建目标数据库并替换
+附件卷；数据库使用单事务导入，附件替换不自动回滚，因此必须先在隔离环境演练并
+记录 RTO/RPO。
 
 ### Volume 管理
 

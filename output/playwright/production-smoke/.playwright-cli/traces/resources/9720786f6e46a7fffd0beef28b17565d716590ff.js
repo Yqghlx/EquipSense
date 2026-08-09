@@ -1,0 +1,30 @@
+import { useQuery, useMutation } from "/node_modules/.vite/deps/@tanstack_react-query.js?v=1d2f6f90";
+import api from "/src/lib/api.ts";
+/**
+* 获取可用套餐列表
+*
+* 套餐列表变化频率低，缓存 10 分钟。
+*/
+export function usePlans() {
+	return useQuery({
+		queryKey: ["plans"],
+		queryFn: async () => {
+			const { data } = await api.get("/auth/plans");
+			return data;
+		},
+		staleTime: 10 * 60 * 1e3
+	});
+}
+/**
+* 注册 mutation
+*
+* 注册成功后返回 AuthResponse，调用方需自行处理 token 存储。
+*/
+export function useRegister() {
+	return useMutation({ mutationFn: async (request) => {
+		const { data } = await api.post("/auth/register", request);
+		return data;
+	} });
+}
+
+//# sourceMappingURL=data:application/json;base64,eyJtYXBwaW5ncyI6IkFBQUEsU0FBUyxVQUFVLG1CQUFtQjtBQUN0QyxPQUFPLFNBQVM7Ozs7OztBQVFoQixPQUFPLFNBQVMsV0FBVztDQUN6QixPQUFPLFNBQVM7RUFDZCxVQUFVLENBQUMsT0FBTztFQUNsQixTQUFTLFlBQVk7R0FDbkIsTUFBTSxFQUFFLFNBQVMsTUFBTSxJQUFJLElBQWdCLGFBQWE7R0FDeEQsT0FBTztFQUNUO0VBQ0EsV0FBVyxLQUFLLEtBQUs7Q0FDdkIsQ0FBQztBQUNIOzs7Ozs7QUFPQSxPQUFPLFNBQVMsY0FBYztDQUM1QixPQUFPLFlBQWtELEVBQ3ZELFlBQVksT0FBTyxZQUE2QjtFQUM5QyxNQUFNLEVBQUUsU0FBUyxNQUFNLElBQUksS0FBbUIsa0JBQWtCLE9BQU87RUFDdkUsT0FBTztDQUNULEVBQ0YsQ0FBQztBQUNIIiwibmFtZXMiOltdLCJzb3VyY2VzIjpbInVzZVJlZ2lzdGVyLnRzIl0sInZlcnNpb24iOjMsInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7IHVzZVF1ZXJ5LCB1c2VNdXRhdGlvbiB9IGZyb20gJ0B0YW5zdGFjay9yZWFjdC1xdWVyeSc7XG5pbXBvcnQgYXBpIGZyb20gJy4uL2xpYi9hcGknO1xuaW1wb3J0IHR5cGUgeyBQbGFuSW5mbywgUmVnaXN0ZXJSZXF1ZXN0LCBBdXRoUmVzcG9uc2UgfSBmcm9tICcuLi90eXBlcyc7XG5cbi8qKlxuICog6I635Y+W5Y+v55So5aWX6aSQ5YiX6KGoXG4gKlxuICog5aWX6aSQ5YiX6KGo5Y+Y5YyW6aKR546H5L2O77yM57yT5a2YIDEwIOWIhumSn+OAglxuICovXG5leHBvcnQgZnVuY3Rpb24gdXNlUGxhbnMoKSB7XG4gIHJldHVybiB1c2VRdWVyeSh7XG4gICAgcXVlcnlLZXk6IFsncGxhbnMnXSxcbiAgICBxdWVyeUZuOiBhc3luYyAoKSA9PiB7XG4gICAgICBjb25zdCB7IGRhdGEgfSA9IGF3YWl0IGFwaS5nZXQ8UGxhbkluZm9bXT4oJy9hdXRoL3BsYW5zJyk7XG4gICAgICByZXR1cm4gZGF0YTtcbiAgICB9LFxuICAgIHN0YWxlVGltZTogMTAgKiA2MCAqIDEwMDAsXG4gIH0pO1xufVxuXG4vKipcbiAqIOazqOWGjCBtdXRhdGlvblxuICpcbiAqIOazqOWGjOaIkOWKn+WQjui/lOWbniBBdXRoUmVzcG9uc2XvvIzosIPnlKjmlrnpnIDoh6rooYzlpITnkIYgdG9rZW4g5a2Y5YKo44CCXG4gKi9cbmV4cG9ydCBmdW5jdGlvbiB1c2VSZWdpc3RlcigpIHtcbiAgcmV0dXJuIHVzZU11dGF0aW9uPEF1dGhSZXNwb25zZSwgRXJyb3IsIFJlZ2lzdGVyUmVxdWVzdD4oe1xuICAgIG11dGF0aW9uRm46IGFzeW5jIChyZXF1ZXN0OiBSZWdpc3RlclJlcXVlc3QpID0+IHtcbiAgICAgIGNvbnN0IHsgZGF0YSB9ID0gYXdhaXQgYXBpLnBvc3Q8QXV0aFJlc3BvbnNlPignL2F1dGgvcmVnaXN0ZXInLCByZXF1ZXN0KTtcbiAgICAgIHJldHVybiBkYXRhO1xuICAgIH0sXG4gIH0pO1xufVxuIl19

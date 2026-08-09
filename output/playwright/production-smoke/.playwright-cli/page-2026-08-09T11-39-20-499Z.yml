@@ -1,0 +1,261 @@
+- generic [ref=e46]:
+  - complementary [ref=e47]:
+    - generic [ref=e48]:
+      - generic [ref=e49]: EquipSense
+      - button "收起侧边栏" [ref=e50]
+    - navigation [ref=e53]:
+      - link "仪表盘" [ref=e54] [cursor=pointer]:
+        - /url: /dashboard
+      - link "设备管理" [active] [ref=e61] [cursor=pointer]:
+        - /url: /devices
+      - link "网关状态" [ref=e65] [cursor=pointer]:
+        - /url: /gateways
+      - link "告警中心" [ref=e72] [cursor=pointer]:
+        - /url: /alerts
+      - link "告警规则" [ref=e76] [cursor=pointer]:
+        - /url: /alert-rules
+      - link "工单管理" [ref=e81] [cursor=pointer]:
+        - /url: /work-orders
+      - link "待审批" [ref=e86] [cursor=pointer]:
+        - /url: /pending-approvals
+      - link "派工看板" [ref=e92] [cursor=pointer]:
+        - /url: /dispatch
+      - link "AI 分析" [ref=e99] [cursor=pointer]:
+        - /url: /analyses
+      - link "知识库" [ref=e109] [cursor=pointer]:
+        - /url: /knowledge
+      - link "FMEA 故障模式库" [ref=e113] [cursor=pointer]:
+        - /url: /fmea
+      - link "诊断评估" [ref=e117] [cursor=pointer]:
+        - /url: /evaluation
+      - link "审计日志" [ref=e123] [cursor=pointer]:
+        - /url: /audit-logs
+      - link "系统设置" [ref=e127] [cursor=pointer]:
+        - /url: /settings
+      - link "用户管理" [ref=e132] [cursor=pointer]:
+        - /url: /users
+      - link "租户管理" [ref=e146] [cursor=pointer]:
+        - /url: /admin/tenants
+    - button "通知 99+" [ref=e153]:
+      - generic [ref=e157]: 通知
+      - generic [ref=e158]: 99+
+  - generic [ref=e159]:
+    - banner [ref=e160]:
+      - generic [ref=e161]: EquipSense
+      - generic [ref=e163]:
+        - status "实时连接正常" [ref=e164]
+        - button [ref=e166]
+        - button "切换主题" [ref=e170]
+        - button "切换语言" [ref=e171]
+        - button "admin" [ref=e172]
+    - main [ref=e176]:
+      - generic [ref=e411]:
+        - generic [ref=e412]:
+          - heading "设备管理" [level=1] [ref=e413]
+          - generic [ref=e414]:
+            - button "导入" [ref=e415]
+            - button "导出" [ref=e416]
+            - button "新建" [ref=e417]
+        - generic [ref=e418]:
+          - textbox "搜索..." [ref=e423]
+          - combobox [ref=e424]:
+            - generic [ref=e425]: 状态
+            - img: ▼
+          - textbox [ref=e426]
+        - table [ref=e428]:
+          - rowgroup [ref=e429]:
+            - row [ref=e430]:
+              - columnheader "设备编码" [ref=e431]
+              - columnheader "设备名称" [ref=e432]
+              - columnheader "设备类型" [ref=e433]
+              - columnheader "状态" [ref=e434]
+              - columnheader "型号" [ref=e435]
+              - columnheader "操作" [ref=e436]
+          - rowgroup [ref=e437]:
+            - row [ref=e438] [cursor=pointer]:
+              - cell "E2E-DEV-mslj8blpse6s" [ref=e439]
+              - cell "E2E测试设备-mslj8blpse6s" [ref=e440]
+              - cell "motor" [ref=e441]
+              - cell "离线" [ref=e442]
+              - cell "-" [ref=e444]
+              - cell [ref=e445]:
+                - generic [ref=e446]:
+                  - button [ref=e447]
+                  - button [ref=e448]
+                  - button [ref=e449]
+            - row [ref=e450] [cursor=pointer]:
+              - cell "E2E-DEV-mslj16ewgt1l" [ref=e451]
+              - cell "E2E测试设备-mslj16ewgt1l" [ref=e452]
+              - cell "motor" [ref=e453]
+              - cell "离线" [ref=e454]
+              - cell "-" [ref=e456]
+              - cell [ref=e457]:
+                - generic [ref=e458]:
+                  - button [ref=e459]
+                  - button [ref=e460]
+                  - button [ref=e461]
+            - row [ref=e462] [cursor=pointer]:
+              - cell "E2E-DEV-mslj1436b68p" [ref=e463]
+              - cell "E2E测试设备-mslj1436b68p" [ref=e464]
+              - cell "motor" [ref=e465]
+              - cell "离线" [ref=e466]
+              - cell "-" [ref=e468]
+              - cell [ref=e469]:
+                - generic [ref=e470]:
+                  - button [ref=e471]
+                  - button [ref=e472]
+                  - button [ref=e473]
+            - row [ref=e474] [cursor=pointer]:
+              - cell "E2E-DEV-mslj0xbctj9z" [ref=e475]
+              - cell "E2E测试设备-mslj0xbctj9z" [ref=e476]
+              - cell "motor" [ref=e477]
+              - cell "离线" [ref=e478]
+              - cell "-" [ref=e480]
+              - cell [ref=e481]:
+                - generic [ref=e482]:
+                  - button [ref=e483]
+                  - button [ref=e484]
+                  - button [ref=e485]
+            - row [ref=e486] [cursor=pointer]:
+              - cell "E2E-DEV-mslj0x8a90nv" [ref=e487]
+              - cell "E2E测试设备-mslj0x8a90nv" [ref=e488]
+              - cell "motor" [ref=e489]
+              - cell "离线" [ref=e490]
+              - cell "-" [ref=e492]
+              - cell [ref=e493]:
+                - generic [ref=e494]:
+                  - button [ref=e495]
+                  - button [ref=e496]
+                  - button [ref=e497]
+            - row [ref=e498] [cursor=pointer]:
+              - cell "E2E-DEV-mslixq2eqkhc" [ref=e499]
+              - cell "E2E测试设备-mslixq2eqkhc" [ref=e500]
+              - cell "motor" [ref=e501]
+              - cell "离线" [ref=e502]
+              - cell "-" [ref=e504]
+              - cell [ref=e505]:
+                - generic [ref=e506]:
+                  - button [ref=e507]
+                  - button [ref=e508]
+                  - button [ref=e509]
+            - row [ref=e510] [cursor=pointer]:
+              - cell "E2E-DEV-mslixnnan94c" [ref=e511]
+              - cell "E2E测试设备-mslixnnan94c" [ref=e512]
+              - cell "motor" [ref=e513]
+              - cell "离线" [ref=e514]
+              - cell "-" [ref=e516]
+              - cell [ref=e517]:
+                - generic [ref=e518]:
+                  - button [ref=e519]
+                  - button [ref=e520]
+                  - button [ref=e521]
+            - row [ref=e522] [cursor=pointer]:
+              - cell "E2E-DEV-mslixgwmcvu4" [ref=e523]
+              - cell "E2E测试设备-mslixgwmcvu4" [ref=e524]
+              - cell "motor" [ref=e525]
+              - cell "离线" [ref=e526]
+              - cell "-" [ref=e528]
+              - cell [ref=e529]:
+                - generic [ref=e530]:
+                  - button [ref=e531]
+                  - button [ref=e532]
+                  - button [ref=e533]
+            - row [ref=e534] [cursor=pointer]:
+              - cell "E2E-DEV-mslixgtewoyl" [ref=e535]
+              - cell "E2E测试设备-mslixgtewoyl" [ref=e536]
+              - cell "motor" [ref=e537]
+              - cell "离线" [ref=e538]
+              - cell "-" [ref=e540]
+              - cell [ref=e541]:
+                - generic [ref=e542]:
+                  - button [ref=e543]
+                  - button [ref=e544]
+                  - button [ref=e545]
+            - row [ref=e546] [cursor=pointer]:
+              - cell "E2E-DEV-mslilokq2i1l" [ref=e547]
+              - cell "E2E测试设备-mslilokq2i1l" [ref=e548]
+              - cell "motor" [ref=e549]
+              - cell "离线" [ref=e550]
+              - cell "-" [ref=e552]
+              - cell [ref=e553]:
+                - generic [ref=e554]:
+                  - button [ref=e555]
+                  - button [ref=e556]
+                  - button [ref=e557]
+            - row [ref=e558] [cursor=pointer]:
+              - cell "E2E-DEV-mslillip0b6y" [ref=e559]
+              - cell "E2E测试设备-mslillip0b6y" [ref=e560]
+              - cell "motor" [ref=e561]
+              - cell "离线" [ref=e562]
+              - cell "-" [ref=e564]
+              - cell [ref=e565]:
+                - generic [ref=e566]:
+                  - button [ref=e567]
+                  - button [ref=e568]
+                  - button [ref=e569]
+            - row [ref=e570] [cursor=pointer]:
+              - cell "E2E-DEV-mslilibx3xyh" [ref=e571]
+              - cell "E2E测试设备-mslilibx3xyh" [ref=e572]
+              - cell "motor" [ref=e573]
+              - cell "离线" [ref=e574]
+              - cell "-" [ref=e576]
+              - cell [ref=e577]:
+                - generic [ref=e578]:
+                  - button [ref=e579]
+                  - button [ref=e580]
+                  - button [ref=e581]
+            - row [ref=e582] [cursor=pointer]:
+              - cell "E2E-DEV-mslilc3p2cz4" [ref=e583]
+              - cell "E2E测试设备-mslilc3p2cz4" [ref=e584]
+              - cell "motor" [ref=e585]
+              - cell "离线" [ref=e586]
+              - cell "-" [ref=e588]
+              - cell [ref=e589]:
+                - generic [ref=e590]:
+                  - button [ref=e591]
+                  - button [ref=e592]
+                  - button [ref=e593]
+            - row [ref=e594] [cursor=pointer]:
+              - cell "E2E-DEV-mslilbljdi9h" [ref=e595]
+              - cell "E2E测试设备-mslilbljdi9h" [ref=e596]
+              - cell "motor" [ref=e597]
+              - cell "离线" [ref=e598]
+              - cell "-" [ref=e600]
+              - cell [ref=e601]:
+                - generic [ref=e602]:
+                  - button [ref=e603]
+                  - button [ref=e604]
+                  - button [ref=e605]
+            - row [ref=e606] [cursor=pointer]:
+              - cell "E2E-DEV-mslil2ybsjvr" [ref=e607]
+              - cell "E2E测试设备-mslil2ybsjvr" [ref=e608]
+              - cell "motor" [ref=e609]
+              - cell "离线" [ref=e610]
+              - cell "-" [ref=e612]
+              - cell [ref=e613]:
+                - generic [ref=e614]:
+                  - button [ref=e615]
+                  - button [ref=e616]
+                  - button [ref=e617]
+            - row [ref=e618] [cursor=pointer]:
+              - cell "E2E-QUICK-mslicxgx" [ref=e619]
+              - cell "E2E快速注册设备-mslicxgx" [ref=e620]
+              - cell "通用设备" [ref=e621]
+              - cell "离线" [ref=e622]
+              - cell "-" [ref=e624]
+              - cell [ref=e625]:
+                - generic [ref=e626]:
+                  - button [ref=e627]
+                  - button [ref=e628]
+                  - button [ref=e629]
+            - row [ref=e630] [cursor=pointer]:
+              - cell "AC-001" [ref=e631]
+              - cell "一号空压机" [ref=e632]
+              - cell "空压机" [ref=e633]
+              - cell "离线" [ref=e634]
+              - cell "-" [ref=e636]
+              - cell [ref=e637]:
+                - generic [ref=e638]:
+                  - button [ref=e639]
+                  - button [ref=e640]
+                  - button [ref=e641]

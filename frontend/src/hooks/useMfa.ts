@@ -3,7 +3,7 @@
  *
  * 提供 MFA 登录验证、MFA 设置、确认和禁用的 mutation hooks。
  * MFA 登录流程：Login 返回 mfaRequired=true → 调用 verifyMfa 完成登录。
- * MFA 管理流程：setup 获取 QR 码 URI → 用户扫码 → confirm 输入验证码启用 → 可随时 disable。
+ * MFA 管理流程：setup 获取 QR 码 URI → 用户扫码 → confirm 输入验证码启用 → 普通角色可按策略禁用。
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';

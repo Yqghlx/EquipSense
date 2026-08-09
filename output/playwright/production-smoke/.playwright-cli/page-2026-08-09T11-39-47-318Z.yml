@@ -1,0 +1,181 @@
+- generic [ref=e2]:
+  - generic [ref=e46]:
+    - complementary [ref=e47]:
+      - generic [ref=e48]:
+        - generic [ref=e49]: EquipSense
+        - button "收起侧边栏" [ref=e50]
+      - navigation [ref=e53]:
+        - link "仪表盘" [ref=e54] [cursor=pointer]:
+          - /url: /dashboard
+        - link "设备管理" [ref=e61] [cursor=pointer]:
+          - /url: /devices
+        - link "网关状态" [ref=e65] [cursor=pointer]:
+          - /url: /gateways
+        - link "告警中心" [ref=e72] [cursor=pointer]:
+          - /url: /alerts
+        - link "告警规则" [ref=e76] [cursor=pointer]:
+          - /url: /alert-rules
+        - link "工单管理" [ref=e81] [cursor=pointer]:
+          - /url: /work-orders
+        - link "待审批" [ref=e86] [cursor=pointer]:
+          - /url: /pending-approvals
+        - link "派工看板" [ref=e92] [cursor=pointer]:
+          - /url: /dispatch
+        - link "AI 分析" [ref=e99] [cursor=pointer]:
+          - /url: /analyses
+        - link "知识库" [ref=e109] [cursor=pointer]:
+          - /url: /knowledge
+        - link "FMEA 故障模式库" [ref=e113] [cursor=pointer]:
+          - /url: /fmea
+        - link "诊断评估" [ref=e117] [cursor=pointer]:
+          - /url: /evaluation
+        - link "审计日志" [ref=e123] [cursor=pointer]:
+          - /url: /audit-logs
+        - link "系统设置" [ref=e127] [cursor=pointer]:
+          - /url: /settings
+        - link "用户管理" [ref=e132] [cursor=pointer]:
+          - /url: /users
+        - link "租户管理" [ref=e146] [cursor=pointer]:
+          - /url: /admin/tenants
+      - button "通知 99+" [ref=e153]:
+        - generic [ref=e157]: 通知
+        - generic [ref=e158]: 99+
+    - generic [ref=e159]:
+      - banner [ref=e160]:
+        - generic [ref=e161]: EquipSense
+        - generic [ref=e163]:
+          - status "实时连接正常" [ref=e164]
+          - button "1" [ref=e642]
+          - button "切换主题" [ref=e170]
+          - button "切换语言" [ref=e171]
+          - button "admin" [ref=e172]
+      - main [ref=e176]:
+        - generic [ref=e644]:
+          - generic [ref=e645]:
+            - button [ref=e646]
+            - generic [ref=e647]:
+              - heading "一号空压机" [level=1] [ref=e648]
+              - paragraph [ref=e649]: AC-001
+            - generic [ref=e650]:
+              - generic [ref=e651]: 离线
+              - generic [ref=e652]:
+                - generic [ref=e653]: 健康评分
+                - generic [ref=e654]: "85.0"
+                - button "刷新健康度" [ref=e655]
+          - generic [ref=e656]:
+            - tablist [ref=e657]:
+              - tab "概览" [selected] [ref=e658]
+              - tab "连接配置" [ref=e659]
+            - tabpanel "概览" [ref=e661]:
+              - generic [ref=e662]:
+                - generic [ref=e663]:
+                  - generic [ref=e664]:
+                    - generic [ref=e665]: 基本信息
+                    - button [ref=e666]
+                  - generic [ref=e667]:
+                    - generic [ref=e668]:
+                      - paragraph [ref=e669]: 设备名称
+                      - paragraph [ref=e670]: 一号空压机
+                    - generic [ref=e671]:
+                      - paragraph [ref=e672]: 设备类型
+                      - paragraph [ref=e673]: 空压机
+                    - generic [ref=e674]:
+                      - paragraph [ref=e675]: 型号
+                      - paragraph [ref=e676]: "-"
+                    - generic [ref=e677]:
+                      - paragraph [ref=e678]: 制造商
+                      - paragraph [ref=e679]: "-"
+                    - generic [ref=e680]:
+                      - paragraph [ref=e681]: 关键等级
+                      - paragraph [ref=e682]: High
+                    - generic [ref=e683]:
+                      - paragraph [ref=e684]: 序列号
+                      - paragraph [ref=e685]: "-"
+                    - generic [ref=e686]:
+                      - paragraph [ref=e687]: 安装日期
+                      - paragraph [ref=e688]: "-"
+                    - generic [ref=e689]:
+                      - paragraph [ref=e690]: 绑定网关
+                      - paragraph [ref=e691]: "-"
+                    - generic [ref=e692]:
+                      - paragraph [ref=e693]: 每小时停机成本（元）
+                      - paragraph [ref=e694]: "-"
+                    - generic [ref=e695]:
+                      - paragraph [ref=e696]: 最后上报
+                      - paragraph [ref=e697]: 6/20/2026, 5:57:29 PM
+                    - generic [ref=e698]:
+                      - paragraph [ref=e699]: 状态
+                      - generic [ref=e700]: 离线
+                    - generic [ref=e701]:
+                      - paragraph [ref=e702]: 健康评分
+                      - paragraph [ref=e703]: "85"
+                - generic [ref=e704]:
+                  - generic [ref=e705]:
+                    - generic [ref=e706]: 遥测趋势
+                    - generic [ref=e707]:
+                      - combobox [ref=e708]:
+                        - generic [ref=e709]: temperature
+                        - img: ▼
+                      - textbox [ref=e710]: temperature
+                      - combobox [ref=e711]:
+                        - generic [ref=e712]: 1h
+                        - img: ▼
+                      - textbox [ref=e713]: 1h
+                  - generic [ref=e714]: 暂无数据
+                - generic [ref=e716]:
+                  - generic [ref=e717]:
+                    - generic [ref=e718]: 数据质量
+                    - generic [ref=e720]: 暂无数据质量评估结果
+                  - generic [ref=e722]:
+                    - generic [ref=e723]: 最近告警
+                    - table [ref=e727]:
+                      - rowgroup [ref=e728]:
+                        - row [ref=e729]:
+                          - columnheader "告警编码" [ref=e730]
+                          - columnheader "指标" [ref=e731]
+                          - columnheader "当前值" [ref=e732]
+                          - columnheader "级别" [ref=e733]
+                          - columnheader "状态" [ref=e734]
+                          - columnheader "时间" [ref=e735]
+                      - rowgroup [ref=e736]:
+                        - row [ref=e737]:
+                          - cell "ALT-AC-001-vibration-20260620095630" [ref=e738]
+                          - cell "vibration" [ref=e739]
+                          - cell "26.25" [ref=e740]
+                          - cell "紧急" [ref=e741]
+                          - cell "Resolved" [ref=e743]
+                          - cell "6/20/2026, 5:56:30 PM" [ref=e745]
+                        - row [ref=e746]:
+                          - cell "ALT-AC-001-motor_current-20260620090917" [ref=e747]
+                          - cell "motor_current" [ref=e748]
+                          - cell "190" [ref=e749]
+                          - cell "高" [ref=e750]
+                          - cell "Resolved" [ref=e752]
+                          - cell "6/20/2026, 5:09:17 PM" [ref=e754]
+                        - row [ref=e755]:
+                          - cell "ALT-AC-001-discharge_pressure-20260620090917" [ref=e756]
+                          - cell "discharge_pressure" [ref=e757]
+                          - cell "1.25" [ref=e758]
+                          - cell "高" [ref=e759]
+                          - cell "Resolved" [ref=e761]
+                          - cell "6/20/2026, 5:09:17 PM" [ref=e763]
+                        - row [ref=e764]:
+                          - cell "ALT-AC-001-vibration-20260620090917" [ref=e765]
+                          - cell "vibration" [ref=e766]
+                          - cell "8.2" [ref=e767]
+                          - cell "紧急" [ref=e768]
+                          - cell "Resolved" [ref=e770]
+                          - cell "6/20/2026, 5:09:17 PM" [ref=e772]
+                        - row [ref=e773]:
+                          - cell "ALT-AC-001-oil_temperature-20260620090917" [ref=e774]
+                          - cell "oil_temperature" [ref=e775]
+                          - cell "95.5" [ref=e776]
+                          - cell "高" [ref=e777]
+                          - cell "Resolved" [ref=e779]
+                          - cell "6/20/2026, 5:09:17 PM" [ref=e781]
+  - status [ref=e782] [cursor=pointer]:
+    - generic [ref=e783]:
+      - generic [ref=e784]:
+        - paragraph [ref=e785]: 操作失败
+        - paragraph [ref=e786]: 操作过于频繁，请稍后再试
+      - button "关闭通知" [ref=e787]

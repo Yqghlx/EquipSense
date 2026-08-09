@@ -155,6 +155,16 @@ public class RedisService
     }
 
     /// <summary>
+    /// 原子读取并删除字符串值，适用于一次性挑战令牌和其他不可重放凭据。
+    /// 需要 Redis 6.2 及以上版本提供 GETDEL 命令；生产与开发 Compose 均使用 Redis 7。
+    /// </summary>
+    public virtual async Task<string?> GetAndDeleteStringAsync(string key)
+    {
+        var value = await _database.StringGetDeleteAsync(key);
+        return value.HasValue ? value.ToString() : null;
+    }
+
+    /// <summary>
     /// 删除指定键
     /// </summary>
     public virtual async Task RemoveKeyAsync(string key)

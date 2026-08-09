@@ -1,0 +1,25 @@
+import { i as __toESM } from "/node_modules/.vite/deps/rolldown-runtime-B-lAHAz2.js?v=1d2f6f90";
+import { t as require_react } from "/node_modules/.vite/deps/react.js?v=1d2f6f90";
+import { t as useRenderElement } from "/node_modules/.vite/deps/useRenderElement-BXRg5SAf.js?v=1d2f6f90";
+/**
+* A separator element accessible to screen readers.
+* Renders a `<div>` element.
+*
+* Documentation: [Base UI Separator](https://base-ui.com/react/components/separator)
+*/
+var Separator = /*#__PURE__*/ (/* @__PURE__ */ __toESM(require_react(), 1)).forwardRef(function SeparatorComponent(componentProps, forwardedRef) {
+	const { className, render, orientation = "horizontal", style, ...elementProps } = componentProps;
+	return useRenderElement("div", componentProps, {
+		state: { orientation },
+		ref: forwardedRef,
+		props: [{
+			role: "separator",
+			"aria-orientation": orientation
+		}, elementProps]
+	});
+});
+Separator.displayName = "Separator";
+//#endregion
+export { Separator as t };
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoiU2VwYXJhdG9yLURCVXVrWFRuLmpzIiwibmFtZXMiOltdLCJzb3VyY2VzIjpbIi4uLy4uL0BiYXNlLXVpL3JlYWN0L2VzbS9zZXBhcmF0b3IvU2VwYXJhdG9yLmpzIl0sInNvdXJjZXNDb250ZW50IjpbIid1c2UgY2xpZW50JztcblxuaW1wb3J0ICogYXMgUmVhY3QgZnJvbSAncmVhY3QnO1xuaW1wb3J0IHsgdXNlUmVuZGVyRWxlbWVudCB9IGZyb20gXCIuLi9pbnRlcm5hbHMvdXNlUmVuZGVyRWxlbWVudC5qc1wiO1xuXG4vKipcbiAqIEEgc2VwYXJhdG9yIGVsZW1lbnQgYWNjZXNzaWJsZSB0byBzY3JlZW4gcmVhZGVycy5cbiAqIFJlbmRlcnMgYSBgPGRpdj5gIGVsZW1lbnQuXG4gKlxuICogRG9jdW1lbnRhdGlvbjogW0Jhc2UgVUkgU2VwYXJhdG9yXShodHRwczovL2Jhc2UtdWkuY29tL3JlYWN0L2NvbXBvbmVudHMvc2VwYXJhdG9yKVxuICovXG5leHBvcnQgY29uc3QgU2VwYXJhdG9yID0gLyojX19QVVJFX18qL1JlYWN0LmZvcndhcmRSZWYoZnVuY3Rpb24gU2VwYXJhdG9yQ29tcG9uZW50KGNvbXBvbmVudFByb3BzLCBmb3J3YXJkZWRSZWYpIHtcbiAgY29uc3Qge1xuICAgIGNsYXNzTmFtZSxcbiAgICByZW5kZXIsXG4gICAgb3JpZW50YXRpb24gPSAnaG9yaXpvbnRhbCcsXG4gICAgc3R5bGUsXG4gICAgLi4uZWxlbWVudFByb3BzXG4gIH0gPSBjb21wb25lbnRQcm9wcztcbiAgY29uc3Qgc3RhdGUgPSB7XG4gICAgb3JpZW50YXRpb25cbiAgfTtcbiAgY29uc3QgZWxlbWVudCA9IHVzZVJlbmRlckVsZW1lbnQoJ2RpdicsIGNvbXBvbmVudFByb3BzLCB7XG4gICAgc3RhdGUsXG4gICAgcmVmOiBmb3J3YXJkZWRSZWYsXG4gICAgcHJvcHM6IFt7XG4gICAgICByb2xlOiAnc2VwYXJhdG9yJyxcbiAgICAgICdhcmlhLW9yaWVudGF0aW9uJzogb3JpZW50YXRpb25cbiAgICB9LCBlbGVtZW50UHJvcHNdXG4gIH0pO1xuICByZXR1cm4gZWxlbWVudDtcbn0pO1xuaWYgKHByb2Nlc3MuZW52Lk5PREVfRU5WICE9PSBcInByb2R1Y3Rpb25cIikgU2VwYXJhdG9yLmRpc3BsYXlOYW1lID0gXCJTZXBhcmF0b3JcIjsiXSwibWFwcGluZ3MiOiI7Ozs7Ozs7OztBQVdBLElBQWEsWUFBeUIseURBQUEsRUFBQSxDQUFNLFdBQVcsU0FBUyxtQkFBbUIsZ0JBQWdCLGNBQWM7Q0FDL0csTUFBTSxFQUNKLFdBQ0EsUUFDQSxjQUFjLGNBQ2QsT0FDQSxHQUFHLGlCQUNEO0NBWUosT0FSZ0IsaUJBQWlCLE9BQU8sZ0JBQWdCO0VBQ3RELE9BQUEsRUFIQSxZQUdJO0VBQ0osS0FBSztFQUNMLE9BQU8sQ0FBQztHQUNOLE1BQU07R0FDTixvQkFBb0I7RUFDdEIsR0FBRyxZQUFZO0NBQ2pCLENBQ2E7QUFDZixDQUFDO0FBQzBDLFVBQVUsY0FBYyIsInhfZ29vZ2xlX2lnbm9yZUxpc3QiOlswXX0=
