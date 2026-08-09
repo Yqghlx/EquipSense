@@ -27,8 +27,11 @@ public class SubscriptionExpiryService : LockedTimerService
         _scopeFactory = scopeFactory;
     }
 
-    /// <summary>启动延迟：原服务启动后立即首次执行，保持该行为。</summary>
-    protected override TimeSpan DefaultStartupDelay => TimeSpan.Zero;
+    /// <summary>
+    /// 启动延迟：等待数据库迁移和种子初始化完成后再执行首次检查，
+    /// 避免应用启动阶段与 schema 创建、其他后台服务争用数据库。
+    /// </summary>
+    protected override TimeSpan DefaultStartupDelay => TimeSpan.FromSeconds(30);
 
     /// <summary>检查间隔：6 小时。</summary>
     protected override TimeSpan DefaultInterval => TimeSpan.FromHours(6);

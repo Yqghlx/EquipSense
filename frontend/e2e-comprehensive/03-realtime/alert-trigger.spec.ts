@@ -76,15 +76,19 @@ test.describe('03-告警触发', () => {
 
     // 等待 Toast 出现
     const toast = page.getByTestId('notification-toast');
-    const toastAppeared = await toast.first().isVisible({ timeout: 30000 }).catch(() => false);
+    // 保存首条通知的标识。并行测试可能同时触发其他告警，页面会展示新的 Toast；
+    // 断言必须只针对本测试触发的首条通知，而不能重新查询 toast.first()。
+    const firstNotificationId = await toast.first()
+      .getAttribute('data-notification-id', { timeout: 30000 })
+      .catch(() => null);
+    expect(firstNotificationId).toBeTruthy();
 
-    if (toastAppeared) {
-      // 等待 Toast 自动消失（通常 3-8 秒）
-      await page.waitForTimeout(10000);
-
-      // 验证 Toast 已消失
-      const toastGone = await toast.first().isVisible().catch(() => false);
-      expect(toastGone).toBeFalsy();
+    if (firstNotificationId) {
+      // 等待首次告警 Toast 自动消失（通常 3-8 秒）。后续新告警可以继续展示新的 Toast，
+      // 但首次通知对应的节点必须从页面移除。
+      await expect(
+        page.locator(`[data-testid="notification-toast"][data-notification-id="${firstNotificationId}"]`),
+      ).toHaveCount(0, { timeout: 10000 });
     }
 
     // 清理

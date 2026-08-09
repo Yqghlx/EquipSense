@@ -7,8 +7,8 @@
 
 | 分类 | 目录 | 测试数 | 说明 |
 |------|------|--------|------|
-| 环境就绪 | `00-setup/` | 8 | 健康检查 + 种子数据验证 |
-| 认证流程 | `01-auth/` | 28 | 登录 / 注册 / 会话 / 强制改密 |
+| 环境就绪 | `00-setup/` | 10 | 健康检查 + 种子数据验证 + 生产凭据覆盖契约 |
+| 认证流程 | `01-auth/` | 32 | 登录 / 注册 / 会话 / 强制改密 |
 | CRUD | `02-crud/` | 191 | 17 个资源的完整增删改查 |
 | 实时推送 | `03-realtime/` | 34 | SignalR / MQTT 告警推送 |
 | 高级场景 | `04-advanced/` | 60 | 通知 / 导出 / 知识库 / AI 分析 |
@@ -16,8 +16,8 @@
 | 权限扩展 | `05-auth/` | 19 | RBAC 跨租户隔离 / 缺失页面降级 |
 | 边界场景 | `06-edge-cases/` | 50 | 并发 / 空状态 / 极值 |
 | 手动审计 | `99-manual-audit/` | 76 | 冒烟测试，**不在默认运行范围**（需显式指定路径） |
-| **默认运行合计** | | **436** | 排除手动审计 |
-| 全量合计 | | **512** | 含手动审计 |
+| **默认运行合计** | | **442** | 排除手动审计 |
+| 全量合计 | | **518** | 含手动审计 |
 
 ## 为什么不「精简到 270」
 
@@ -86,6 +86,55 @@ npx playwright test
 
 环境变量 `E2E_FAST_LOGIN=1` 时，`loginAs` 自动走快速路径；未设置时走 UI 路径（与真实用户行为一致）。
 
+### 生产镜像验收凭据
+
+E2E 默认只为开发/集成测试回退到公开测试凭据。验收生产镜像时，必须把后端
+`SEED_ADMIN_PASSWORD` 等五个种子密码以同样的临时值注入 Playwright：
+
+```bash
+E2E_ADMIN_PASSWORD="$SEED_ADMIN_PASSWORD" \
+E2E_LEAD_PASSWORD="$SEED_LEAD_PASSWORD" \
+E2E_TECH_PASSWORD="$SEED_TECH_PASSWORD" \
+E2E_OPERATOR_PASSWORD="$SEED_OPERATOR_PASSWORD" \
+E2E_VIEWER_PASSWORD="$SEED_VIEWER_PASSWORD" \
+npx playwright test e2e-comprehensive
+```
+
+跨租户隔离用例还要求在隔离的验收数据库中显式创建第二租户账户，并把同一临时密码注入测试进程：
+
+```bash
+export E2E_TENANT2_PASSWORD='<隔离验收用的独立临时强密码>'
+
+SEED_TENANT2_ACCOUNT=true \
+SEED_TENANT2_PASSWORD="$E2E_TENANT2_PASSWORD" \
+dotnet run --project src/EquipAI.WebAPI
+
+npx playwright test e2e-comprehensive/05-error-handling/permission-denied.spec.ts \
+  --grep '跨租户数据隔离验证'
+```
+
+不要在生产业务数据库中开启 `SEED_TENANT2_ACCOUNT`；该账户只用于隔离的验收/CI 数据库。测试代码不会打印这些值；
+`00-setup/credentials.spec.ts` 会锁定五个角色和第二租户密码的环境变量覆盖行为。
+
+本地将 Vite 与 ASP.NET Core 分开启动时，健康检查和 Swagger 必须直连后端，示例：
+
+```bash
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173 \
+PLAYWRIGHT_API_BASE_URL=http://127.0.0.1:8080 \
+E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
+```
+
+生产 Docker/Nginx 同源部署时可省略 `PLAYWRIGHT_API_BASE_URL`，测试会使用 `PLAYWRIGHT_BASE_URL`。
+
+### Production 容器运行时 Smoke Gate
+
+完整业务 E2E 继续在 Development 环境运行；CI 另有
+`tests/scripts/production-runtime-smoke.sh`，使用当前提交实际构建的 backend/frontend
+镜像和 Production 配置启动 PostgreSQL、Redis、Mosquitto、RabbitMQ、backend、frontend，
+验证迁移/种子、观察者账户真实登录与 `/auth/me` 受保护接口、startup/liveness/ready 探针、HTTPS、Nginx `/health` 和 `/api/` 反向代理。
+Smoke 使用临时随机凭据及临时证书，不替代正式许可证、正式域名证书、现场协议和生产全量
+用户流程验收；版本发布 job 必须先通过该启动门禁。
+
 ### 哪些用例不能用快速路径
 
 **专门测试登录/注册流程的用例**必须用 `loginViaUI`（真实 UI 表单）：
@@ -140,7 +189,7 @@ verifyAuthCookie(page): Promise<APIResponse>
 ```bash
 cd frontend
 
-# 默认运行（436 个测试，排除手动审计）
+# 默认运行（442 个测试，排除手动审计）
 npx playwright test e2e-comprehensive
 
 # 启用快速登录路径
@@ -149,7 +198,7 @@ E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
 # 运行特定目录
 npx playwright test e2e-comprehensive/02-crud/devices-crud.spec.ts
 
-# 含手动审计的全量运行（512 个测试）
+# 含手动审计的全量运行（518 个测试）
 npx playwright test e2e-comprehensive/99-manual-audit
 
 # 调试模式

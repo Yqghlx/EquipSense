@@ -32,7 +32,7 @@ dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~AlertServiceTe
 dotnet clean
 ```
 
-> ⚠️ **编译强约束**：`Directory.Build.props` 设置 `TreatWarningsAsErrors=true`、`Nullable=enable`、`ImplicitUsings=enable`，**任何警告都会让编译失败**。已显式抑制的 NuGet 警告：`NU1603`（版本自动解析）、`NU1901/NU1903`（已知漏洞）。新增依赖或写代码时必须保证零警告。
+> ⚠️ **编译强约束**：`Directory.Build.props` 设置 `TreatWarningsAsErrors=true`、`Nullable=enable`、`ImplicitUsings=enable`，**任何警告都会让编译失败**。仅允许显式抑制 `NU1603`（版本自动解析提示）；`NU1901/NU1903` 等漏洞警告不得抑制，新增依赖或写代码时必须保证零警告。
 
 ### 前端 (React 19 + TypeScript)
 
@@ -136,7 +136,7 @@ docker compose -f docker/docker-compose.yml logs -f backend
 - `PG_PASSWORD`（PostgreSQL 密码，必填）
 - `JWT_SECRET`（JWT 签名密钥，≥32 字符，必填）
 - `LLM_API_KEY`（可选，未配置时 AI 分析降级为规则匹配）
-- 默认管理员账号：`admin / Admin@123`
+- 开发/测试管理员凭据由测试环境注入；生产环境管理员初始密码必须来自 `SEED_ADMIN_PASSWORD`，仓库不提供通用生产密码
 
 ## 技术栈
 

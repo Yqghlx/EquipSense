@@ -8,12 +8,12 @@
  * - Mosquitto MQTT 代理端口
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, captureErrors } from '../helpers';
+import { BACKEND_URL, BASE_URL, captureErrors } from '../helpers';
 
 test.describe('00-环境健康检查', () => {
   test('1. 后端健康检查 GET /health 返回 200', async ({ request }) => {
     // 发送健康检查请求，验证后端服务正常运行
-    const response = await request.get(`${BASE_URL}/health`);
+    const response = await request.get(`${BACKEND_URL}/health`);
     expect(response.ok()).toBeTruthy();
     expect(response.status()).toBe(200);
 
@@ -45,7 +45,7 @@ test.describe('00-环境健康检查', () => {
 
   test('3. Swagger 文档可访问', async ({ request }) => {
     // 访问 Swagger 文档页面，验证 API 文档服务可用
-    const response = await request.get(`${BASE_URL}/swagger/index.html`);
+    const response = await request.get(`${BACKEND_URL}/swagger/index.html`);
     // Swagger 可能返回 200 或 301 重定向，均视为可访问
     expect(response.status()).toBeLessThan(400);
   });
@@ -53,7 +53,7 @@ test.describe('00-环境健康检查', () => {
   test('4. Mosquitto MQTT 端口 1883 连通', async ({ request }) => {
     // 通过后端健康检查端点间接验证 MQTT 连通性
     // MQTT 是 TCP 协议，Playwright 无法直接连接，因此通过 /health 端点检查
-    const response = await request.get(`${BASE_URL}/health`);
+    const response = await request.get(`${BACKEND_URL}/health`);
     expect(response.ok()).toBeTruthy();
 
     const body = await response.json().catch(() => null);

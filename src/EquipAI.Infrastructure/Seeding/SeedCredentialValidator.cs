@@ -60,6 +60,24 @@ public static class SeedCredentialValidator
             throw new InvalidOperationException(
                 $"生产环境缺少或配置了不安全的种子账户密码：{string.Join("、", missingVariables)}。请配置后重启服务。");
         }
+
+        // 账户密码即使都满足长度要求，也不能复用同一值，否则一次泄露会同时危及多个账户。
+        var duplicateVariables = requiredVariables
+            .Select(variable => new
+            {
+                Variable = variable,
+                Value = credentials[variable]!
+            })
+            .GroupBy(item => item.Value, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1)
+            .SelectMany(group => group.Select(item => item.Variable))
+            .ToArray();
+
+        if (duplicateVariables.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"生产环境种子账户密码不得复用：{string.Join("、", duplicateVariables)}。请为每个账户配置独立密码。");
+        }
     }
 
     /// <summary>

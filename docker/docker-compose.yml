@@ -107,6 +107,9 @@ services:
   # 提供持久化、每处理器独立重试和死信队列；definitions 仅包含 v2 队列策略，不含凭证。
   rabbitmq:
     image: "${RABBITMQ_IMAGE:?请设置 RABBITMQ_IMAGE，例如 rabbitmq:4.3.4-management-alpine@sha256:...}"
+    # 健康检查需要读取 Erlang cookie；在丢弃 DAC 能力后，root 反而无法读取
+    # rabbitmq 用户拥有的 cookie，因此让 broker 与健康检查统一使用服务账户。
+    user: rabbitmq
     container_name: equipai-rabbitmq
     restart: unless-stopped
     ports:

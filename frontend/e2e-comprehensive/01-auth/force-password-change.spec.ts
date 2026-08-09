@@ -9,7 +9,7 @@
  * - 普通用户登录不触发改密
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, loginAs, captureErrors } from '../helpers';
+import { BASE_URL, login, loginAs, captureErrors, getE2EPassword } from '../helpers';
 
 test.describe('01-强制改密流程', () => {
   test('1. MustChangePassword 用户登录后应弹出改密对话框', async ({ page }) => {
@@ -18,7 +18,7 @@ test.describe('01-强制改密流程', () => {
     // 通过 API 创建 mustChangePassword=true 的测试用户
     const adminToken = await (async () => {
       const resp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-        data: { username: 'admin', password: 'Admin@123' },
+        data: { username: 'admin', password: getE2EPassword('admin') },
       });
       const body = await resp.json();
       return body.accessToken || body.token;
@@ -220,7 +220,7 @@ test.describe('01-强制改密流程', () => {
       const passwordInputs = dialog.locator('input[type="password"]');
       const count = await passwordInputs.count();
       if (count >= 3) {
-        await passwordInputs.nth(0).fill('Admin@123');
+        await passwordInputs.nth(0).fill(getE2EPassword('admin'));
         await passwordInputs.nth(1).fill('Admin@456');
         await passwordInputs.nth(2).fill('Admin@456');
         await dialog.getByRole('button', { name: /保存|save/i }).click();
@@ -272,7 +272,7 @@ test.describe('01-强制改密流程', () => {
       const count = await passwordInputs.count();
       if (count >= 3) {
         // 第一次改密
-        await passwordInputs.nth(0).fill('Admin@123');
+        await passwordInputs.nth(0).fill(getE2EPassword('admin'));
         await passwordInputs.nth(1).fill('Admin@456');
         await passwordInputs.nth(2).fill('Admin@456');
         await dialog.getByRole('button', { name: /保存|save/i }).click();

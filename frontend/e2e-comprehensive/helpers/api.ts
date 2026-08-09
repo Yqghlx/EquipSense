@@ -5,7 +5,7 @@
  * 知识规则、待审批规则等资源的增删改查。
  * 所有请求自动获取 Token 并携带认证头。
  */
-import { expect, type Page } from '@playwright/test';
+import { expect, type APIResponse, type Page } from '@playwright/test';
 import { getCurrentUserId, getToken } from './auth';
 import { BASE_URL } from './auth';
 
@@ -79,8 +79,8 @@ export async function deleteDeviceViaAPI(
   page: Page,
   token: string,
   id: string,
-): Promise<void> {
-  await page.request.delete(`${BASE_URL}/api/v1/devices/${id}`, {
+): Promise<APIResponse> {
+  return page.request.delete(`${BASE_URL}/api/v1/devices/${id}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }

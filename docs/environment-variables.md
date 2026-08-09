@@ -73,7 +73,7 @@ Security__Mfa__RequiredRoles__1=MaintenanceLead
 | `Mqtt__Username` | MQTT 用户名 | — | 生产环境必填 |
 | `Mqtt__Password` | MQTT 密码 | — | 生产环境必填 |
 
-生产 Docker Compose 使用 8883/TLS，并要求 `MQTT_USERNAME`、`MQTT_PASSWORD` 显式配置；开发 Compose 仍使用 1883 明文。
+生产 Docker Compose 使用 8883/TLS，并要求 `MQTT_USERNAME`、`MQTT_PASSWORD` 显式配置；开发 Compose 仍使用 1883 明文。生产校验器会拒绝 `MQTT_PASSWORD` 与其他基础设施密码、安全密钥或种子账户密码复用，拒绝重复环境变量和非 `Production` 运行环境，且不会在错误输出中打印凭据值。部署门禁还会校验 Nginx/MQTT 证书的格式、30 天有效期、证书-私钥匹配关系和 MQTT CA 链；证书文件存在但为空、过期或错配时仍会阻断部署。
 
 ## 生产种子账户
 
@@ -83,9 +83,13 @@ Security__Mfa__RequiredRoles__1=MaintenanceLead
 | `SEED_LEAD_PASSWORD` | 维保主管初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
 | `SEED_TECH_PASSWORD` | 技术员初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
 | `SEED_OPERATOR_PASSWORD` | 操作员初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
-| `SEED_VIEWER_PASSWORD` | 观察者初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
+| `SEED_VIEWER_PASSWORD` | 观察者初始密码（至少 16 个字符，不得使用占位值或公开默认值，并且不能与其他生产凭据复用） | — | 生产环境必填 |
 | `SEED_TENANT2_ACCOUNT` | 是否创建测试用第二租户账户 | `false` | 否 |
 | `SEED_TENANT2_PASSWORD` | 第二租户测试账户密码 | — | 启用第二租户账户时必填 |
+
+五个 `SEED_*_PASSWORD` 必须分别生成，不能在不同账户之间复用；同样不能与 PG、Redis、RabbitMQ、MQTT、Seq、Grafana、JWT、TOTP 或网关认证密钥相同。`docker/validate-env.sh` 会在部署前执行这项 fail-closed 检查，并仅报告发生冲突的变量名。
+
+隔离验收或 CI 需要覆盖第二租户时，测试进程使用 `E2E_TENANT2_PASSWORD`，其值必须与 `SEED_TENANT2_PASSWORD` 一致；该变量只注入 Playwright，不应写入生产业务环境，也不应在生产业务数据库开启 `SEED_TENANT2_ACCOUNT`。
 
 ## AI/LLM
 
@@ -127,6 +131,10 @@ Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名�
 `docker/restore.sh`：它默认只执行备份完整性校验和 dry-run，必须显式传入 `--confirm`
 才会停止服务、覆盖数据库和附件。跨主机部署时应将备份目录同步到 S3/OSS，并定期在
 隔离环境执行恢复演练、记录 RTO/RPO。
+
+PostgreSQL 新备份使用 custom format（文件名为 `*.dump`，由容器内 `pg_restore --list`
+校验），恢复时自动执行 TimescaleDB `pre_restore`/`post_restore` 生命周期；历史
+`*.sql.gz` 纯文本备份仍兼容恢复。
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|

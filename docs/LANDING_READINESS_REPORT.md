@@ -3,7 +3,7 @@
 > 基线生成时间：2026-06-14
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-09）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证包含事务 Outbox/Inbox、RabbitMQ v2 真实 broker 测试、自动建单事务回滚、1187 个后端单元测试、159 个后端集成测试（153 个常规场景 + 6 个真实 RabbitMQ 场景）、前端 351 个单元测试、真实 PostgreSQL 迁移核验、关键流程干净浏览器冒烟，以及前后端生产构建。当前 `docker/.env` 仍有 17 个生产门禁问题，修复前不得上线。
+> **当前状态说明（2026-08-10）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证包含事务 Outbox/Inbox、自动建单事务回滚、1189 个后端单元测试、159 个后端集成测试（153 个通过，6 个真实 RabbitMQ 场景默认跳过，可通过 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 显式启用）、前端 352 个单元测试、真实 PostgreSQL/RabbitMQ 迁移核验、关键流程干净浏览器冒烟、前后端生产构建，以及隔离 Production runtime smoke。当前 `docker/.env` 有 23 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 26 个发布门禁问题，修复前不得上线。
 
 ## 一、项目规模
 
@@ -12,9 +12,9 @@
 | 后端代码行（Core+Application+Infrastructure+WebAPI） | 51,534 行 |
 | 后端 API 端点 | 135 个（25 个 Controller） |
 | 前端页面 | 27 个 |
-| 单元测试 | 1187 个（后端）+ 351 个（前端） |
+| 单元测试 | 1189 个（后端）+ 352 个（前端） |
 | 集成测试 | 159 个用例（19 个文件） |
-| E2E 测试 | 440 个用例（Playwright） |
+| E2E 测试 | 442 个用例（Playwright） |
 | 压力测试 | 11 个脚本（k6） |
 
 ## 二、功能完备性核验（对照行业产品）
@@ -66,13 +66,13 @@
 |------|------|------|
 | 容器化 | ✅ | docker-compose.yml（12 服务）+ 后端/前端多阶段 Dockerfile |
 | 反向代理 | ✅ | Nginx（TLS 终止、静态资源、API/WebSocket 代理） |
-| 配置管理 | ✅（代码）/ ⚠️（当前环境） | `.env.example` 覆盖 PG/Redis/MQTT/JWT/MFA/AutoMapper/LLM/SMTP/VAPID/TLS/监控；当前 `.env` 尚有 17 项未通过门禁 |
+| 配置管理 | ✅（代码）/ ⚠️（当前环境） | `.env.example` 覆盖 PG/Redis/MQTT/JWT/MFA/AutoMapper/LLM/SMTP/VAPID/TLS/监控；当前 `.env` 尚有 26 项未通过门禁 |
 | 数据持久化 | ✅ | TimescaleDB 7天压缩 + 90天保留 + 连续聚合；工单附件使用 `attachments_data` 命名卷并纳入备份 |
 | 迁移自动化 | ✅ | 启动自动 MigrateAsync + 种子初始化；迁移元数据可发现性有单测，MFA 迁移已在真实 PostgreSQL 验证 |
 | 健康检查 | ✅ | 三级探针（startup/liveness/ready），含 PG+Redis+MQTT+LLM |
 | 日志聚合 | ✅ | Serilog + Seq 结构化日志 |
 | 指标监控 | ✅ | Prometheus /metrics + Grafana 仪表盘 + 业务指标采集 |
-| CI/CD | ✅ | GitHub Actions（测试、NuGet/npm/Trivy 阻断扫描、Docker 构建、E2E、部署前置门禁、原子版本记录和失败回滚） |
+| CI/CD | ✅ | GitHub Actions（测试、NuGet/npm/Trivy 阻断扫描、Production 容器 runtime smoke、Docker 构建、E2E、部署前置门禁、原子版本记录和失败回滚） |
 
 ## 四、安全设计核验
 
@@ -126,24 +126,24 @@
 |------|------|
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
 | 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
-| 后端单元测试 | ✅ 1187/1187 通过 |
-| 后端集成测试 | ✅ 159/159 通过（153 个常规场景 + 显式启用的 6 个真实 RabbitMQ broker 场景） |
+| 后端单元测试 | ✅ 1189/1189 通过 |
+| 后端集成测试 | ✅ 153 通过、6 跳过、0 失败（共 159 个；6 个真实 RabbitMQ broker 场景需显式设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true`） |
 | 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
-| 前端单元测试 | ✅ 351/351 通过 |
-| E2E 测试 | ⚠️ 440 个测试被发现；本轮关键工单/设备流程真实浏览器冒烟通过，干净会话 0 console error / 0 warning，尚未在当前生产镜像全量执行 440 个场景 |
+| 前端单元测试 | ✅ 352/352 通过 |
+| E2E 测试 | ✅ 开发栈全量执行 442 个场景：437 通过、5 跳过、0 失败（含五个角色与第二租户生产凭据覆盖契约）；生产镜像仍需单独执行全量验收 |
 | i18n 完整性 | ✅ 753 个键在中英文资源中完全对齐 |
 | 生产构建 | ✅ PWA SW 产出 + precache 124 entries |
 | 生产配置 | ✅ appsettings.Production.json |
 | 依赖审计 | ✅ NuGet 全解决方案无已知漏洞；npm 全量审计 0 漏洞；审计服务失败会阻断 |
-| 生产脚本 | ✅ 环境校验、备份、恢复、部署、回滚、蓝绿与 CI 契约行为测试通过 |
+| 生产脚本/启动门禁 | ✅ 环境校验、独立凭据与 TLS/MQTT 证书 fail-closed 检查、应用种子账户启动校验、Production runtime smoke 门禁接入、备份、恢复、部署、回滚、蓝绿与 CI 契约行为测试通过；本机隔离 smoke 已用本地构建后端镜像和等价 Nginx runtime 镜像通过，固定 digest 的完整前端镜像仍需干净 CI Docker runner 验证 |
 
 ## 七、部署前检查清单
 
 部署到生产环境前，逐项确认：
 
-- [ ] `bash docker/validate-env.sh docker/.env --check-runtime-files` 以 0 退出；当前环境仍报告 17 个问题
-- [ ] `docker/.env` 已创建，PG/Redis/RabbitMQ/MQTT/Seq/Grafana 与五个种子账户密码均为独立强随机值
+- [ ] `bash docker/validate-env.sh docker/.env --check-runtime-files` 以 0 退出；当前环境仍报告 26 个问题（23 个配置问题 + 3 个证书问题，包含重复键和非 Production 环境）
+- [ ] `docker/.env` 已创建，PG/Redis/RabbitMQ/MQTT/Seq/Grafana 与五个种子账户密码均为独立强随机值；校验器不得报告凭据复用
 - [ ] `JWT_SECRET` ≥ 32 字符（`openssl rand -base64 48`）
 - [ ] `TOTP_ENCRYPTION_KEY` 已由密钥管理系统保存并注入
 - [ ] `AUTOMAPPER_LICENSE_KEY` 已完成许可证审核并由密钥管理系统注入
@@ -162,4 +162,4 @@
 
 **EquipSense 代码库已达到生产候选版本的质量基线，但当前部署环境尚未达到可上线状态。** 核心闭环、租户隔离、可靠消息、迁移、工单完整性、供应链 fail-closed、部署回滚和可观测性已有自动化证据；真实 PostgreSQL、RabbitMQ 和关键浏览器流程也已验证。
 
-上线前仍必须清零当前 `docker/.env` 的 17 个门禁问题，注入 AutoMapper 许可证与全部生产凭据，替换正式 TLS/MQTT 证书，并完成隔离恢复演练、生产镜像全量 E2E、容量基线以及钉钉/飞书与 OPC UA/Modbus 的现场联调。以上属于明确的发布条件，不应以“代码已实现”替代真实环境验收。
+上线前仍必须清零当前部署检查的 26 个门禁问题（其中 `docker/.env` 配置问题 23 个、TLS/MQTT 运行时证书问题 3 个），注入 AutoMapper 许可证与全部生产凭据，替换正式 TLS/MQTT 证书，并完成隔离恢复演练、生产镜像全量 E2E、容量基线以及钉钉/飞书与 OPC UA/Modbus 的现场联调。以上属于明确的发布条件，不应以“代码已实现”替代真实环境验收。

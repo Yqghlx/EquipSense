@@ -74,7 +74,7 @@ echo "=========================================="
 # 原因：生产部署只装 Docker，主机没装 pg_dump 客户端工具
 # （v1.4 修复：之前用主机 pg_dump 导致备份无声失败）
 PG_CONTAINER="${PG_CONTAINER:-equipai-postgres}"
-PG_FILE="$BACKUP_DIR/${PG_DB}_${TIMESTAMP}.sql.gz"
+PG_FILE="$BACKUP_DIR/${PG_DB}_${TIMESTAMP}.dump"
 echo "[1/4] 备份 PostgreSQL ($PG_DB) via docker exec..."
 
 # 检查容器是否运行（避免容器停了还在尝试备份）
@@ -82,26 +82,29 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
   echo "  ✗ PostgreSQL 容器 $PG_CONTAINER 未运行，跳过备份"
   BACKUP_SUCCESS=false
 else
-  # 在容器内执行 pg_dump，输出通过管道 gzip 压缩
+  # 使用 PostgreSQL custom format。它自带压缩，并保留 pg_restore 的对象依赖信息，
+  # 这样 TimescaleDB 的 catalog、hypertable 和 chunk 可以按正确顺序恢复。
   # PGPASSWORD 通过 -e 传入容器环境，避免进程列表泄露
   if docker exec -e PGPASSWORD="$PG_PASSWORD" "$PG_CONTAINER" \
     pg_dump -U "$PG_USER" -d "$PG_DB" \
-    --format=plain --no-owner --no-privileges \
-    | gzip > "$PG_FILE"; then
+    --format=custom \
+    --no-owner --no-privileges \
+    > "$PG_FILE"; then
 
-    # 完整性校验（gzip -t 测试压缩文件是否损坏）
-    if gzip -t "$PG_FILE" 2>/dev/null; then
+    # 完整性校验必须在数据库容器内执行，避免生产主机还需要安装 pg_restore。
+    if docker exec -i "$PG_CONTAINER" pg_restore --list - < "$PG_FILE" >/dev/null 2>&1; then
       chmod 600 "$PG_FILE"
       SIZE=$(du -h "$PG_FILE" | cut -f1)
       echo "  ✓ PostgreSQL 备份成功: $PG_FILE ($SIZE)"
       BACKUP_FILES+=("$PG_FILE")
     else
-      echo "  ✗ PostgreSQL 备份损坏，gzip -t 校验失败"
+      echo "  ✗ PostgreSQL custom 备份校验失败，pg_restore --list 无法读取"
       rm -f "$PG_FILE"
       BACKUP_SUCCESS=false
     fi
   else
     echo "  ✗ PostgreSQL 备份失败"
+    rm -f "$PG_FILE"
     BACKUP_SUCCESS=false
   fi
 fi
@@ -178,6 +181,8 @@ echo "[4/4] Grafana 配置已在 git 版本管理（docker/grafana/provisioning/
 # ============================================================
 echo ""
 echo "清理 $RETAIN_DAYS 天前的旧备份..."
+find "$BACKUP_DIR" -name "${PG_DB}_*.dump" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
+# 保留历史版本纯文本 gzip 备份的自动清理能力；restore.sh 仍兼容该格式。
 find "$BACKUP_DIR" -name "${PG_DB}_*.sql.gz" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
 find "$BACKUP_DIR" -name "redis_*.rdb" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
 find "$BACKUP_DIR" -name "attachments_*.tar.gz" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
@@ -195,7 +200,7 @@ if [[ "${S3_SYNC:-false}" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
     echo "  ✗ S3_SYNC 已开启，但主机未安装 aws-cli" >&2
     BACKUP_SUCCESS=false
   elif aws s3 sync "$BACKUP_DIR" "$S3_BUCKET" \
-    --exclude "*" --include "*.sql.gz" --include "*.rdb" --include "attachments_*.tar.gz"; then
+    --exclude "*" --include "*.dump" --include "*.sql.gz" --include "*.rdb" --include "attachments_*.tar.gz"; then
     echo "  ✓ S3 同步完成"
   else
     echo "  ✗ S3 同步失败" >&2

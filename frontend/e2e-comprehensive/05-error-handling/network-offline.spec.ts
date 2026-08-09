@@ -260,12 +260,6 @@ test.describe('网络异常降级', () => {
 
     // 记录请求次数
     let requestCount = 0;
-    await page.route('**/api/v1/devices', async (route) => {
-      if (route.request().method() === 'POST') {
-        requestCount++;
-      }
-      await route.continue();
-    });
 
     // 打开新建设备对话框
     await page.getByRole('button', { name: /新建|create/i }).click();
@@ -276,21 +270,36 @@ test.describe('网络异常降级', () => {
     const suffix = Date.now().toString(36);
     await dialog.locator('input').first().fill(`E2E-DEBOUNCE-${suffix}`);
     await dialog.locator('input').nth(1).fill('防抖测试设备');
+    // 设备类型是必填字段；先完成前端校验，才能验证真实提交中的防重复状态。
+    await dialog.getByRole('combobox').first().click();
+    await page.getByRole('option', { name: 'motor' }).click();
 
-    // 快速点击保存按钮 3 次
-    const saveBtn = dialog.getByRole('button', { name: /保存|确认|submit/i });
-    await saveBtn.click();
-    await saveBtn.click();
-    await saveBtn.click();
-    await page.waitForTimeout(3000);
+    // 暂缓首个响应，确保能观察到提交中的禁用状态；否则本地 API 过快返回时，
+    // 对话框会在第二次点击前关闭，测试会把“已关闭”误报成“重复提交失败”。
+    let releaseRequest: () => void = () => undefined;
+    const requestReleased = new Promise<void>((resolve) => { releaseRequest = resolve; });
+    await page.route('**/api/v1/devices**', async (route) => {
+      if (route.request().method() === 'POST') {
+        requestCount++;
+        await requestReleased;
+      }
+      await route.continue();
+    });
 
-    // 验证提交按钮在提交过程中被禁用（防重复提交）
-    // 第一次提交后按钮应该是 disabled 状态
-    // 实际请求次数应小于等于 1（因为 loading 状态会禁用按钮）
-    expect(requestCount).toBeLessThanOrEqual(2);
+    // 点击保存后，按钮必须立即禁用，防止用户连续点击产生重复 POST。
+    // 提交中按钮文案会从“保存”切换为“加载中”，因此用稳定的 type 定位。
+    const saveBtn = dialog.locator('button[type="submit"]');
+    await saveBtn.click();
+    await expect(saveBtn).toBeDisabled();
+    expect(requestCount).toBe(1);
+    releaseRequest();
+    await page.waitForTimeout(1000);
+
+    // 实际请求次数必须严格为 1。
+    expect(requestCount).toBe(1);
 
     // 取消路由拦截
-    await page.unroute('**/api/v1/devices');
+    await page.unroute('**/api/v1/devices**');
 
     expect(errors).toEqual([]);
   });

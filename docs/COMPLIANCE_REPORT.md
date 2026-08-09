@@ -51,7 +51,7 @@ EquipSense 是面向工业企业的设备监控与预测维护 SaaS 平台，核
 | 数据库访问 | EF Core 参数化查询（防 SQL 注入） | ✅ 已实现 |
 | 多租户隔离 | 全局查询过滤器（TenantId），纵深防御中间件链 | ✅ 已实现 |
 | 敏感字段加密 | 密码 bcrypt 哈希；TOTP 密钥使用 AES-256-GCM 加密；手机号/邮箱等 PII 仍依赖数据库层 TDE | ⚠️ 部分 |
-| 数据备份 | `docker/backup.sh` 导出 PostgreSQL、附件和可选 Redis，逐文件校验并支持 S3/OSS 异地同步；`docker/restore.sh` 提供 dry-run、危险归档拒绝、受控重建数据库和恢复后健康检查 | ✅ 已实现（需配置定时任务、异地目标和隔离恢复演练） |
+| 数据备份 | `docker/backup.sh` 以 PostgreSQL custom format 导出数据库、附件和可选 Redis，逐文件校验并支持 S3/OSS 异地同步；`docker/restore.sh` 兼容历史 gzip 备份，使用 TimescaleDB pre/post restore、dry-run、危险归档拒绝、受控重建数据库和恢复后健康检查 | ✅ 已实现（需配置定时任务、异地目标和隔离恢复演练） |
 
 ### 2.5 安全审计
 
@@ -89,7 +89,7 @@ EquipSense 是面向工业企业的设备监控与预测维护 SaaS 平台，核
 
 ## 四、部署安全清单
 
-以下是实际环境验收项，不因代码中已有校验器而自动视为完成。2026-08-09 当前 `docker/.env` 仍有 17 个生产门禁问题，因此凭据与证书相关项保持未勾选：
+以下是实际环境验收项，不因代码中已有校验器而自动视为完成。2026-08-10 当前部署检查仍有 26 个生产门禁问题（23 个配置问题和 3 个 TLS/MQTT 运行时证书问题，包含重复键和非 Production 环境），因此凭据与证书相关项保持未勾选：
 
 - [ ] `JWT_SECRET` ≥ 32 字符随机字符串并由密钥管理系统注入
 - [ ] PG/Redis/RabbitMQ/MQTT/Seq/Grafana 与种子账户使用独立强密码

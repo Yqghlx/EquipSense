@@ -72,7 +72,7 @@ jobs:
         if: matrix.language == 'csharp'
         run: |
           dotnet restore EquipAI.sln
-          dotnet build EquipAI.sln --configuration Release --no-restore
+          dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers
 
       - name: 执行 CodeQL 分析
         uses: github/codeql-action/analyze@v3

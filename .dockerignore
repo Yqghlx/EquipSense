@@ -1,0 +1,52 @@
+# 只将 Dockerfile 实际需要的源码、项目文件和运行脚本发送到构建上下文。
+# 这样可以显著缩短构建时间，也避免把本地凭据、测试产物和开发缓存带入构建器。
+
+# 版本控制与本地开发配置
+.git
+.github
+.agents
+.codex
+.vscode
+.idea
+
+# 文档、测试和临时输出不参与镜像构建
+docs
+tests
+output
+coverage-results
+frontend/e2e-comprehensive
+frontend/playwright-report
+frontend/test-results
+frontend/coverage
+
+# 本地依赖、编译产物和缓存必须在镜像阶段重新生成
+**/bin
+**/obj
+frontend/node_modules
+frontend/dist
+frontend/.vite
+frontend/.cache
+**/.eslintcache
+**/.tsbuildinfo
+
+# 生产凭据、证书、备份和日志严禁进入构建上下文
+docker/.env
+docker/ssl
+docker/mqtt-certs
+docker/mqtt-ca
+docker/mosquitto_passwd
+docker/backups
+docker/*.dump
+docker/*.sql.gz
+docker/*.rdb
+docker/*.tar.gz
+**/*.pem
+**/*.key
+**/*.crt
+**/*.log
+
+# 系统文件和压缩包
+.DS_Store
+*.swp
+*.swo
+*.tmp

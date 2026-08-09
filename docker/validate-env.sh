@@ -79,6 +79,25 @@ else
     fi
   done
 
+  # Compose 对重复键采用最后一项，容易让旧配置静默覆盖新凭据或域名。
+  # 只报告变量名，不输出任何值，避免校验日志泄露敏感信息。
+  duplicate_env_keys="$(awk -F= '
+    /^[A-Za-z_][A-Za-z0-9_]*=/ { counts[$1]++ }
+    END { for (key in counts) if (counts[key] > 1) print key }
+  ' "$ENV_FILE")"
+  while IFS= read -r env_key; do
+    if [ -n "$env_key" ]; then
+      error "$env_key 重复定义"
+    fi
+  done <<< "$duplicate_env_keys"
+
+  # Compose 会采用重复键的最后一项；如果旧配置尾部残留 Development，
+  # 生产专用的 MFA、许可证和安全策略可能被绕过，因此显式拒绝非 Production。
+  aspnet_environment="$(read_env_value ASPNETCORE_ENVIRONMENT)"
+  if [ -n "$aspnet_environment" ] && [ "$aspnet_environment" != "Production" ]; then
+    error "ASPNETCORE_ENVIRONMENT 必须为 Production"
+  fi
+
   jwt_value="$(read_env_value JWT_SECRET)"
   if [ -n "$jwt_value" ] && [[ "$jwt_value" != *"请修改"* ]] && [ "${#jwt_value}" -lt 32 ]; then
     error "JWT_SECRET 长度不足 32 个字符"
@@ -131,6 +150,56 @@ else
     if [ -n "$value" ] && [[ "$value" != *"请修改"* ]] && [[ "$value" != *"PLEASE_CHANGE"* ]] && [[ "$value" != *"CHANGE_ME"* ]] && [[ "$value" != *"change-me"* ]] && [ "${#value}" -lt 16 ]; then
       error "$key 长度不足 16 个字符"
     fi
+  done
+
+  # 不同组件和不同账户必须使用独立凭据；复用同一值会让一次泄露横向扩大影响面。
+  # 只报告变量名，绝不把凭据值写入日志。空值和占位值交给前面的必填校验处理。
+  is_placeholder_credential() {
+    local value="$1"
+    [ -z "$value" ] \
+      || [[ "$value" == *"请修改"* ]] \
+      || [[ "$value" == *"PLEASE_CHANGE"* ]] \
+      || [[ "$value" == *"CHANGE_ME"* ]] \
+      || [[ "$value" == *"SET_VIA_ENVIRONMENT"* ]] \
+      || [[ "$value" == *"change-me"* ]]
+  }
+
+  credential_keys=(
+    "PG_PASSWORD"
+    "REDIS_PASSWORD"
+    "RABBITMQ_PASSWORD"
+    "MQTT_PASSWORD"
+    "SEQ_ADMIN_PASSWORD"
+    "GRAFANA_PASSWORD"
+    "SEED_ADMIN_PASSWORD"
+    "SEED_LEAD_PASSWORD"
+    "SEED_TECH_PASSWORD"
+    "SEED_OPERATOR_PASSWORD"
+    "SEED_VIEWER_PASSWORD"
+    "JWT_SECRET"
+    "TOTP_ENCRYPTION_KEY"
+    "GATEWAY_AUTH_KEY"
+    "LLM_API_KEY"
+    "SMTP_PASSWORD"
+    "VAPID__PRIVATEKEY"
+    "EVALUATION_INGESTION_API_KEY"
+    "S3_SECRET_ACCESS_KEY"
+  )
+  seen_credential_keys=()
+  seen_credential_values=()
+  for key in "${credential_keys[@]}"; do
+    value="$(read_env_value "$key")"
+    if is_placeholder_credential "$value"; then
+      continue
+    fi
+    for index in "${!seen_credential_keys[@]}"; do
+      if [ "$value" = "${seen_credential_values[$index]}" ]; then
+        error "$key 与 ${seen_credential_keys[$index]} 不得复用同一凭据"
+        break
+      fi
+    done
+    seen_credential_keys+=("$key")
+    seen_credential_values+=("$value")
   done
 
   frontend_url="$(read_env_value FRONTEND_URL)"
@@ -188,6 +257,172 @@ else
         error "运行时文件缺失：$relative_path"
       fi
     done
+
+    if ! command -v openssl >/dev/null 2>&1; then
+      error "运行时证书校验需要 openssl，但当前系统未安装"
+    else
+      check_runtime_certificate() {
+        local path="$1"
+        local description="$2"
+        if [ ! -s "$path" ]; then
+          error "$description 为空或缺失"
+          return 1
+        fi
+        if ! openssl x509 -in "$path" -noout >/dev/null 2>&1; then
+          error "$description 不是有效的 X.509 证书"
+          return 1
+        fi
+        if ! openssl x509 -checkend 2592000 -noout -in "$path" >/dev/null 2>&1; then
+          error "$description 已过期或将在 30 天内过期"
+          return 1
+        fi
+        return 0
+      }
+
+      check_runtime_private_key() {
+        local path="$1"
+        local description="$2"
+        if [ ! -s "$path" ]; then
+          error "$description 为空或缺失"
+          return 1
+        fi
+        if ! openssl pkey -in "$path" -noout >/dev/null 2>&1; then
+          error "$description 不是有效的私钥"
+          return 1
+        fi
+        return 0
+      }
+
+      check_runtime_key_pair() {
+        local certificate_path="$1"
+        local key_path="$2"
+        local description="$3"
+        local certificate_fingerprint
+        local key_fingerprint
+
+        if ! certificate_fingerprint="$({
+          openssl x509 -in "$certificate_path" -pubkey -noout 2>/dev/null \
+            | openssl pkey -pubin -outform DER 2>/dev/null \
+            | openssl dgst -sha256 2>/dev/null
+        })"; then
+          error "$description 无法读取证书公钥"
+          return 1
+        fi
+        if ! key_fingerprint="$({
+          openssl pkey -in "$key_path" -pubout 2>/dev/null \
+            | openssl pkey -pubin -outform DER 2>/dev/null \
+            | openssl dgst -sha256 2>/dev/null
+        })"; then
+          error "$description 无法读取私钥公钥"
+          return 1
+        fi
+        if [ -z "$certificate_fingerprint" ] || [ "$certificate_fingerprint" != "$key_fingerprint" ]; then
+          error "$description 证书与私钥不匹配"
+          return 1
+        fi
+        return 0
+      }
+
+      check_runtime_certificate_host() {
+        local certificate_path="$1"
+        local host="$2"
+        local error_message="$3"
+        local certificate_text
+        local san_line
+        local common_name
+        local wildcard_host=""
+
+        if [ -z "$host" ]; then
+          error "$error_message（主机名为空）"
+          return 1
+        fi
+
+        if ! certificate_text="$(openssl x509 -in "$certificate_path" -text -noout 2>/dev/null)"; then
+          error "$error_message（无法读取证书名称）"
+          return 1
+        fi
+
+        # LibreSSL 和部分旧版 OpenSSL 没有 x509 -checkhost，使用证书文本中的
+        # SAN/CN 做兼容性校验；优先 SAN，只有证书没有 SAN 时才回退到 CN。
+        san_line="$(printf '%s\n' "$certificate_text" | awk '/Subject Alternative Name:/{getline; print; exit}')"
+        common_name="$(openssl x509 -in "$certificate_path" -noout -subject -nameopt RFC2253 2>/dev/null \
+          | sed -n 's/^subject=.*CN=\([^,]*\).*$/\1/p' \
+          | sed 's/^ *//; s/ *$//')"
+        if [[ "$host" =~ [A-Za-z] && "$host" == *.* ]]; then
+          wildcard_host="*.${host#*.}"
+        fi
+
+        if [ -n "$san_line" ]; then
+          if printf '%s\n' "$san_line" | grep -Fq "DNS:${host}" \
+            || { [ -n "$wildcard_host" ] && printf '%s\n' "$san_line" | grep -Fq "DNS:${wildcard_host}"; } \
+            || printf '%s\n' "$san_line" | grep -Fq "IP Address:${host}"; then
+            return 0
+          fi
+        elif [ "$common_name" = "$host" ] || { [ -n "$wildcard_host" ] && [ "$common_name" = "$wildcard_host" ]; }; then
+          return 0
+        fi
+
+        if [ -z "$san_line" ] && [ -z "$common_name" ]; then
+          error "$error_message（证书缺少 SAN/CN）"
+        else
+          error "$error_message"
+        fi
+        return 1
+      }
+
+      ssl_certificate="$SCRIPT_DIR/ssl/cert.pem"
+      ssl_key="$SCRIPT_DIR/ssl/key.pem"
+      mqtt_ca_certificate="$SCRIPT_DIR/mqtt-certs/ca.crt"
+      mqtt_server_certificate="$SCRIPT_DIR/mqtt-certs/server.crt"
+      mqtt_server_key="$SCRIPT_DIR/mqtt-certs/server.key"
+
+      ssl_certificate_valid=false
+      ssl_key_valid=false
+      mqtt_ca_certificate_valid=false
+      mqtt_server_certificate_valid=false
+      mqtt_server_key_valid=false
+
+      check_runtime_certificate "$ssl_certificate" "Nginx TLS 证书" && ssl_certificate_valid=true
+      check_runtime_private_key "$ssl_key" "Nginx TLS 私钥" && ssl_key_valid=true
+      if [ "$ssl_certificate_valid" = true ] && [ "$ssl_key_valid" = true ]; then
+        if ! check_runtime_key_pair "$ssl_certificate" "$ssl_key" "Nginx TLS"; then
+          :
+        fi
+        frontend_url="$(read_env_value FRONTEND_URL)"
+        frontend_host="${frontend_url#https://}"
+        frontend_host="${frontend_host%%/*}"
+        frontend_host="$(printf '%s' "$frontend_host" | sed -E 's/:[0-9]+$//; s/^\[//; s/\]$//')"
+        if ! check_runtime_certificate_host "$ssl_certificate" "$frontend_host" "Nginx TLS 证书与 FRONTEND_URL 主机名不匹配"; then
+          :
+        fi
+      fi
+
+      check_runtime_certificate "$mqtt_ca_certificate" "MQTT CA 证书" && mqtt_ca_certificate_valid=true
+      check_runtime_certificate "$mqtt_server_certificate" "MQTT 服务端证书" && mqtt_server_certificate_valid=true
+      check_runtime_private_key "$mqtt_server_key" "MQTT 服务端私钥" && mqtt_server_key_valid=true
+      if [ "$mqtt_ca_certificate_valid" = true ] && [ "$mqtt_server_certificate_valid" = true ]; then
+        if ! openssl verify -CAfile "$mqtt_ca_certificate" "$mqtt_server_certificate" >/dev/null 2>&1; then
+          error "MQTT 服务端证书未通过配置的 CA 链校验"
+        fi
+      fi
+      if [ "$mqtt_server_certificate_valid" = true ] && [ "$mqtt_server_key_valid" = true ]; then
+        if ! check_runtime_key_pair "$mqtt_server_certificate" "$mqtt_server_key" "MQTT 服务端"; then
+          :
+        fi
+        if ! check_runtime_certificate_host "$mqtt_server_certificate" "mosquitto" "MQTT 服务端证书未包含 mosquitto 主机名"; then
+          :
+        fi
+      fi
+
+      mqtt_username="$(read_env_value MQTT_USERNAME)"
+      mqtt_password_file="$SCRIPT_DIR/mosquitto_passwd/passwd"
+      if [ ! -s "$mqtt_password_file" ]; then
+        error "Mosquitto 密码文件为空或缺失"
+      elif [ -n "$mqtt_username" ] \
+        && ! awk -F: -v expected="$mqtt_username" '$1 == expected { found = 1 } END { exit found ? 0 : 1 }' "$mqtt_password_file"; then
+        error "Mosquitto 密码文件未配置 .env 中的 MQTT_USERNAME"
+      fi
+    fi
   fi
 fi
 

@@ -12,6 +12,7 @@ ENV_FILE="$SCRIPT_DIR/.env"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 COMPOSE_FILES=()
 DB_BACKUP=""
+DB_BACKUP_FORMAT=""
 ATTACHMENTS_BACKUP=""
 REDIS_BACKUP=""
 ATTACHMENTS_PATH="/app/uploads"
@@ -19,6 +20,7 @@ HEALTH_URL="http://localhost:8080/health"
 SKIP_ATTACHMENTS=false
 CONFIRM=false
 TEMP_DIR=""
+TIMESCALE_RESTORE_PREPARED=false
 
 usage() {
   cat <<'EOF'
@@ -26,7 +28,7 @@ usage() {
 
 必填：
   --env-file PATH             生产环境变量文件
-  --db-backup PATH            PostgreSQL .sql.gz 备份
+  --db-backup PATH            PostgreSQL .dump 备份（兼容历史 .sql.gz）
   --attachments-backup PATH   工单附件 .tar.gz 备份
 
 可选：
@@ -81,6 +83,23 @@ require_private_file() {
   esac
 }
 
+detect_database_backup_format() {
+  local magic
+  magic="$(head -c 5 "$DB_BACKUP" 2>/dev/null || true)"
+  if [[ "$magic" = "PGDMP" ]]; then
+    DB_BACKUP_FORMAT="custom"
+    return
+  fi
+
+  if gzip -t "$DB_BACKUP" 2>/dev/null; then
+    # 旧版本使用纯文本 SQL + gzip；保留该路径，避免历史备份无法恢复。
+    DB_BACKUP_FORMAT="legacy-plain"
+    return
+  fi
+
+  fatal "PostgreSQL 备份格式无法识别：需要 PGDMP custom 文件或纯文本 gzip 文件：$DB_BACKUP"
+}
+
 validate_attachment_archive() {
   local listing
   listing="$(tar -tzf "$ATTACHMENTS_BACKUP" 2>/dev/null)" \
@@ -123,7 +142,7 @@ validate_inputs() {
     [[ -f "$compose_file" ]] || fatal "Compose 文件不存在：$compose_file"
   done
   require_private_file "$DB_BACKUP" "PostgreSQL 备份"
-  gzip -t "$DB_BACKUP" 2>/dev/null || fatal "PostgreSQL 备份不是可读的 gzip 文件：$DB_BACKUP"
+  detect_database_backup_format
 
   if [[ "$SKIP_ATTACHMENTS" = false ]]; then
     [[ -n "$ATTACHMENTS_BACKUP" ]] || fatal "必须指定 --attachments-backup，或显式使用 --skip-attachments"
@@ -156,6 +175,7 @@ print_plan() {
     printf '  Compose：%s\n' "$compose_file"
   done
   printf '  PostgreSQL：%s\n' "$DB_BACKUP"
+  printf '  PostgreSQL 格式：%s\n' "$DB_BACKUP_FORMAT"
   if [[ "$SKIP_ATTACHMENTS" = true ]]; then
     printf '  工单附件：跳过（已显式指定 --skip-attachments）\n'
   else
@@ -250,7 +270,28 @@ POSTGRES_RUNNING="$(docker inspect --format '{{.State.Running}}' "$POSTGRES_CONT
 [[ "$POSTGRES_RUNNING" = true ]] || fatal "PostgreSQL 容器未运行"
 
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/equipsense-restore.XXXXXX")"
-trap 'rm -rf -- "$TEMP_DIR"' EXIT
+
+cleanup_restore() {
+  local exit_code="$?"
+  trap - EXIT
+
+  # pg_restore/psql 失败时，数据库可能仍处于 TimescaleDB restoring 状态；
+  # 必须先退出恢复模式，再保留原始失败码，避免故障被掩盖或服务无法正常启动。
+  if [[ "$TIMESCALE_RESTORE_PREPARED" = true ]]; then
+    printf '恢复异常，尝试退出 TimescaleDB restoring 模式……\n' >&2
+    if ! "${COMPOSE[@]}" exec -T postgres sh -c \
+      'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT timescaledb_post_restore()"' \
+      >/dev/null; then
+      printf '恢复失败：TimescaleDB post_restore 也执行失败，需人工检查数据库状态。\n' >&2
+      [[ "$exit_code" -ne 0 ]] || exit_code=1
+    fi
+    TIMESCALE_RESTORE_PREPARED=false
+  fi
+
+  rm -rf -- "$TEMP_DIR"
+  exit "$exit_code"
+}
+trap cleanup_restore EXIT
 
 printf '停止后端，避免恢复期间产生新写入……\n'
 "${COMPOSE[@]}" stop backend
@@ -260,8 +301,8 @@ if [[ -n "$REDIS_BACKUP" ]]; then
   "${COMPOSE[@]}" stop redis
 fi
 
-printf '恢复 PostgreSQL（重建目标数据库，单事务导入）……\n'
-gzip -dc "$DB_BACKUP" | "${COMPOSE[@]}" exec -T postgres sh -c '
+printf '恢复 PostgreSQL（重建目标数据库，清理 TimescaleDB 内部元数据）……\n'
+"${COMPOSE[@]}" exec -T postgres sh -c '
   set -eu
 
   # 仅清空 public schema 无法覆盖 TimescaleDB 的内部 schema；先重建数据库，
@@ -277,10 +318,38 @@ SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE datname = :'target_db' AND pid <> pg_backend_pid();
 DROP DATABASE IF EXISTS :"target_db";
-CREATE DATABASE :"target_db" OWNER :"target_user";
+  CREATE DATABASE :"target_db" OWNER :"target_user";
 SQL
-  psql -v ON_ERROR_STOP=1 --single-transaction -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 '
+
+printf '准备 TimescaleDB 恢复模式……\n'
+"${COMPOSE[@]}" exec -T postgres sh -c '
+  set -eu
+  psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "CREATE EXTENSION IF NOT EXISTS timescaledb" \
+    -c "SELECT timescaledb_pre_restore()"
+' >/dev/null
+TIMESCALE_RESTORE_PREPARED=true
+
+if [[ "$DB_BACKUP_FORMAT" = custom ]]; then
+  printf '恢复 PostgreSQL custom 备份（pg_restore，禁止并行）……\n'
+  "${COMPOSE[@]}" exec -T postgres sh -c \
+    'pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" --dbname="$POSTGRES_DB" -' \
+    < "$DB_BACKUP"
+else
+  printf '恢复 PostgreSQL 历史纯文本 gzip 备份……\n'
+  gzip -dc "$DB_BACKUP" | "${COMPOSE[@]}" exec -T postgres sh -c \
+    'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+fi
+
+printf '完成 TimescaleDB 恢复并更新统计信息……\n'
+"${COMPOSE[@]}" exec -T postgres sh -c \
+  'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT timescaledb_post_restore()"' \
+  >/dev/null
+TIMESCALE_RESTORE_PREPARED=false
+"${COMPOSE[@]}" exec -T postgres sh -c \
+  'psql -v ON_ERROR_STOP=1 -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "ANALYZE"' \
+  >/dev/null
 
 if [[ "$SKIP_ATTACHMENTS" = false ]]; then
   printf '恢复工单附件……\n'

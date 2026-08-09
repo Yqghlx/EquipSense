@@ -2098,7 +2098,7 @@ cd ../../frontend
 npm install
 npm run dev      # http://localhost:3000，代理 /api → localhost:8080
 
-# 默认管理员：admin / Admin@123（首次登录强制修改密码）
+# 开发/测试管理员凭据由测试环境注入；生产环境管理员初始密码来自 `SEED_ADMIN_PASSWORD`，首次登录后必须修改
 ```
 
 **前后端联调：** 前端 Vite 开发服务器（端口 3000）通过 `vite.config.ts` 代理 `/api` → `http://localhost:8080`，无需 CORS 配置。

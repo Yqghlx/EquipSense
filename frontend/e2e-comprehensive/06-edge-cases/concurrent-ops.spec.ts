@@ -24,6 +24,7 @@ import {
   createWorkOrderViaAPI,
   createThresholdRule,
   deleteAlertRuleViaAPI,
+  getE2EPassword,
 } from '../helpers';
 
 test.describe('并发操作', () => {
@@ -72,7 +73,7 @@ test.describe('并发操作', () => {
 
       const passwordInput2 = page2.locator('input[type="password"]').first();
       await passwordInput2.waitFor({ state: 'visible', timeout: 5000 });
-      await passwordInput2.fill('Admin@123');
+      await passwordInput2.fill(getE2EPassword('admin'));
 
       await page2.getByRole('button', { name: /登录|login/i }).click();
       await page2.waitForURL(/dashboard/, { timeout: 15000 });

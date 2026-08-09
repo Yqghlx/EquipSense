@@ -1,0 +1,24 @@
+# Production runtime smoke 专用覆盖。
+# 只替换应用镜像来源，不改变生产 Compose 的依赖、环境变量和安全配置。
+# 镜像必须由当前 CI job 在本地构建，禁止 smoke 测试静默拉取旧镜像。
+services:
+  postgres:
+    # 清除基础生产 Compose 的固定容器名，允许 smoke 与本机现有服务并行运行。
+    container_name: !reset null
+  redis:
+    container_name: !reset null
+  mosquitto:
+    container_name: !reset null
+  rabbitmq:
+    container_name: !reset null
+  backend:
+    image: ${SMOKE_BACKEND_IMAGE:?请设置 SMOKE_BACKEND_IMAGE}
+    container_name: !reset null
+    build: !reset null
+    pull_policy: never
+
+  frontend:
+    image: ${SMOKE_FRONTEND_IMAGE:?请设置 SMOKE_FRONTEND_IMAGE}
+    container_name: !reset null
+    build: !reset null
+    pull_policy: never

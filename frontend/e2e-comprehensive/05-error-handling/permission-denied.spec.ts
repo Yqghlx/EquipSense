@@ -7,17 +7,13 @@
  * - API 请求 401/403 响应处理
  * - 跨租户数据隔离
  *
- * 角色和密码：
- * - admin / Admin@123 （系统管理员）
- * - lead / Lead@123    （维保主管）
- * - tech / Tech@123    （技术员）
- * - operator / Operator@123 （操作员）
- * - viewer / Viewer@123     （观察者）
+ * 角色密码由 helpers/credentials.ts 统一读取；生产镜像验收必须通过环境变量注入。
  */
 import { test, expect } from '@playwright/test';
 import {
   BASE_URL,
   loginAs,
+  getE2ETenant2Password,
   captureErrors,
   getTokenForRole,
   navigateViaSidebar,
@@ -83,33 +79,43 @@ test.describe('RBAC 权限拒绝', () => {
 
     // 先用管理员创建设备
     const adminToken = await getTokenForRole(page, 'admin');
-    const dev = await createDeviceViaAPI(page, adminToken, {
-      deviceCode: 'TECH-DELETE-TEST',
-      name: '技术员删除测试',
-    });
+    const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const deviceName = `技术员删除测试-${suffix}`;
+    let deviceId: string | undefined;
 
-    // 技术员登录
-    await loginAs(page, 'tech');
-    await navigateViaSidebar(page, /设备/i);
-    await page.waitForTimeout(2000);
+    try {
+      // 每次运行使用唯一编码，避免并行或上次异常退出留下的测试数据造成 409 冲突。
+      const dev = await createDeviceViaAPI(page, adminToken, {
+        deviceCode: `TECH-DELETE-TEST-${suffix}`,
+        name: deviceName,
+      });
+      deviceId = typeof dev.id === 'string' ? dev.id : undefined;
+      expect(deviceId).toBeTruthy();
 
-    const row = page.locator('table tbody tr').filter({ hasText: '技术员删除测试' }).first();
-    if (await row.isVisible().catch(() => false)) {
-      // 查找删除按钮
-      const deleteBtn = row.getByRole('button', { name: /删除|delete/i })
-        .or(row.locator('button').last());
+      // 技术员登录
+      await loginAs(page, 'tech');
+      await navigateViaSidebar(page, /设备/i);
+      await page.waitForTimeout(2000);
 
+      const row = page.locator('table tbody tr').filter({ hasText: deviceName }).first();
+      await expect(row).toBeVisible();
+
+      // 删除按钮可以被隐藏，也可以显示为禁用状态；两种都表示前端没有授予删除能力。
+      const deleteBtn = row.getByRole('button', { name: /删除|delete/i }).first();
       if (await deleteBtn.isVisible().catch(() => false)) {
-        // 删除按钮应该是禁用状态
-        const isDisabled = await deleteBtn.isDisabled().catch(() => false);
-        expect(isDisabled).toBeTruthy();
+        await expect(deleteBtn).toBeDisabled();
+      }
+    } finally {
+      // 无论断言是否失败都清理夹具，避免污染后续测试和开发环境。
+      if (deviceId) {
+        const { deleteDeviceViaAPI } = await import('../helpers');
+        // 同一浏览器上下文仍可能保留技术员 HttpOnly Cookie；先恢复管理员会话，
+        // 确保服务端不会优先使用低权限 Cookie 覆盖管理员 Authorization 头。
+        await loginAs(page, 'admin');
+        const cleanupResponse = await deleteDeviceViaAPI(page, adminToken, deviceId);
+        expect(cleanupResponse.ok(), `清理设备夹具失败：HTTP ${cleanupResponse.status()}`).toBeTruthy();
       }
     }
-
-    // 清理
-    await createDeviceViaAPI(page, adminToken, { deviceCode: 'cleanup' }).catch(() => {});
-    const { deleteDeviceViaAPI } = await import('../helpers');
-    await deleteDeviceViaAPI(page, adminToken, dev.id as string);
 
     expect(errors).toEqual([]);
   });
@@ -494,7 +500,7 @@ test.describe('RBAC 权限拒绝', () => {
 
     // 使用第二租户的 admin 登录，验证看不到默认租户的设备
     const tenant2TokenResp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-      data: { username: 'tenant2admin', password: 'Tenant2@123' },
+      data: { username: 'tenant2admin', password: getE2ETenant2Password() },
     });
     expect(tenant2TokenResp.ok()).toBeTruthy();
     const tenant2Body = await tenant2TokenResp.json();

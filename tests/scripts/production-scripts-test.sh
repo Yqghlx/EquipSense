@@ -106,6 +106,42 @@ test_validate_env_rejects_missing_automapper_license() {
   assert_contains "$output" "AUTOMAPPER_LICENSE_KEY"
 }
 
+test_validate_env_rejects_reused_production_credentials() {
+  local env_file="$TEST_ROOT/reused-credentials.env"
+  printf '%s\n' \
+    'PG_PASSWORD=shared-production-secret' \
+    'REDIS_PASSWORD=shared-production-secret' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' > "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "复用生产凭据时环境校验不应通过"
+  assert_contains "$output" "REDIS_PASSWORD 与 PG_PASSWORD 不得复用同一凭据"
+  [[ "$output" != *"shared-production-secret"* ]] || fail "校验输出不得泄露凭据值"
+}
+
 test_validate_env_rejects_weak_production_config() {
   local env_file="$TEST_ROOT/weak.env"
   printf '%s\n' \
@@ -146,6 +182,185 @@ test_validate_env_rejects_weak_production_config() {
   assert_contains "$output" "FRONTEND_URL 必须使用 HTTPS"
   assert_contains "$output" "SEQ_ADMIN_PASSWORD 长度不足"
   assert_contains "$output" "GRAFANA_PASSWORD 长度不足"
+}
+
+test_validate_env_rejects_non_production_environment() {
+  local env_file="$TEST_ROOT/non-production-environment.env"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' \
+    'ASPNETCORE_ENVIRONMENT=Development' > "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非 Production 环境不应通过生产环境校验"
+  assert_contains "$output" "ASPNETCORE_ENVIRONMENT 必须为 Production"
+}
+
+test_validate_env_rejects_duplicate_keys() {
+  local env_file="$TEST_ROOT/duplicate-keys.env"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' \
+    'ASPNETCORE_ENVIRONMENT=Production' \
+    'FRONTEND_URL=https://other.example.com' > "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "重复环境变量不应通过生产环境校验"
+  assert_contains "$output" "FRONTEND_URL 重复定义"
+}
+
+test_production_env_template_uses_https_default() {
+  local template_content
+  template_content="$(cat "$PROJECT_ROOT/docker/.env.example")"
+  assert_contains "$template_content" "FRONTEND_PORT=80"
+  assert_contains "$template_content" "FRONTEND_URL=https://localhost"
+  [[ "$template_content" != *"FRONTEND_URL=http://"* ]] \
+    || fail "生产环境模板不应使用 HTTP 前端地址"
+}
+
+test_validate_runtime_files_rejects_invalid_certificates() {
+  local case_dir="$TEST_ROOT/invalid-certificates"
+  local env_file="$case_dir/.env"
+  mkdir -p \
+    "$case_dir/ssl" \
+    "$case_dir/mqtt-certs" \
+    "$case_dir/mosquitto_passwd" \
+    "$case_dir/rabbitmq" \
+    "$case_dir/prometheus" \
+    "$case_dir/grafana/provisioning/datasources" \
+    "$case_dir/grafana/provisioning/dashboards"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' > "$env_file"
+  chmod 600 "$env_file"
+  touch \
+    "$case_dir/ssl/cert.pem" \
+    "$case_dir/ssl/key.pem" \
+    "$case_dir/mqtt-certs/ca.crt" \
+    "$case_dir/mqtt-certs/server.crt" \
+    "$case_dir/mqtt-certs/server.key" \
+    "$case_dir/mosquitto.prod.conf" \
+    "$case_dir/rabbitmq/rabbitmq.conf" \
+    "$case_dir/rabbitmq/definitions.json" \
+    "$case_dir/rabbitmq/start.sh" \
+    "$case_dir/prometheus.yml" \
+    "$case_dir/prometheus/rules.yml" \
+    "$case_dir/alertmanager.yml" \
+    "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
+    "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
+  printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "无效 TLS/MQTT 证书不应通过运行时文件门禁"
+  assert_contains "$output" "证书"
+
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=example.com" >/dev/null 2>&1
+  openssl genrsa -out "$case_dir/ssl/mismatch.key" 2048 >/dev/null 2>&1
+  mv "$case_dir/ssl/mismatch.key" "$case_dir/ssl/key.pem"
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "证书与私钥不匹配时运行时门禁不应通过"
+  assert_contains "$output" "Nginx TLS 证书与私钥不匹配"
+
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=example.com" >/dev/null 2>&1
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "即将过期的证书不应通过运行时门禁"
+  assert_contains "$output" "Nginx TLS 证书 已过期或将在 30 天内过期"
+
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=wrong.example.com" \
+    -addext "subjectAltName=DNS:wrong.example.com" >/dev/null 2>&1
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "证书主机名与前端地址不匹配时不应通过运行时门禁"
+  assert_contains "$output" "Nginx TLS 证书与 FRONTEND_URL 主机名不匹配"
 }
 
 test_validate_runtime_files_gate() {
@@ -193,11 +408,6 @@ test_validate_runtime_files_gate() {
     "$case_dir/grafana/provisioning/datasources" \
     "$case_dir/grafana/provisioning/dashboards"
   touch \
-    "$case_dir/ssl/cert.pem" \
-    "$case_dir/ssl/key.pem" \
-    "$case_dir/mqtt-certs/ca.crt" \
-    "$case_dir/mqtt-certs/server.crt" \
-    "$case_dir/mqtt-certs/server.key" \
     "$case_dir/mosquitto_passwd/passwd" \
     "$case_dir/mosquitto.prod.conf" \
     "$case_dir/rabbitmq/rabbitmq.conf" \
@@ -208,6 +418,35 @@ test_validate_runtime_files_gate() {
     "$case_dir/alertmanager.yml" \
     "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
     "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=example.com" >/dev/null 2>&1
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/mqtt-certs/ca.key" \
+    -out "$case_dir/mqtt-certs/ca.crt" \
+    -subj "/CN=EquipSense Test MQTT CA" >/dev/null 2>&1
+  openssl req -newkey rsa:2048 -nodes \
+    -keyout "$case_dir/mqtt-certs/server.key" \
+    -out "$case_dir/mqtt-certs/server.csr" \
+    -subj "/CN=mosquitto" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "$case_dir/mqtt-certs/server.csr" \
+    -CA "$case_dir/mqtt-certs/ca.crt" \
+    -CAkey "$case_dir/mqtt-certs/ca.key" \
+    -CAcreateserial \
+    -out "$case_dir/mqtt-certs/server.crt" \
+    -days 365 \
+    -sha256 >/dev/null 2>&1
+  local empty_password_file_output
+  local empty_password_file_result_code
+  set +e
+  empty_password_file_output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  empty_password_file_result_code=$?
+  set -e
+  [[ "$empty_password_file_result_code" -ne 0 ]] || fail "空 Mosquitto 密码文件不应通过运行时门禁"
+  assert_contains "$empty_password_file_output" "Mosquitto 密码文件为空或缺失"
+  printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
   bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files >/dev/null
 }
 
@@ -268,7 +507,8 @@ test_backup_includes_attachments() {
     'case "${1:-}" in' \
     '  ps) printf "fake-postgres\\n" ;;' \
     '  exec)' \
-    '    if [[ "$*" == *"pg_dump"* ]]; then printf "CREATE TABLE backup_test;\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
     '    if [[ "$*" == *"tar"* ]]; then tar -C "$FAKE_ATTACHMENTS_ROOT" -czf - .; exit 0; fi' \
     '    exit 1 ;;' \
     '  cp) cp -R "$FAKE_ATTACHMENTS_ROOT/." "$3" ;;' \
@@ -283,23 +523,23 @@ test_backup_includes_attachments() {
     fail "备份脚本应在模拟数据源可用时成功完成"
   fi
 
-  local sql_file
+  local dump_file
   local attachment_file
-  sql_file="$(find "$backup_dir" -name '*.sql.gz' -print -quit)"
+  dump_file="$(find "$backup_dir" -name '*.dump' -print -quit)"
   attachment_file="$(find "$backup_dir" -name 'attachments_*.tar.gz' -print -quit)"
-  [[ -n "$sql_file" ]] || fail "应生成 PostgreSQL 备份"
+  [[ -n "$dump_file" ]] || fail "应生成 PostgreSQL custom 备份"
   [[ -n "$attachment_file" ]] || fail "应生成工单附件备份"
-  gzip -t "$sql_file"
+  [[ "$(head -c 5 "$dump_file")" = "PGDMP" ]] || fail "PostgreSQL 备份应使用 custom format"
   tar -tzf "$attachment_file" | grep -q 'report.txt' || fail "附件归档中缺少测试文件"
 
   local backup_mode
   local file_mode
   if stat -c '%a' "$backup_dir" >/dev/null 2>&1; then
     backup_mode="$(stat -c '%a' "$backup_dir")"
-    file_mode="$(stat -c '%a' "$sql_file")"
+    file_mode="$(stat -c '%a' "$dump_file")"
   else
     backup_mode="$(stat -f '%Lp' "$backup_dir")"
-    file_mode="$(stat -f '%Lp' "$sql_file")"
+    file_mode="$(stat -f '%Lp' "$dump_file")"
   fi
   [[ "$backup_mode" = "700" ]] || fail "备份目录应为 700 权限，实际为 $backup_mode"
   [[ "$file_mode" = "600" ]] || fail "数据库备份文件应为 600 权限，实际为 $file_mode"
@@ -363,6 +603,7 @@ test_backup_rejects_requested_redis_failure() {
     '  ps) printf "fake-postgres\\n" ;;' \
     '  exec)' \
     '    if [[ "$*" == *"pg_dump"* ]]; then printf "CREATE TABLE backup_test;\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then exit 0; fi' \
     '    if [[ "$*" == *"redis-cli"* ]]; then exit 1; fi' \
     '    exit 1 ;;' \
     '  *) exit 1 ;;' \
@@ -392,6 +633,14 @@ create_restore_fixtures() {
   chmod 600 "$case_dir/database.sql.gz" "$case_dir/attachments.tar.gz"
 }
 
+create_custom_restore_fixture() {
+  local case_dir="$1"
+  : > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  printf 'PGDMP\\001\\014' > "$case_dir/database.dump"
+  chmod 600 "$case_dir/database.dump"
+}
+
 test_restore_dry_run_does_not_mutate_services() {
   local case_dir="$TEST_ROOT/restore-dry-run"
   mkdir -p "$case_dir/bin"
@@ -414,6 +663,29 @@ test_restore_dry_run_does_not_mutate_services() {
 
   assert_contains "$output" "dry-run"
   [[ ! -f "$case_dir/docker-called" ]] || fail "dry-run 不应调用 Docker 或修改服务"
+}
+
+test_restore_dry_run_accepts_custom_backup() {
+  local case_dir="$TEST_ROOT/restore-custom-dry-run"
+  mkdir -p "$case_dir/bin"
+  create_custom_restore_fixture "$case_dir"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$RESTORE_DOCKER_CALLED"' \
+    'exit 99' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$case_dir/docker-called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --db-backup "$case_dir/database.dump" \
+      --skip-attachments 2>&1)" \
+    || fail "合法 custom 备份的 dry-run 应成功"
+
+  assert_contains "$output" "dry-run"
+  [[ ! -f "$case_dir/docker-called" ]] || fail "custom 备份 dry-run 不应调用 Docker"
 }
 
 test_restore_confirm_cleans_attachments_without_running_backend() {
@@ -468,6 +740,95 @@ test_restore_confirm_cleans_attachments_without_running_backend() {
     || fail "Redis 恢复应使用 root 一次性容器修正 RDB 权限并清理旧 AOF"
   grep -q 'appendonly' "$docker_log" \
     || fail "Redis 恢复应清理旧 AOF，确保 dump.rdb 会被加载"
+}
+
+test_restore_confirm_uses_custom_format_and_timescale_lifecycle() {
+  local case_dir="$TEST_ROOT/restore-custom-confirm"
+  local docker_log="$case_dir/docker.log"
+  mkdir -p "$case_dir/bin"
+  create_custom_restore_fixture "$case_dir"
+  : > "$case_dir/compose.yml"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$RESTORE_DOCKER_LOG"' \
+    'if [[ "${1:-}" = "inspect" ]]; then printf "true\\n"; exit 0; fi' \
+    '[[ "${1:-}" = "compose" ]] || exit 1' \
+    'if [[ "$*" == *" ps -q postgres"* ]]; then printf "fake-postgres\\n"; exit 0; fi' \
+    'if [[ "$*" == *" exec -T postgres "* ]]; then cat >/dev/null; printf "1\\n"; exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/curl"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/curl"
+
+  local output
+  if ! output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_LOG="$docker_log" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --compose-file "$case_dir/compose.yml" \
+      --db-backup "$case_dir/database.dump" \
+      --skip-attachments --confirm 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "合法 custom 备份的 confirm 恢复应成功完成模拟流程"
+  fi
+
+  assert_contains "$output" "恢复完成"
+  grep -q 'timescaledb_pre_restore' "$docker_log" \
+    || fail "恢复前必须进入 TimescaleDB restoring 模式"
+  grep -q 'pg_restore' "$docker_log" \
+    || fail "custom format 必须使用 pg_restore 恢复"
+  grep -q -- '--exit-on-error' "$docker_log" \
+    || fail "pg_restore 必须遇到错误立即失败"
+  ! grep -q -- ' -j' "$docker_log" \
+    || fail "TimescaleDB 恢复不应使用并行 pg_restore"
+  grep -q 'timescaledb_post_restore' "$docker_log" \
+    || fail "恢复后必须退出 TimescaleDB restoring 模式"
+  grep -q 'ANALYZE' "$docker_log" \
+    || fail "恢复后应更新数据库统计信息"
+}
+
+test_restore_failure_exits_timescale_restore_mode() {
+  local case_dir="$TEST_ROOT/restore-custom-failure"
+  local docker_log="$case_dir/docker.log"
+  mkdir -p "$case_dir/bin"
+  create_custom_restore_fixture "$case_dir"
+  : > "$case_dir/compose.yml"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$RESTORE_DOCKER_LOG"' \
+    'if [[ "${1:-}" = "inspect" ]]; then printf "true\\n"; exit 0; fi' \
+    '[[ "${1:-}" = "compose" ]] || exit 1' \
+    'if [[ "$*" == *" ps -q postgres"* ]]; then printf "fake-postgres\\n"; exit 0; fi' \
+    'if [[ "$*" == *" pg_restore "* ]]; then cat >/dev/null; exit 42; fi' \
+    'if [[ "$*" == *" exec -T postgres "* ]]; then cat >/dev/null; printf "1\\n"; exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/curl"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/curl"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_LOG="$docker_log" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --compose-file "$case_dir/compose.yml" \
+      --db-backup "$case_dir/database.dump" \
+      --skip-attachments --confirm 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "pg_restore 失败时恢复必须返回非零"
+  assert_contains "$output" "恢复异常"
+  grep -q 'timescaledb_pre_restore' "$docker_log" \
+    || fail "恢复失败测试必须确认曾进入 TimescaleDB restoring 模式"
+  grep -q 'timescaledb_post_restore' "$docker_log" \
+    || fail "pg_restore 失败后必须尝试退出 TimescaleDB restoring 模式"
 }
 
 test_restore_rejects_corrupted_archive() {
@@ -811,11 +1172,87 @@ test_deploy_rollback_health_failure_is_critical() {
 test_release_waits_for_quality_gates() {
   local release_block
   release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  assert_contains "$release_block" "needs: [backend, frontend]"
+  assert_contains "$release_block" "needs: [backend, frontend, production-smoke]"
 
   local deploy_block
   deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$deploy_block" "needs: [release]"
+}
+
+test_ci_build_disables_unreliable_build_servers() {
+  local ci_content
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$ci_content" "dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers"
+
+  local codeql_content
+  codeql_content="$(cat "$PROJECT_ROOT/.github/workflows/codeql.yml")"
+  assert_contains "$codeql_content" "dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers"
+}
+
+test_docker_build_context_excludes_local_artifacts_and_secrets() {
+  [[ -f "$PROJECT_ROOT/.dockerignore" ]] || fail "Docker 构建必须有根目录 .dockerignore"
+
+  local dockerignore_content
+  dockerignore_content="$(cat "$PROJECT_ROOT/.dockerignore")"
+  for ignored_path in frontend/node_modules docker/.env docker/mqtt-certs docker/mosquitto_passwd '**/bin' '**/obj'; do
+    assert_contains "$dockerignore_content" "$ignored_path"
+  done
+}
+
+test_docker_backend_build_is_reproducible() {
+  local dockerfile_content
+  dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.backend")"
+  assert_contains "$dockerfile_content" "COPY global.json Directory.Build.props ./"
+  assert_contains "$dockerfile_content" "--no-restore"
+}
+
+test_frontend_runtime_installs_certificate_check_dependency() {
+  local dockerfile_content
+  dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.frontend")"
+  assert_contains "$dockerfile_content" "apk add --no-cache openssl"
+}
+
+test_docker_edgegateway_build_is_reproducible() {
+  local dockerfile_content
+  dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.edgegateway")"
+  assert_contains "$dockerfile_content" "COPY global.json Directory.Build.props ./"
+  assert_contains "$dockerfile_content" "--no-restore"
+}
+
+test_production_runtime_smoke_gate_is_wired() {
+  [[ -x "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh" ]] \
+    || fail "Production runtime smoke 脚本必须存在且可执行"
+  [[ -f "$PROJECT_ROOT/docker/docker-compose.smoke.yml" ]] \
+    || fail "Production runtime smoke 必须有独立 Compose 镜像覆盖"
+
+  local smoke_compose
+  smoke_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.smoke.yml")"
+  assert_contains "$smoke_compose" "build: !reset null"
+  for service in postgres redis mosquitto rabbitmq backend frontend; do
+    assert_contains "$smoke_compose" "${service}:"
+    assert_contains "$smoke_compose" "container_name: !reset null"
+  done
+  assert_contains "$smoke_compose" "SMOKE_BACKEND_IMAGE"
+  assert_contains "$smoke_compose" "SMOKE_FRONTEND_IMAGE"
+
+  local smoke_script
+  smoke_script="$(cat "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh")"
+  assert_contains "$smoke_script" "SEED_VIEWER_PASSWORD"
+  assert_contains "$smoke_script" "/api/v1/auth/login"
+  assert_contains "$smoke_script" "/api/v1/auth/me"
+  assert_contains "$smoke_script" "jq -r"
+
+  local smoke_block
+  smoke_block="$(sed -n '/^  production-smoke:/,/^  release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$smoke_block" "needs: [backend, frontend]"
+  assert_contains "$smoke_block" "production-runtime-smoke.sh"
+  assert_contains "$smoke_block" "docker build"
+}
+
+test_rabbitmq_healthcheck_uses_service_account() {
+  local rabbitmq_block
+  rabbitmq_block="$(sed -n '/^  rabbitmq:/,/^  backend:/p' "$PROJECT_ROOT/docker/docker-compose.yml")"
+  assert_contains "$rabbitmq_block" "    user: rabbitmq"
 }
 
 test_deploy_has_fail_closed_preflight() {
@@ -923,7 +1360,12 @@ case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_automapper_license
+    test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
+    test_validate_env_rejects_non_production_environment
+    test_validate_env_rejects_duplicate_keys
+    test_production_env_template_uses_https_default
+    test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
     ;;
@@ -934,7 +1376,10 @@ case "${1:-all}" in
     ;;
   restore)
     test_restore_dry_run_does_not_mutate_services
+    test_restore_dry_run_accepts_custom_backup
     test_restore_confirm_cleans_attachments_without_running_backend
+    test_restore_confirm_uses_custom_format_and_timescale_lifecycle
+    test_restore_failure_exits_timescale_restore_mode
     test_restore_rejects_corrupted_archive
     test_restore_rejects_unsafe_attachment_archive
     test_restore_rejects_corrupted_redis_backup
@@ -952,20 +1397,35 @@ case "${1:-all}" in
     ;;
   ci)
     test_release_waits_for_quality_gates
+    test_ci_build_disables_unreliable_build_servers
+    test_docker_build_context_excludes_local_artifacts_and_secrets
+    test_docker_backend_build_is_reproducible
+    test_frontend_runtime_installs_certificate_check_dependency
+    test_docker_edgegateway_build_is_reproducible
+    test_production_runtime_smoke_gate_is_wired
+    test_rabbitmq_healthcheck_uses_service_account
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
     ;;
   all)
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_automapper_license
+    test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
+    test_validate_env_rejects_non_production_environment
+    test_validate_env_rejects_duplicate_keys
+    test_production_env_template_uses_https_default
+    test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
     test_backup_includes_attachments
     test_backup_rejects_missing_remote_target
     test_backup_rejects_requested_redis_failure
     test_restore_dry_run_does_not_mutate_services
+    test_restore_dry_run_accepts_custom_backup
     test_restore_confirm_cleans_attachments_without_running_backend
+    test_restore_confirm_uses_custom_format_and_timescale_lifecycle
+    test_restore_failure_exits_timescale_restore_mode
     test_restore_rejects_corrupted_archive
     test_restore_rejects_unsafe_attachment_archive
     test_restore_rejects_corrupted_redis_backup
@@ -979,6 +1439,13 @@ case "${1:-all}" in
     test_deploy_without_history_never_rolls_back_to_unknown_tag
     test_deploy_rollback_health_failure_is_critical
     test_release_waits_for_quality_gates
+    test_ci_build_disables_unreliable_build_servers
+    test_docker_build_context_excludes_local_artifacts_and_secrets
+    test_docker_backend_build_is_reproducible
+    test_frontend_runtime_installs_certificate_check_dependency
+    test_docker_edgegateway_build_is_reproducible
+    test_production_runtime_smoke_gate_is_wired
+    test_rabbitmq_healthcheck_uses_service_account
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
     test_bluegreen_router_does_not_cross_color_dependency

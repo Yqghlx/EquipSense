@@ -11,7 +11,7 @@
  * 产出：截图 + 详细日志，跑完分析问题。
  */
 import { test, expect, type Page } from '@playwright/test';
-import { login, BASE_URL } from '../helpers';
+import { login, BASE_URL, getE2EPassword } from '../helpers';
 
 const SHOT_DIR = 'test-results/page-audit';
 
@@ -293,7 +293,7 @@ test.describe('页面实测审计', () => {
     await login(page);
     // 获取第一个设备 ID
     const token = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-      data: { username: 'admin', password: 'Admin@123' },
+      data: { username: 'admin', password: getE2EPassword('admin') },
     }).then(r => r.json()).then(j => j.accessToken);
     const devResp = await page.request.get(`${BASE_URL}/api/v1/devices?pageSize=1`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -336,7 +336,7 @@ test.describe('页面实测审计', () => {
   test('工单详情（真实ID）', async ({ page }) => {
     await login(page);
     const token = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-      data: { username: 'admin', password: 'Admin@123' },
+      data: { username: 'admin', password: getE2EPassword('admin') },
     }).then(r => r.json()).then(j => j.accessToken);
     const woResp = await page.request.get(`${BASE_URL}/api/v1/work-orders?pageSize=1`, {
       headers: { Authorization: `Bearer ${token}` },

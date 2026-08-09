@@ -8,6 +8,7 @@
 // 认证相关
 export {
   BASE_URL,
+  BACKEND_URL,
   login,
   loginAs,
   loginAsFast,
@@ -19,6 +20,8 @@ export {
   verifyAuthCookie,
   getCurrentUserId,
 } from './auth';
+
+export { getE2EPassword, getE2ETenant2Password } from './credentials';
 
 // API 请求封装
 export {

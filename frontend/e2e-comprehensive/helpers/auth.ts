@@ -13,9 +13,22 @@
  * 让测试改用「user 信息 + /auth/me 探活」验证登录态，而不是读 token 字符串。
  */
 import { type Page, type APIResponse } from '@playwright/test';
+import { getE2EPassword } from './credentials';
 
 /** E2E 测试基础 URL — CI 中通过 PLAYWRIGHT_BASE_URL 环境变量覆盖 */
 export const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'https://localhost:8443';
+
+/**
+ * 后端直连地址。
+ *
+ * 本地开发时 BASE_URL 指向 Vite（5173），/health 和 /swagger 不会被 Vite 代理；
+ * 这两个探针必须直连 ASP.NET Core（8080），否则静态 index.html 会伪装成健康响应。
+ * 生产 Docker/Nginx 环境默认同源，仍使用 BASE_URL。
+ */
+export const BACKEND_URL = process.env.PLAYWRIGHT_API_BASE_URL
+  || (BASE_URL.replace(/\/$/, '').match(/^(https?:\/\/)(localhost|127\.0\.0\.1):5173$/)
+    ? BASE_URL.replace(/:5173\/?$/, ':8080')
+    : BASE_URL);
 
 /**
  * 读取浏览器侧可观察的认证状态
@@ -98,11 +111,11 @@ export async function getCurrentUserId(page: Page): Promise<string> {
 
 /** 角色到登录凭证的映射 */
 const ROLE_CREDENTIALS: Record<string, { username: string; password: string }> = {
-  admin: { username: 'admin', password: 'Admin@123' },
-  lead: { username: 'lead', password: 'Lead@123' },
-  tech: { username: 'tech', password: 'Tech@123' },
-  operator: { username: 'operator', password: 'Operator@123' },
-  viewer: { username: 'viewer', password: 'Viewer@123' },
+  admin: { username: 'admin', password: getE2EPassword('admin') },
+  lead: { username: 'lead', password: getE2EPassword('lead') },
+  tech: { username: 'tech', password: getE2EPassword('tech') },
+  operator: { username: 'operator', password: getE2EPassword('operator') },
+  viewer: { username: 'viewer', password: getE2EPassword('viewer') },
 };
 
 /**

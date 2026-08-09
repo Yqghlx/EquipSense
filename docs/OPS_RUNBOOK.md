@@ -225,11 +225,13 @@ cd /path/to/EquipSense
 ls -lht docker/backups
 ```
 
-`backup.sh` 会逐个执行 gzip/tar 完整性校验；生产环境默认必须同时生成
-`*.sql.gz` 和 `attachments_*.tar.gz`。显式启用 `BACKUP_REDIS=true` 后，Redis
+`backup.sh` 会逐个执行 PostgreSQL custom/tar 完整性校验；生产环境默认必须同时生成
+`*.dump` 和 `attachments_*.tar.gz`。历史 `*.sql.gz` 仍可用于兼容恢复。显式启用 `BACKUP_REDIS=true` 后，Redis
 快照或复制失败会使脚本返回非零；启用 `S3_SYNC=true` 后，异地目标缺失、未安装
 `aws-cli` 或同步失败也会返回非零。备份文件和目录应保持 600/700 权限，并在
 密钥管理系统之外单独保护 `TOTP_ENCRYPTION_KEY`。
+`.dump` 使用容器内 `pg_restore --list` 校验；恢复脚本会先执行 TimescaleDB
+`pre_restore`，恢复后执行 `post_restore` 和 `ANALYZE`，恢复失败时也会尝试退出 restoring 模式。
 
 ### 4.2 恢复流程
 
@@ -239,7 +241,7 @@ ls -lht docker/backups
 
 ```bash
 # 1. 明确选择同一时间点的备份，不要把数据库和附件混用不同批次
-DB_BACKUP="docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz"
+DB_BACKUP="docker/backups/equipai_YYYYMMDD_HHMMSS.dump"
 ATTACHMENTS_BACKUP="docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz"
 REDIS_BACKUP="docker/backups/redis_YYYYMMDD_HHMMSS.rdb"  # 没有则留空
 RESTORE_ARGS=(
@@ -265,7 +267,7 @@ fi
   --env-file docker/.env \
   --compose-file docker/docker-compose.yml \
   --compose-file docker/docker-compose.prod.yml \
-  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz \
+  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.dump \
   --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
   --confirm
 ```

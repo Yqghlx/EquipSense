@@ -58,7 +58,7 @@ nano .env    # 填写所有必填凭据
 cd ..
 ```
 
-`setup.sh` 会在生成任何证书或认证文件前，一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。
+`setup.sh` 会在生成任何证书或认证文件前，一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。部署脚本额外使用 `--check-runtime-files` 校验证书是非空、可解析、至少还有 30 天有效期，且证书与私钥匹配、MQTT 服务端证书通过配置的 CA 链；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
 
 > 注意：Docker Compose 默认只从当前工作目录加载 `.env`。本项目配置文件位于 `docker/.env`，因此从仓库根目录执行 Compose 命令时必须带 `--env-file docker/.env`；本手册的生产命令已统一显式指定该参数。
 
@@ -101,7 +101,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
 ```
 
-首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。
+首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。正式部署前必须使用 `bash docker/validate-env.sh docker/.env --check-runtime-files`，不能只检查文件路径是否存在。镜像构建使用仓库根目录 `.dockerignore` 排除 `node_modules`、编译产物、测试报告、备份、证书和 `.env`，不要用 `-f` 指向其他上下文，否则可能导致构建缓慢或把敏感文件发送给 Docker daemon。
 
 ### 4. 验证部署
 
@@ -167,7 +167,7 @@ curl http://localhost:8080/api/v1/system/info
 
 工单附件写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机或 Kubernetes 部署时应改用 S3/MinIO 等共享对象存储，并将数据库备份与附件卷分别纳入备份策略。
 
-管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符且不得包含占位值；所有种子用户首次登录后必须修改密码。
+管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符、彼此独立且不得包含占位值；所有种子用户首次登录后必须修改密码。数据库、Redis、RabbitMQ、MQTT、Seq、Grafana 和五个种子账户也必须分别使用不同的随机凭据，不能为了方便复制同一个密码；直接通过编排平台注入环境变量时，应用启动校验仍会拒绝种子账户密码复用。
 
 `TOTP_ENCRYPTION_KEY` 用于保护数据库中的 MFA 密钥，应用启动时会校验它必须解码为 32 字节；该密钥必须与数据库备份分开保存并纳入密钥管理系统的备份策略。密钥丢失后，历史 MFA 密钥无法恢复；轮换前必须先制定批量重新加密和回滚方案。
 
@@ -180,6 +180,8 @@ curl http://localhost:8080/api/v1/system/info
 ### RabbitMQ 既有部署升级
 
 生产 Compose 默认使用 RabbitMQ，且 `RABBITMQ_IMAGE` 必须显式设置为带 digest 的镜像引用。已有 3.13 数据卷不得直接挂载到 4.3；有保留消息需求时按 `3.13 -> 4.2 -> 4.3` 升级，每一步先备份并启用稳定 feature flags。切换后验证 `equipai-v2-at-least-once-dlx` policy，再启动后端。完整迁移、排空和回滚步骤见 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md)。
+
+生产 Compose 明确让 RabbitMQ 以 `rabbitmq` 服务账户运行。由于服务同时启用 `cap_drop: ALL`，若恢复为 root，健康检查将无法读取 Erlang cookie 并误报 broker 不健康；升级 Compose 时必须保留该 `user` 配置。
 
 生产 Compose 默认将 PostgreSQL、Redis、RabbitMQ、后端 API 和可观测性面板绑定到 `127.0.0.1`，
 避免数据库、管理端口和日志面板直接暴露到公网；前端、MQTT 和蓝绿 router 默认绑定 `0.0.0.0`。
@@ -198,6 +200,12 @@ GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。�
 `bash ./validate-env.sh .env --check-runtime-files` 和 Compose 渲染门禁；只有生产凭据、
 镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重建容器。校验或
 镜像拉取失败发生在运行态变更前，不触发回滚。
+
+PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
+backend/frontend 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
+健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理；完整业务 E2E 仍在
+Development 环境执行。Smoke Compose 会清除固定容器名并使用独立 project，可与本机
+已有基础设施并行运行。
 
 首次重建 backend/frontend 后的任何失败都会进入统一回滚：脚本使用
 `.last-deployed-tag` 对应的本机旧镜像（`--pull never`）恢复两个无状态服务，再次验证
@@ -278,7 +286,7 @@ cd docker
 cd ..
 ```
 
-脚本会生成以下文件并逐个校验：`*.sql.gz`（数据库）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。显式启用 `BACKUP_REDIS=true` 后，如果 Redis 快照或复制失败，脚本也会以非零状态结束；开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
+脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。显式启用 `BACKUP_REDIS=true` 后，如果 Redis 快照或复制失败，脚本也会以非零状态结束；开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
 
 ### PostgreSQL 与附件恢复
 
@@ -293,7 +301,7 @@ cd ..
   --env-file docker/.env \
   --compose-file docker/docker-compose.yml \
   --compose-file docker/docker-compose.prod.yml \
-  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz \
+  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.dump \
   --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz
 
 # 确认后执行数据库、附件恢复及健康检查
@@ -301,7 +309,7 @@ cd ..
   --env-file docker/.env \
   --compose-file docker/docker-compose.yml \
   --compose-file docker/docker-compose.prod.yml \
-  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.sql.gz \
+  --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.dump \
   --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
   --confirm
 ```

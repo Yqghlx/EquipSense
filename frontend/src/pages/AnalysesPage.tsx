@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -114,9 +114,8 @@ export default function AnalysesPage() {
               </TableRow>
             ) : (
               data?.items.map((analysis) => (
-                <>
+                <Fragment key={analysis.id}>
                   <TableRow
-                    key={analysis.id}
                     className="cursor-pointer"
                     onClick={() => setExpandedId(expandedId === analysis.id ? null : analysis.id)}
                   >
@@ -140,7 +139,7 @@ export default function AnalysesPage() {
                       </TableCell>
                     </TableRow>
                   )}
-                </>
+                </Fragment>
               ))
             )}
           </TableBody>

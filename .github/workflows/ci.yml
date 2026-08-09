@@ -90,7 +90,7 @@ jobs:
         run: dotnet restore EquipAI.sln
 
       - name: 构建后端
-        run: dotnet build EquipAI.sln --configuration Release --no-restore
+        run: dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers
 
       - name: 安装 ReportGenerator（合并覆盖率报告）
         run: dotnet tool install -g dotnet-reportgenerator-globaltool --version 5.5.11
@@ -310,6 +310,35 @@ jobs:
           severity: HIGH,CRITICAL
 
   # ============================================================================
+  # Production 容器运行时 smoke（PR、main 和版本 tag 均执行）
+  # 使用当前提交实际构建的镜像 + Production 配置，验证迁移、健康探针、TLS 和 Nginx 代理。
+  # 完整业务 E2E 仍由下方 e2e job 在 Development 环境覆盖。
+  # ============================================================================
+  production-smoke:
+    name: Production 容器运行时 Smoke
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.ref == 'refs/heads/main' && github.event_name == 'push') || startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建 smoke 后端镜像
+        run: docker build --file docker/Dockerfile.backend --tag equipsense/backend:ci-${GITHUB_SHA} .
+
+      - name: 构建 smoke 前端镜像
+        run: docker build --file docker/Dockerfile.frontend --tag equipsense/frontend:ci-${GITHUB_SHA} .
+
+      - name: 运行 Production 容器 smoke
+        env:
+          SMOKE_BACKEND_IMAGE: equipsense/backend:ci-${{ github.sha }}
+          SMOKE_FRONTEND_IMAGE: equipsense/frontend:ci-${{ github.sha }}
+          # 有正式测试许可证时注入；未注入时仅验证配置路径和容器启动契约，不代表许可证有效性。
+          SMOKE_AUTOMAPPER_LICENSE_KEY: ${{ secrets.AUTOMAPPER_LICENSE_KEY }}
+        run: bash tests/scripts/production-runtime-smoke.sh
+
+  # ============================================================================
   # 版本发布（仅在打 vX.Y.Z tag 时触发）
   # 测试已在 main 分支跑过，tag 流水线只做镜像发布：打 semver 标签 1.2.3 / 1.2 / 1 + latest
   # 这样可区分版本（不再只有 :latest/:sha），支持回滚到精确版本
@@ -319,7 +348,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     # 即使 tag 推送绕过了 main 分支，也必须先通过完整后端/前端质量门禁。
-    needs: [backend, frontend]
+    needs: [backend, frontend, production-smoke]
     permissions:
       contents: read
       packages: write
@@ -514,7 +543,7 @@ jobs:
       - name: 还原并构建后端
         run: |
           dotnet restore EquipAI.sln
-          dotnet build EquipAI.sln --configuration Release --no-restore
+          dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers
 
       - name: 生成性能测试临时凭据
         run: echo "LOADTEST_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
@@ -623,7 +652,7 @@ jobs:
       - name: 还原并构建后端
         run: |
           dotnet restore EquipAI.sln
-          dotnet build EquipAI.sln --configuration Release --no-restore
+          dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers
 
       - name: 安装前端依赖
         working-directory: frontend

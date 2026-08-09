@@ -62,6 +62,18 @@ public class SubscriptionExpiryServiceTests : IAsyncLifetime
             _sp.GetRequiredService<ILogger<SubscriptionExpiryService>>());
 
     [Fact]
+    public void 首次检查应等待应用启动后的稳定窗口()
+    {
+        var service = new InspectableSubscriptionExpiryService(
+            _sp.GetRequiredService<IServiceScopeFactory>(),
+            new AlwaysAcquireLockProvider(),
+            _sp.GetRequiredService<ILogger<SubscriptionExpiryService>>());
+
+        service.StartupDelay.Should().Be(TimeSpan.FromSeconds(30),
+            "数据库迁移和种子初始化完成后再执行到期检查，避免启动期 schema 竞态和数据库压力叠加");
+    }
+
+    [Fact]
     public async Task 到期付费订阅_应降级为可用Trial_配额生效可创建设备()
     {
         var expiredTenantId = Guid.NewGuid();
@@ -157,6 +169,20 @@ public class SubscriptionExpiryServiceTests : IAsyncLifetime
         var subscriptionService = _sp.GetRequiredService<ISubscriptionService>();
         var canCreate = await subscriptionService.CanCreateResourceAsync(trialTenantId, "device");
         canCreate.Should().BeFalse("试用到期 Expired 状态不允许创建资源");
+    }
+
+    /// <summary>仅暴露启动延迟供回归测试校验，不改变生产服务的可见 API。</summary>
+    private sealed class InspectableSubscriptionExpiryService : SubscriptionExpiryService
+    {
+        public InspectableSubscriptionExpiryService(
+            IServiceScopeFactory scopeFactory,
+            IDistributedLockProvider lockProvider,
+            ILogger<SubscriptionExpiryService> logger)
+            : base(scopeFactory, lockProvider, logger)
+        {
+        }
+
+        public TimeSpan StartupDelay => DefaultStartupDelay;
     }
 
     /// <summary>

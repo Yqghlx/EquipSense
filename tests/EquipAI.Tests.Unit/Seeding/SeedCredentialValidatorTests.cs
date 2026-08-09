@@ -50,6 +50,29 @@ public class SeedCredentialValidatorTests
     }
 
     [Fact]
+    public void 生产环境禁止不同种子账户复用同一密码()
+    {
+        var credentials = new Dictionary<string, string?>
+        {
+            ["SEED_ADMIN_PASSWORD"] = "shared-seed-secret",
+            ["SEED_LEAD_PASSWORD"] = "shared-seed-secret",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong"
+        };
+
+        var act = () => SeedCredentialValidator.Validate(
+            isProduction: true,
+            credentials,
+            includeTenant2Account: false);
+
+        var exception = act.Should().Throw<InvalidOperationException>().Which;
+        exception.Message.Should().Contain("SEED_LEAD_PASSWORD");
+        exception.Message.Should().Contain("SEED_ADMIN_PASSWORD");
+        exception.Message.Should().NotContain("shared-seed-secret");
+    }
+
+    [Fact]
     public void 生产环境禁止使用公开的种子默认密码()
     {
         var credentials = new Dictionary<string, string?>

@@ -17,6 +17,7 @@ import {
   gotoDeviceDetail,
   createTestDevice,
   deleteDeviceViaAPI,
+  getE2EPassword,
 } from '../helpers';
 
 test.describe('03-实时遥测数据', () => {
@@ -442,7 +443,7 @@ test.describe('03-实时遥测数据', () => {
     await page1.goto(`${BASE_URL}/login`);
     await page1.waitForLoadState('networkidle');
     await page1.getByPlaceholder(/用户名|username/i).fill('admin');
-    await page1.getByPlaceholder(/密码|password/i).fill('Admin@123');
+    await page1.getByPlaceholder(/密码|password/i).fill(getE2EPassword('admin'));
     await page1.getByRole('button', { name: /登录|login/i }).click();
     await page1.waitForURL(/dashboard/, { timeout: 10000 });
     await gotoDeviceDetail(page1, device1.id as string);
@@ -450,7 +451,7 @@ test.describe('03-实时遥测数据', () => {
     await page2.goto(`${BASE_URL}/login`);
     await page2.waitForLoadState('networkidle');
     await page2.getByPlaceholder(/用户名|username/i).fill('admin');
-    await page2.getByPlaceholder(/密码|password/i).fill('Admin@123');
+    await page2.getByPlaceholder(/密码|password/i).fill(getE2EPassword('admin'));
     await page2.getByRole('button', { name: /登录|login/i }).click();
     await page2.waitForURL(/dashboard/, { timeout: 10000 });
     await gotoDeviceDetail(page2, device2.id as string);

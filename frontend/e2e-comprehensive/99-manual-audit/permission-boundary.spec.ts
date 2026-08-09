@@ -16,7 +16,7 @@
  *   Viewer: 全部只读
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { BASE_URL } from '../helpers';
+import { BASE_URL, getE2EPassword } from '../helpers';
 
 const log: string[] = [];
 function record(role: string, action: string, expected: 'allow' | 'deny', actual: number, detail = '') {
@@ -31,11 +31,11 @@ function record(role: string, action: string, expected: 'allow' | 'deny', actual
 }
 
 const ROLES = [
-  { name: 'admin', username: 'admin', password: 'Admin@123', displayName: 'SystemAdmin' },
-  { name: 'lead', username: 'lead', password: 'Lead@123', displayName: 'MaintenanceLead' },
-  { name: 'tech', username: 'tech', password: 'Tech@123', displayName: 'Technician' },
-  { name: 'operator', username: 'operator', password: 'Operator@123', displayName: 'Operator' },
-  { name: 'viewer', username: 'viewer', password: 'Viewer@123', displayName: 'Viewer' },
+  { name: 'admin', username: 'admin', password: getE2EPassword('admin'), displayName: 'SystemAdmin' },
+  { name: 'lead', username: 'lead', password: getE2EPassword('lead'), displayName: 'MaintenanceLead' },
+  { name: 'tech', username: 'tech', password: getE2EPassword('tech'), displayName: 'Technician' },
+  { name: 'operator', username: 'operator', password: getE2EPassword('operator'), displayName: 'Operator' },
+  { name: 'viewer', username: 'viewer', password: getE2EPassword('viewer'), displayName: 'Viewer' },
 ];
 
 async function getToken(request: APIRequestContext, username: string, password: string): Promise<string | null> {

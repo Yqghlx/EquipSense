@@ -10,7 +10,7 @@
  * - 登出流程与状态清理
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, loginViaUI, captureErrors, getAuthState, verifyAuthCookie } from '../helpers';
+import { BASE_URL, login, loginViaUI, captureErrors, getAuthState, verifyAuthCookie, getE2EPassword } from '../helpers';
 
 test.describe('01-登录功能', () => {
   test('1. 登录页面加载无错误 — 检查 placeholder 和 button 可见', async ({ page }) => {
@@ -82,7 +82,7 @@ test.describe('01-登录功能', () => {
     expect(errors).toEqual([]);
   });
 
-  test('4. 正确登录跳转仪表盘 — admin/Admin@123', async ({ page }) => {
+  test('4. 正确登录跳转仪表盘 — 管理员凭据', async ({ page }) => {
     const errors = captureErrors(page);
 
     // 使用正确的管理员凭证通过 UI 登录（本用例专门验证登录流程，不能用快速路径）
@@ -112,7 +112,7 @@ test.describe('01-登录功能', () => {
 
     // 执行登录操作
     await page.getByPlaceholder(/用户名|username/i).fill('admin');
-    await page.getByPlaceholder(/密码|password/i).fill('Admin@123');
+    await page.getByPlaceholder(/密码|password/i).fill(getE2EPassword('admin'));
     await page.getByRole('button', { name: /登录|login/i }).click();
     await page.waitForURL(/dashboard/, { timeout: 10000 });
     await page.waitForLoadState('networkidle');

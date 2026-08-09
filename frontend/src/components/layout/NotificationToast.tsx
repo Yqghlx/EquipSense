@@ -34,6 +34,7 @@ export function NotificationToast() {
   return (
     <div
       data-testid="notification-toast"
+      data-notification-id={latest.id}
       role="status"
       aria-live="polite"
       aria-atomic="true"
