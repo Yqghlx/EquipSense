@@ -13,11 +13,11 @@ public class SeedCredentialValidatorTests
     {
         var credentials = new Dictionary<string, string?>
         {
-            ["SEED_ADMIN_PASSWORD"] = "admin-secret",
-            ["SEED_LEAD_PASSWORD"] = "lead-secret",
+            ["SEED_ADMIN_PASSWORD"] = "admin-secret-strong",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
             ["SEED_TECH_PASSWORD"] = null,
-            ["SEED_OPERATOR_PASSWORD"] = "operator-secret",
-            ["SEED_VIEWER_PASSWORD"] = "viewer-secret"
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong"
         };
 
         var act = () => SeedCredentialValidator.Validate(
@@ -34,11 +34,11 @@ public class SeedCredentialValidatorTests
     {
         var credentials = new Dictionary<string, string?>
         {
-            ["SEED_ADMIN_PASSWORD"] = "admin-secret",
-            ["SEED_LEAD_PASSWORD"] = "lead-secret",
-            ["SEED_TECH_PASSWORD"] = "tech-secret",
-            ["SEED_OPERATOR_PASSWORD"] = "operator-secret",
-            ["SEED_VIEWER_PASSWORD"] = "viewer-secret"
+            ["SEED_ADMIN_PASSWORD"] = "admin-secret-strong",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong"
         };
 
         var act = () => SeedCredentialValidator.Validate(
@@ -55,10 +55,52 @@ public class SeedCredentialValidatorTests
         var credentials = new Dictionary<string, string?>
         {
             ["SEED_ADMIN_PASSWORD"] = "Admin@123",
-            ["SEED_LEAD_PASSWORD"] = "lead-secret",
-            ["SEED_TECH_PASSWORD"] = "tech-secret",
-            ["SEED_OPERATOR_PASSWORD"] = "operator-secret",
-            ["SEED_VIEWER_PASSWORD"] = "viewer-secret"
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong"
+        };
+
+        var act = () => SeedCredentialValidator.Validate(
+            isProduction: true,
+            credentials,
+            includeTenant2Account: false);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*SEED_ADMIN_PASSWORD*");
+    }
+
+    [Fact]
+    public void 生产环境禁止使用占位凭据()
+    {
+        var credentials = new Dictionary<string, string?>
+        {
+            ["SEED_ADMIN_PASSWORD"] = "PLEASE_CHANGE_ADMIN_PASSWORD",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong"
+        };
+
+        var act = () => SeedCredentialValidator.Validate(
+            isProduction: true,
+            credentials,
+            includeTenant2Account: false);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*SEED_ADMIN_PASSWORD*");
+    }
+
+    [Fact]
+    public void 生产环境禁止使用过短的种子密码()
+    {
+        var credentials = new Dictionary<string, string?>
+        {
+            ["SEED_ADMIN_PASSWORD"] = "short-password",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong"
         };
 
         var act = () => SeedCredentialValidator.Validate(
@@ -75,11 +117,11 @@ public class SeedCredentialValidatorTests
     {
         var credentials = new Dictionary<string, string?>
         {
-            ["SEED_ADMIN_PASSWORD"] = "admin-secret",
-            ["SEED_LEAD_PASSWORD"] = "lead-secret",
-            ["SEED_TECH_PASSWORD"] = "tech-secret",
-            ["SEED_OPERATOR_PASSWORD"] = "operator-secret",
-            ["SEED_VIEWER_PASSWORD"] = "viewer-secret",
+            ["SEED_ADMIN_PASSWORD"] = "admin-secret-strong",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong",
             ["SEED_TENANT2_PASSWORD"] = null
         };
 

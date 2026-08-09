@@ -69,7 +69,7 @@ test_validate_env_rejects_weak_production_config() {
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=short' \
-    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_ADMIN_PASSWORD=short' \
     'SEED_LEAD_PASSWORD=lead-password-long' \
     'SEED_TECH_PASSWORD=tech-password-long' \
     'SEED_OPERATOR_PASSWORD=operator-password-long' \
@@ -90,9 +90,71 @@ test_validate_env_rejects_weak_production_config() {
   assert_contains "$output" "PG_PASSWORD 长度不足"
   assert_contains "$output" "REDIS_PASSWORD 长度不足"
   assert_contains "$output" "MQTT_PASSWORD 长度不足"
+  assert_contains "$output" "SEED_ADMIN_PASSWORD 长度不足"
   assert_contains "$output" "FRONTEND_URL 必须使用 HTTPS"
   assert_contains "$output" "SEQ_ADMIN_PASSWORD 长度不足"
   assert_contains "$output" "GRAFANA_PASSWORD 长度不足"
+}
+
+test_validate_runtime_files_gate() {
+  local case_dir="$TEST_ROOT/runtime-files"
+  local env_file="$case_dir/.env"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' > "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "缺少生产 bind mount 文件时运行时门禁不应通过"
+  assert_contains "$output" "运行时文件缺失"
+
+  mkdir -p \
+    "$case_dir/ssl" \
+    "$case_dir/mqtt-certs" \
+    "$case_dir/mosquitto_passwd" \
+    "$case_dir/rabbitmq" \
+    "$case_dir/prometheus" \
+    "$case_dir/grafana/provisioning/datasources" \
+    "$case_dir/grafana/provisioning/dashboards"
+  touch \
+    "$case_dir/ssl/cert.pem" \
+    "$case_dir/ssl/key.pem" \
+    "$case_dir/mqtt-certs/ca.crt" \
+    "$case_dir/mqtt-certs/server.crt" \
+    "$case_dir/mqtt-certs/server.key" \
+    "$case_dir/mosquitto_passwd/passwd" \
+    "$case_dir/mosquitto.prod.conf" \
+    "$case_dir/rabbitmq/rabbitmq.conf" \
+    "$case_dir/rabbitmq/definitions.json" \
+    "$case_dir/rabbitmq/start.sh" \
+    "$case_dir/prometheus.yml" \
+    "$case_dir/prometheus/rules.yml" \
+    "$case_dir/alertmanager.yml" \
+    "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
+    "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
+  bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files >/dev/null
 }
 
 test_setup_rejects_new_placeholder_env() {
@@ -175,6 +237,18 @@ test_backup_includes_attachments() {
   [[ -n "$attachment_file" ]] || fail "应生成工单附件备份"
   gzip -t "$sql_file"
   tar -tzf "$attachment_file" | grep -q 'report.txt' || fail "附件归档中缺少测试文件"
+
+  local backup_mode
+  local file_mode
+  if stat -c '%a' "$backup_dir" >/dev/null 2>&1; then
+    backup_mode="$(stat -c '%a' "$backup_dir")"
+    file_mode="$(stat -c '%a' "$sql_file")"
+  else
+    backup_mode="$(stat -f '%Lp' "$backup_dir")"
+    file_mode="$(stat -f '%Lp' "$sql_file")"
+  fi
+  [[ "$backup_mode" = "700" ]] || fail "备份目录应为 700 权限，实际为 $backup_mode"
+  [[ "$file_mode" = "600" ]] || fail "数据库备份文件应为 600 权限，实际为 $file_mode"
 }
 
 test_backup_rejects_missing_remote_target() {
@@ -213,6 +287,45 @@ test_backup_rejects_missing_remote_target() {
   assert_contains "$output" "S3_BUCKET"
 }
 
+test_backup_rejects_requested_redis_failure() {
+  local case_dir="$TEST_ROOT/backup-redis"
+  local backup_dir="$case_dir/backups"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'PG_CONTAINER=fake-postgres' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'BACKUP_REDIS=true' \
+    'BACKUP_ATTACHMENTS=false' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  # PostgreSQL 成功、Redis BGSAVE 失败；显式启用 Redis 备份时整体结果必须失败。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "CREATE TABLE backup_test;\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"redis-cli"* ]]; then exit 1; fi' \
+    '    exit 1 ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" bash "$case_dir/backup.sh" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "显式启用 Redis 备份但快照失败时不应返回成功"
+  assert_contains "$output" "Redis BGSAVE 失败"
+}
+
 test_release_waits_for_quality_gates() {
   local release_block
   release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
@@ -229,14 +342,14 @@ test_deploy_has_fail_closed_preflight() {
   local deploy_block
   deploy_block="$(sed -n '/^  deploy:/,$p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$deploy_block" 'COMPOSE="docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml"'
-  assert_contains "$deploy_block" 'bash ./validate-env.sh .env'
+  assert_contains "$deploy_block" 'bash ./validate-env.sh .env --check-runtime-files'
   assert_contains "$deploy_block" '$COMPOSE config --quiet'
   assert_contains "$deploy_block" '${GHCR_PULL_TOKEN:-}'
   assert_contains "$deploy_block" '${GHCR_PULL_USER:-}'
 
   local preflight_line
   local login_line
-  preflight_line="$(printf '%s\n' "$deploy_block" | grep -n 'bash ./validate-env.sh .env' | cut -d: -f1 | head -n1)"
+  preflight_line="$(printf '%s\n' "$deploy_block" | grep -n 'bash ./validate-env.sh .env --check-runtime-files' | cut -d: -f1 | head -n1)"
   login_line="$(printf '%s\n' "$deploy_block" | grep -n 'docker login ghcr.io' | cut -d: -f1 | head -n1)"
   [[ -n "$preflight_line" && -n "$login_line" && "$preflight_line" -lt "$login_line" ]] \
     || fail "部署前置校验必须发生在 GHCR 登录和拉取镜像之前"
@@ -251,7 +364,7 @@ test_bluegreen_router_does_not_cross_color_dependency() {
 test_bluegreen_has_fail_closed_preflight() {
   local deploy_script
   deploy_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
-  assert_contains "$deploy_script" 'bash "$COMPOSE_DIR/validate-env.sh" "$COMPOSE_DIR/.env"'
+  assert_contains "$deploy_script" 'bash "$COMPOSE_DIR/validate-env.sh" "$COMPOSE_DIR/.env" --check-runtime-files'
   assert_contains "$deploy_script" '"${COMPOSE[@]}" config --quiet'
 
   local preflight_line
@@ -303,31 +416,47 @@ test_production_internal_ports_bind_loopback_by_default() {
   assert_contains "$compose_content" '${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000'
 }
 
+test_development_internal_ports_bind_loopback_by_default() {
+  local compose_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.dev.yml")"
+  assert_contains "$compose_content" '${DEV_BIND_ADDRESS:-127.0.0.1}:5432:5432'
+  assert_contains "$compose_content" '${DEV_BIND_ADDRESS:-127.0.0.1}:6379:6379'
+  assert_contains "$compose_content" '${DEV_BIND_ADDRESS:-127.0.0.1}:1883:1883'
+  assert_contains "$compose_content" '${DEV_BIND_ADDRESS:-127.0.0.1}:5672:5672'
+  assert_contains "$compose_content" '${DEV_BIND_ADDRESS:-127.0.0.1}:15672:15672'
+}
+
 case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_weak_production_config
+    test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
     ;;
   backup)
     test_backup_includes_attachments
     test_backup_rejects_missing_remote_target
+    test_backup_rejects_requested_redis_failure
     ;;
   ci)
     test_release_waits_for_quality_gates
+    test_deploy_has_fail_closed_preflight
     ;;
   all)
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_weak_production_config
+    test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
     test_backup_includes_attachments
     test_backup_rejects_missing_remote_target
+    test_backup_rejects_requested_redis_failure
     test_release_waits_for_quality_gates
     test_deploy_has_fail_closed_preflight
     test_bluegreen_router_does_not_cross_color_dependency
     test_bluegreen_has_fail_closed_preflight
     test_bluegreen_colors_do_not_inherit_public_entry_ports
     test_production_internal_ports_bind_loopback_by_default
+    test_development_internal_ports_bind_loopback_by_default
     ;;
   *)
     fail "用法：$0 [setup|backup|ci|all]"

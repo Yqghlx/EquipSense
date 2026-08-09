@@ -136,7 +136,7 @@ script: |
   set -euo pipefail
   cd "$DEPLOY_PATH"
   # DEPLOY_PATH 必须包含 .env、validate-env.sh 和 Compose 文件；先执行配置门禁
-  bash ./validate-env.sh .env
+  bash ./validate-env.sh .env --check-runtime-files
   docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml config --quiet
   # 登录 GHCR（凭证从服务器环境变量）
   echo "${GHCR_PULL_TOKEN:?未配置 GHCR_PULL_TOKEN}" | docker login ghcr.io -u "${GHCR_PULL_USER:?未配置 GHCR_PULL_USER}" --password-stdin

@@ -142,7 +142,7 @@ curl http://localhost:8080/api/v1/system/info
 | `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（至少 32 位纯 ASCII） | - | 使用边缘网关时必填 |
 | `FILE_STORAGE_BASE_PATH` | 工单附件目录，必须与 `attachments_data` 卷挂载点一致 | `/app/uploads` | 否 |
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
-| `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码 | - | 生产环境必填 |
+| `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码（每项至少 16 个字符，不得使用占位值或公开默认值） | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
 | `LLM_MODEL` | LLM 模型 | `qwen-plus` | 否 |
@@ -163,7 +163,7 @@ curl http://localhost:8080/api/v1/system/info
 
 工单附件写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机或 Kubernetes 部署时应改用 S3/MinIO 等共享对象存储，并将数据库备份与附件卷分别纳入备份策略。
 
-管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。所有种子用户首次登录后必须修改密码。
+管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符且不得包含占位值；所有种子用户首次登录后必须修改密码。
 
 > `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。
 
@@ -183,7 +183,7 @@ GitHub Actions 的 `deploy` job 要求 `DEPLOY_PATH` 指向生产 Docker 文件�
 - `validate-env.sh`
 - `docker-compose.yml` 与 `docker-compose.prod.yml`
 
-部署会先执行 `bash ./validate-env.sh .env` 和 `docker compose --env-file .env ... config --quiet`，
+部署会先执行 `bash ./validate-env.sh .env --check-runtime-files` 和 `docker compose --env-file .env ... config --quiet`，
 只有生产凭据、镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重启容器。校验失败会在任何容器变更前退出。
 如需启用零停机蓝绿部署，再按 [`BLUE_GREEN_DEPLOY.md`](BLUE_GREEN_DEPLOY.md) 准备 `docker-compose.bluegreen.yml`、router 配置和部署脚本。
 
@@ -252,7 +252,7 @@ cd docker
 cd ..
 ```
 
-脚本会生成以下文件并逐个校验：`*.sql.gz`（数据库）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把没有异地副本的备份误报为成功。
+脚本会生成以下文件并逐个校验：`*.sql.gz`（数据库）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。显式启用 `BACKUP_REDIS=true` 后，如果 Redis 快照或复制失败，脚本也会以非零状态结束；开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
 
 ### PostgreSQL 与附件恢复
 
@@ -268,7 +268,7 @@ test -n "$LATEST_DB_BACKUP" && test -n "$LATEST_ATTACHMENTS_BACKUP"
 # 3. 恢复 PostgreSQL
 gunzip -c "$LATEST_DB_BACKUP" | \
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
 # 4. 校验并解压附件备份到临时目录，再复制回持久卷
 ATTACHMENTS_TMP="$(mktemp -d)"

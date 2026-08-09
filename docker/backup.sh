@@ -20,6 +20,8 @@
 #   BACKUP_WEBHOOK  备份完成通知 webhook（可选）
 
 set -euo pipefail
+# 数据库和附件备份包含敏感业务数据；不要依赖调用方的 umask，默认只允许当前用户读取。
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -56,6 +58,7 @@ if [ -z "${PG_PASSWORD:-}" ]; then
 fi
 
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_SUCCESS=true
 declare -a BACKUP_FILES
@@ -88,6 +91,7 @@ else
 
     # 完整性校验（gzip -t 测试压缩文件是否损坏）
     if gzip -t "$PG_FILE" 2>/dev/null; then
+      chmod 600 "$PG_FILE"
       SIZE=$(du -h "$PG_FILE" | cut -f1)
       echo "  ✓ PostgreSQL 备份成功: $PG_FILE ($SIZE)"
       BACKUP_FILES+=("$PG_FILE")
@@ -118,6 +122,7 @@ if [ "$BACKUP_ATTACHMENTS" = "true" ]; then
     if docker cp "$ATTACHMENTS_CONTAINER:$ATTACHMENTS_PATH/." "$ATTACHMENTS_TEMP_DIR/"; then
       if tar -C "$ATTACHMENTS_TEMP_DIR" -czf "$ATTACHMENTS_FILE" . \
         && tar -tzf "$ATTACHMENTS_FILE" >/dev/null 2>&1; then
+        chmod 600 "$ATTACHMENTS_FILE"
         SIZE=$(du -h "$ATTACHMENTS_FILE" | cut -f1)
         echo "  ✓ 工单附件备份成功: $ATTACHMENTS_FILE ($SIZE)"
         BACKUP_FILES+=("$ATTACHMENTS_FILE")
@@ -147,14 +152,17 @@ if [ "$BACKUP_REDIS" = "true" ] && [ -n "${REDIS_PASSWORD:-}" ]; then
   if docker exec equipai-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE >/dev/null 2>&1; then
     sleep 2  # 等待 BGSAVE 完成
     if docker cp equipai-redis:/data/dump.rdb "$REDIS_FILE" 2>/dev/null; then
+      chmod 600 "$REDIS_FILE"
       SIZE=$(du -h "$REDIS_FILE" | cut -f1)
       echo "  ✓ Redis 备份成功: $REDIS_FILE ($SIZE)"
       BACKUP_FILES+=("$REDIS_FILE")
     else
-      echo "  ✗ Redis RDB 复制失败（容器未运行？）"
+      echo "  ✗ Redis RDB 复制失败（容器未运行？）" >&2
+      BACKUP_SUCCESS=false
     fi
   else
-    echo "  ⚠ Redis BGSAVE 失败，跳过（非关键数据）"
+    echo "  ✗ Redis BGSAVE 失败，无法完成已启用的 Redis 备份" >&2
+    BACKUP_SUCCESS=false
   fi
 else
   echo "[3/4] Redis 备份已跳过（未配置 REDIS_PASSWORD 或 BACKUP_REDIS=false）"

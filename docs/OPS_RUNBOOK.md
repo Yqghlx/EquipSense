@@ -235,7 +235,7 @@ test -n "$LATEST_DB_BACKUP" && test -n "$LATEST_ATTACHMENTS_BACKUP"
 
 # 3. 恢复 PostgreSQL
 gunzip -c "$LATEST_DB_BACKUP" | docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+  sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
 # 4. 恢复工单附件（先校验归档，再写回持久卷）
 ATTACHMENTS_TMP="$(mktemp -d)"

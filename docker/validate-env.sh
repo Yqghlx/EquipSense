@@ -6,6 +6,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${1:-$SCRIPT_DIR/.env}"
+CHECK_RUNTIME_FILES=false
+if [ "${2:-}" = "--check-runtime-files" ]; then
+  CHECK_RUNTIME_FILES=true
+fi
 ERRORS=0
 
 error() {
@@ -100,6 +104,14 @@ else
     fi
   done
 
+  # 种子账户会直接获得登录能力，不能只校验非空；应用启动时也会执行同样的门禁。
+  for key in SEED_ADMIN_PASSWORD SEED_LEAD_PASSWORD SEED_TECH_PASSWORD SEED_OPERATOR_PASSWORD SEED_VIEWER_PASSWORD; do
+    value="$(read_env_value "$key")"
+    if [ -n "$value" ] && [[ "$value" != *"请修改"* ]] && [[ "$value" != *"PLEASE_CHANGE"* ]] && [[ "$value" != *"CHANGE_ME"* ]] && [[ "$value" != *"change-me"* ]] && [ "${#value}" -lt 16 ]; then
+      error "$key 长度不足 16 个字符"
+    fi
+  done
+
   frontend_url="$(read_env_value FRONTEND_URL)"
   if [ -n "$frontend_url" ] && [[ "$frontend_url" != https://* ]]; then
     error "FRONTEND_URL 必须使用 HTTPS"
@@ -125,7 +137,36 @@ else
     tenant2_password="$(read_env_value SEED_TENANT2_PASSWORD)"
     if [ -z "$tenant2_password" ] || [[ "$tenant2_password" == *"请修改"* ]] || [ "$tenant2_password" = "Tenant2@123" ]; then
       error "SEED_TENANT2_ACCOUNT 已开启，但 SEED_TENANT2_PASSWORD 缺失或仍为公开默认值"
+    elif [[ "$tenant2_password" == *"PLEASE_CHANGE"* ]] || [[ "$tenant2_password" == *"CHANGE_ME"* ]] || [[ "$tenant2_password" == *"change-me"* ]] || [ "${#tenant2_password}" -lt 16 ]; then
+      error "SEED_TENANT2_PASSWORD 不得使用占位值且长度至少 16 个字符"
     fi
+  fi
+
+  # Compose 的 bind mount 文件缺失会把错误推迟到容器启动阶段；部署门禁可显式
+  # 开启此检查，在任何镜像拉取或容器重启前确认生产运行时文件已经就位。
+  if [ "$CHECK_RUNTIME_FILES" = true ]; then
+    RUNTIME_FILES=(
+      "ssl/cert.pem"
+      "ssl/key.pem"
+      "mqtt-certs/ca.crt"
+      "mqtt-certs/server.crt"
+      "mqtt-certs/server.key"
+      "mosquitto_passwd/passwd"
+      "mosquitto.prod.conf"
+      "rabbitmq/rabbitmq.conf"
+      "rabbitmq/definitions.json"
+      "rabbitmq/start.sh"
+      "prometheus.yml"
+      "prometheus/rules.yml"
+      "alertmanager.yml"
+      "grafana/provisioning/datasources/prometheus.yml"
+      "grafana/provisioning/dashboards/dashboard.yml"
+    )
+    for relative_path in "${RUNTIME_FILES[@]}"; do
+      if [ ! -f "$SCRIPT_DIR/$relative_path" ]; then
+        error "运行时文件缺失：$relative_path"
+      fi
+    done
   fi
 fi
 

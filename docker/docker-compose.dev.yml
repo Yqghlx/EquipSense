@@ -1,11 +1,12 @@
 # docker/docker-compose.dev.yml
 # 开发环境依赖服务：PostgreSQL + TimescaleDB, Redis, Mosquitto
+# 宿主端口默认仅监听本机；局域网调试时显式设置 DEV_BIND_ADDRESS=0.0.0.0。
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
     container_name: equipai-postgres
     ports:
-      - "5432:5432"
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:5432:5432"
     environment:
       POSTGRES_DB: equipai_dev
       POSTGRES_USER: postgres
@@ -23,7 +24,7 @@ services:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: equipai-redis
     ports:
-      - "6379:6379"
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:6379:6379"
     command: >
       redis-server
       --maxmemory 256mb
@@ -38,7 +39,7 @@ services:
     image: eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1
     container_name: equipai-mosquitto
     ports:
-      - "1883:1883"
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:1883:1883"
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
 
@@ -47,8 +48,8 @@ services:
     image: "${RABBITMQ_IMAGE:-rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94}"
     container_name: equipai-rabbitmq
     ports:
-      - "5672:5672"    # AMQP
-      - "15672:15672"  # Management UI
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:5672:5672"    # AMQP
+      - "${DEV_BIND_ADDRESS:-127.0.0.1}:15672:15672"  # Management UI
     environment:
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_TEST_USERNAME:-equipai_test}"
       RABBITMQ_DEFAULT_PASS: "${RABBITMQ_TEST_PASSWORD:-equipai_test_password}"

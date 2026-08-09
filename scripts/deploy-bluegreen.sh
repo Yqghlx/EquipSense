@@ -49,20 +49,28 @@ fi
 echo "=== 蓝绿部署: $TAG ==="
 echo "当前活跃: $ACTIVE_COLOR → 部署目标: $TARGET_COLOR (backend :$TARGET_BACKEND_PORT)"
 
-# ── 2. 登录 GHCR 拉取私有镜像（凭证从服务器环境变量，不通过 CI 传输） ──
+# ── 2. 部署前置门禁：先校验凭据和 Compose 渲染，再接触远程镜像 ──
+if [ ! -f "$COMPOSE_DIR/validate-env.sh" ]; then
+  echo "❌ 未找到生产环境校验器: $COMPOSE_DIR/validate-env.sh" >&2
+  exit 1
+fi
+bash "$COMPOSE_DIR/validate-env.sh" "$COMPOSE_DIR/.env" --check-runtime-files
+export TAG
+"${COMPOSE[@]}" config --quiet
+
+# ── 3. 登录 GHCR 拉取私有镜像（凭证从服务器环境变量，不通过 CI 传输） ──
 if [ -z "${GHCR_PULL_TOKEN:-}" ] || [ -z "${GHCR_PULL_USER:-}" ]; then
   echo "❌ 服务器未配置 GHCR_PULL_USER/GHCR_PULL_TOKEN 环境变量" >&2
   exit 1
 fi
 echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USER" --password-stdin
 
-# ── 3. 在目标色上拉取新镜像 + 启动（旧色仍服务流量，零停机） ──
-export TAG
+# ── 4. 在目标色上拉取新镜像 + 启动（旧色仍服务流量，零停机） ──
 echo "拉取 $TAG 镜像到 $TARGET_COLOR..."
 "${COMPOSE[@]}" pull backend-$TARGET_COLOR frontend-$TARGET_COLOR
 "${COMPOSE[@]}" --profile "$TARGET_COLOR" up -d --no-deps backend-$TARGET_COLOR frontend-$TARGET_COLOR
 
-# ── 4. 健康门禁：轮询目标色后端 /health（旧色仍在线，不影响用户） ──
+# ── 5. 健康门禁：轮询目标色后端 /health（旧色仍在线，不影响用户） ──
 echo "等待 $TARGET_COLOR 后端健康检查..."
 sleep 10  # 给容器初始化时间
 HEALTHY=false
@@ -84,7 +92,7 @@ if [ "$HEALTHY" != "true" ]; then
   exit 1
 fi
 
-# ── 5. 原子切换：重写 Nginx upstream → reload（<1s 中断） ──
+# ── 6. 原子切换：重写 Nginx upstream → reload（<1s 中断） ──
 echo "切换 Nginx upstream 到 $TARGET_COLOR..."
 cat > upstream-active.conf <<EOF
 # 由 deploy-bluegreen.sh 自动生成 — $(date -u +%FT%TZ)
@@ -104,12 +112,12 @@ EOF
   exit 1
 }
 
-# ── 6. 优雅停止旧色（drain 30s 让现有连接完成） ──
+# ── 7. 优雅停止旧色（drain 30s 让现有连接完成） ──
 echo "新色 $TARGET_COLOR 已接管流量。优雅停止旧色 $ACTIVE_COLOR（drain 30s）..."
 sleep 30
 "${COMPOSE[@]}" --profile "$ACTIVE_COLOR" stop backend-$ACTIVE_COLOR frontend-$ACTIVE_COLOR || true
 
-# ── 7. 记录新活跃色 + 版本 ──
+# ── 8. 记录新活跃色 + 版本 ──
 echo "$TARGET_COLOR" > .active-color
 echo "$TAG" > .last-deployed-tag
 echo "=== 蓝绿部署成功: $TAG (active=$TARGET_COLOR) ==="
