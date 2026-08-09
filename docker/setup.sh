@@ -108,73 +108,11 @@ read_env_value() {
 
 if [ -f "${ENV_FILE}" ]; then
     success ".env 文件已存在: ${ENV_FILE}"
-
-    # 检查 .env 中是否还有未修改的占位值
-    if grep -q "请修改为强密码" "${ENV_FILE}" || grep -q "请修改为随机密钥" "${ENV_FILE}"; then
-        warn ".env 文件中包含未修改的占位值（密码/密钥），请务必修改后再启动服务"
-        warn "  运行以下命令编辑配置：nano ${ENV_FILE}"
-    fi
-
-    # Compose 使用 :? 语法时通常只报告第一个缺失变量；这里在启动前一次性检查所有必填项，
-    # 让部署人员能在一轮修复全部配置问题，避免容器启动到一半才逐项失败。
-    REQUIRED_ENV_VARS=(
-        "PG_PASSWORD"
-        "REDIS_PASSWORD"
-        "RABBITMQ_IMAGE"
-        "RABBITMQ_PASSWORD"
-        "JWT_SECRET"
-        "GATEWAY_AUTH_KEY"
-        "MQTT_USERNAME"
-        "MQTT_PASSWORD"
-        "SEED_ADMIN_PASSWORD"
-        "SEED_LEAD_PASSWORD"
-        "SEED_TECH_PASSWORD"
-        "SEED_OPERATOR_PASSWORD"
-        "SEED_VIEWER_PASSWORD"
-        "FRONTEND_URL"
-        "SEQ_ADMIN_PASSWORD"
-        "GRAFANA_PASSWORD"
-    )
-
-    for key in "${REQUIRED_ENV_VARS[@]}"; do
-        value=$(read_env_value "${key}")
-        if [ -z "${value}" ] \
-            || [[ "${value}" == *"请修改"* ]] \
-            || [[ "${value}" == *"PLEASE_CHANGE"* ]] \
-            || [ "${key}" = "MQTT_USERNAME" ] && [ "${value}" = "device" ] \
-            || [ "${key}" = "MQTT_PASSWORD" ] && [ "${value}" = "device123" ]; then
-            error "必填环境变量 ${key} 缺失或仍为占位值（不会打印其内容）"
-        fi
-    done
-
-    jwt_value=$(read_env_value "JWT_SECRET")
-    if [ -n "${jwt_value}" ] && [ "${jwt_value}" != *"请修改"* ] && [ "${#jwt_value}" -lt 32 ]; then
-        error "JWT_SECRET 长度不足 32 个字符"
-    fi
-
-    gateway_auth_key=$(read_env_value "GATEWAY_AUTH_KEY")
-    if [ -n "${gateway_auth_key}" ] && [ "${gateway_auth_key}" != *"PLEASE_CHANGE"* ] \
-        && [ "${#gateway_auth_key}" -lt 32 ]; then
-        error "GATEWAY_AUTH_KEY 长度不足 32 个字符"
-    fi
-    if [ -n "${gateway_auth_key}" ] && printf '%s' "${gateway_auth_key}" | LC_ALL=C grep -q '[^ -~]'; then
-        error "GATEWAY_AUTH_KEY 必须只包含 ASCII 字符（HTTP Header 不允许中文等非 ASCII 字符）"
-    fi
-
-    rabbitmq_password=$(read_env_value "RABBITMQ_PASSWORD")
-    if [ -n "${rabbitmq_password}" ] && [ "${rabbitmq_password}" != *"请修改"* ] \
-        && [ "${#rabbitmq_password}" -lt 16 ]; then
-        error "RABBITMQ_PASSWORD 长度不足 16 个字符"
-    fi
-
-    rabbitmq_image=$(read_env_value "RABBITMQ_IMAGE")
-    if [ -n "${rabbitmq_image}" ] && [[ "${rabbitmq_image}" != *@sha256:* ]]; then
-        error "RABBITMQ_IMAGE 必须使用带 digest 的固定镜像引用（例如 image:tag@sha256:...）"
-    fi
 else
     if [ -f "${ENV_EXAMPLE}" ]; then
         echo -e "  ${YELLOW}正在从 .env.example 创建 .env 文件...${NC}"
         cp "${ENV_EXAMPLE}" "${ENV_FILE}"
+        chmod 600 "${ENV_FILE}"
         success "已创建 .env 文件: ${ENV_FILE}"
         warn "⚠️  请立即编辑 .env 文件，修改所有密码和密钥！"
         warn "  运行以下命令编辑配置：nano ${ENV_FILE}"
@@ -185,7 +123,20 @@ else
         warn "    - GRAFANA_PASSWORD（Grafana 管理员密码）"
     else
         error ".env.example 模板文件不存在: ${ENV_EXAMPLE}"
+        exit 1
     fi
+fi
+
+# 即使用户已有 .env，也统一收紧权限；随后在生成任何证书或 MQTT 密码文件前
+# 一次性校验全部凭据，避免首次运行用占位配置产生“看似成功”的半成品环境。
+chmod 600 "${ENV_FILE}"
+if [ ! -f "${SCRIPT_DIR}/validate-env.sh" ]; then
+    error "缺少环境变量校验器: ${SCRIPT_DIR}/validate-env.sh"
+    exit 1
+fi
+if ! bash "${SCRIPT_DIR}/validate-env.sh" "${ENV_FILE}"; then
+    error "环境变量校验未通过，请编辑 ${ENV_FILE} 后重新运行 setup.sh"
+    exit 1
 fi
 
 # =============================================================================
@@ -299,6 +250,7 @@ REQUIRED_FILES=(
     ".env.example|.env 模板文件"
     "docker-compose.yml|Docker Compose 主配置"
     "docker-compose.dev.yml|Docker Compose 开发环境配置"
+    "validate-env.sh|环境变量校验器"
     "mosquitto.conf|Mosquitto 开发环境配置"
     "mosquitto.prod.conf|Mosquitto 生产环境配置"
     "mqtt-certs/ca.crt|MQTT CA 证书"

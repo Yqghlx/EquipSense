@@ -522,6 +522,42 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// 回归：同一设备同一秒命中多条分层规则时，告警编码仍必须全局唯一。
+    /// 旧编码只包含设备、指标和秒级时间，多条规则会撞上 alert_code 唯一索引并中断后续规则评估。
+    /// </summary>
+    [Fact]
+    public async Task 同一秒多条规则触发_告警编码仍唯一()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, _tenantId, deviceId, "MOTOR-MULTI-RULE");
+
+        db.AlertRules.AddRange(
+            CreateAlertRule(_tenantId, "temperature", severity: AlertSeverity.High),
+            CreateAlertRule(_tenantId, "temperature", severity: AlertSeverity.Critical));
+        await db.SaveChangesAsync();
+
+        var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
+        aggregatorMock
+            .Setup(a => a.EvaluateAsync(
+                deviceId,
+                It.IsAny<Guid>(),
+                "temperature",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AlertAggregationDecision(true, false, false));
+
+        await service.EvaluateForDeviceAsync(
+            _tenantId, deviceId, "电机", "temperature", 100, new DeviceContext());
+
+        var codes = db.Alerts.Select(a => a.AlertCode).ToList();
+        codes.Should().HaveCount(2);
+        codes.Distinct(StringComparer.Ordinal).Should().HaveCount(2);
+        codes.Should().AllSatisfy(code =>
+            code.Should().MatchRegex(
+                "^ALT-MOTOR-MULTI-RULE-temperature-[0-9a-f]{8}-[0-9]{17}-[0-9a-f]{8}$"));
+    }
+
+    /// <summary>
     /// 测试 11：有基线数据时，应将基线注入 DeviceContext 传给评估器
     /// 验证：评估器接收到的 DeviceContext.Baseline 不为空
     /// </summary>

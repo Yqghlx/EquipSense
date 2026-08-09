@@ -95,29 +95,34 @@ export async function deleteDeviceViaAPI(
  * @param page - Playwright Page 实例
  * @param name - 规则名称（不传则自动生成 E2E- 前缀名称）
  * @param enabled - 是否启用（默认 true）
+ * @param deviceId - 可选的设备 ID；传入后规则只匹配该设备，避免 E2E 测试受到其他全局规则污染
  * @returns API 响应 JSON
  */
 export async function createThresholdRule(
   page: Page,
   name?: string,
   enabled = true,
+  deviceId?: string,
 ): Promise<Record<string, unknown>> {
   const token = await getToken(page);
   const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const ruleName = name || `E2E-RULE-THRESHOLD-${suffix}`;
 
+  const data: Record<string, unknown> = {
+    name: ruleName,
+    ruleType: 'Threshold',
+    metric: 'temperature',
+    operator: 'GT',
+    threshold: 80,
+    severity: 'High',
+    cooldownSeconds: 300,
+    enabled,
+  };
+  if (deviceId) data.deviceId = deviceId;
+
   const resp = await page.request.post(`${BASE_URL}/api/v1/alert-rules`, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    data: {
-      name: ruleName,
-      ruleType: 'Threshold',
-      metric: 'temperature',
-      operator: 'GT',
-      threshold: 80,
-      severity: 'High',
-      cooldownSeconds: 300,
-      enabled,
-    },
+    data,
   });
   expect(resp.ok()).toBeTruthy();
   return resp.json();

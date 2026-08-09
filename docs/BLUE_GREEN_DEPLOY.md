@@ -45,11 +45,15 @@
 | `docker/.active-color` | 当前活跃色记录（blue/green，首次部署默认 blue） |
 | `scripts/deploy-bluegreen.sh` | 部署编排脚本（拉镜像 → 健康 → 切换 → 停旧） |
 
+`router` 不对 `backend-blue` 或 `backend-green` 声明固定的 `depends_on`。蓝绿发布时只启动
+目标颜色，固定依赖另一种颜色会使 Compose 在单 profile 下无法解析；部署脚本会先完成目标后端
+健康门禁，再 reload router 的 upstream，因而路由层可以独立于颜色启动和重载。
+
 ---
 
 ## 首次启用蓝绿
 
-在服务器上（`$DEPLOY_PATH/docker/` 目录）执行：
+在服务器上（`$DEPLOY_PATH` 目录本身，即包含 `.env` 和 Compose 文件的 Docker 文件目录）执行：
 
 ```bash
 # 1. 初始化活跃色（默认 blue）
@@ -78,9 +82,9 @@ CI 的 deploy job 在打 `vX.Y.Z` tag 时触发。切换到蓝绿后，将 deplo
 手动部署：
 
 ```bash
-# 在服务器 DEPLOY_PATH/docker/ 目录
+# 在服务器 DEPLOY_PATH 目录
 GHCR_PULL_USER=xxx GHCR_PULL_TOKEN=xxx \
-  ../../scripts/deploy-bluegreen.sh 1.2.3
+  ../scripts/deploy-bluegreen.sh 1.2.3
 ```
 
 脚本执行步骤：
@@ -131,10 +135,13 @@ echo "<旧色>" > .active-color
 script: |
   set -euo pipefail
   cd "$DEPLOY_PATH"
+  # DEPLOY_PATH 必须包含 .env、validate-env.sh 和 Compose 文件；先执行配置门禁
+  bash ./validate-env.sh .env
+  docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml config --quiet
   # 登录 GHCR（凭证从服务器环境变量）
-  echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USER" --password-stdin
+  echo "${GHCR_PULL_TOKEN:?未配置 GHCR_PULL_TOKEN}" | docker login ghcr.io -u "${GHCR_PULL_USER:?未配置 GHCR_PULL_USER}" --password-stdin
   # 调用蓝绿编排脚本
-  bash scripts/deploy-bluegreen.sh "$TARGET_VERSION"
+  bash ../scripts/deploy-bluegreen.sh "$TARGET_VERSION"
 ```
 
 **前置**：服务器需已执行「首次启用蓝绿」，且内存足够双实例运行

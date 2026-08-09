@@ -14,7 +14,7 @@ public class Alert : BaseEntity
     public Guid TenantId { get; set; }
 
     /// <summary>
-    /// 告警编码，格式：ALT-{device_code}-{metric}-{yyyyMMddHHmmss}
+    /// 告警编码，格式：ALT-{device_code}-{metric}-{rule_short_id}-{timestamp}-{random_suffix}，全局唯一。
     /// </summary>
     public string AlertCode { get; set; } = string.Empty;
 

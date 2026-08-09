@@ -1,5 +1,5 @@
 # 阶段1：构建
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:e2f26f26169fd10d6f1b426e01c97397717b32e9d5ab4ee4a7d5497ed9403007 AS build
 WORKDIR /src
 
 # 先复制项目文件并还原依赖（利用 Docker 层缓存）。EdgeGateway 依赖 Core，两个项目文件都必须存在。
@@ -14,7 +14,7 @@ RUN dotnet publish EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj \
     -c Release -o /app/publish
 
 # 阶段2：运行
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:8.0@sha256:794b603ad8cf882df3a37dcb124eccdcd688c367864cd66e93e921cda9caba76 AS runtime
 WORKDIR /app
 
 # 安装 ICU 库（中文等 Unicode 排序所需）

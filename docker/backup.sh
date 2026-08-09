@@ -1,5 +1,5 @@
 #!/bin/bash
-# EquipSense 全量备份脚本 — PostgreSQL + Redis + Grafana 配置
+# EquipSense 全量备份脚本 — PostgreSQL + 工单附件 + Redis + Grafana 配置
 #
 # 用法：
 #   手动执行：./backup.sh
@@ -12,6 +12,9 @@
 #   BACKUP_DIR      备份目录（默认 ./backups）
 #   RETAIN_DAYS     保留天数（默认 7）
 #   BACKUP_REDIS    是否备份 Redis（默认 true）
+#   BACKUP_ATTACHMENTS  是否备份工单附件（默认 true）
+#   ATTACHMENTS_CONTAINER  附件所在容器（默认 equipai-backend）
+#   ATTACHMENTS_PATH  容器内附件目录（默认 /app/uploads）
 #   S3_SYNC         是否同步到 S3/OSS（默认 false）
 #   S3_BUCKET       S3/OSS 桶地址（如 s3://my-bucket/backups/）
 #   BACKUP_WEBHOOK  备份完成通知 webhook（可选）
@@ -34,6 +37,18 @@ PG_DB="${PG_DB:-equipai}"
 BACKUP_DIR="${BACKUP_DIR:-$SCRIPT_DIR/backups}"
 RETAIN_DAYS="${RETAIN_DAYS:-7}"
 BACKUP_REDIS="${BACKUP_REDIS:-true}"
+BACKUP_ATTACHMENTS="${BACKUP_ATTACHMENTS:-true}"
+ATTACHMENTS_CONTAINER="${ATTACHMENTS_CONTAINER:-equipai-backend}"
+ATTACHMENTS_PATH="${ATTACHMENTS_PATH:-/app/uploads}"
+
+# 相对路径始终相对于 docker/ 目录，避免从仓库根目录和定时任务执行时产生两套备份目录。
+case "$BACKUP_DIR" in
+  /*)
+    ;;
+  *)
+    BACKUP_DIR="$SCRIPT_DIR/$BACKUP_DIR"
+    ;;
+esac
 
 if [ -z "${PG_PASSWORD:-}" ]; then
   echo "[FATAL] PG_PASSWORD 未设置" >&2
@@ -57,7 +72,7 @@ echo "=========================================="
 # （v1.4 修复：之前用主机 pg_dump 导致备份无声失败）
 PG_CONTAINER="${PG_CONTAINER:-equipai-postgres}"
 PG_FILE="$BACKUP_DIR/${PG_DB}_${TIMESTAMP}.sql.gz"
-echo "[1/3] 备份 PostgreSQL ($PG_DB) via docker exec..."
+echo "[1/4] 备份 PostgreSQL ($PG_DB) via docker exec..."
 
 # 检查容器是否运行（避免容器停了还在尝试备份）
 if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
@@ -88,11 +103,45 @@ else
 fi
 
 # ============================================================
-# 2. Redis 备份（可选）
+# 2. 工单附件备份（默认启用）
+# ============================================================
+if [ "$BACKUP_ATTACHMENTS" = "true" ]; then
+  ATTACHMENTS_FILE="$BACKUP_DIR/attachments_${TIMESTAMP}.tar.gz"
+  ATTACHMENTS_TEMP_DIR=""
+  echo "[2/4] 备份工单附件 ($ATTACHMENTS_PATH) via docker cp..."
+
+  if ! docker ps --format '{{.Names}}' | grep -q "^${ATTACHMENTS_CONTAINER}$"; then
+    echo "  ✗ 附件容器 $ATTACHMENTS_CONTAINER 未运行，无法完成全量备份"
+    BACKUP_SUCCESS=false
+  else
+    ATTACHMENTS_TEMP_DIR=$(mktemp -d "$BACKUP_DIR/.attachments.XXXXXX")
+    if docker cp "$ATTACHMENTS_CONTAINER:$ATTACHMENTS_PATH/." "$ATTACHMENTS_TEMP_DIR/"; then
+      if tar -C "$ATTACHMENTS_TEMP_DIR" -czf "$ATTACHMENTS_FILE" . \
+        && tar -tzf "$ATTACHMENTS_FILE" >/dev/null 2>&1; then
+        SIZE=$(du -h "$ATTACHMENTS_FILE" | cut -f1)
+        echo "  ✓ 工单附件备份成功: $ATTACHMENTS_FILE ($SIZE)"
+        BACKUP_FILES+=("$ATTACHMENTS_FILE")
+      else
+        echo "  ✗ 工单附件归档损坏，tar -tzf 校验失败"
+        rm -f "$ATTACHMENTS_FILE"
+        BACKUP_SUCCESS=false
+      fi
+    else
+      echo "  ✗ 工单附件复制失败（容器路径或权限可能不正确）"
+      BACKUP_SUCCESS=false
+    fi
+    rm -rf "$ATTACHMENTS_TEMP_DIR"
+  fi
+else
+  echo "[2/4] 工单附件备份已跳过（BACKUP_ATTACHMENTS=false）"
+fi
+
+# ============================================================
+# 3. Redis 备份（可选）
 # ============================================================
 if [ "$BACKUP_REDIS" = "true" ] && [ -n "${REDIS_PASSWORD:-}" ]; then
   REDIS_FILE="$BACKUP_DIR/redis_${TIMESTAMP}.rdb"
-  echo "[2/3] 备份 Redis..."
+  echo "[3/4] 备份 Redis..."
 
   # 触发 BGSAVE 后复制 RDB 文件（需要 docker exec 访问 Redis 容器）
   if docker exec equipai-redis redis-cli -a "$REDIS_PASSWORD" BGSAVE >/dev/null 2>&1; then
@@ -108,13 +157,13 @@ if [ "$BACKUP_REDIS" = "true" ] && [ -n "${REDIS_PASSWORD:-}" ]; then
     echo "  ⚠ Redis BGSAVE 失败，跳过（非关键数据）"
   fi
 else
-  echo "[2/3] Redis 备份已跳过（未配置 REDIS_PASSWORD 或 BACKUP_REDIS=false）"
+  echo "[3/4] Redis 备份已跳过（未配置 REDIS_PASSWORD 或 BACKUP_REDIS=false）"
 fi
 
 # ============================================================
-# 3. Grafana 仪表盘配置（已版本化在 git，可选导出用户自定义部分）
+# 4. Grafana 仪表盘配置（已版本化在 git，可选导出用户自定义部分）
 # ============================================================
-echo "[3/3] Grafana 配置已在 git 版本管理（docker/grafana/provisioning/），无需单独备份"
+echo "[4/4] Grafana 配置已在 git 版本管理（docker/grafana/provisioning/），无需单独备份"
 
 # ============================================================
 # 清理过期备份
@@ -123,18 +172,26 @@ echo ""
 echo "清理 $RETAIN_DAYS 天前的旧备份..."
 find "$BACKUP_DIR" -name "${PG_DB}_*.sql.gz" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
 find "$BACKUP_DIR" -name "redis_*.rdb" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
+find "$BACKUP_DIR" -name "attachments_*.tar.gz" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
 
 # ============================================================
 # 异地同步（S3/OSS，可选）
 # ============================================================
-if [ "${S3_SYNC:-false}" = "true" ] && [ -n "${S3_BUCKET:-}" ]; then
+if [[ "${S3_SYNC:-false}" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
   echo ""
-  echo "同步到 S3/OSS: $S3_BUCKET"
-  if command -v aws >/dev/null 2>&1; then
-    aws s3 sync "$BACKUP_DIR" "$S3_BUCKET" --exclude "*" --include "*.sql.gz" --include "*.rdb"
+  echo "同步到 S3/OSS: ${S3_BUCKET:-<未配置>}"
+  if [ -z "${S3_BUCKET:-}" ]; then
+    echo "  ✗ S3_SYNC 已开启，但 S3_BUCKET 未配置" >&2
+    BACKUP_SUCCESS=false
+  elif ! command -v aws >/dev/null 2>&1; then
+    echo "  ✗ S3_SYNC 已开启，但主机未安装 aws-cli" >&2
+    BACKUP_SUCCESS=false
+  elif aws s3 sync "$BACKUP_DIR" "$S3_BUCKET" \
+    --exclude "*" --include "*.sql.gz" --include "*.rdb" --include "attachments_*.tar.gz"; then
     echo "  ✓ S3 同步完成"
   else
-    echo "  ⚠ aws-cli 未安装，跳过 S3 同步"
+    echo "  ✗ S3 同步失败" >&2
+    BACKUP_SUCCESS=false
   fi
 fi
 
@@ -163,4 +220,3 @@ else
   echo "=========================================="
   exit 1
 fi
-

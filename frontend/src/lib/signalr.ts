@@ -27,22 +27,37 @@ export async function startConnection(): Promise<HubConnection> {
   const setStatus = useRealtimeStore.getState().setStatus;
   setStatus('connecting');
 
-  connection = new HubConnectionBuilder()
+  const newConnection = new HubConnectionBuilder()
     .withUrl('/hubs/industrial')
     .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
     .configureLogging(LogLevel.Information)
     .build();
+  connection = newConnection;
 
   // 关键修复：暴露连接生命周期状态给 UI
   // withAutomaticReconnect 在前 4 次重连尝试期间触发 onreconnecting（黄灯），
   // 成功后触发 onreconnected（绿灯）。若所有重连耗尽则触发 onclose（红灯）。
-  connection.onreconnecting(() => setStatus('reconnecting'));
-  connection.onreconnected(() => setStatus('connected'));
-  connection.onclose(() => setStatus('disconnected'));
+  newConnection.onreconnecting(() => setStatus('reconnecting'));
+  newConnection.onreconnected(() => setStatus('connected'));
+  newConnection.onclose(() => setStatus('disconnected'));
 
-  await connection.start();
-  setStatus('connected');
-  return connection;
+  try {
+    await newConnection.start();
+    setStatus('connected');
+    return newConnection;
+  } catch (error) {
+    // 初次握手失败不会进入 withAutomaticReconnect；清理失败实例，否则后续调用会复用永久断开的连接。
+    if (connection === newConnection) {
+      connection = null;
+    }
+    setStatus('disconnected');
+    try {
+      await newConnection.stop();
+    } catch {
+      // 握手失败后的 stop 可能再次抛错，但不能覆盖原始连接异常。
+    }
+    throw error;
+  }
 }
 
 /** 断开 SignalR 连接并清除实例 */

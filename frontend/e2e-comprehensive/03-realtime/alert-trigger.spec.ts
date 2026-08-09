@@ -35,7 +35,7 @@ test.describe('03-告警触发', () => {
     // 创建测试设备和告警规则（温度 > 80 触发 High 级别告警）
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     // 登录并等待仪表盘加载（仪表盘页面会接收 SignalR Toast 推送）
@@ -45,7 +45,7 @@ test.describe('03-告警触发', () => {
     await triggerAlertViaAPI(page, { deviceId, metric: 'temperature', value: 100 });
 
     // 等待告警评估 + SignalR 推送 + Toast 出现
-    const toast = page.locator('[class*="toast"], [role="status"], [data-sonner-toast]');
+    const toast = page.getByTestId('notification-toast');
     await expect(toast.first()).toBeVisible({ timeout: 30000 }).catch(() => {
       console.warn('[告警] 在 30 秒内未检测到 Toast 通知');
     });
@@ -67,7 +67,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     await login(page);
@@ -75,7 +75,7 @@ test.describe('03-告警触发', () => {
     await triggerAlertViaAPI(page, { deviceId, metric: 'temperature', value: 100 });
 
     // 等待 Toast 出现
-    const toast = page.locator('[class*="toast"], [role="status"], [data-sonner-toast]');
+    const toast = page.getByTestId('notification-toast');
     const toastAppeared = await toast.first().isVisible({ timeout: 30000 }).catch(() => false);
 
     if (toastAppeared) {
@@ -104,7 +104,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     await login(page);
@@ -112,7 +112,7 @@ test.describe('03-告警触发', () => {
     await triggerAlertViaAPI(page, { deviceId, metric: 'temperature', value: 100 });
 
     // 等待 Toast 出现并点击
-    const toast = page.locator('[class*="toast"], [role="status"], [data-sonner-toast]');
+    const toast = page.getByTestId('notification-toast');
     const toastAppeared = await toast.first().isVisible({ timeout: 30000 }).catch(() => false);
 
     if (toastAppeared) {
@@ -142,7 +142,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     // 先登录并导航到告警中心
@@ -181,7 +181,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     // 先触发告警，等告警入库后再打开告警中心
@@ -222,7 +222,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     // 触发告警
@@ -270,7 +270,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     // 触发告警
@@ -329,7 +329,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     await login(page);
@@ -375,7 +375,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     // 触发告警
@@ -425,7 +425,7 @@ test.describe('03-告警触发', () => {
 
     const device = await createTestDevice(page);
     const deviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = rule.id as string;
 
     await login(page);

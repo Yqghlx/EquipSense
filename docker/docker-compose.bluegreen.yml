@@ -26,8 +26,9 @@ services:
       service: backend
     profiles: ["blue"]
     container_name: equipai-backend-blue
-    ports: ["8081:8080"]
-    # 不再发布宿主 8080（由 router 反代）；仅暴露给同网络服务
+    ports: !override
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8081:8080"
+    # 覆盖基础服务端口，避免继承宿主 8080；router 负责对外反代。
     networks:
       - bluegreen
 
@@ -37,7 +38,8 @@ services:
       service: backend
     profiles: ["green"]
     container_name: equipai-backend-green
-    ports: ["8082:8080"]
+    ports: !override
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8082:8080"
     networks:
       - bluegreen
 
@@ -48,7 +50,8 @@ services:
       service: frontend
     profiles: ["blue"]
     container_name: equipai-frontend-blue
-    ports: ["3001:80"]
+    ports: !override
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:3001:80"
     environment:
       BACKEND_URL: "http://backend-blue:8080"
     networks:
@@ -60,7 +63,8 @@ services:
       service: frontend
     profiles: ["green"]
     container_name: equipai-frontend-green
-    ports: ["3002:80"]
+    ports: !override
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:3002:80"
     environment:
       BACKEND_URL: "http://backend-green:8080"
     networks:
@@ -70,21 +74,19 @@ services:
   # 独立于 frontend 容器内的 nginx；router 负责把 /api/ /hubs/ / 反代到活跃色。
   # upstream 由 /etc/nginx/conf.d/upstream-active.conf 决定，部署脚本切换时重写 + reload。
   router:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     container_name: equipai-router
     profiles: ["blue", "green"]
     ports:
-      - "80:80"
-      - "443:443"
+      - "${PUBLIC_BIND_ADDRESS:-0.0.0.0}:80:80"
+      - "${PUBLIC_BIND_ADDRESS:-0.0.0.0}:443:443"
     volumes:
       - ./nginx.bluegreen.conf:/etc/nginx/nginx.conf:ro
       - ./upstream-active.conf:/etc/nginx/conf.d/upstream-active.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      frontend-blue:
-        condition: service_started
-      backend-blue:
-        condition: service_started
+    # 不绑定任一颜色的 depends_on：发布过程中只会启动目标颜色，
+    # 固定依赖 blue 会让 green profile 在 Compose 解析阶段直接失效。
+    # 上游容器由部署脚本先完成健康门禁，router 只负责 reload 原子切流。
     networks:
       - bluegreen
     restart: unless-stopped
@@ -92,4 +94,3 @@ services:
 networks:
   bluegreen:
     name: equipsense_bluegreen
-

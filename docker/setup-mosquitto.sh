@@ -98,7 +98,7 @@ else
             if command -v docker &> /dev/null; then
                 echo -e "${YELLOW}使用 Docker 容器生成密码哈希${NC}"
                 docker run --rm -v "${PASSWD_DIR}":/work \
-                    eclipse-mosquitto:2 \
+                    eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 \
                     mosquitto_passwd -c -b /work/passwd "${USERNAME}" "${PASSWORD}"
             else
                 echo -e "${RED}错误：无法生成密码哈希。${NC}"
@@ -114,7 +114,7 @@ else
     elif command -v docker &> /dev/null; then
         echo -e "${YELLOW}使用 Docker 容器生成密码哈希${NC}"
         docker run --rm -v "${PASSWD_DIR}":/work \
-            eclipse-mosquitto:2 \
+            eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 \
             mosquitto_passwd -c -b /work/passwd "${USERNAME}" "${PASSWORD}"
     else
         echo -e "${RED}错误：未找到 openssl 或 docker，无法生成密码哈希${NC}"
@@ -144,4 +144,4 @@ echo ""
 echo -e "${GREEN}如需添加更多用户，可执行：${NC}"
 echo "  mosquitto_passwd -b ${PASSWD_FILE} <用户名> <密码>"
 echo "  # 或者使用 Docker："
-echo "  docker run --rm -v ${PASSWD_DIR}:/work eclipse-mosquitto:2 mosquitto_passwd -b /work/passwd <用户名> <密码>"
+echo "  docker run --rm -v ${PASSWD_DIR}:/work eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 mosquitto_passwd -b /work/passwd <用户名> <密码>"

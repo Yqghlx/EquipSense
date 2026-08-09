@@ -188,12 +188,12 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="username">{t('auth.username')}</Label>
-            <Input id="username" {...register('username')} placeholder={t('auth.username')} />
+            <Input id="username" autoComplete="username" {...register('username')} placeholder={t('auth.username')} />
             {errors.username && <p className="text-sm text-destructive">{errors.username.message}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">{t('auth.password')}</Label>
-            <Input id="password" type="password" {...register('password')} placeholder={t('auth.password')} />
+            <Input id="password" type="password" autoComplete="current-password" {...register('password')} placeholder={t('auth.password')} />
             {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

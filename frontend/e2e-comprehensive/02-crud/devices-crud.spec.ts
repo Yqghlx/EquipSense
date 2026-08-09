@@ -386,7 +386,7 @@ test.describe('设备列表 CRUD', () => {
   });
 
   // ==========================================================================
-  // 13. 批量导入（验证入口存在）
+  // 13. 批量导入（验证入口和预览闭环）
   // ==========================================================================
 
   test('应存在批量导入入口或相关功能', async ({ page }) => {
@@ -394,24 +394,22 @@ test.describe('设备列表 CRUD', () => {
     await navigateViaSidebar(page, /设备/i);
     await page.waitForTimeout(1500);
 
-    // 查找导入按钮（可能在工具栏或菜单中）
+    // 批量导入是设备管理的核心运维入口，缺失时必须阻断回归。
     const importBtn = page.getByRole('button', { name: /导入|import/i });
-    const hasImport = await importBtn.isVisible().catch(() => false);
+    await expect(importBtn).toBeVisible();
 
-    // 如果存在导入按钮，点击验证对话框
-    if (hasImport) {
-      await importBtn.click();
-      await page.waitForTimeout(1000);
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible().catch(() => false)) {
-        // 验证对话框中存在文件上传组件
-        const fileInput = dialog.locator('input[type="file"]');
-        expect(await fileInput.count()).toBeGreaterThanOrEqual(0);
-        // 关闭对话框
-        await dialog.getByRole('button', { name: /取消|cancel/i }).click().catch(() => {});
-      }
-    }
-    // 即使没有导入按钮也算通过（功能可能尚未实现）
+    const fileInput = page.locator('input[type="file"]');
+    await expect(fileInput).toHaveCount(1);
+    await fileInput.setInputFiles({
+      name: 'devices.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('deviceCode,name,type\nE2E-IMPORT,导入测试设备,pump\n'),
+    });
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('input[type="file"]')).toHaveCount(0);
+    await dialog.getByRole('button', { name: /关闭|close/i }).click();
     expect(errors).toEqual([]);
   });
 

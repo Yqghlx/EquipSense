@@ -37,7 +37,7 @@ else
     400|600)
       ;;
     *)
-      error ".env 文件权限不安全（当前 $env_mode），请设置为 600"
+      error ".env 文件权限不安全（当前 ${env_mode}），请设置为 600"
       ;;
   esac
 
@@ -62,7 +62,7 @@ else
 
   for key in "${REQUIRED_ENV_VARS[@]}"; do
     value="$(read_env_value "$key")"
-    if [ -z "$value" ] +      || [[ "$value" == *"请修改"* ]] +      || [[ "$value" == *"PLEASE_CHANGE"* ]] +      || { [ "$key" = "MQTT_USERNAME" ] && [ "$value" = "device" ]; } +      || { [ "$key" = "MQTT_PASSWORD" ] && [ "$value" = "device123" ]; }; then
+    if [ -z "$value" ] || [[ "$value" == *"请修改"* ]] || [[ "$value" == *"PLEASE_CHANGE"* ]] || { [ "$key" = "MQTT_USERNAME" ] && [ "$value" = "device" ]; } || { [ "$key" = "MQTT_PASSWORD" ] && [ "$value" = "device123" ]; }; then
       error "必填环境变量 $key 缺失或仍为占位值（不会打印其内容）"
     fi
   done
@@ -83,13 +83,36 @@ else
   fi
 
   rabbitmq_password="$(read_env_value RABBITMQ_PASSWORD)"
-  if [ -n "$rabbitmq_password" ] && [[ "$rabbitmq_password" != *"请修改"* ]] +    && [ "${#rabbitmq_password}" -lt 16 ]; then
+  if [ -n "$rabbitmq_password" ] && [[ "$rabbitmq_password" != *"请修改"* ]] && [ "${#rabbitmq_password}" -lt 16 ]; then
     error "RABBITMQ_PASSWORD 长度不足 16 个字符"
   fi
 
   rabbitmq_user="$(read_env_value RABBITMQ_USER)"
   if [ "$rabbitmq_user" = "guest" ]; then
     error "RABBITMQ_USER 不得使用 guest"
+  fi
+
+  # 生产凭据即使非占位值也不能过短，避免部署门禁被“任意非空字符串”绕过。
+  for key in PG_PASSWORD REDIS_PASSWORD MQTT_PASSWORD SEQ_ADMIN_PASSWORD GRAFANA_PASSWORD; do
+    value="$(read_env_value "$key")"
+    if [ -n "$value" ] && [[ "$value" != *"请修改"* ]] && [ "${#value}" -lt 16 ]; then
+      error "$key 长度不足 16 个字符"
+    fi
+  done
+
+  frontend_url="$(read_env_value FRONTEND_URL)"
+  if [ -n "$frontend_url" ] && [[ "$frontend_url" != https://* ]]; then
+    error "FRONTEND_URL 必须使用 HTTPS"
+  fi
+
+  s3_sync="$(read_env_value S3_SYNC)"
+  if [[ "$s3_sync" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
+    s3_bucket="$(read_env_value S3_BUCKET)"
+    if [ -z "$s3_bucket" ]; then
+      error "S3_SYNC 已开启，但 S3_BUCKET 未配置"
+    elif [[ "$s3_bucket" != s3://* ]]; then
+      error "S3_BUCKET 必须使用 s3:// 开头的目标地址"
+    fi
   fi
 
   rabbitmq_image="$(read_env_value RABBITMQ_IMAGE)"
@@ -100,7 +123,7 @@ else
   tenant2_account="$(read_env_value SEED_TENANT2_ACCOUNT)"
   if [[ "$tenant2_account" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
     tenant2_password="$(read_env_value SEED_TENANT2_PASSWORD)"
-    if [ -z "$tenant2_password" ] +      || [[ "$tenant2_password" == *"请修改"* ]] +      || [ "$tenant2_password" = "Tenant2@123" ]; then
+    if [ -z "$tenant2_password" ] || [[ "$tenant2_password" == *"请修改"* ]] || [ "$tenant2_password" = "Tenant2@123" ]; then
       error "SEED_TENANT2_ACCOUNT 已开启，但 SEED_TENANT2_PASSWORD 缺失或仍为公开默认值"
     fi
   fi

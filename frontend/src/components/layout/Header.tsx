@@ -13,6 +13,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { RealtimeIndicator } from './RealtimeIndicator';
+import { revokeSessionAndClearLocalState } from '../../lib/authSession';
 import { useState } from 'react';
 
 /**
@@ -24,7 +25,6 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const { t, i18n } = useTranslation();
   const { theme, toggleTheme } = useTheme();
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
   const notifications = useNotificationStore((s) => s.notifications);
   const navigate = useNavigate();
   const [showNotifications, setShowNotifications] = useState(false);
@@ -33,9 +33,9 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   /** 退出登录并跳转到登录页 */
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const handleLogout = async () => {
+    await revokeSessionAndClearLocalState();
+    navigate('/login', { replace: true });
   };
 
   /** 切换中英文 */
@@ -95,7 +95,10 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
 
         {/* 用户菜单 */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center rounded-md h-9 w-9 hover:bg-accent hover:text-accent-foreground">
+          <DropdownMenuTrigger
+            aria-label={user?.username ?? '用户菜单'}
+            className="inline-flex items-center justify-center rounded-md h-9 w-9 hover:bg-accent hover:text-accent-foreground"
+          >
             <User className="h-4 w-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

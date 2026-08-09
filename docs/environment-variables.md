@@ -90,6 +90,25 @@ Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名�
 |--------|------|--------|------|
 | `FileStorage__BasePath` / `FILE_STORAGE_BASE_PATH` | 工单附件物理存储目录；Docker 中必须与卷挂载点一致 | `/app/uploads` | 否 |
 
+## 备份
+
+`docker/backup.sh` 默认备份 PostgreSQL 和工单附件；Redis 为可选缓存备份。跨主机部署时应将备份目录同步到 S3/OSS，并定期执行恢复演练。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `BACKUP_DIR` | 备份文件输出目录 | `./backups` | 否 |
+| `RETAIN_DAYS` | 本地备份保留天数 | `7` | 否 |
+| `BACKUP_ATTACHMENTS` | 是否归档后端 `/app/uploads` 工单附件 | `true` | 生产建议保持 `true` |
+| `ATTACHMENTS_CONTAINER` | 附件所在容器名 | `equipai-backend` | 否 |
+| `ATTACHMENTS_PATH` | 容器内附件目录 | `/app/uploads` | 否 |
+| `BACKUP_REDIS` | 是否备份 Redis RDB | `true` | 否 |
+| `S3_SYNC` / `S3_BUCKET` | 是否将备份同步到 S3/OSS 及目标桶；开启后缺少目标、aws-cli 或同步失败都会让备份返回非零 | `false` / — | 异地备份时必填 |
+
+生产 Compose 的端口绑定默认遵循最小暴露原则：`INTERNAL_BIND_ADDRESS=127.0.0.1`
+仅允许本机访问 PostgreSQL、Redis、RabbitMQ、后端和可观测性面板；
+`PUBLIC_BIND_ADDRESS=0.0.0.0` 用于前端、MQTT 和蓝绿 router。若由外部负载均衡器统一对外，
+可将 `PUBLIC_BIND_ADDRESS` 也设为 `127.0.0.1`，不要直接把内部服务改为公网监听。
+
 ## SMTP 邮件
 
 | 变量名 | 说明 | 默认值 | 必填 |

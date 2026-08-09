@@ -204,6 +204,7 @@ docker stats equipai-backend --no-stream
 ```bash
 # PostgreSQL 全量备份（含 TimescaleDB 扩展数据）
 ./docker/backup.sh
+# 默认同时归档工单附件；确认输出中存在 attachments_*.tar.gz
 
 # 或手动执行
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
@@ -226,15 +227,31 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T grafa
 # 1. 停止后端（避免恢复期间有写入）
 docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend
 
-# 2. 恢复 PostgreSQL
-gunzip -c backup_20260614.sql.gz | docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+# 2. 自动选择当前目录最近一次备份（也可手动替换为指定文件）
+LATEST_DB_BACKUP="$(ls -t backup_*.sql.gz | head -n1)"
+LATEST_ATTACHMENTS_BACKUP="$(ls -t attachments_*.tar.gz | head -n1)"
+LATEST_REDIS_BACKUP="$(ls -t redis_backup_*.rdb 2>/dev/null | head -n1 || true)"
+test -n "$LATEST_DB_BACKUP" && test -n "$LATEST_ATTACHMENTS_BACKUP"
+
+# 3. 恢复 PostgreSQL
+gunzip -c "$LATEST_DB_BACKUP" | docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
   sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
-# 3. 恢复 Redis（如需要）
-docker cp ./redis_backup_20260614.rdb equipai-redis:/data/dump.rdb
-docker compose --env-file docker/.env -f docker/docker-compose.yml restart redis
+# 4. 恢复工单附件（先校验归档，再写回持久卷）
+ATTACHMENTS_TMP="$(mktemp -d)"
+tar -tzf "$LATEST_ATTACHMENTS_BACKUP" >/dev/null
+tar -xzf "$LATEST_ATTACHMENTS_BACKUP" -C "$ATTACHMENTS_TMP"
+docker compose --env-file docker/.env -f docker/docker-compose.yml cp \
+  "$ATTACHMENTS_TMP/." backend:/app/uploads/
+rm -rf "$ATTACHMENTS_TMP"
 
-# 4. 启动后端并验证
+# 5. 恢复 Redis（如需要）
+if test -n "$LATEST_REDIS_BACKUP"; then
+  docker cp "$LATEST_REDIS_BACKUP" equipai-redis:/data/dump.rdb
+  docker compose --env-file docker/.env -f docker/docker-compose.yml restart redis
+fi
+
+# 6. 启动后端并验证
 docker compose --env-file docker/.env -f docker/docker-compose.yml start backend
 curl http://localhost:8080/health
 ```

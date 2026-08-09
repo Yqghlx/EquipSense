@@ -38,6 +38,7 @@ test.describe('03-告警聚合防风暴', () => {
     page: import('@playwright/test').Page,
     options: { deviceId: string; metric?: string; value?: number },
     sendCount = 3,
+    ruleId?: string,
   ): Promise<Array<Record<string, unknown>>> {
     const { deviceId, metric = 'temperature', value = 100 } = options;
 
@@ -54,13 +55,19 @@ test.describe('03-告警聚合防风暴', () => {
     for (let retry = 0; retry < 20; retry++) {
       const alerts = await getAlertsViaAPI(page, { deviceId });
       const items = (alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>;
-      if (items.length >= 1) return items;
+      const matchingItems = ruleId
+        ? items.filter((item) => item.ruleId === ruleId || item.rule_id === ruleId)
+        : items;
+      if (matchingItems.length >= 1) return matchingItems;
       await page.waitForTimeout(1000);
     }
 
     // 最后再查一次
     const alerts = await getAlertsViaAPI(page, { deviceId });
-    return (alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>;
+    const items = (alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>;
+    return ruleId
+      ? items.filter((item) => item.ruleId === ruleId || item.rule_id === ruleId)
+      : items;
   }
 
   test('1. 第 1 次告警立即创建新记录 — 同设备同指标首次触发', async ({ page }) => {
@@ -70,10 +77,10 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
-    const alertItems = await reliablyTriggerAlert(page, { deviceId: testDeviceId });
+    const alertItems = await reliablyTriggerAlert(page, { deviceId: testDeviceId }, 3, testRuleId!);
     expect(alertItems.length).toBeGreaterThanOrEqual(1);
     expect(alertItems[0]).toBeTruthy();
 
@@ -89,11 +96,11 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     // 第 1 次触发
-    const firstItems = await reliablyTriggerAlert(page, { deviceId: testDeviceId });
+    const firstItems = await reliablyTriggerAlert(page, { deviceId: testDeviceId }, 3, testRuleId!);
     const countAfterFirst = firstItems.length;
 
     // 第 2 次触发（同类告警）
@@ -105,7 +112,8 @@ test.describe('03-告警聚合防风暴', () => {
     await page.waitForTimeout(3000);
 
     const alertsAfterSecond = await getAlertsViaAPI(page, { deviceId: testDeviceId });
-    const secondItems = (alertsAfterSecond.items || alertsAfterSecond.data || alertsAfterSecond) as Array<Record<string, unknown>>;
+    const secondItems = ((alertsAfterSecond.items || alertsAfterSecond.data || alertsAfterSecond) as Array<Record<string, unknown>>)
+      .filter((item) => item.ruleId === testRuleId || item.rule_id === testRuleId);
 
     // 第 2 次触发不应增加新的告警记录数
     expect(secondItems.length).toBeLessThanOrEqual(countAfterFirst + 1);
@@ -130,7 +138,7 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     // 连续触发 3 次同类告警
@@ -145,7 +153,8 @@ test.describe('03-告警聚合防风暴', () => {
     await page.waitForTimeout(2000);
 
     const alerts = await getAlertsViaAPI(page, { deviceId: testDeviceId });
-    const items = (alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>;
+    const items = ((alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>)
+      .filter((item) => item.ruleId === testRuleId || item.rule_id === testRuleId);
 
     expect(items.length).toBeLessThanOrEqual(3);
 
@@ -169,7 +178,7 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     for (let i = 0; i < 5; i++) {
@@ -183,7 +192,8 @@ test.describe('03-告警聚合防风暴', () => {
     await page.waitForTimeout(2000);
 
     const alerts = await getAlertsViaAPI(page, { deviceId: testDeviceId });
-    const items = (alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>;
+    const items = ((alerts.items || alerts.data || alerts) as Array<Record<string, unknown>>)
+      .filter((item) => item.ruleId === testRuleId || item.rule_id === testRuleId);
 
     expect(items.length).toBeLessThanOrEqual(1);
 
@@ -208,11 +218,11 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const tempRule = await createThresholdRule(page, 'E2E-AGG-TEMP', true);
+    const tempRule = await createThresholdRule(page, 'E2E-AGG-TEMP', true, testDeviceId!);
     testRuleId = tempRule.id as string;
 
     // 可靠触发温度告警（多发 + 轮询）
-    const items = await reliablyTriggerAlert(page, { deviceId: testDeviceId });
+    const items = await reliablyTriggerAlert(page, { deviceId: testDeviceId }, 3, testRuleId!);
     expect(items.length).toBeGreaterThanOrEqual(1);
 
     // 触发振动告警（只有温度规则，振动不会产生新告警）
@@ -254,8 +264,10 @@ test.describe('03-告警聚合防风暴', () => {
     for (let retry = 0; retry < 20; retry++) {
       const alerts1 = await getAlertsViaAPI(page, { deviceId: deviceId1 });
       const alerts2 = await getAlertsViaAPI(page, { deviceId: deviceId2 });
-      items1 = (alerts1.items || alerts1.data || alerts1) as Array<Record<string, unknown>>;
-      items2 = (alerts2.items || alerts2.data || alerts2) as Array<Record<string, unknown>>;
+      items1 = ((alerts1.items || alerts1.data || alerts1) as Array<Record<string, unknown>>)
+        .filter((item) => item.ruleId === testRuleId || item.rule_id === testRuleId);
+      items2 = ((alerts2.items || alerts2.data || alerts2) as Array<Record<string, unknown>>)
+        .filter((item) => item.ruleId === testRuleId || item.rule_id === testRuleId);
       if (items1.length + items2.length >= 1) break;
       await page.waitForTimeout(1000);
     }
@@ -276,11 +288,11 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     // 可靠触发告警（多发 + 轮询）
-    const itemsBefore = await reliablyTriggerAlert(page, { deviceId: testDeviceId });
+    const itemsBefore = await reliablyTriggerAlert(page, { deviceId: testDeviceId }, 3, testRuleId!);
     const countBefore = itemsBefore.length;
 
     // 验证聚合字段的窗口时间存在
@@ -304,7 +316,7 @@ test.describe('03-告警聚合防风暴', () => {
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
 
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     for (let i = 0; i < 3; i++) {

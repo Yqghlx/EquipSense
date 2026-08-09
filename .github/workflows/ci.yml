@@ -62,7 +62,7 @@ jobs:
 
     services:
       rabbitmq:
-        image: rabbitmq:4.3.4-management-alpine
+        image: rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94
         env:
           RABBITMQ_DEFAULT_USER: equipai_test
           RABBITMQ_DEFAULT_PASS: equipai_test_password
@@ -77,6 +77,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: 运行生产脚本回归测试
+        run: bash tests/scripts/production-scripts-test.sh
 
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
         uses: actions/setup-dotnet@v4
@@ -315,6 +318,8 @@ jobs:
     name: 版本发布（semver 标签）
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    # 即使 tag 推送绕过了 main 分支，也必须先通过完整后端/前端质量门禁。
+    needs: [backend, frontend]
     permissions:
       contents: read
       packages: write
@@ -406,12 +411,8 @@ jobs:
   #   DEPLOY_SSH_KEY    — 生产服务器 SSH 私钥（建议独立部署用户，仅授权 docker 命令）
   #   DEPLOY_HOST       — 生产服务器地址（如 deploy.example.com 或 IP）
   #   DEPLOY_USER       — SSH 用户名
-  #   DEPLOY_PATH       — 服务器上 docker-compose.yml 所在目录（如 /opt/equipsense）
-  # 必需 Secrets：
-  #   DEPLOY_SSH_KEY    — 生产服务器 SSH 私钥（建议独立部署用户，仅授权 docker 命令）
-  #   DEPLOY_HOST       — 生产服务器地址（如 deploy.example.com 或 IP）
-  #   DEPLOY_USER       — SSH 用户名
-  #   DEPLOY_PATH       — 服务器上项目目录（含 docker-compose*.yml，如 /opt/equipsense/docker）
+  #   DEPLOY_PATH       — 服务器上生产 Docker 文件目录（必须包含 .env、validate-env.sh 和两个 Compose 文件，
+  #                       如 /opt/equipsense/docker）
   #
   # GHCR 拉取凭证（保留在服务器，不通过 CI 传输）：
   #   生产服务器需预配置环境变量 GHCR_PULL_USER / GHCR_PULL_TOKEN（read:packages 权限），
@@ -452,24 +453,35 @@ jobs:
             set -euo pipefail
             cd "$DEPLOY_PATH"
 
-            # Compose 文件组合：base + prod 覆盖（拉取 GHCR 镜像）
-            COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
-
             echo "=== 部署版本 $TARGET_VERSION ==="
+
+            # 先锁定目标版本，让生产覆盖文件可以在 preflight 阶段完成变量展开。
+            export TAG="$TARGET_VERSION"
+
+            # Compose 文件组合：base + prod 覆盖（拉取 GHCR 镜像）。
+            # 显式指定 .env，避免 SSH 工作目录或 Compose 默认加载规则变化导致误用占位配置。
+            COMPOSE="docker compose --env-file .env -f docker-compose.yml -f docker-compose.prod.yml"
+
+            # 任何镜像操作和容器重启前先阻断不安全/不完整配置，避免把失败推迟到停机之后。
+            if [ ! -f .env ] || [ ! -f validate-env.sh ]; then
+              echo "❌ DEPLOY_PATH 必须包含 .env、validate-env.sh 和 Compose 文件" >&2
+              exit 1
+            fi
+            bash ./validate-env.sh .env
+            $COMPOSE config --quiet
 
             # 记录当前版本（用于回滚）
             CURRENT_TAG=$(cat .last-deployed-tag 2>/dev/null || echo "unknown")
             echo "当前版本: $CURRENT_TAG → 目标版本: $TARGET_VERSION"
 
             # 登录 GHCR 拉取私有镜像（凭证从服务器环境变量读取，不通过 CI 传输）
-            if [ -z "$GHCR_PULL_TOKEN" ] || [ -z "$GHCR_PULL_USER" ]; then
+            if [ -z "${GHCR_PULL_TOKEN:-}" ] || [ -z "${GHCR_PULL_USER:-}" ]; then
               echo "❌ 服务器未配置 GHCR_PULL_USER/GHCR_PULL_TOKEN 环境变量" >&2
               exit 1
             fi
             echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USER" --password-stdin
 
             # 拉取新镜像 + 滚动重启（仅 backend/frontend，不动 PG/Redis/MQTT 等有状态服务）
-            export TAG=$TARGET_VERSION
             $COMPOSE pull backend frontend
             $COMPOSE up -d --no-deps --force-recreate backend frontend
 
@@ -477,26 +489,36 @@ jobs:
             echo "等待服务启动..."
             sleep 30
 
-            # 健康门禁：轮询 /health 最多 120 秒
+            # 健康门禁：同时检查后端全部依赖就绪和前端容器健康，最多轮询 120 秒。
+            # /health 只覆盖 PostgreSQL/Redis 存活，不能证明 RabbitMQ、MQTT 和只读库可用。
             HEALTHY=false
             for i in $(seq 1 12); do
-              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health || echo "000")
-              if [ "$HTTP_CODE" = "200" ]; then
-                echo "✅ 后端健康检查通过（第 $i 次探测）"
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health/ready || echo "000")
+              FRONTEND_CONTAINER="$($COMPOSE ps -q frontend 2>/dev/null || true)"
+              FRONTEND_STATUS=""
+              if [ -n "$FRONTEND_CONTAINER" ]; then
+                FRONTEND_STATUS=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "$FRONTEND_CONTAINER" 2>/dev/null || true)
+              fi
+              if [ "$HTTP_CODE" = "200" ] && [ "$FRONTEND_STATUS" = "healthy" ]; then
+                echo "✅ 后端 readiness + 前端容器健康检查通过（第 $i 次探测）"
                 HEALTHY=true
                 break
               fi
-              echo "等待健康检查... ($i/12, HTTP $HTTP_CODE)"
+              echo "等待健康检查... ($i/12, backend readiness HTTP $HTTP_CODE, frontend=$FRONTEND_STATUS)"
               sleep 10
             done
 
             # 健康检查失败 → 回滚到上一版本
             if [ "$HEALTHY" != "true" ]; then
-              echo "❌ 健康检查失败，回滚到 $CURRENT_TAG"
-              export TAG=$CURRENT_TAG
-              $COMPOSE pull backend frontend
-              $COMPOSE up -d --no-deps --force-recreate backend frontend
-              echo "已回滚到 $CURRENT_TAG，请检查日志排查问题"
+              if [ "$CURRENT_TAG" != "unknown" ] && [ -n "$CURRENT_TAG" ]; then
+                echo "❌ 健康检查失败，回滚到 $CURRENT_TAG"
+                export TAG=$CURRENT_TAG
+                $COMPOSE pull backend frontend
+                $COMPOSE up -d --no-deps --force-recreate backend frontend
+                echo "已回滚到 $CURRENT_TAG，请检查日志排查问题"
+              else
+                echo "❌ 健康检查失败，且没有可用的历史版本可自动回滚；保留现场并要求人工恢复" >&2
+              fi
               exit 1
             fi
 
@@ -534,7 +556,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
         options: >-
@@ -644,7 +666,7 @@ jobs:
           --health-retries 5
 
       redis:
-        image: redis:7-alpine
+        image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
         ports:
           - 6379:6379
         options: >-

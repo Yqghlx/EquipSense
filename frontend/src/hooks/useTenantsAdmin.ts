@@ -114,9 +114,10 @@ export function useTenantDetail(id: string | undefined) {
  *
  * 调用 GET /admin/tenants/stats
  */
-export function useGlobalStats() {
+export function useGlobalStats(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['admin', 'globalStats'],
+    enabled: options.enabled ?? true,
     queryFn: async () => {
       const { data } = await api.get('/admin/tenants/stats');
       return data as GlobalStats;

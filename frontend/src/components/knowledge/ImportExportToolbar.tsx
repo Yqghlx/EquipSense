@@ -75,11 +75,9 @@ export default function ImportExportToolbar() {
 
         {/* 导出下拉菜单 */}
         <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Button variant="outline" size="sm">
-              <Download className="mr-2 h-4 w-4" />
-              {t('knowledge.importExport.export')}
-            </Button>
+          <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+            <Download className="mr-2 h-4 w-4" />
+            {t('knowledge.importExport.export')}
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => handleExport('csv')}>

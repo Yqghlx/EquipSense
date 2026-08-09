@@ -33,7 +33,11 @@ export function NotificationToast() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 w-80 cursor-pointer rounded-lg border border-border bg-card p-4 shadow-lg transition-all"
+      data-testid="notification-toast"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      className="notification-toast fixed bottom-4 right-4 z-50 w-80 cursor-pointer rounded-lg border border-border bg-card p-4 shadow-lg transition-all"
       onClick={() => {
         markRead(latest.id);
         if (latest.link) navigate(latest.link);

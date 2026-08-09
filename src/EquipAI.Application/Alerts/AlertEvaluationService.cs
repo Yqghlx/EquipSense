@@ -25,19 +25,23 @@ public class AlertEvaluationService : IAlertEvaluationService
     private readonly IAlertAggregator _aggregator;
     private readonly IEnumerable<IAlertRuleEvaluator> _evaluators;
     private readonly ILogger<AlertEvaluationService> _logger;
+    private readonly AlertEvaluationConcurrencyGate _concurrencyGate;
 
     public AlertEvaluationService(
         IServiceScopeFactory scopeFactory,
         IEventBus eventBus,
         IAlertAggregator aggregator,
         IEnumerable<IAlertRuleEvaluator> evaluators,
-        ILogger<AlertEvaluationService> logger)
+        ILogger<AlertEvaluationService> logger,
+        AlertEvaluationConcurrencyGate? concurrencyGate = null)
     {
         _scopeFactory = scopeFactory;
         _eventBus = eventBus;
         _aggregator = aggregator;
         _evaluators = evaluators;
         _logger = logger;
+        // 单元测试可以不注册门闩；生产环境通过 DI 注入 Singleton，跨事件作用域共享同一组键控锁。
+        _concurrencyGate = concurrencyGate ?? new AlertEvaluationConcurrencyGate();
     }
 
     /// <inheritdoc />
@@ -102,6 +106,12 @@ public class AlertEvaluationService : IAlertEvaluationService
             var triggered = evaluator.Evaluate(value, rule, context);
             sw.Stop();
             BusinessMetrics.AlertEvaluationDuration.Observe(sw.Elapsed.TotalMilliseconds);
+
+            // 评估结果确定后再锁定状态变更路径：不触发时保护自动恢复，触发时保护聚合计数与告警创建/更新。
+            // 这样不同指标、不同规则仍可并行，但同一告警键不会出现“更新早于创建提交”的竞态。
+            await using var evaluationLease = await _concurrencyGate.EnterAsync(
+                AlertEvaluationConcurrencyGate.BuildKey(tenantId, deviceId, rule.Id, metric),
+                cancellationToken);
 
             if (!triggered)
             {
@@ -199,7 +209,7 @@ public class AlertEvaluationService : IAlertEvaluationService
 
     /// <summary>
     /// 创建新告警实例
-    /// 告警编码格式：ALT-{设备编码}-{指标}-{时间戳}
+    /// 告警编码格式：ALT-{设备编码}-{指标}-{规则短 ID}-{时间戳}-{随机后缀}
     /// </summary>
     private async Task<Alert?> CreateAlertAsync(AppDbContext dbContext, Guid tenantId,
         Guid deviceId, AlertRule rule, string metric, double value, DeviceContext context,
@@ -211,7 +221,19 @@ public class AlertEvaluationService : IAlertEvaluationService
             .FirstOrDefaultAsync(d => d.Id == deviceId);
         var deviceCode = device?.DeviceCode ?? deviceId.ToString("N")[..8];
 
-        var alertCode = $"ALT-{deviceCode}-{metric}-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        // 告警编码必须全局唯一：同一设备同一秒可能同时命中多条分层规则，
+        // 仅使用设备+指标+秒级时间会撞上数据库唯一索引，导致后续规则评估中断。
+        // 规则短 ID 便于现场追溯来源，毫秒时间与随机后缀共同覆盖跨实例并发场景。
+        var ruleShortId = rule.Id.ToString("N")[..8];
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff");
+        var randomSuffix = Guid.NewGuid().ToString("N")[..8];
+        var uniqueSuffix = $"{ruleShortId}-{timestamp}-{randomSuffix}";
+        var alertCodePrefix = $"ALT-{deviceCode}-{metric}-";
+        const int maxAlertCodeLength = 100;
+        var prefixLength = Math.Min(
+            alertCodePrefix.Length,
+            maxAlertCodeLength - uniqueSuffix.Length);
+        var alertCode = alertCodePrefix[..prefixLength] + uniqueSuffix;
 
         var alert = new Alert
         {

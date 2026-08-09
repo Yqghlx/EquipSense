@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 project_dir="$(cd -- "${script_dir}/.." && pwd)"
-image="${RABBITMQ_SMOKE_IMAGE:-rabbitmq:4.3.4-management-alpine}"
+image="${RABBITMQ_SMOKE_IMAGE:-rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94}"
 username="${RABBITMQ_SMOKE_USERNAME:-equipai_smoke}"
 password="${RABBITMQ_SMOKE_PASSWORD:-equipai_smoke_password_123456}"
 container="equipsense-rabbitmq-startup-smoke-$$"

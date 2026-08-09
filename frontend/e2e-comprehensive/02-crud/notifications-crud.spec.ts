@@ -80,7 +80,7 @@ test.describe('02-通知中心', () => {
     // 创建测试设备和告警规则
     const device = await createTestDevice(page);
     const deviceId = (device as Record<string, unknown>).id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, deviceId);
     const ruleId = (rule as Record<string, unknown>).id as string;
 
     try {

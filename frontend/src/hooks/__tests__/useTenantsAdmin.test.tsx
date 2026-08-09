@@ -156,6 +156,16 @@ describe('useTenantDetail', () => {
 });
 
 describe('useGlobalStats', () => {
+  it('非系统管理员应禁用全局统计查询', () => {
+    const { result } = renderHook(
+      () => useGlobalStats({ enabled: false }),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(mockedApi.get).not.toHaveBeenCalled();
+  });
+
   it('应获取全局统计', async () => {
     const mockStats = {
       totalTenants: 50,

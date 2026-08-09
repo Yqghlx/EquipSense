@@ -42,7 +42,12 @@ cd EquipSense
 
 # 2. 创建环境变量文件
 cp docker/.env.example docker/.env
-# 编辑 .env，设置所有必填密码、JWT_SECRET 和固定的 RABBITMQ_IMAGE
+# 首次校验会因占位值返回非零，这是预期行为；先编辑 .env 填写所有必填凭据
+cd docker
+./setup.sh
+nano .env
+./setup.sh
+cd ..
 
 # 3. 启动全套服务
 docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build

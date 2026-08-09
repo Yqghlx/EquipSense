@@ -8,7 +8,7 @@ services:
     container_name: equipai-postgres
     restart: unless-stopped
     ports:
-      - "${PG_PORT:-5432}:5432"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${PG_PORT:-5432}:5432"
     environment:
       POSTGRES_DB: ${PG_DB:-equipai}
       POSTGRES_USER: ${PG_USER:-postgres}
@@ -46,7 +46,7 @@ services:
     container_name: equipai-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     command: >
       redis-server
       --appendonly yes
@@ -81,7 +81,7 @@ services:
     container_name: equipai-mosquitto
     restart: unless-stopped
     ports:
-      - "${MQTT_PORT:-8883}:8883"
+      - "${PUBLIC_BIND_ADDRESS:-0.0.0.0}:${MQTT_PORT:-8883}:8883"
     volumes:
       - ./mosquitto.prod.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mqtt-certs:/mosquitto/config/certs:ro
@@ -110,8 +110,8 @@ services:
     container_name: equipai-rabbitmq
     restart: unless-stopped
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${RABBITMQ_PORT:-5672}:5672"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${RABBITMQ_MGMT_PORT:-15672}:15672"
     environment:
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-equipai}"
       # RabbitMQ 服务始终会启动，禁止使用公开默认密码，避免管理端口暴露弱凭证。
@@ -149,7 +149,7 @@ services:
     container_name: equipai-backend
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-8080}:8080"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8080}:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
@@ -267,7 +267,7 @@ services:
     container_name: equipai-edgegateway
     restart: unless-stopped
     ports:
-      - "${EDGE_PORT:-8081}:8081"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${EDGE_PORT:-8081}:8081"
     environment:
       Gateway__Id: "${GATEWAY_ID:-gateway-001}"
       Gateway__TenantId: "${GATEWAY_TENANT_ID:-}"
@@ -315,7 +315,7 @@ services:
     container_name: equipai-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8443}:443"
+      - "${PUBLIC_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PORT:-8443}:443"
     environment:
       BACKEND_URL: http://backend:8080
       SSL_CERT_PATH: "${SSL_CERT_PATH:-/etc/nginx/ssl/cert.pem}"
@@ -360,7 +360,7 @@ services:
     container_name: equipai-seq
     restart: unless-stopped
     ports:
-      - "${SEQ_PORT:-5341}:80"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${SEQ_PORT:-5341}:80"
     environment:
       ACCEPT_EULA: "Y"
       SEQ_FIRSTRUN_ADMINPASSWORD: "${SEQ_ADMIN_PASSWORD:?请在 .env 中设置 SEQ_ADMIN_PASSWORD}"
@@ -390,7 +390,7 @@ services:
     container_name: equipai-prometheus
     restart: unless-stopped
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules.yml:/etc/prometheus/rules.yml:ro
@@ -414,7 +414,7 @@ services:
     container_name: equipai-alertmanager
     restart: unless-stopped
     ports:
-      - "${ALERTMANAGER_PORT:-9093}:9093"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
@@ -434,7 +434,7 @@ services:
     container_name: equipai-grafana
     restart: unless-stopped
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?请在 .env 中设置 GRAFANA_PASSWORD}"
@@ -467,9 +467,9 @@ services:
     container_name: equipai-jaeger
     restart: unless-stopped
     ports:
-      - "${JAEGER_UI_PORT:-16686}:16686"   # Web UI
-      - "${JAEGER_OTLP_PORT:-4317}:4317"   # OTLP gRPC（后端推送）
-      - "${JAEGER_OTLP_HTTP_PORT:-4318}:4318"  # OTLP HTTP（备选）
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${JAEGER_UI_PORT:-16686}:16686"   # Web UI
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${JAEGER_OTLP_PORT:-4317}:4317"   # OTLP gRPC（后端推送）
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${JAEGER_OTLP_HTTP_PORT:-4318}:4318"  # OTLP HTTP（备选）
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
       # 内存存储（重启清空），适合开发/中小规模；生产应换 Elasticsearch/Cassandra 后端

@@ -62,7 +62,7 @@ export default function DashboardPage() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: oee } = useOee();
   const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
-  const { data: globalStats } = useGlobalStats();
+  const { data: globalStats } = useGlobalStats({ enabled: isSystemAdmin });
 
   /** 统计卡片配置（可点击跳转） */
   const statCards = [

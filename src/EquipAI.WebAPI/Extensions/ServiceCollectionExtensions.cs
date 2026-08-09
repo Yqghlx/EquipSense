@@ -308,6 +308,8 @@ public static class ServiceCollectionExtensions
 
         // 告警聚合器（Singleton — Redis 共享状态，Redis 故障时自动降级到本地窗口）
         services.AddSingleton<IAlertAggregator, AlertAggregator>();
+        // 告警状态并发门闩（Singleton — 同一设备/规则/指标串行创建与更新，避免并发遥测重复建 Active 告警）
+        services.AddSingleton<AlertEvaluationConcurrencyGate>();
 
         // 告警评估服务（Scoped — 需要 DbContext）
         services.AddScoped<IAlertEvaluationService, AlertEvaluationService>();

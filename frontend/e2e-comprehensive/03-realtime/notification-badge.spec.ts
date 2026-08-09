@@ -92,7 +92,7 @@ test.describe('03-通知角标', () => {
     // 创建测试设备和告警规则
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     // 登录
@@ -144,7 +144,7 @@ test.describe('03-通知角标', () => {
     // 创建测试设备和告警规则
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     // 触发告警
@@ -268,7 +268,7 @@ test.describe('03-通知角标', () => {
     // 创建测试设备和告警规则
     const device = await createTestDevice(page);
     testDeviceId = device.id as string;
-    const rule = await createThresholdRule(page);
+    const rule = await createThresholdRule(page, undefined, true, testDeviceId!);
     testRuleId = rule.id as string;
 
     // 连续触发大量告警（模拟超过 99 条的场景）

@@ -121,14 +121,16 @@ export async function loginAsFast(page: Page, role: string = 'admin'): Promise<v
   // API 登录，Cookie 自动写入上下文
   await loginViaAPI(page, role);
 
-  // 注入 sessionStorage('user')，让 AuthGuard 同步放行
-  await page.addInitScript((userJson) => {
+  // 注入 sessionStorage('user') 和主动刷新时间戳，让 AuthGuard 与刷新调度都保持
+  // 与真实 UI 登录路径一致。
+  await page.addInitScript(({ userJson, tokenExpiryMs }) => {
     try {
       sessionStorage.setItem('user', userJson);
+      sessionStorage.setItem('token_expires_at_ms', String(tokenExpiryMs));
     } catch {
       // 极少数情况下 sessionStorage 不可用，忽略——Cookie 仍生效
     }
-  }, ROLE_USER_JSON[role]);
+  }, { userJson: ROLE_USER_JSON[role], tokenExpiryMs: ROLE_TOKEN_EXPIRY_MS[role] });
 
   await page.goto(`${BASE_URL}/dashboard`);
   await page.waitForLoadState('networkidle');
@@ -197,6 +199,9 @@ async function loginViaAPI(page: Page, role: string): Promise<void> {
       // 缓存 user JSON 供后续 addInitScript 注入（避免每次登录都重新解析）
       const userInfo = body.userInfo ?? body.UserInfo;
       ROLE_USER_JSON[role] = JSON.stringify(userInfo);
+      const expiresIn = body.expiresIn ?? body.ExpiresIn;
+      const expiresInSeconds = typeof expiresIn === 'number' && expiresIn > 0 ? expiresIn : 900;
+      ROLE_TOKEN_EXPIRY_MS[role] = Date.now() + expiresInSeconds * 1000;
       return;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
@@ -210,6 +215,9 @@ async function loginViaAPI(page: Page, role: string): Promise<void> {
 
 /** 角色到 sessionStorage('user') JSON 的缓存（首次 loginViaAPI 后填充） */
 const ROLE_USER_JSON: Record<string, string> = {};
+
+/** 角色到 sessionStorage 主动刷新时间戳的缓存（快速登录必须与真实登录保持一致） */
+const ROLE_TOKEN_EXPIRY_MS: Record<string, number> = {};
 
 /**
  * 以管理员身份登录（兼容原有调用方式）

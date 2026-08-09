@@ -49,10 +49,14 @@ DOMAIN=your-domain.com
 确认 `docker/.env` 中的必填项已替换占位值后，生成开发/测试用 Nginx 与 MQTT TLS 证书，并创建 MQTT 密码文件：
 
 ```bash
-cd docker && ./setup.sh && cd ..
+cd docker
+./setup.sh   # 首次运行会创建 .env 并因占位凭据返回非零，这是预期行为
+nano .env    # 填写所有必填凭据
+./setup.sh   # 配置通过后才会生成证书和 MQTT 密码文件
+cd ..
 ```
 
-`setup.sh` 会在启动前一次性校验生产 Compose 所需的凭证、JWT 长度、证书/监控配置文件，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。
+`setup.sh` 会在生成任何证书或认证文件前，一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。
 
 > 注意：Docker Compose 默认只从当前工作目录加载 `.env`。本项目配置文件位于 `docker/.env`，因此从仓库根目录执行 Compose 命令时必须带 `--env-file docker/.env`；本手册的生产命令已统一显式指定该参数。
 
@@ -124,6 +128,8 @@ curl http://localhost:8080/api/v1/system/info
 | `PG_DB` | 数据库名 | `equipai` | 否 |
 | `PG_USER` | 数据库用户 | `postgres` | 否 |
 | `PG_PORT` | PostgreSQL 端口 | `5432` | 否 |
+| `INTERNAL_BIND_ADDRESS` | 内部服务宿主端口绑定地址 | `127.0.0.1` | 否 |
+| `PUBLIC_BIND_ADDRESS` | 前端、MQTT、蓝绿路由宿主端口绑定地址 | `0.0.0.0` | 否 |
 | `REDIS_PASSWORD` | Redis 密码 | - | 生产环境必填 |
 | `REDIS_PORT` | Redis 端口 | `6379` | 否 |
 | `RABBITMQ_IMAGE` | RabbitMQ 带 digest 的精确镜像引用 | 无默认值 | 生产环境必填 |
@@ -164,6 +170,22 @@ curl http://localhost:8080/api/v1/system/info
 ### RabbitMQ 既有部署升级
 
 生产 Compose 默认使用 RabbitMQ，且 `RABBITMQ_IMAGE` 必须显式设置为带 digest 的镜像引用。已有 3.13 数据卷不得直接挂载到 4.3；有保留消息需求时按 `3.13 -> 4.2 -> 4.3` 升级，每一步先备份并启用稳定 feature flags。切换后验证 `equipai-v2-at-least-once-dlx` policy，再启动后端。完整迁移、排空和回滚步骤见 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md)。
+
+生产 Compose 默认将 PostgreSQL、Redis、RabbitMQ、后端 API 和可观测性面板绑定到 `127.0.0.1`，
+避免数据库、管理端口和日志面板直接暴露到公网；前端、MQTT 和蓝绿 router 默认绑定 `0.0.0.0`。
+如使用外部负载均衡器，可在 `.env` 中将 `PUBLIC_BIND_ADDRESS` 改为 `127.0.0.1`，并由负载均衡器负责公网入口。
+
+### CI/CD 自动部署前置条件
+
+GitHub Actions 的 `deploy` job 要求 `DEPLOY_PATH` 指向生产 Docker 文件目录本身（不是仓库根目录），该目录必须同时包含：
+
+- `.env`（权限为 `600`，由密钥管理系统或人工安全注入）
+- `validate-env.sh`
+- `docker-compose.yml` 与 `docker-compose.prod.yml`
+
+部署会先执行 `bash ./validate-env.sh .env` 和 `docker compose --env-file .env ... config --quiet`，
+只有生产凭据、镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重启容器。校验失败会在任何容器变更前退出。
+如需启用零停机蓝绿部署，再按 [`BLUE_GREEN_DEPLOY.md`](BLUE_GREEN_DEPLOY.md) 准备 `docker-compose.bluegreen.yml`、router 配置和部署脚本。
 
 ### 依赖审计说明
 
@@ -221,32 +243,53 @@ curl -X POST http://localhost:8080/api/v1/devices/health-score/refresh-all \
 
 ## 备份与恢复
 
-### PostgreSQL 备份
+### 全量备份（推荐）
 
 ```bash
-# 手动备份
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
-  pg_dump -U postgres equipai > backup_$(date +%Y%m%d).sql
+# 备份 PostgreSQL、工单附件；如配置了 REDIS_PASSWORD，也会备份 Redis
+cd docker
+./backup.sh
+cd ..
+```
 
-# 恢复
+脚本会生成以下文件并逐个校验：`*.sql.gz`（数据库）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把没有异地副本的备份误报为成功。
+
+### PostgreSQL 与附件恢复
+
+```bash
+# 1. 先停止后端，避免恢复过程中产生新写入
+docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend
+
+# 2. 自动选择最近一次已生成的数据库和附件备份（也可手动替换为指定文件）
+LATEST_DB_BACKUP="$(ls -t docker/backups/equipai_*.sql.gz | head -n1)"
+LATEST_ATTACHMENTS_BACKUP="$(ls -t docker/backups/attachments_*.tar.gz | head -n1)"
+test -n "$LATEST_DB_BACKUP" && test -n "$LATEST_ATTACHMENTS_BACKUP"
+
+# 3. 恢复 PostgreSQL
+gunzip -c "$LATEST_DB_BACKUP" | \
 docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
-  psql -U postgres equipai < backup_20260602.sql
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+
+# 4. 校验并解压附件备份到临时目录，再复制回持久卷
+ATTACHMENTS_TMP="$(mktemp -d)"
+tar -tzf "$LATEST_ATTACHMENTS_BACKUP" >/dev/null
+tar -xzf "$LATEST_ATTACHMENTS_BACKUP" -C "$ATTACHMENTS_TMP"
+docker compose --env-file docker/.env -f docker/docker-compose.yml cp \
+  "$ATTACHMENTS_TMP/." backend:/app/uploads/
+rm -rf "$ATTACHMENTS_TMP"
+
+# 5. 恢复 Redis（可选）并启动后端
+docker compose --env-file docker/.env -f docker/docker-compose.yml restart redis
+docker compose --env-file docker/.env -f docker/docker-compose.yml start backend
 ```
 
 ### Volume 管理
 
 ```bash
-# 列出所有 volume
+# 列出所有 volume（确认 attachments_data 仍然存在）
 docker volume ls | grep equipai
 
-# 备份工单附件（将 equipsense_attachments_data 替换为实际 volume 名称）
-docker run --rm \
-  -v equipsense_attachments_data:/data:ro \
-  -v "$PWD":/backup \
-  alpine:3.20 tar czf /backup/attachments_$(date +%Y%m%d).tar.gz -C /data .
-
-# 仅清理备份 volume
-docker volume rm equipai_pg_backup
+# 不要直接删除 pgdata、attachments_data 或 redis_data；先完成备份与恢复演练
 ```
 
 ## 日志查看
@@ -374,8 +417,8 @@ UPDATE tenants SET time_zone = 'Asia/Shanghai' WHERE slug = 'your-tenant-slug';
 
 ### 备份脚本依赖（v1.3.0+）
 
-`docker/backup.sh` 已改为通过 `docker exec equipai-postgres pg_dump` 在容器内执行备份。
-**主机不需要安装 PostgreSQL 客户端工具**，只需要 Docker 访问权限。
+`docker/backup.sh` 通过 Docker 在容器内导出 PostgreSQL，并通过 `docker cp` 归档后端的 `/app/uploads` 附件目录。
+**主机不需要安装 PostgreSQL 客户端工具**，只需要 Docker 访问权限和主机 `tar`。
 
 定时备份（推荐每天凌晨 2 点）：
 ```bash
