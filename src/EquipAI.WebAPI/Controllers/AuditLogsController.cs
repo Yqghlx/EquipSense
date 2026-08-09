@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.OutputCaching;
 using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.Services;
 using EquipAI.Core.Interfaces;
@@ -34,7 +33,6 @@ public class AuditLogsController : ControllerBase
     /// </summary>
     [HttpGet]
     [RequirePermission("audit:read")]
-    [OutputCache(Duration = 300)] // 5 分钟缓存，审计日志变化频率低
     [ProducesResponseType(typeof(PagedResult<AuditLogDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<AuditLogDto>>> GetAuditLogs(
         [FromQuery] PagedQuery query,

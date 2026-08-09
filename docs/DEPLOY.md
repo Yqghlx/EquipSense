@@ -28,6 +28,7 @@ JWT_SECRET=<随机密钥，至少32位>
 MQTT_USERNAME=<MQTT用户名>
 MQTT_PASSWORD=<MQTT强密码>
 GATEWAY_AUTH_KEY=<至少32位的纯ASCII网关认证密钥>
+GATEWAY_ALLOWED_HOSTS=edgegateway
 SEED_ADMIN_PASSWORD=<管理员初始密码>
 SEED_LEAD_PASSWORD=<主管初始密码>
 SEED_TECH_PASSWORD=<技术员初始密码>
@@ -37,7 +38,7 @@ VAPID__PUBLICKEY=<由 web-push 生成的公钥>
 VAPID__PRIVATEKEY=<由 web-push 生成的私钥>
 REDIS_PASSWORD=<Redis强密码>
 RABBITMQ_PASSWORD=<RabbitMQ强密码>
-RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine
+RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94
 SEQ_ADMIN_PASSWORD=<Seq管理员密码>
 GRAFANA_PASSWORD=<Grafana管理员密码>
 
@@ -50,6 +51,10 @@ DOMAIN=your-domain.com
 ```bash
 cd docker && ./setup.sh && cd ..
 ```
+
+`setup.sh` 会在启动前一次性校验生产 Compose 所需的凭证、JWT 长度、证书/监控配置文件，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。
+
+生产 Compose 的基础设施镜像使用 digest 固定版本；升级镜像时应先更新 digest、完成全量验证，再进行部署。RabbitMQ 通过 `RABBITMQ_IMAGE` 显式注入，生产环境应使用带 digest 的镜像引用。
 
 生成 VAPID 密钥：
 
@@ -119,7 +124,7 @@ curl http://localhost:8080/api/v1/system/info
 | `PG_PORT` | PostgreSQL 端口 | `5432` | 否 |
 | `REDIS_PASSWORD` | Redis 密码 | - | 生产环境必填 |
 | `REDIS_PORT` | Redis 端口 | `6379` | 否 |
-| `RABBITMQ_IMAGE` | RabbitMQ 精确镜像版本 | 无默认值 | 生产环境必填 |
+| `RABBITMQ_IMAGE` | RabbitMQ 带 digest 的精确镜像引用 | 无默认值 | 生产环境必填 |
 | `RABBITMQ_PASSWORD` | RabbitMQ 密码（至少 16 字符，禁止 guest） | - | 生产环境必填 |
 | `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | - | 生产环境必填 |
 | `GRAFANA_PASSWORD` | Grafana 管理员密码 | - | 生产环境必填 |
@@ -127,6 +132,7 @@ curl http://localhost:8080/api/v1/system/info
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
 | `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（至少 32 位纯 ASCII） | - | 使用边缘网关时必填 |
+| `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码 | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
@@ -152,7 +158,7 @@ curl http://localhost:8080/api/v1/system/info
 
 ### RabbitMQ 既有部署升级
 
-生产 Compose 默认使用 RabbitMQ，且 `RABBITMQ_IMAGE` 必须显式设置。已有 3.13 数据卷不得直接挂载到 4.3；有保留消息需求时按 `3.13 -> 4.2 -> 4.3` 升级，每一步先备份并启用稳定 feature flags。切换后验证 `equipai-v2-at-least-once-dlx` policy，再启动后端。完整迁移、排空和回滚步骤见 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md)。
+生产 Compose 默认使用 RabbitMQ，且 `RABBITMQ_IMAGE` 必须显式设置为带 digest 的镜像引用。已有 3.13 数据卷不得直接挂载到 4.3；有保留消息需求时按 `3.13 -> 4.2 -> 4.3` 升级，每一步先备份并启用稳定 feature flags。切换后验证 `equipai-v2-at-least-once-dlx` policy，再启动后端。完整迁移、排空和回滚步骤见 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md)。
 
 ### 依赖审计说明
 
@@ -193,6 +199,8 @@ SMTP_ENABLE_SSL=true
 3. 交互式卡片自动推送（红色=严重，橙色=高级）
 
 > 仅 Critical/High 级别告警推送机器人，避免低级别刷屏。所有级别告警都会生成站内通知。
+
+> 出于 SSRF 防护，集成 URL 默认不得指向回环、云元数据或私网地址；企业内网 EAM 需显式设置 `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS=true`。
 
 ### 设备健康度定时刷新
 

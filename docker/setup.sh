@@ -99,6 +99,13 @@ step "步骤 2/5：配置环境变量 (.env)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
 
+read_env_value() {
+    local key="$1"
+    local line
+    line=$(grep -E "^${key}=" "${ENV_FILE}" | tail -n 1 || true)
+    printf '%s' "${line#*=}"
+}
+
 if [ -f "${ENV_FILE}" ]; then
     success ".env 文件已存在: ${ENV_FILE}"
 
@@ -106,6 +113,63 @@ if [ -f "${ENV_FILE}" ]; then
     if grep -q "请修改为强密码" "${ENV_FILE}" || grep -q "请修改为随机密钥" "${ENV_FILE}"; then
         warn ".env 文件中包含未修改的占位值（密码/密钥），请务必修改后再启动服务"
         warn "  运行以下命令编辑配置：nano ${ENV_FILE}"
+    fi
+
+    # Compose 使用 :? 语法时通常只报告第一个缺失变量；这里在启动前一次性检查所有必填项，
+    # 让部署人员能在一轮修复全部配置问题，避免容器启动到一半才逐项失败。
+    REQUIRED_ENV_VARS=(
+        "PG_PASSWORD"
+        "REDIS_PASSWORD"
+        "RABBITMQ_IMAGE"
+        "RABBITMQ_PASSWORD"
+        "JWT_SECRET"
+        "GATEWAY_AUTH_KEY"
+        "MQTT_USERNAME"
+        "MQTT_PASSWORD"
+        "SEED_ADMIN_PASSWORD"
+        "SEED_LEAD_PASSWORD"
+        "SEED_TECH_PASSWORD"
+        "SEED_OPERATOR_PASSWORD"
+        "SEED_VIEWER_PASSWORD"
+        "FRONTEND_URL"
+        "SEQ_ADMIN_PASSWORD"
+        "GRAFANA_PASSWORD"
+    )
+
+    for key in "${REQUIRED_ENV_VARS[@]}"; do
+        value=$(read_env_value "${key}")
+        if [ -z "${value}" ] \
+            || [[ "${value}" == *"请修改"* ]] \
+            || [[ "${value}" == *"PLEASE_CHANGE"* ]] \
+            || [ "${key}" = "MQTT_USERNAME" ] && [ "${value}" = "device" ] \
+            || [ "${key}" = "MQTT_PASSWORD" ] && [ "${value}" = "device123" ]; then
+            error "必填环境变量 ${key} 缺失或仍为占位值（不会打印其内容）"
+        fi
+    done
+
+    jwt_value=$(read_env_value "JWT_SECRET")
+    if [ -n "${jwt_value}" ] && [ "${jwt_value}" != *"请修改"* ] && [ "${#jwt_value}" -lt 32 ]; then
+        error "JWT_SECRET 长度不足 32 个字符"
+    fi
+
+    gateway_auth_key=$(read_env_value "GATEWAY_AUTH_KEY")
+    if [ -n "${gateway_auth_key}" ] && [ "${gateway_auth_key}" != *"PLEASE_CHANGE"* ] \
+        && [ "${#gateway_auth_key}" -lt 32 ]; then
+        error "GATEWAY_AUTH_KEY 长度不足 32 个字符"
+    fi
+    if [ -n "${gateway_auth_key}" ] && printf '%s' "${gateway_auth_key}" | LC_ALL=C grep -q '[^ -~]'; then
+        error "GATEWAY_AUTH_KEY 必须只包含 ASCII 字符（HTTP Header 不允许中文等非 ASCII 字符）"
+    fi
+
+    rabbitmq_password=$(read_env_value "RABBITMQ_PASSWORD")
+    if [ -n "${rabbitmq_password}" ] && [ "${rabbitmq_password}" != *"请修改"* ] \
+        && [ "${#rabbitmq_password}" -lt 16 ]; then
+        error "RABBITMQ_PASSWORD 长度不足 16 个字符"
+    fi
+
+    rabbitmq_image=$(read_env_value "RABBITMQ_IMAGE")
+    if [ -n "${rabbitmq_image}" ] && [[ "${rabbitmq_image}" != *@sha256:* ]]; then
+        error "RABBITMQ_IMAGE 必须使用带 digest 的固定镜像引用（例如 image:tag@sha256:...）"
     fi
 else
     if [ -f "${ENV_EXAMPLE}" ]; then
@@ -201,6 +265,15 @@ if [ -f "${PASSWD_FILE}" ] && [ -s "${PASSWD_FILE}" ]; then
     # 列出用户名（不含密码哈希）
     USER_LIST=$(cut -d: -f1 "${PASSWD_FILE}" 2>/dev/null | tr '\n' ' ')
     success "用户列表: ${USER_LIST}"
+
+    # 仅检查文件存在还不够：如果 .env 的 MQTT_USERNAME 与密码文件不一致，
+    # Mosquitto 会正常启动，但后端/边缘网关会持续认证失败，形成隐蔽的遥测中断。
+    if [ -f "${ENV_FILE}" ]; then
+        mqtt_username=$(read_env_value "MQTT_USERNAME")
+        if [ -n "${mqtt_username}" ] && ! grep -q "^${mqtt_username}:" "${PASSWD_FILE}"; then
+            error "Mosquitto 密码文件不包含 .env 中的 MQTT_USERNAME（请重新运行 setup-mosquitto.sh）"
+        fi
+    fi
 else
     echo -e "  ${YELLOW}Mosquitto 密码文件不存在或为空，正在创建...${NC}"
 
@@ -240,7 +313,7 @@ REQUIRED_FILES=(
     "Dockerfile.frontend|前端 Dockerfile"
     "entrypoint.sh|后端入口脚本"
     "nginx-entrypoint.sh|Nginx 入口脚本"
-    "grafana/provisioning/datasources/datasource.yml|Grafana 数据源配置"
+    "grafana/provisioning/datasources/prometheus.yml|Grafana 数据源配置"
     "grafana/provisioning/dashboards/dashboard.yml|Grafana 仪表盘配置"
 )
 
@@ -257,7 +330,8 @@ for ITEM in "${REQUIRED_FILES[@]}"; do
     fi
 done
 
-# 检查脚本文件是否可执行
+# 检查宿主机上需要直接运行的脚本是否可执行。
+# nginx-entrypoint.sh 由 Dockerfile.frontend 在镜像构建阶段 chmod，不能在宿主机上改动仓库文件权限。
 echo ""
 echo -e "  ${BLUE}检查脚本文件可执行权限...${NC}"
 EXECUTABLE_SCRIPTS=(
@@ -266,7 +340,6 @@ EXECUTABLE_SCRIPTS=(
     "setup-mosquitto.sh"
     "setup.sh"
     "entrypoint.sh"
-    "nginx-entrypoint.sh"
     "backup.sh"
 )
 

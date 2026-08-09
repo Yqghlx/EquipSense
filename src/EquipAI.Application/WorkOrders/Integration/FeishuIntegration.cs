@@ -167,7 +167,7 @@ public class FeishuIntegration : IWorkOrderIntegration
         var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(webhookUrl, card, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
 
-        _logger.LogInformation("飞书 Webhook 推送完成: Status={Status}, Body={Body}", response.StatusCode, body);
+        _logger.LogInformation("飞书 Webhook 推送完成: Status={Status}", response.StatusCode);
         return response.IsSuccessStatusCode ? body : null;
     }
 
@@ -205,7 +205,7 @@ public class FeishuIntegration : IWorkOrderIntegration
         using var tokenDoc = JsonDocument.Parse(tokenBody);
         if (!tokenDoc.RootElement.TryGetProperty("tenant_access_token", out var tokenEl) || string.IsNullOrEmpty(tokenEl.GetString()))
         {
-            _logger.LogWarning("飞书 TenantAccessToken 为空。响应：{Body}", tokenBody);
+            _logger.LogWarning("飞书 TenantAccessToken 为空，未继续发送消息");
             return null;
         }
         var token = tokenEl.GetString();
@@ -232,7 +232,7 @@ public class FeishuIntegration : IWorkOrderIntegration
 
         if (!msgResponse.IsSuccessStatusCode)
         {
-            _logger.LogWarning("飞书应用模式发送消息失败: Status={Status}, Body={Body}", msgResponse.StatusCode, msgBody);
+            _logger.LogWarning("飞书应用模式发送消息失败: Status={Status}", msgResponse.StatusCode);
             return null;
         }
 

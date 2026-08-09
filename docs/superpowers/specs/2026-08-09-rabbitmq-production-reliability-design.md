@@ -170,7 +170,7 @@ equipai.v2.events.{event-key}                         fanout 事件交换机
 
 - `EVENTBUS_PROVIDER` 默认 `RabbitMQ`；
 - backend 对 rabbitmq 使用 `condition: service_healthy`；
-- `RABBITMQ_IMAGE` 为生产必填变量，`.env.example` 给出当前基线 `rabbitmq:4.3.4-management-alpine`；
+- `RABBITMQ_IMAGE` 为生产必填变量，`.env.example` 给出带 digest 的当前基线 `rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94`；
 - 继续强制要求 `RABBITMQ_PASSWORD`；
 - 挂载只包含 v2 队列策略的 RabbitMQ definitions/policy，不在镜像内硬编码业务密码；
 - Development Compose 不强制启动 RabbitMQ，继续使用 InMemory。

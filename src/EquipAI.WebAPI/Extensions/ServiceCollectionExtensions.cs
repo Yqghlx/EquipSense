@@ -131,6 +131,10 @@ public static class ServiceCollectionExtensions
         // 文件存储服务（本地文件系统实现，后续可替换为 S3/MinIO）
         services.AddScoped<Core.Interfaces.IFileStorageService, Infrastructure.Services.LocalFileStorageService>();
 
+        // 租户可配置出站地址的 SSRF 防护策略，保存时与实际发送时均执行校验。
+        services.AddSingleton<OutboundEndpointPolicy>();
+        services.AddTransient<OutboundEndpointValidationHandler>();
+
         // MQTT 配置选项
         services.Configure<MqttOptions>(configuration.GetSection("Mqtt"));
 
@@ -273,6 +277,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ITenantService, TenantService>();
         services.AddScoped<IDeviceService, DeviceService>();
         services.AddScoped<DeviceImportService>();
+        services.AddSingleton<GatewayEndpointPolicy>();
         services.AddScoped<GatewayManagementService>();
         services.AddScoped<GatewayDeviceConfigService>();
         services.AddScoped<Application.Devices.DeviceTypeTemplateService>();
@@ -370,11 +375,16 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient("WorkOrderIntegration", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);
-        });
+        }).AddHttpMessageHandler<OutboundEndpointValidationHandler>();
         // 告警多渠道通知 — 钉钉/飞书机器人推送复用同一 HttpClient 工厂模式
         services.AddHttpClient("AlertIntegration", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(10);
+        }).AddHttpMessageHandler<OutboundEndpointValidationHandler>();
+        // 网关状态/连接测试代理统一复用连接池，并由调用方先执行目标地址安全校验。
+        services.AddHttpClient("GatewayProxy", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
         });
         services.AddScoped<IWorkOrderIntegration, WebhookIntegration>();
         services.AddScoped<IWorkOrderIntegration, DingTalkIntegration>();

@@ -11,7 +11,6 @@ using EquipAI.Infrastructure.Middleware;
 using EquipAI.WebAPI.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OutputCaching;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -65,16 +64,6 @@ public class DevicesController : ControllerBase
     /// <returns>分页设备结果</returns>
     [HttpGet]
     [RequirePermission("device:read")]
-    // ⚠️ 多租户安全约束：本端点的响应是租户私有的（设备清单含位置/序列号等敏感数据）。
-    // 当前安全的原因：ASP.NET Core OutputCache 默认不缓存带 Authorization 头的请求，而本端点全部
-    // 走认证（Bearer JWT），故响应实际不入缓存——不会跨租户命中（已由 TenantIsolationTests.
-    // DeviceList_OutputCache_DoesNotLeakAcrossTenants 锁定为不变量）。
-    // 后续若要"真正启用"认证响应缓存以减库压，必须三件事齐备，否则会引入 P0 跨租户泄漏：
-    //   1) 缓存键 VaryBy tenant_id（本仓 Policy 目前未配置 VaryBy）；
-    //   2) UseOutputCache 必须注册在 UseAuthentication/UseAuthorization 之后（当前在它们之前），
-    //      否则未认证请求可能在认证前命中他人缓存；
-    //   3) 设备增删改后按 Tag("devices") 失效缓存，避免同租户读到陈旧数据。
-    [OutputCache(PolicyName = "Devices")]
     [ProducesResponseType(typeof(PagedResult<DeviceDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<DeviceDto>>> GetDevices(
         [FromQuery] PagedQuery query,
@@ -283,7 +272,7 @@ public class DevicesController : ControllerBase
         var result = await _importService.ExecuteImportAsync(
             content, file.FileName, _tenantContext.TenantId, _tenantContext.UserId, ct);
 
-        // 导入成功后清除设备列表输出缓存，确保后续查询能立即看到新设备
+        // 导入成功后返回导入数量，前端据此刷新租户私有设备列表。
         if (result.Imported > 0)
         {
             HttpContext.Response.Headers["X-Import-Count"] = result.Imported.ToString();

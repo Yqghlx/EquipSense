@@ -91,7 +91,7 @@ public class EamIntegration : IWorkOrderIntegration
                 return externalId ?? responseBody;
             }
 
-            _logger.LogWarning("EAM 工单创建失败: Status={Status}, Body={Body}", response.StatusCode, responseBody);
+            _logger.LogWarning("EAM 工单创建失败: Status={Status}", response.StatusCode);
             return null;
         }
         catch (Exception ex)
@@ -148,8 +148,7 @@ public class EamIntegration : IWorkOrderIntegration
             }
             else
             {
-                _logger.LogWarning("EAM 工单状态更新失败: Status={StatusCode}, Body={Body}",
-                    response.StatusCode, responseBody);
+                _logger.LogWarning("EAM 工单状态更新失败: Status={StatusCode}", response.StatusCode);
             }
         }
         catch (Exception ex)

@@ -34,25 +34,31 @@ public class LocalFileStorageService : IFileStorageService
 
     public LocalFileStorageService(IConfiguration configuration, ILogger<LocalFileStorageService> logger)
     {
-        _basePath = configuration["FileStorage:BasePath"] ?? "uploads";
+        // 固化为绝对路径，后续所有路径都通过 Path.GetRelativePath 判断是否仍在根目录内。
+        // 仅用 StartsWith 判断会把 /uploads-secret 错误地当成 /uploads 的子目录。
+        _basePath = Path.GetFullPath(configuration["FileStorage:BasePath"] ?? "uploads");
         _logger = logger;
     }
 
     public async Task<string> SaveAsync(Guid tenantId, string category, string fileName, Stream stream, string contentType)
     {
-        ValidateFile(fileName, stream.Length);
+        var safeCategory = NormalizeCategory(category);
+        var safeFileName = NormalizeFileName(fileName);
+        ValidateFile(safeFileName, stream.Length);
 
         // 构建存储目录：{basePath}/{tenantId}/{category}/
-        var directory = Path.Combine(_basePath, tenantId.ToString(), category);
+        var directory = Path.GetFullPath(Path.Combine(_basePath, tenantId.ToString(), safeCategory));
+        EnsureInsideBasePath(directory);
         Directory.CreateDirectory(directory);
 
         // 生成唯一文件名避免冲突：{原始名_不含扩展名}_{短GUID}.{扩展名}
-        var extension = Path.GetExtension(fileName);
-        var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+        var extension = Path.GetExtension(safeFileName);
+        var nameWithoutExt = SanitizeFileNamePart(Path.GetFileNameWithoutExtension(safeFileName));
         var uniqueName = $"{nameWithoutExt}_{Guid.NewGuid():N}{extension}";
 
-        var fullPath = Path.Combine(directory, uniqueName);
-        var relativePath = Path.Combine(tenantId.ToString(), category, uniqueName)
+        var fullPath = Path.GetFullPath(Path.Combine(directory, uniqueName));
+        EnsureInsideBasePath(fullPath);
+        var relativePath = Path.Combine(tenantId.ToString(), safeCategory, uniqueName)
             .Replace('\\', '/');
 
         await using var fileStream = new FileStream(fullPath, FileMode.Create, FileAccess.Write);
@@ -64,13 +70,7 @@ public class LocalFileStorageService : IFileStorageService
 
     public async Task<(Stream Stream, string ContentType, string FileName)> GetAsync(string storagePath)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(_basePath, storagePath));
-
-        // 安全检查：防止路径遍历攻击
-        if (!fullPath.StartsWith(Path.GetFullPath(_basePath), StringComparison.OrdinalIgnoreCase))
-        {
-            throw new UnauthorizedAccessException("非法文件路径访问");
-        }
+        var fullPath = ResolveStoragePath(storagePath);
 
         if (!File.Exists(fullPath))
         {
@@ -86,13 +86,7 @@ public class LocalFileStorageService : IFileStorageService
 
     public Task DeleteAsync(string storagePath)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(_basePath, storagePath));
-
-        // 安全检查：防止路径遍历攻击
-        if (!fullPath.StartsWith(Path.GetFullPath(_basePath), StringComparison.OrdinalIgnoreCase))
-        {
-            throw new UnauthorizedAccessException("非法文件路径访问");
-        }
+        var fullPath = ResolveStoragePath(storagePath);
 
         if (File.Exists(fullPath))
         {
@@ -105,12 +99,14 @@ public class LocalFileStorageService : IFileStorageService
 
     public Task<bool> ExistsAsync(string storagePath)
     {
-        var fullPath = Path.GetFullPath(Path.Combine(_basePath, storagePath));
-        if (!fullPath.StartsWith(Path.GetFullPath(_basePath), StringComparison.OrdinalIgnoreCase))
+        try
+        {
+            return Task.FromResult(File.Exists(ResolveStoragePath(storagePath)));
+        }
+        catch (UnauthorizedAccessException)
         {
             return Task.FromResult(false);
         }
-        return Task.FromResult(File.Exists(fullPath));
     }
 
     /// <summary>
@@ -127,6 +123,81 @@ public class LocalFileStorageService : IFileStorageService
         var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();
         if (!AllowedExtensions.Contains(extension))
             throw new ArgumentException($"不支持的文件类型：.{extension}");
+    }
+
+    /// <summary>
+    /// 规范化文件分类。分类只允许作为单级目录使用，避免调用方把目录树带入存储路径。
+    /// </summary>
+    private static string NormalizeCategory(string category)
+    {
+        if (string.IsNullOrWhiteSpace(category)
+            || category is "." or ".."
+            || category.Contains('/')
+            || category.Contains('\\'))
+        {
+            throw new ArgumentException("文件分类必须是单级目录名", nameof(category));
+        }
+
+        return category.Trim();
+    }
+
+    /// <summary>
+    /// 只保留原始文件名的最后一段，并统一处理 Windows 与 Unix 路径分隔符。
+    /// </summary>
+    private static string NormalizeFileName(string fileName)
+    {
+        var normalized = fileName.Replace('\\', '/');
+        var safeFileName = Path.GetFileName(normalized);
+        if (string.IsNullOrWhiteSpace(safeFileName) || safeFileName is "." or "..")
+            throw new ArgumentException("文件名无效", nameof(fileName));
+
+        return safeFileName;
+    }
+
+    /// <summary>
+    /// 移除文件名中可能导致跨平台创建失败的字符，并限制名称长度，避免路径过长。
+    /// </summary>
+    private static string SanitizeFileNamePart(string name)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = string.Concat(name.Select(character =>
+            invalidChars.Contains(character) ? '_' : character));
+        sanitized = sanitized.Trim().TrimEnd('.', ' ');
+
+        if (string.IsNullOrWhiteSpace(sanitized) || sanitized is "." or "..")
+            sanitized = "file";
+
+        return sanitized.Length <= 100 ? sanitized : sanitized[..100];
+    }
+
+    /// <summary>
+    /// 将相对存储路径解析为绝对路径，并拒绝根目录外的路径。
+    /// </summary>
+    private string ResolveStoragePath(string storagePath)
+    {
+        if (string.IsNullOrWhiteSpace(storagePath) || Path.IsPathRooted(storagePath))
+            throw new UnauthorizedAccessException("非法文件路径访问");
+
+        var fullPath = Path.GetFullPath(Path.Combine(_basePath, storagePath));
+        EnsureInsideBasePath(fullPath);
+        return fullPath;
+    }
+
+    /// <summary>
+    /// 使用相对路径判断边界，避免目录名仅共享前缀时绕过检查。
+    /// </summary>
+    private void EnsureInsideBasePath(string fullPath)
+    {
+        var relativePath = Path.GetRelativePath(_basePath, fullPath);
+        var parentPrefix = ".." + Path.DirectorySeparatorChar;
+        var alternateParentPrefix = ".." + Path.AltDirectorySeparatorChar;
+        if (relativePath == ".."
+            || relativePath.StartsWith(parentPrefix, StringComparison.Ordinal)
+            || relativePath.StartsWith(alternateParentPrefix, StringComparison.Ordinal)
+            || Path.IsPathRooted(relativePath))
+        {
+            throw new UnauthorizedAccessException("非法文件路径访问");
+        }
     }
 
     /// <summary>

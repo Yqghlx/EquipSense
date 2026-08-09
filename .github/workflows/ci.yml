@@ -214,6 +214,11 @@ jobs:
       - name: npm 生产依赖审计
         run: node scripts/check-production-audit.mjs
 
+      # 构建期开发依赖也会进入 CI/镜像构建环境；已通过 overrides 锁定传递依赖修复版本，
+      # 全量审计同样阻断 high/critical，防止只审计运行时依赖而遗漏供应链风险。
+      - name: npm 全量依赖审计
+        run: npm audit --audit-level=high
+
   # ============================================================================
   # Docker 镜像构建 + 推送（main 分支推送，打 sha + latest 标签）
   # 版本 tag 发布见下方 release job（打 semver 标签）
@@ -516,7 +521,7 @@ jobs:
 
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
         env:
           POSTGRES_PASSWORD: test_pw
           POSTGRES_DB: equipai_test
@@ -616,7 +621,7 @@ jobs:
 
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
         env:
           POSTGRES_PASSWORD: test_pw
           POSTGRES_DB: equipai_test

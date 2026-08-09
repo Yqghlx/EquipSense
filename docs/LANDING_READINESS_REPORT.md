@@ -3,6 +3,8 @@
 > 生成时间：2026-06-14
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
+> **当前状态说明（2026-08-09）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证已包含事务 Outbox/Inbox、RabbitMQ v2 真实 broker 测试、自动建单事务回滚、1115 个后端单元测试、158 个后端集成测试、前端 342 个单元测试，以及前后端生产构建。生产部署仍必须先通过 `cd docker && ./setup.sh` 的凭证与证书前置检查。
+
 ## 一、项目规模
 
 | 维度 | 数量 |
@@ -140,7 +142,7 @@
 - [ ] TLS 证书已挂载（`SSL_CERT_PATH` / `SSL_KEY_PATH`）
 - [ ] `GRAFANA_PASSWORD` 已修改
 - [ ] 钉钉/飞书集成在租户 Settings 配置（如需机器人推送）
-- [ ] 首次启动验证：`/health` 返回 Healthy，默认账号 admin/Admin@123 登录后立即改密
+- [ ] 首次启动验证：`/health` 返回 Healthy，使用 `SEED_ADMIN_PASSWORD` 配置的管理员初始密码登录后立即改密（不再使用公开默认密码）
 
 ## 八、结论
 

@@ -92,6 +92,25 @@ public class IntegrationControllerTests
     }
 
     /// <summary>
+    /// 回归测试：租户可配置的 Webhook 不得指向本机回环地址，避免后端被用作 SSRF 代理。
+    /// </summary>
+    [Fact]
+    public async Task UpdateIntegration_WithLoopbackWebhook_Returns400()
+    {
+        var client = await GetAuthenticatedClientAsync();
+
+        var request = new
+        {
+            enabled = true,
+            config = "{\"url\":\"http://127.0.0.1:8080/internal\"}"
+        };
+
+        var response = await client.PutAsJsonAsync("/api/v1/settings/integrations/webhook", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
     /// 验证：PUT /api/v1/settings/integrations/{type} 使用不支持的类型返回 400
     /// </summary>
     [Fact]

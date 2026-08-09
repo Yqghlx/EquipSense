@@ -67,14 +67,6 @@ try
         // 全局审计日志 Filter：自动记录所有非 GET 写操作（设备/工单/告警/用户/规则的增删改）
         options.Filters.Add<EquipAI.WebAPI.Middleware.AuditActionFilter>();
     });
-    // API 响应输出缓存（减少重复查询对数据库的压力）
-    builder.Services.AddOutputCache(options =>
-    {
-        options.AddBasePolicy(policy => policy.Expire(TimeSpan.FromSeconds(30)));
-        options.AddPolicy("Devices", policy => policy.Expire(TimeSpan.FromMinutes(2)).Tag("devices"));
-        options.AddPolicy("AlertRules", policy => policy.Expire(TimeSpan.FromMinutes(5)).Tag("alert-rules"));
-        options.AddPolicy("TenantConfig", policy => policy.Expire(TimeSpan.FromMinutes(10)).Tag("tenant-config"));
-    });
     // mTLS 双向认证配置（Phase 4 安全加固）
     // 边缘网关上传数据时携带客户端证书，后端验证证书合法性
     // 开发环境默认关闭（MTLS_ENABLED=false），生产环境开启需配置证书路径
@@ -277,6 +269,37 @@ try
         throw new InvalidOperationException("网关认证密钥不安全，应用拒绝启动。请在环境变量中设置至少 32 位的随机密钥");
     }
 
+    var gatewayAllowedHosts = builder.Configuration
+        .GetSection("Gateway:AllowedHosts")
+        .Get<string[]>()
+        ?.SelectMany(value => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        .Where(value => !string.IsNullOrWhiteSpace(value) && value != "*")
+        .ToArray()
+        ?? [];
+    if (app.Environment.IsProduction() && gatewayAllowedHosts.Length == 0)
+    {
+        Log.Fatal("生产环境未配置 Gateway:AllowedHosts，后端网关代理已拒绝启动");
+        throw new InvalidOperationException("生产环境必须配置 Gateway:AllowedHosts 精确主机白名单");
+    }
+
+    // 评估标准答案上报是内部测试能力，生产默认关闭；显式开启时必须同时绑定固定租户和独立密钥。
+    // 这样即使评估 API Key 泄露，也不会允许调用方通过请求体伪造任意租户并污染评估数据。
+    var evaluationIngestionEnabled = builder.Configuration.GetValue("Evaluation:AllowGroundTruthIngestion", false);
+    if (app.Environment.IsProduction() && evaluationIngestionEnabled)
+    {
+        var evaluationApiKey = builder.Configuration["Evaluation:IngestionApiKey"];
+        var evaluationTenantId = builder.Configuration["Evaluation:TenantId"];
+        if (string.IsNullOrWhiteSpace(evaluationApiKey)
+            || evaluationApiKey.Length < 32
+            || !Guid.TryParse(evaluationTenantId, out var parsedEvaluationTenantId)
+            || parsedEvaluationTenantId == Guid.Empty)
+        {
+            Log.Fatal("生产评估上报已开启，但 Evaluation:IngestionApiKey 或 Evaluation:TenantId 无效");
+            throw new InvalidOperationException(
+                "生产评估上报配置不完整：请同时设置至少 32 位的 Evaluation:IngestionApiKey 和有效的 Evaluation:TenantId");
+        }
+    }
+
     // ASP.NET Core 不会展开 JSON 中的 ${VAR} 占位符；生产配置必须由环境变量覆盖连接串，
     // 否则服务会以字面量占位符连接基础设施并在重试后才失败，部署排障成本很高。
     var defaultConnectionString = builder.Configuration.GetConnectionString("Default") ?? string.Empty;
@@ -374,8 +397,6 @@ try
     {
         app.UseRateLimiter();
     }
-    // 3.6 输出缓存 — 对 GET 请求的响应进行短期缓存
-    app.UseOutputCache();
     // 4. JWT 认证 — 解析并验证 Bearer Token，填充 context.User
     app.UseAuthentication();
     // 5. 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（必须在认证之后）

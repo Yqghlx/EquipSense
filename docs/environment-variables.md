@@ -64,6 +64,24 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | `LLM__ApiKey` | LLM API 密钥 | — | 否（未配置时 AI 分析降级为规则匹配） |
 | `LLM__Model` | LLM 模型名称 | `qwen-plus` | 否 |
 
+## AI 评估上报
+
+标准答案上报属于内部评估能力，生产默认关闭。开启时必须固定归属租户并使用独立 API Key，不能复用 JWT、网关或 RabbitMQ 凭证。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `EVALUATION_ALLOW_GROUND_TRUTH_INGESTION` | 是否启用生产标准答案上报 | `false` | 否 |
+| `EVALUATION_INGESTION_API_KEY` | 标准答案上报 API Key（至少 32 字符） | — | 开启时必填 |
+| `EVALUATION_TENANT_ID` | 标准答案固定归属租户 ID | — | 开启时必填 |
+
+## 出站集成安全
+
+Webhook、钉钉、飞书和 EAM 配置会触发后端出站 HTTP 请求。应用默认拒绝回环、链路本地、云元数据和 RFC1918 私网地址；若企业 EAM 位于内网，必须由部署者显式开启，并配合网络层最小权限控制。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许租户集成访问 RFC1918/IPv6 ULA 私网地址 | `false` | 否 |
+
 ## SMTP 邮件
 
 | 变量名 | 说明 | 默认值 | 必填 |
@@ -89,6 +107,7 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
 | `Gateway__AuthKey` | 网关认证密钥 | — | 使用网关时必填 |
+| `GATEWAY_ALLOWED_HOSTS` | 后端代理网关状态/连接测试的精确主机白名单，多主机逗号分隔 | `edgegateway`（Docker） | 使用网关时必填 |
 | `Gateway__DefaultGatewayId` | 默认网关标识 | `gateway-001` | 否 |
 | `Gateway__HealthPort` | 网关健康端点端口 | `8081` | 否 |
 | `Gateway__Host` | 网关主机地址 | `localhost` | 否 |
@@ -115,7 +134,7 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `EventBus__Outbox__MaxBackoffSeconds` | 发布失败最大退避（秒） | `300` | 否 |
 | `EventBus__Outbox__RetentionDays` | 已发布 Outbox 保留天数 | `7` | 否 |
 | `RABBITMQ_PASSWORD` | docker-compose RabbitMQ 服务密码（服务始终启动，禁止使用公开默认值） | — | Docker 生产必填 |
-| `RABBITMQ_IMAGE` | RabbitMQ 精确镜像版本 | 无默认值 | Docker 生产必填 |
+| `RABBITMQ_IMAGE` | RabbitMQ 带 digest 的精确镜像引用 | 无默认值 | Docker 生产必填 |
 | `ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION` | Compose 生产紧急降级开关 | `false` | 否 |
 | `RABBITMQ_USER` | docker-compose rabbitmq 服务默认用户 | `equipai` | 否 |
 | `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | — | Docker 生产必填 |

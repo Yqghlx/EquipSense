@@ -50,7 +50,7 @@ equipai.v2.{event-key}.{handler-key}.dead         处理器死信队列
 
 ```env
 EVENTBUS_PROVIDER=RabbitMQ
-RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine
+RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94
 RABBITMQ_USER=equipai
 RABBITMQ_PASSWORD=<至少16字符的强密码>
 EventBus__RabbitMq__Host=rabbitmq
@@ -75,6 +75,6 @@ RabbitMQ 镜像变量是必填项，目的是让已有部署在变更容器前�
 
 ## 可靠性边界
 
-生产 RabbitMQ 模式现已使用事务 Outbox 和幂等 Inbox：业务状态与事件登记在同一 `AppDbContext` 保存，Outbox 分发器在发布确认后标记消息；消费者按“事件 ID + 处理器”取得租约，成功后写入 Inbox 完成标记，重复投递直接确认跳过。手工建单还将编码生成、审计日志与 Outbox 登记包进关系型数据库事务；告警自动建单对编码器先落库的历史边界使用稳定工单 ID 和活跃工单恢复逻辑兜底。详细数据模型和故障边界见 [`superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md`](superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md)。
+生产 RabbitMQ 模式现已使用事务 Outbox 和幂等 Inbox：业务状态与事件登记在同一 `AppDbContext` 保存，Outbox 分发器在发布确认后标记消息；消费者按“事件 ID + 处理器”取得租约，成功后写入 Inbox 完成标记，重复投递直接确认跳过。手工与告警自动建单均将编码生成、创建审计与 Outbox 登记包进关系型数据库事务；稳定工单 ID 和活跃工单恢复逻辑继续覆盖历史断链补发。详细数据模型和故障边界见 [`superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md`](superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md)。
 
 系统仍提供 at-least-once 语义，不提供恰好一次。发布确认成功但 Outbox 状态更新前崩溃时可能再次发布同一事件，因此消费者业务副作用必须保持幂等；单节点 quorum queue 只增强重启恢复能力，不等同于多节点高可用。

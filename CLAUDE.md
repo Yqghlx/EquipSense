@@ -227,7 +227,7 @@ EquipSense/
 **`Program.cs` 中的关键后台服务与中间件配置：**
 - `BusinessMetricsCollector`（`HostedService`）：每 30 秒从数据库采集业务 Gauge 指标，Prometheus 暴露在 `/metrics`
 - `GatewayHeartbeatMonitor`（`HostedService`）：每 30 秒检查超时网关并标记 `offline`
-- **OutputCache 三档策略**：默认 30 秒、`Devices` 2 分钟、`AlertRules` 5 分钟、`TenantConfig` 10 分钟
+- **租户私有查询不使用后端 OutputCache**：设备、告警、审计响应必须在认证和租户解析后实时查询，避免 Cookie 认证请求发生跨租户缓存命中；前端 TanStack Query 负责短期展示缓存
 - **SignalR**：`KeepAliveInterval=15s`、`ClientTimeoutInterval=30s`
 - **CORS**：从 `Cors:Origins` 配置读取，未配置时默认 `http://localhost:5173`，**强制 `AllowCredentials`**（SignalR WebSocket 必需）
 

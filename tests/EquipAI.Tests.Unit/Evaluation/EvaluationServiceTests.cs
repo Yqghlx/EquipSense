@@ -148,6 +148,26 @@ public class EvaluationServiceTests : IAsyncDisposable
         entries.Should().HaveCount(1, "去重后仍只有 1 条");
     }
 
+    /// <summary>
+    /// 同一个 runId 可以在不同租户中独立使用，租户边界不能被批次去重逻辑打穿。
+    /// </summary>
+    [Fact]
+    public async Task IngestReportAsync_相同RunId但不同租户_应分别写入()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var otherTenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var runId = "run-same-id-different-tenant";
+
+        var first = await service.IngestReportAsync(CreateReport(deviceId, runId, DateTime.UtcNow), _tenantId);
+        var second = await service.IngestReportAsync(CreateReport(deviceId, runId, DateTime.UtcNow), otherTenantId);
+
+        first.Should().Be(1);
+        second.Should().Be(1, "批次去重必须限定在当前租户内");
+        (await db.GroundTruthEntries.IgnoreQueryFilters().CountAsync()).Should().Be(2);
+    }
+
     // =========================================================================
     // EvaluateAsync — 漏报（无 analysis）
     // =========================================================================
@@ -174,6 +194,47 @@ public class EvaluationServiceTests : IAsyncDisposable
         result.MatchedCount.Should().Be(0);
         result.MismatchedCount.Should().Be(0);
         result.Details.Should().ContainSingle(d => d.Matched == null);
+    }
+
+    /// <summary>
+    /// 评估必须只读取当前租户的标准答案和分析，不能因为后台查询绕过过滤器而跨租户泄漏或误匹配。
+    /// </summary>
+    [Fact]
+    public async Task EvaluateAsync_只读取当前租户数据_不会匹配其他租户的Analysis()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var otherTenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var injectTime = DateTime.UtcNow.AddMinutes(-5);
+        const string runId = "run-tenant-isolation";
+
+        await service.IngestReportAsync(CreateReport(deviceId, runId, injectTime), _tenantId);
+
+        // 构造同一 runId、同一设备但属于其他租户的数据；修复前 IgnoreQueryFilters 会将它纳入评估，
+        // 且分析查询只按 DeviceId，会把其他租户的诊断错误地计入当前租户。
+        db.GroundTruthEntries.Add(new GroundTruthEntry
+        {
+            TenantId = otherTenantId,
+            RunId = runId,
+            DeviceId = deviceId,
+            DeviceCode = "OTHER-TENANT-DEVICE",
+            ScenarioName = "other-tenant",
+            FaultType = "bearing_wear",
+            ExpectedRootCause = "轴承磨损",
+            ExpectedSeverity = "high",
+            AffectedMetrics = "[\"vibration\"]",
+            InjectedAt = injectTime,
+        });
+        db.Analyses.Add(CreateAnalysis(deviceId, otherTenantId, injectTime.AddMinutes(1), "轴承磨损"));
+        await db.SaveChangesAsync();
+
+        var result = await service.EvaluateAsync(runId, _tenantId);
+
+        result.TotalFaults.Should().Be(1, "评估结果不能包含其他租户的标准答案");
+        result.MissedCount.Should().Be(1, "其他租户的分析不能匹配当前租户的标准答案");
+        result.MatchedCount.Should().Be(0);
+        result.Details.Should().ContainSingle();
     }
 
     // =========================================================================

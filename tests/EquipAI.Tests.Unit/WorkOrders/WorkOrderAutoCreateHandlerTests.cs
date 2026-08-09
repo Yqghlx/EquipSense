@@ -6,6 +6,7 @@ using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -111,6 +112,75 @@ public class WorkOrderAutoCreateHandlerTests
         workOrders[0].Type.Should().Be(WorkOrderType.Corrective);
         workOrders[0].Status.Should().Be(WorkOrderStatus.PendingDispatch);
         workOrders[0].AlertId.Should().Be(evt.AlertId);
+    }
+
+    [Fact]
+    public async Task HandleAsync_自动创建工单应写入创建审计日志()
+    {
+        var (db, _, handler) = CreateSut();
+        var ruleId = Guid.NewGuid();
+
+        db.AlertRules.Add(new AlertRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "自动创建规则",
+            Metric = "temperature", Conditions = "[]",
+            Severity = AlertSeverity.High, AutoCreateWorkorder = true
+        });
+        await db.SaveChangesAsync();
+
+        await handler.HandleAsync(MakeAlertEvent(ruleId: ruleId), CancellationToken.None);
+
+        var logs = await db.WorkOrderLogs.IgnoreQueryFilters().ToListAsync();
+        logs.Should().ContainSingle();
+        logs[0].Action.Should().Be(WorkOrderLogAction.Created);
+    }
+
+    [Fact]
+    public async Task HandleAsync_创建事件失败时_工单和审计日志应一起回滚()
+    {
+        // InMemory 提供程序不会真正执行数据库事务；使用 SQLite 验证生产关系型数据库的回滚语义。
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        await db.Database.EnsureCreatedAsync();
+
+        var ruleId = Guid.NewGuid();
+        db.AlertRules.Add(new AlertRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "自动创建规则",
+            Metric = "temperature", Conditions = "[]",
+            Severity = AlertSeverity.High, AutoCreateWorkorder = true
+        });
+        await db.SaveChangesAsync();
+
+        var eventBus = new Mock<IEventBus>();
+        eventBus
+            .Setup(e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        eventBus
+            .Setup(e => e.PublishAsync(
+                It.IsAny<WorkOrderCreatedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("事件发布失败"));
+
+        var spMock = new Mock<IServiceProvider>();
+        spMock.Setup(sp => sp.GetService(typeof(AppDbContext))).Returns(db);
+        spMock.Setup(sp => sp.GetService(typeof(IEventBus))).Returns(eventBus.Object);
+        var scopeMock = new Mock<IServiceScope>();
+        scopeMock.SetupGet(s => s.ServiceProvider).Returns(spMock.Object);
+        var scopeFactoryMock = new Mock<IServiceScopeFactory>();
+        scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
+        var logger = LoggerFactory.Create(_ => { }).CreateLogger<WorkOrderAutoCreateHandler>();
+        var handler = new WorkOrderAutoCreateHandler(logger, eventBus.Object, scopeFactoryMock.Object);
+
+        var act = () => handler.HandleAsync(MakeAlertEvent(ruleId: ruleId), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await db.WorkOrders.IgnoreQueryFilters().CountAsync()).Should().Be(0);
+        (await db.WorkOrderLogs.IgnoreQueryFilters().CountAsync()).Should().Be(0);
     }
 
     [Fact]

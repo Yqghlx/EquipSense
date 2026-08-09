@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using EquipAI.Application.Services;
 using EquipAI.Application.WorkOrders.DTOs;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -24,17 +25,20 @@ public class IntegrationSettingsService
     private readonly AppDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
     private readonly IEnumerable<IWorkOrderIntegration> _integrations;
+    private readonly OutboundEndpointPolicy _outboundEndpointPolicy;
     private readonly ILogger<IntegrationSettingsService> _logger;
 
     public IntegrationSettingsService(
         AppDbContext dbContext,
         ITenantContext tenantContext,
         IEnumerable<IWorkOrderIntegration> integrations,
+        OutboundEndpointPolicy outboundEndpointPolicy,
         ILogger<IntegrationSettingsService> logger)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
         _integrations = integrations;
+        _outboundEndpointPolicy = outboundEndpointPolicy;
         _logger = logger;
     }
 
@@ -112,6 +116,11 @@ public class IntegrationSettingsService
         }
 
         integrations[type] = existingConfig;
+
+        var endpointValidation = ValidateEndpointConfiguration(type, existingConfig);
+        if (!endpointValidation.Allowed)
+            return (false, endpointValidation.Reason);
+
         settingsDoc["integrations"] = integrations;
 
         tenant.Settings = JsonSerializer.Serialize(settingsDoc);
@@ -121,6 +130,42 @@ public class IntegrationSettingsService
             type, request.Enabled, _tenantContext.TenantId);
 
         return (true, null);
+    }
+
+    /// <summary>
+    /// 在保存配置前校验所有会被服务端主动请求的 URL。
+    /// </summary>
+    private (bool Allowed, string Reason) ValidateEndpointConfiguration(
+        string type,
+        IReadOnlyDictionary<string, object> configuration)
+    {
+        var urlProperty = type.ToLowerInvariant() switch
+        {
+            "webhook" => "url",
+            "dingtalk" => "webhookUrl",
+            "feishu" => "webhookUrl",
+            "eam" => "endpoint",
+            _ => null,
+        };
+
+        if (urlProperty is null
+            || !configuration.TryGetValue(urlProperty, out var rawValue)
+            || rawValue is null)
+        {
+            return (true, string.Empty);
+        }
+
+        var rawUrl = rawValue switch
+        {
+            JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+            string text => text,
+            _ => null,
+        };
+
+        if (string.IsNullOrWhiteSpace(rawUrl))
+            return (true, string.Empty);
+
+        return _outboundEndpointPolicy.ValidateConfiguredUri(rawUrl);
     }
 
     /// <summary>
@@ -174,12 +219,13 @@ public class IntegrationSettingsService
                 _tenantContext.TenantId, testWorkOrderId,
                 "[测试] 集成连接测试", "Low", integrationConfig);
             sw.Stop();
+            var succeeded = result is not null;
 
             return (new IntegrationTestResult
             {
                 Type = type,
-                Success = true,
-                Message = "连接测试成功",
+                Success = succeeded,
+                Message = succeeded ? "连接测试成功" : "连接测试失败：外部系统未返回成功响应",
                 DurationMs = sw.ElapsedMilliseconds,
                 Details = result
             }, false);

@@ -157,14 +157,14 @@ public class WebhookIntegration : IWorkOrderIntegration
             var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
-            _logger.LogInformation("Webhook 推送完成: URL={Url}, Status={Status}, Body={Body}",
-                config.Url, response.StatusCode, responseBody);
+            _logger.LogInformation("Webhook 推送完成: Host={Host}, Status={Status}",
+                GetTargetHost(config.Url), response.StatusCode);
 
             return response.IsSuccessStatusCode ? responseBody : null;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Webhook 推送失败: URL={Url}", config.Url);
+            _logger.LogWarning(ex, "Webhook 推送失败: Host={Host}", GetTargetHost(config.Url));
             return null;
         }
     }
@@ -177,4 +177,10 @@ public class WebhookIntegration : IWorkOrderIntegration
         try { return JsonSerializer.Deserialize<T>(config); }
         catch { return null; }
     }
+
+    /// <summary>
+    /// 仅提取目标主机用于日志，避免记录 Webhook 查询串中的 token 或签名。
+    /// </summary>
+    private static string GetTargetHost(string? rawUrl)
+        => Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri) ? uri.Host : "unknown";
 }

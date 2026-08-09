@@ -531,19 +531,11 @@ public class TenantIsolationTests
     }
 
     /// <summary>
-    /// v1.5 安全探针：OutputCache 是否导致设备列表跨租户（甚至未认证）泄漏
-    ///
-    /// 背景：GET /api/v1/devices 标注了 [OutputCache(PolicyName="Devices")]，且 UseOutputCache
-    /// 注册在 UseAuthentication 之前，缓存键默认只含 method/path/query、不含 tenant_id。
-    /// 若 OutputCache 实际缓存认证请求的响应，租户 B（甚至未认证请求者）用相同 URL 会命中
-    /// 租户 A 的缓存，看到 A 的设备清单——P0 跨租户泄漏。
-    ///
-    /// 本测试是"决定性实验"：先于修复运行，用真实管线判定泄漏是否成立。
-    /// 租户 A 有 3 台设备，租户 B 有 0 台。A 先请求（填充缓存），B 再用相同查询请求。
-    /// 若 B 看到任何 A 的设备 → 泄漏成立。未认证请求同理。
+    /// v1.5 安全探针：验证设备列表在真实 HTTP 管线中始终按租户隔离，且未认证请求不会得到数据。
+    /// 租户 A 有 3 台设备，租户 B 有 0 台；两边使用相同查询参数，B 不得看到 A 的设备。
     /// </summary>
     [Fact]
-    public async Task DeviceList_OutputCache_DoesNotLeakAcrossTenants()
+    public async Task DeviceList_TenantIsolation_DoesNotLeakAcrossTenants()
     {
         // Arrange
         var tenantAId = Guid.NewGuid();
@@ -598,31 +590,30 @@ public class TenantIsolationTests
         // 统一查询串（缓存键相同的前提）
         const string url = "/api/v1/devices?page=1&pageSize=50";
 
-        // Act 1：租户 A 请求，填充缓存
+        // Act 1：租户 A 请求
         var clientA = await CreateAuthenticatedClientAsync(userAId, tenantAId, UserRole.Operator);
         var respA = await clientA.GetAsync(url);
         respA.StatusCode.Should().Be(HttpStatusCode.OK);
         var resultA = await respA.Content.ReadFromJsonAsync<PagedResult<DeviceDto>>();
         resultA!.Items.Should().HaveCount(3, "租户 A 应看到自己的 3 台设备");
 
-        // Act 2：租户 B 用相同 URL 请求 —— 若缓存按租户隔离，B 应看到 0 台；若泄漏，B 会看到 A 的设备
+        // Act 2：租户 B 用相同 URL 请求，B 应看到 0 台
         var clientB = await CreateAuthenticatedClientAsync(userBId, tenantBId, UserRole.Operator);
         var respB = await clientB.GetAsync(url);
         respB.StatusCode.Should().Be(HttpStatusCode.OK);
         var resultB = await respB.Content.ReadFromJsonAsync<PagedResult<DeviceDto>>();
 
-        // Assert：租户 B 绝不能看到租户 A 的任何设备（跨租户缓存泄漏是 P0）
+        // Assert：租户 B 绝不能看到租户 A 的任何设备（跨租户数据泄漏是 P0）
         resultB!.Items.Should().BeEmpty(
-            "租户 B 无设备，且输出缓存必须按租户隔离——若 B 看到任何设备（尤其 CACHE-LEAK-A-*），即为跨租户缓存泄漏");
+            "租户 B 无设备，若看到任何设备（尤其 CACHE-LEAK-A-*），即为跨租户数据泄漏");
         resultB.Items.Should().NotContain(d => d.Name.StartsWith("CACHE-LEAK-A"),
             "租户 B 的响应绝不可包含租户 A 的设备");
 
-        // Act 3：未认证请求用相同 URL —— OutputCache 在认证之前注册，若它短路了缓存命中，
-        // 未认证请求会直接拿到 A 的缓存数据。必须返回 401，绝不能 200 + A 的设备。
+        // Act 3：未认证请求用相同 URL，必须返回 401，绝不能返回 A 的设备。
         using var anonClient = _factory.CreateClient();
         var respAnon = await anonClient.GetAsync(url);
         respAnon.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "未认证请求必须被认证中间件拦截为 401；若返回 200 + 设备数据，说明 OutputCache 在认证前短路了缓存命中，构成未认证数据泄漏");
+            "未认证请求必须被认证中间件拦截为 401，构成未认证数据泄漏");
     }
 
     /// <summary>

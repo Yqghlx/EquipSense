@@ -16,15 +16,21 @@ namespace EquipAI.WebAPI.Controllers;
 public class GatewayConfigController : ControllerBase
 {
     private readonly GatewayDeviceConfigService _service;
+    private readonly GatewayEndpointPolicy _endpointPolicy;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<GatewayConfigController> _logger;
 
     public GatewayConfigController(
         GatewayDeviceConfigService service,
+        GatewayEndpointPolicy endpointPolicy,
+        IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<GatewayConfigController> logger)
     {
         _service = service;
+        _endpointPolicy = endpointPolicy;
+        _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
     }
@@ -36,16 +42,27 @@ public class GatewayConfigController : ControllerBase
     [HttpGet("status")]
     [Authorize]
     [RequirePermission("device:read")]
-    public async Task<ActionResult> GetGatewayStatus()
+    public async Task<ActionResult> GetGatewayStatus(CancellationToken ct = default)
     {
         // 从配置获取网关健康端点地址
         var gatewayHealthPort = _configuration["Gateway:HealthPort"] ?? "8081";
-        var gatewayHost = _configuration["Gateway:Host"] ?? "localhost";
+        var gatewayHost = _configuration["Gateway:Host"] ?? "edgegateway";
+
+        if (!int.TryParse(gatewayHealthPort, out var parsedPort)
+            || !await _endpointPolicy.IsResolvedEndpointAllowedAsync(gatewayHost, parsedPort, ct))
+        {
+            _logger.LogWarning("拒绝代理到未授权或危险网关地址：{Host}:{Port}", gatewayHost, gatewayHealthPort);
+            return Ok(new
+            {
+                status = "unreachable",
+                message = "网关地址未通过安全策略校验",
+            });
+        }
 
         try
         {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            var response = await httpClient.GetAsync($"http://{gatewayHost}:{gatewayHealthPort}/status");
+            var httpClient = _httpClientFactory.CreateClient("GatewayProxy");
+            var response = await httpClient.GetAsync($"http://{gatewayHost}:{parsedPort}/status", ct);
 
             if (response.IsSuccessStatusCode)
             {

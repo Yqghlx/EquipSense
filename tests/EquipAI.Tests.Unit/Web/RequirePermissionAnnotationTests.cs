@@ -4,6 +4,7 @@ using EquipAI.WebAPI.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Xunit;
 
@@ -110,5 +111,21 @@ public class RequirePermissionAnnotationTests
         missing.Should().BeEmpty(
             "以下写操作端点未标注 [RequirePermission]，PermissionMiddleware 会直接放行导致越权（任意认证角色均可调用）：{0}",
             string.Join(", ", missing));
+    }
+
+    /// <summary>
+    /// 租户私有查询不得使用输出缓存。当前输出缓存位于认证中间件之前，Cookie 认证请求不能依赖
+    /// Authorization 请求头自动跳过缓存来保证租户隔离。
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(DevicesController), nameof(DevicesController.GetDevices))]
+    [InlineData(typeof(AlertsController), nameof(AlertsController.GetAlerts))]
+    [InlineData(typeof(AuditLogsController), nameof(AuditLogsController.GetAuditLogs))]
+    public void 租户私有查询_不得启用OutputCache(Type controllerType, string methodName)
+    {
+        var method = controllerType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Instance);
+        method.Should().NotBeNull();
+        method!.GetCustomAttribute<OutputCacheAttribute>().Should().BeNull(
+            $"{controllerType.Name}.{methodName} 返回租户私有数据，不得在认证前使用输出缓存");
     }
 }

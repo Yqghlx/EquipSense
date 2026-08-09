@@ -10,7 +10,6 @@ using EquipAI.Infrastructure.Middleware;
 using EquipAI.WebAPI.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.OutputCaching;
 
 namespace EquipAI.WebAPI.Controllers;
 
@@ -38,7 +37,6 @@ public class AlertsController : ControllerBase
 
     [HttpGet]
     [RequirePermission("alert:read")]
-    [OutputCache(Duration = 30)] // 30 秒缓存，平衡实时性与数据库负载
     [ProducesResponseType(typeof(PagedResult<AlertDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<AlertDto>>> GetAlerts(
         [FromQuery] PagedQuery query,

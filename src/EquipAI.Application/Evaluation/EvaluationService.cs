@@ -38,7 +38,7 @@ public class EvaluationService
         // 同一批次去重（避免模拟器重复上报）
         var existingRunId = await _dbContext.GroundTruthEntries
             .IgnoreQueryFilters()
-            .AnyAsync(g => g.RunId == report.RunId, ct);
+            .AnyAsync(g => g.TenantId == tenantId && g.RunId == report.RunId, ct);
 
         if (existingRunId)
         {
@@ -73,7 +73,12 @@ public class EvaluationService
     /// </summary>
     public async Task<EvaluationResult> EvaluateAsync(string? runId, Guid tenantId, CancellationToken ct = default)
     {
-        var truthQuery = _dbContext.GroundTruthEntries.IgnoreQueryFilters().AsQueryable();
+        // 后台评估可能没有 HttpContext，必须绕过全局过滤器后显式补回 tenantId。
+        // 只按 runId 查询会让一个租户看到其他租户的设备故障和 AI 诊断结果。
+        var truthQuery = _dbContext.GroundTruthEntries
+            .IgnoreQueryFilters()
+            .Where(g => g.TenantId == tenantId)
+            .AsQueryable();
         if (!string.IsNullOrEmpty(runId))
             truthQuery = truthQuery.Where(g => g.RunId == runId);
 
@@ -105,7 +110,8 @@ public class EvaluationService
         // 查找时间窗内同设备的 analysis 记录（IgnoreQueryFilters 避免后台无 HttpContext 问题）
         var analysis = await _dbContext.Analyses
             .IgnoreQueryFilters()
-            .Where(a => a.DeviceId == truth.DeviceId
+            .Where(a => a.TenantId == truth.TenantId
+                     && a.DeviceId == truth.DeviceId
                      && a.CreatedAt >= injectedUtc
                      && a.CreatedAt <= windowEnd)
             .OrderByDescending(a => a.Confidence)

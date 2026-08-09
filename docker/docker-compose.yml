@@ -3,7 +3,7 @@
 # 使用方式：docker compose up -d
 services:
   postgres:
-    image: timescale/timescaledb:latest-pg16
+    image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
     container_name: equipai-postgres
     restart: unless-stopped
     ports:
@@ -41,7 +41,7 @@ services:
           memory: 2G
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: equipai-redis
     restart: unless-stopped
     ports:
@@ -76,7 +76,7 @@ services:
           memory: 512M
 
   mosquitto:
-    image: eclipse-mosquitto:2
+    image: eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1
     container_name: equipai-mosquitto
     restart: unless-stopped
     ports:
@@ -105,7 +105,7 @@ services:
   # RabbitMQ：生产事件总线。镜像版本必须显式配置，防止旧数据卷被静默跨大版本挂载。
   # 提供持久化、每处理器独立重试和死信队列；definitions 仅包含 v2 队列策略，不含凭证。
   rabbitmq:
-    image: "${RABBITMQ_IMAGE:?请设置 RABBITMQ_IMAGE，例如 rabbitmq:4.3.4-management-alpine}"
+    image: "${RABBITMQ_IMAGE:?请设置 RABBITMQ_IMAGE，例如 rabbitmq:4.3.4-management-alpine@sha256:...}"
     container_name: equipai-rabbitmq
     restart: unless-stopped
     ports:
@@ -164,6 +164,8 @@ services:
       # 网关认证密钥：必须与 edgegateway 服务使用同一变量，保证两侧一致
       # ⚠️ 必须为纯 ASCII（HTTP header 不允许中文），生产环境请替换为强随机值
       Gateway__AuthKey: "${GATEWAY_AUTH_KEY:?请在 .env 中设置 GATEWAY_AUTH_KEY（纯 ASCII）}"
+      # 后端主动代理网关状态/连接测试的精确主机白名单；多主机用逗号分隔
+      Gateway__AllowedHosts__0: "${GATEWAY_ALLOWED_HOSTS:-edgegateway}"
       Mqtt__Host: mosquitto
       Mqtt__Port: 8883
       Mqtt__ClientIdPrefix: "equipai-backend"
@@ -201,6 +203,11 @@ services:
       # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
+      # AI 评估标准答案上报默认关闭；只有内部联调时显式开启并绑定固定租户/API Key
+      Evaluation__AllowGroundTruthIngestion: "${EVALUATION_ALLOW_GROUND_TRUTH_INGESTION:-false}"
+      Evaluation__IngestionApiKey: "${EVALUATION_INGESTION_API_KEY:-}"
+      Evaluation__TenantId: "${EVALUATION_TENANT_ID:-}"
+      Security__OutboundHttp__AllowPrivateNetworks: "${OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS:-false}"
       # 生产默认使用 RabbitMQ；InMemory 只允许通过应用级 break-glass 开关显式启用。
       EventBus__Provider: "${EVENTBUS_PROVIDER:-RabbitMQ}"
       EventBus__AllowInMemoryInProduction: "${ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION:-false}"
@@ -344,7 +351,7 @@ services:
   # ============================================================================
 
   seq:
-    image: datalust/seq:latest
+    image: datalust/seq:latest@sha256:868a12e93ec0b8c993767a7dd4cd6c8ebc441511c79e4cfac66c911f62d4db65
     container_name: equipai-seq
     restart: unless-stopped
     ports:
@@ -374,7 +381,7 @@ services:
           memory: 512M
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:latest@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac
     container_name: equipai-prometheus
     restart: unless-stopped
     ports:
@@ -398,7 +405,7 @@ services:
   # AlertManager — 告警路由与通知（webhook 推送到钉钉/飞书）
   # ============================================================
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:latest@sha256:af26fbe4dd1886ac0efd7bd55cd9027da262e105b137a376522b7c14c3626e4a
     container_name: equipai-alertmanager
     restart: unless-stopped
     ports:
@@ -418,7 +425,7 @@ services:
           memory: 128M
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:latest@sha256:5dad0df181cb644a14e13617b913b261a54f7d4fd4510721dba420929f35bea2
     container_name: equipai-grafana
     restart: unless-stopped
     ports:
@@ -451,7 +458,7 @@ services:
   # 配置：后端 OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
   # 生产环境可换为 Tempo（与 Grafana 一体化）或 OTel Collector 多导出。
   jaeger:
-    image: jaegertracing/all-in-one:1.62.0
+    image: jaegertracing/all-in-one:1.62.0@sha256:836e9b69c88afbedf7683ea7162e179de63b1f981662e83f5ebb68badadc710f
     container_name: equipai-jaeger
     restart: unless-stopped
     ports:

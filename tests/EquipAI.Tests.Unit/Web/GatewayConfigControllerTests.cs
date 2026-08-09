@@ -57,8 +57,19 @@ public class GatewayConfigControllerTests
             httpContext.Request.Headers["X-Gateway-Auth-Key"] = AuthKey;
 
         // GatewayDeviceConfigService 持有 db/ITenantContext/logger —— 设备配置查询下沉到服务
-        var service = new GatewayDeviceConfigService(db, Mock.Of<ITenantContext>(), NullLogger<GatewayDeviceConfigService>.Instance);
-        return new GatewayConfigController(service, config, NullLogger<GatewayConfigController>.Instance)
+        var endpointPolicy = new GatewayEndpointPolicy(config);
+        var service = new GatewayDeviceConfigService(
+            db,
+            Mock.Of<ITenantContext>(),
+            endpointPolicy,
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<GatewayDeviceConfigService>.Instance);
+        return new GatewayConfigController(
+            service,
+            endpointPolicy,
+            Mock.Of<IHttpClientFactory>(),
+            config,
+            NullLogger<GatewayConfigController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext },
         };

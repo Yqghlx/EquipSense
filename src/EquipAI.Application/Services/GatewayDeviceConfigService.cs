@@ -23,15 +23,21 @@ public class GatewayDeviceConfigService
 {
     private readonly AppDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
+    private readonly GatewayEndpointPolicy _endpointPolicy;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GatewayDeviceConfigService> _logger;
 
     public GatewayDeviceConfigService(
         AppDbContext dbContext,
         ITenantContext tenantContext,
+        GatewayEndpointPolicy endpointPolicy,
+        IHttpClientFactory httpClientFactory,
         ILogger<GatewayDeviceConfigService> logger)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
+        _endpointPolicy = endpointPolicy;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -116,7 +122,14 @@ public class GatewayDeviceConfigService
     {
         try
         {
-            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            if (!await _endpointPolicy.IsResolvedEndpointAllowedAsync(gateway.Host, gateway.HealthPort, ct))
+            {
+                _logger.LogWarning("拒绝代理到未授权或危险网关地址：{GatewayId} {Host}:{Port}",
+                    gateway.GatewayId, gateway.Host, gateway.HealthPort);
+                return (new TestConnectionResponse(), false);
+            }
+
+            var httpClient = _httpClientFactory.CreateClient("GatewayProxy");
             var payload = new { protocol, connectionString = connectionConfig };
             var response = await httpClient.PostAsJsonAsync(
                 $"http://{gateway.Host}:{gateway.HealthPort}/test-connection",

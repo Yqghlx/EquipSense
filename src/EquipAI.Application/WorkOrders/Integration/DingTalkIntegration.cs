@@ -169,12 +169,13 @@ public class DingTalkIntegration : IWorkOrderIntegration
             var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(url, message, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
 
-            _logger.LogInformation("钉钉推送完成: Status={Status}, Body={Body}", response.StatusCode, body);
+            _logger.LogInformation("钉钉推送完成: Host={Host}, Status={Status}",
+                GetTargetHost(url), response.StatusCode);
             return response.IsSuccessStatusCode ? body : null;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "钉钉推送失败: URL={Url}", url);
+            _logger.LogWarning(ex, "钉钉推送失败: Host={Host}", GetTargetHost(url));
             return null;
         }
     }
@@ -187,4 +188,10 @@ public class DingTalkIntegration : IWorkOrderIntegration
         try { return JsonSerializer.Deserialize<DingTalkConfig>(config); }
         catch { return null; }
     }
+
+    /// <summary>
+    /// 仅提取目标主机用于日志，避免记录带签名的完整 Webhook URL。
+    /// </summary>
+    private static string GetTargetHost(string? rawUrl)
+        => Uri.TryCreate(rawUrl, UriKind.Absolute, out var uri) ? uri.Host : "unknown";
 }

@@ -16,15 +16,18 @@ public class GatewayManagementService
 {
     private readonly AppDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
+    private readonly GatewayEndpointPolicy _endpointPolicy;
     private readonly ILogger<GatewayManagementService> _logger;
 
     public GatewayManagementService(
         AppDbContext dbContext,
         ITenantContext tenantContext,
+        GatewayEndpointPolicy endpointPolicy,
         ILogger<GatewayManagementService> logger)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
+        _endpointPolicy = endpointPolicy;
         _logger = logger;
     }
 
@@ -34,6 +37,13 @@ public class GatewayManagementService
     /// </summary>
     public async Task<GatewayDto> RegisterOrUpdateAsync(RegisterGatewayRequest request, CancellationToken ct = default)
     {
+        var host = string.IsNullOrWhiteSpace(request.Host) ? "edgegateway" : request.Host;
+        var healthPort = request.HealthPort ?? 8081;
+        if (!_endpointPolicy.IsAllowed(host, healthPort, out var endpointReason))
+        {
+            throw new InvalidOperationException($"网关注册目标不被允许：{endpointReason}");
+        }
+
         var existing = await _dbContext.UnfilteredSet<Gateway>()
             .FirstOrDefaultAsync(g => g.TenantId == request.TenantId && g.GatewayId == request.GatewayId, ct);
 
@@ -45,8 +55,8 @@ public class GatewayManagementService
                 TenantId = request.TenantId,
                 Name = request.Name ?? request.GatewayId,
                 Description = request.Description,
-                Host = request.Host ?? "localhost",
-                HealthPort = request.HealthPort ?? 8081,
+                Host = host,
+                HealthPort = healthPort,
                 Status = "online",
                 LastHeartbeatAt = DateTime.UtcNow,
                 UptimeSeconds = request.UptimeSeconds,

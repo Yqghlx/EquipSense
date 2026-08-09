@@ -5,6 +5,7 @@ using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -56,88 +57,154 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
             return;
         }
 
-        // 防重复：同一告警不重复创建活跃工单（未关闭、未取消的工单视为活跃）。
-        // 但不能只返回：旧实例可能已经把工单写入数据库，却在写入 WorkOrderCreatedEvent
-        // 前宕机。重试时必须使用同一个事件 ID 幂等补发，才能避免“有工单、无通知”的断链。
-        var existingActiveWorkOrder = await dbContext.WorkOrders
-            .IgnoreQueryFilters()
-            .Where(wo => wo.TenantId == @event.TenantId
-                && wo.AlertId == @event.AlertId
-                && wo.Status != WorkOrderStatus.Closed
-                && wo.Status != WorkOrderStatus.Cancelled)
-            .OrderBy(wo => wo.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (existingActiveWorkOrder is not null)
+        // 防重复、工单写入、创建审计和 Outbox 登记必须处于同一关系型事务中。
+        // 编码生成器内部需要先 SaveChanges 才能捕获唯一约束冲突，因此事务由本方法包住整个流程。
+        // Npgsql 启用了瞬时故障重试，显式事务必须由 execution strategy 执行；InMemory 仅用于快速单元测试，
+        // 不支持事务时执行相同业务步骤，SQLite 回归测试负责验证真实回滚语义。
+        async Task CreateOrRecoverAsync()
         {
-            _logger.LogInformation(
-                "告警已有关联的活跃工单，将幂等补发创建事件: AlertId={AlertId}, WorkOrderId={WorkOrderId}",
-                @event.AlertId, existingActiveWorkOrder.Id);
-            await eventBus.PublishAsync(new WorkOrderCreatedEvent(
-                EventId: existingActiveWorkOrder.Id,
-                OccurredAt: existingActiveWorkOrder.CreatedAt,
-                TenantId: existingActiveWorkOrder.TenantId,
-                WorkOrderId: existingActiveWorkOrder.Id,
-                DeviceId: existingActiveWorkOrder.DeviceId,
-                Title: existingActiveWorkOrder.Title,
-                Priority: existingActiveWorkOrder.Priority.ToString()), cancellationToken);
-            return;
-        }
-
-        // 生成工单编码并创建工单（带冲突重试）
-        // 与 WorkOrderService.CreateAsync 共用 WorkOrderCodeGenerator，保证两条路径行为一致：
-        // 同样 IgnoreQueryFilters 读跨租户最大序号、同样在唯一约束冲突（SQLSTATE 23505）时重试。
-        // savedWorkOrder 仅在 SaveChangesAsync 真正成功后才被赋值，作为"是否落库"的唯一判据。
-        var savedWorkOrder = await WorkOrderCodeGenerator.CreateWithUniqueCodeAsync(
-            dbContext,
-            code =>
+            IDbContextTransaction? transaction = null;
+            try
             {
-                var workOrder = new WorkOrder
+                if (dbContext.Database.IsRelational())
                 {
-                    TenantId = @event.TenantId,
-                    WorkOrderCode = code,
-                    Title = $"告警工单：{@event.Metric} 异常",
-                    Type = WorkOrderType.Corrective,
-                    Priority = MapSeverity(@event.Severity),
-                    Status = WorkOrderStatus.PendingDispatch,
-                    DeviceId = @event.DeviceId,
-                    AlertId = @event.AlertId
-                };
-                // SLA 到期时间：自动建单必须设 DueDate 才能纳入 WorkOrderStatisticsService 的 SLA 达成率统计
-                // （Where DueDate.HasValue），否则告警驱动工单被排除 → SLA KPI 失真（最该受 SLA 约束的工单反而不计入）。
-                // 基于工单 CreatedAt + 优先级 SLA 时限（SlaTracker.CalculateDueDate），与 SlaManagementService
-                // 的超时判断基准（createdAt + slaHours）保持一致（回归 #255）
-                workOrder.DueDate = SlaTracker.CalculateDueDate(workOrder.Priority.ToString(), workOrder.CreatedAt);
-                return workOrder;
-            },
-            _logger,
-            cancellationToken);
+                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                }
 
-        // 关键：用显式的"是否成功落库"标志判断，而非依赖 workOrder.Id。
-        // BaseEntity.Id 在构造时即赋 Guid.NewGuid()，永不为 Guid.Empty，
-        // 旧判断 (workOrder.Id == Guid.Empty) 恒为 false → 3 次编码冲突后会把【未落库】的工单
-        // 误判为成功，进而发布 WorkOrderCreatedEvent，触发 WorkOrderNotificationHandler 向
-        // Dashboard 推送一条【数据库里根本不存在】的幽灵工单通知。改为 savedWorkOrder 判据根除该隐患。
-        if (savedWorkOrder is null)
-        {
-            _logger.LogError("自动建单失败：3 次重试后仍无法生成唯一编码，AlertId={AlertId}", @event.AlertId);
-            return;
+                // 防重复：同一告警不重复创建活跃工单（未关闭、未取消的工单视为活跃）。
+                // 但不能只返回：旧实例可能已经把工单写入数据库，却在写入 WorkOrderCreatedEvent
+                // 前宕机。重试时必须使用同一个事件 ID 幂等补发，才能避免“有工单、无通知”的断链。
+                var existingActiveWorkOrder = await dbContext.WorkOrders
+                    .IgnoreQueryFilters()
+                    .Where(wo => wo.TenantId == @event.TenantId
+                        && wo.AlertId == @event.AlertId
+                        && wo.Status != WorkOrderStatus.Closed
+                        && wo.Status != WorkOrderStatus.Cancelled)
+                    .OrderBy(wo => wo.CreatedAt)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (existingActiveWorkOrder is not null)
+                {
+                    _logger.LogInformation(
+                        "告警已有关联的活跃工单，将幂等补发创建事件: AlertId={AlertId}, WorkOrderId={WorkOrderId}",
+                        @event.AlertId, existingActiveWorkOrder.Id);
+                    await eventBus.PublishAsync(new WorkOrderCreatedEvent(
+                        EventId: existingActiveWorkOrder.Id,
+                        OccurredAt: existingActiveWorkOrder.CreatedAt,
+                        TenantId: existingActiveWorkOrder.TenantId,
+                        WorkOrderId: existingActiveWorkOrder.Id,
+                        DeviceId: existingActiveWorkOrder.DeviceId,
+                        Title: existingActiveWorkOrder.Title,
+                        Priority: existingActiveWorkOrder.Priority.ToString()), cancellationToken);
+                    if (transaction is not null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+
+                    return;
+                }
+
+                // 生成工单编码并创建工单（带冲突重试）。
+                // 与 WorkOrderService.CreateAsync 共用 WorkOrderCodeGenerator，保证两条路径行为一致：
+                // 同样 IgnoreQueryFilters 读跨租户最大序号、同样在唯一约束冲突（SQLSTATE 23505）时重试。
+                // savedWorkOrder 仅在 SaveChangesAsync 真正成功后才被赋值，作为“是否落库”的唯一判据。
+                var savedWorkOrder = await WorkOrderCodeGenerator.CreateWithUniqueCodeAsync(
+                    dbContext,
+                    code =>
+                    {
+                        var workOrder = new WorkOrder
+                        {
+                            TenantId = @event.TenantId,
+                            WorkOrderCode = code,
+                            Title = $"告警工单：{@event.Metric} 异常",
+                            Type = WorkOrderType.Corrective,
+                            Priority = MapSeverity(@event.Severity),
+                            Status = WorkOrderStatus.PendingDispatch,
+                            DeviceId = @event.DeviceId,
+                            AlertId = @event.AlertId
+                        };
+                        // SLA 到期时间：自动建单必须设 DueDate 才能纳入 WorkOrderStatisticsService 的 SLA 达成率统计
+                        // （Where DueDate.HasValue），否则告警驱动工单被排除 → SLA KPI 失真（最该受 SLA 约束的工单反而不计入）。
+                        // 基于工单 CreatedAt + 优先级 SLA 时限（SlaTracker.CalculateDueDate），与 SlaManagementService
+                        // 的超时判断基准（createdAt + slaHours）保持一致（回归 #255）。
+                        workOrder.DueDate = SlaTracker.CalculateDueDate(workOrder.Priority.ToString(), workOrder.CreatedAt);
+                        return workOrder;
+                    },
+                    _logger,
+                    cancellationToken);
+
+                // 关键：用显式的“是否成功落库”标志判断，而非依赖 workOrder.Id。
+                // BaseEntity.Id 在构造时即赋 Guid.NewGuid()，永不为 Guid.Empty，
+                // 旧判断 (workOrder.Id == Guid.Empty) 恒为 false → 3 次编码冲突后会把【未落库】的工单
+                // 误判为成功，进而发布 WorkOrderCreatedEvent，触发 WorkOrderNotificationHandler 向
+                // Dashboard 推送一条【数据库里根本不存在】的幽灵工单通知。改为 savedWorkOrder 判据根除该隐患。
+                if (savedWorkOrder is null)
+                {
+                    _logger.LogError("自动建单失败：3 次重试后仍无法生成唯一编码，AlertId={AlertId}", @event.AlertId);
+                    if (transaction is not null)
+                    {
+                        await transaction.CommitAsync(cancellationToken);
+                    }
+
+                    return;
+                }
+
+                // 自动建单也必须留下创建审计，确保手工和告警创建路径的追踪能力一致。
+                dbContext.WorkOrderLogs.Add(new WorkOrderLog
+                {
+                    WorkOrderId = savedWorkOrder.Id,
+                    Action = WorkOrderLogAction.Created,
+                    NewStatus = WorkOrderStatus.PendingDispatch.ToString(),
+                    Note = $"由告警自动创建（AlertId: {@event.AlertId}）"
+                });
+
+                _logger.LogInformation(
+                    "已自动创建工单: WorkOrderId={WorkOrderId}, Code={WorkOrderCode}, AlertId={AlertId}",
+                    savedWorkOrder.Id, savedWorkOrder.WorkOrderCode, @event.AlertId);
+
+                // 发布工单创建事件，供 SignalR 推送等下游模块消费。
+                // 工单 ID 同时作为事件 ID，消费失败重试或历史断链恢复时可安全幂等补发。
+                await eventBus.PublishAsync(new WorkOrderCreatedEvent(
+                    EventId: savedWorkOrder.Id,
+                    OccurredAt: savedWorkOrder.CreatedAt,
+                    TenantId: savedWorkOrder.TenantId,
+                    WorkOrderId: savedWorkOrder.Id,
+                    DeviceId: savedWorkOrder.DeviceId,
+                    Title: savedWorkOrder.Title,
+                    Priority: savedWorkOrder.Priority.ToString()), cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+            }
+            catch
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+
+                throw;
+            }
+            finally
+            {
+                if (transaction is not null)
+                {
+                    await transaction.DisposeAsync();
+                }
+            }
         }
 
-        _logger.LogInformation(
-            "已自动创建工单: WorkOrderId={WorkOrderId}, Code={WorkOrderCode}, AlertId={AlertId}",
-            savedWorkOrder.Id, savedWorkOrder.WorkOrderCode, @event.AlertId);
-
-        // 发布工单创建事件，供 SignalR 推送等下游模块消费
-        await eventBus.PublishAsync(new WorkOrderCreatedEvent(
-            // 工单创建事件的一次性语义由工单 ID 稳定标识；消费失败重试时可安全补发。
-            EventId: savedWorkOrder.Id,
-            OccurredAt: savedWorkOrder.CreatedAt,
-            TenantId: savedWorkOrder.TenantId,
-            WorkOrderId: savedWorkOrder.Id,
-            DeviceId: savedWorkOrder.DeviceId,
-            Title: savedWorkOrder.Title,
-            Priority: savedWorkOrder.Priority.ToString()
-        ), cancellationToken);
+        if (dbContext.Database.IsRelational())
+        {
+            var executionStrategy = dbContext.Database.CreateExecutionStrategy();
+            await executionStrategy.ExecuteAsync(CreateOrRecoverAsync);
+        }
+        else
+        {
+            await CreateOrRecoverAsync();
+        }
     }
 
     /// <summary>

@@ -280,12 +280,12 @@ public class AlertNotificationService
             };
             var msgResp = await client.SendAsync(msgReq, ct);
             var msgBody = await msgResp.Content.ReadAsStringAsync(ct);
-            _logger.LogInformation("告警飞书推送完成（App）: AlertId={AlertId}, Status={Status}, Body={Body}",
-                alertId, msgResp.StatusCode, msgBody.Length > 200 ? msgBody[..200] : msgBody);
+            _logger.LogInformation("告警飞书推送完成（App）: AlertId={AlertId}, Status={Status}",
+                alertId, msgResp.StatusCode);
         }
         else
         {
-            _logger.LogWarning("飞书应用 token 响应异常: {Body}", await tokenResp.Content.ReadAsStringAsync(ct));
+            _logger.LogWarning("飞书应用 token 响应异常，未继续发送消息");
         }
     }
 
