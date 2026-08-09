@@ -2,15 +2,18 @@
 
 EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。Docker 部署时优先使用环境变量（`docker/.env` 文件）。
 
+本地开发配置中的数据库、JWT 和网关密钥仅保留占位符。请使用 `dotnet user-secrets` 或环境变量注入真实值，避免把凭据写入仓库；生产 Docker 部署必须使用 `docker/.env` 中的强随机值。
+
 ## 数据库
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
-| `ConnectionStrings__Default` | PostgreSQL 连接字符串（读写主库） | `Host=localhost;Port=5432;Database=equipai;Username=equipai;Password=...` | 是 |
+| `ConnectionStrings__Default` | PostgreSQL 连接字符串（读写主库） | 无（本地开发使用 User Secrets） | 是 |
 | `ConnectionStrings__ReadOnly` | PostgreSQL 只读副本连接串（CQRS 读路径）。未配置或等于 Default 时退化为单库（只读上下文指向主库，行为零变化）。配置独立副本后纯读 QueryService（遥测、分析）路由到此库 | 同 Default | 否 |
 | `READONLY_DB_HOST` | docker-compose 中只读副本的主机（覆盖 ReadOnly 连接的 Host） | `postgres`（同主库） | 否 |
 | `READONLY_DB_PORT` | docker-compose 中只读副本的端口 | `5432`（同主库） | 否 |
 | `PG_PASSWORD` | Docker 部署中的 PostgreSQL 密码 | — | Docker 部署必填 |
+| `DEV_PG_PASSWORD` | 开发 Compose 中 PostgreSQL 密码 | 无 | 开发 Compose 必填 |
 
 ## 认证
 
@@ -104,8 +107,10 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 | `EventBus__RabbitMq__Password` | RabbitMQ 密码 | `guest` | Provider=RabbitMQ 时必填 |
 | `EventBus__RabbitMq__MaxRetryCount` | 最大重试次数（含首次） | `5` | 否 |
 | `EventBus__RabbitMq__RetryIntervalSeconds` | 重试间隔（秒） | `30` | 否 |
-| `RABBITMQ_PASSWORD` | docker-compose rabbitmq 服务默认密码 | `changeme_rabbitmq` | 生产必改 |
+| `RABBITMQ_PASSWORD` | docker-compose RabbitMQ 服务密码（服务始终启动，禁止使用公开默认值） | — | Docker 生产必填 |
 | `RABBITMQ_USER` | docker-compose rabbitmq 服务默认用户 | `equipai` | 否 |
+| `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | — | Docker 生产必填 |
+| `GRAFANA_PASSWORD` | Grafana 管理员密码 | — | Docker 生产必填 |
 
 ## 限流与调试
 

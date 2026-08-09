@@ -63,7 +63,7 @@ public class DeviceHealthServiceTests
     };
 
     [Fact]
-    public async Task GetHealthLevel_Should_Classify_Correctly()
+    public void GetHealthLevel_Should_Classify_Correctly()
     {
         DeviceHealthService.GetHealthLevel(90).Should().Be("Healthy");
         DeviceHealthService.GetHealthLevel(85).Should().Be("Healthy");

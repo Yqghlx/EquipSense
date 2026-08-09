@@ -1,4 +1,5 @@
 using EquipAI.Application.Alerts;
+using EquipAI.Core.Interfaces;
 using FluentAssertions;
 
 namespace EquipAI.Tests.Unit.Alerts;
@@ -10,57 +11,57 @@ public class AlertAggregatorTests
     private readonly Guid _ruleId = Guid.NewGuid();
 
     [Fact]
-    public void Evaluate_FirstOccurrence_ShouldCreate()
+    public async Task Evaluate_FirstOccurrence_ShouldCreate()
     {
-        var result = _aggregator.Evaluate(Guid.NewGuid(), _ruleId, "temperature");
-        result.Should().Be((true, false, false));
+        var result = await _aggregator.EvaluateAsync(Guid.NewGuid(), _ruleId, "temperature");
+        result.Should().Be(new AlertAggregationDecision(true, false, false));
     }
 
     [Fact]
-    public void Evaluate_SecondOccurrence_ShouldUpdate()
+    public async Task Evaluate_SecondOccurrence_ShouldUpdate()
     {
         var deviceId = Guid.NewGuid();
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        var result = _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        result.Should().Be((false, true, false));
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        var result = await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        result.Should().Be(new AlertAggregationDecision(false, true, false));
     }
 
     [Fact]
-    public void Evaluate_ThirdOccurrence_ShouldUpdate()
+    public async Task Evaluate_ThirdOccurrence_ShouldUpdate()
     {
         var deviceId = Guid.NewGuid();
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        var result = _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        result.Should().Be((false, true, false));
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        var result = await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        result.Should().Be(new AlertAggregationDecision(false, true, false));
     }
 
     [Fact]
-    public void Evaluate_FourthOccurrence_ShouldSilence()
+    public async Task Evaluate_FourthOccurrence_ShouldSilence()
     {
         var deviceId = Guid.NewGuid();
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        var result = _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        result.Should().Be((false, false, true));
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        var result = await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        result.Should().Be(new AlertAggregationDecision(false, false, true));
     }
 
     [Fact]
-    public void Evaluate_DifferentMetrics_ShouldBeIndependent()
+    public async Task Evaluate_DifferentMetrics_ShouldBeIndependent()
     {
         var deviceId = Guid.NewGuid();
-        _aggregator.Evaluate(deviceId, _ruleId, "temperature");
-        var result = _aggregator.Evaluate(deviceId, _ruleId, "vibration");
-        result.Should().Be((true, false, false));
+        await _aggregator.EvaluateAsync(deviceId, _ruleId, "temperature");
+        var result = await _aggregator.EvaluateAsync(deviceId, _ruleId, "vibration");
+        result.Should().Be(new AlertAggregationDecision(true, false, false));
     }
 
     [Fact]
-    public void Evaluate_DifferentDevices_SameMetric_ShouldBeIndependent()
+    public async Task Evaluate_DifferentDevices_SameMetric_ShouldBeIndependent()
     {
-        _aggregator.Evaluate(Guid.NewGuid(), _ruleId, "temperature");
-        var result = _aggregator.Evaluate(Guid.NewGuid(), _ruleId, "temperature");
-        result.Should().Be((true, false, false));
+        await _aggregator.EvaluateAsync(Guid.NewGuid(), _ruleId, "temperature");
+        var result = await _aggregator.EvaluateAsync(Guid.NewGuid(), _ruleId, "temperature");
+        result.Should().Be(new AlertAggregationDecision(true, false, false));
     }
 
     /// <summary>
@@ -69,16 +70,16 @@ public class AlertAggregatorTests
     /// 第二条规则的首发被误判为 shouldUpdate，严重告警被吞并进告警级告警。
     /// </summary>
     [Fact]
-    public void Evaluate_DifferentRules_SameDeviceMetric_ShouldBeIndependent()
+    public async Task Evaluate_DifferentRules_SameDeviceMetric_ShouldBeIndependent()
     {
         var deviceId = Guid.NewGuid();
         var ruleWarn = Guid.NewGuid();
         var ruleCrit = Guid.NewGuid();
 
-        _aggregator.Evaluate(deviceId, ruleWarn, "temperature");
-        var result = _aggregator.Evaluate(deviceId, ruleCrit, "temperature");
+        await _aggregator.EvaluateAsync(deviceId, ruleWarn, "temperature");
+        var result = await _aggregator.EvaluateAsync(deviceId, ruleCrit, "temperature");
 
-        result.Should().Be((true, false, false),
+        result.Should().Be(new AlertAggregationDecision(true, false, false),
             "同设备同指标的不同规则应各自独立首发创建，不得共享窗口互相吞并");
     }
 }

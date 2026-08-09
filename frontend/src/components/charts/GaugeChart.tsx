@@ -1,5 +1,6 @@
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from './ReactECharts';
 import { useTheme } from '../../hooks/useTheme';
+import { echarts } from './echarts';
 
 interface GaugeChartProps {
   /** 当前值 */
@@ -54,5 +55,5 @@ export function GaugeChart({ value, max = 100, title, color = '#3b82f6', height 
     ],
   };
 
-  return <ReactECharts option={option} style={{ height }} />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height }} />;
 }

@@ -27,6 +27,7 @@ PG_PASSWORD=<强密码，至少16位>
 JWT_SECRET=<随机密钥，至少32位>
 MQTT_USERNAME=<MQTT用户名>
 MQTT_PASSWORD=<MQTT强密码>
+GATEWAY_AUTH_KEY=<至少32位的纯ASCII网关认证密钥>
 SEED_ADMIN_PASSWORD=<管理员初始密码>
 SEED_LEAD_PASSWORD=<主管初始密码>
 SEED_TECH_PASSWORD=<技术员初始密码>
@@ -34,10 +35,13 @@ SEED_OPERATOR_PASSWORD=<操作员初始密码>
 SEED_VIEWER_PASSWORD=<观察者初始密码>
 VAPID__PUBLICKEY=<由 web-push 生成的公钥>
 VAPID__PRIVATEKEY=<由 web-push 生成的私钥>
+REDIS_PASSWORD=<Redis强密码>
+RABBITMQ_PASSWORD=<RabbitMQ强密码>
+SEQ_ADMIN_PASSWORD=<Seq管理员密码>
+GRAFANA_PASSWORD=<Grafana管理员密码>
 
 # 可选修改
 DOMAIN=your-domain.com
-REDIS_PASSWORD=<Redis密码>
 ```
 
 确认 `docker/.env` 中的必填项已替换占位值后，生成开发/测试用 Nginx 与 MQTT TLS 证书，并创建 MQTT 密码文件：
@@ -109,11 +113,15 @@ curl http://localhost:8080/api/v1/system/info
 | `PG_DB` | 数据库名 | `equipai` | 否 |
 | `PG_USER` | 数据库用户 | `postgres` | 否 |
 | `PG_PORT` | PostgreSQL 端口 | `5432` | 否 |
-| `REDIS_PASSWORD` | Redis 密码 | 空 | 否 |
+| `REDIS_PASSWORD` | Redis 密码 | - | 生产环境必填 |
 | `REDIS_PORT` | Redis 端口 | `6379` | 否 |
+| `RABBITMQ_PASSWORD` | RabbitMQ 密码（即使事件总线使用 InMemory，RabbitMQ 容器也会启动） | - | 生产环境必填 |
+| `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | - | 生产环境必填 |
+| `GRAFANA_PASSWORD` | Grafana 管理员密码 | - | 生产环境必填 |
 | `MQTT_PORT` | MQTT 对外端口 | `8883` | 否 |
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
+| `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（至少 32 位纯 ASCII） | - | 使用边缘网关时必填 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码 | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |

@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Security
+
+- 将本地数据库、JWT 和网关认证配置改为占位符，并为生产环境增加网关密钥安全校验；真实凭据通过环境变量或 .NET User Secrets 注入。
+- 移除生产 Compose 中 RabbitMQ、Seq 和 Grafana 的公开弱密码默认值，缺少强密码时拒绝解析配置。
+- 生产环境检测未解析的连接串占位符并在启动阶段失败，避免服务以字面量凭据反复重试基础设施连接。
+
+### Fixed
+
+- 告警聚合窗口改为 Redis 原子计数，支持多后端实例共享 30 分钟防风暴窗口；Redis 故障时保留本地降级路径。
+- 修复 Playwright E2E 辅助函数缺少公开导出导致测试用例无法发现的问题。
+
+### Changed
+
+- README 和运行文档同步四级 AI 分析链及正式模拟器入口。
+- ECharts 改为按需注册，减少生产前端包体积。
+
 ## [1.2.0] - 2026-06-06
 
 ### Added

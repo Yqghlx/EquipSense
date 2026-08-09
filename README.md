@@ -6,7 +6,7 @@ EquipSense（内部代号 EquipAI）是一个端到端的工业 IoT 监控平台
 
 - **实时监控**：通过 MQTT 接收设备遥测数据，SignalR 实时推送到前端
 - **智能告警**：三级告警引擎（阈值 / 组合 / 基线），含 30 分钟聚合防风暴
-- **AI 根因分析**：自动降级策略（L3 统计分析 → L1 LLM 诊断），数据质量影响置信度
+- **AI 根因分析**：四级自动降级策略（L4 ML 异常检测 → L2 规则 → L3 统计 → L1 LLM），数据质量影响置信度
 - **工单闭环**：告警触发后自动创建工单，支持完整生命周期管理
 - **多租户 SaaS**：Day 1 多租户隔离，RBAC 五角色权限矩阵
 
@@ -57,7 +57,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 #### 1. 启动基础设施
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml up -d
+DEV_PG_PASSWORD='<本地数据库密码>' docker compose -f docker/docker-compose.dev.yml up -d
 ```
 
 这会启动 PostgreSQL（5432）、Redis（6379）和 Mosquitto（1883）。
@@ -66,6 +66,11 @@ docker compose -f docker/docker-compose.dev.yml up -d
 
 ```bash
 cd src
+# 首次本地开发需把数据库、JWT 和网关密钥写入 .NET User Secrets，不要写入 appsettings.json
+dotnet user-secrets set --project EquipAI.WebAPI "ConnectionStrings:Default" "Host=localhost;Port=5432;Database=equipai_dev;Username=postgres;Password=<本地数据库密码>;Maximum Pool Size=100"
+dotnet user-secrets set --project EquipAI.WebAPI "ConnectionStrings:ReadOnly" "Host=localhost;Port=5432;Database=equipai_dev;Username=postgres;Password=<本地数据库密码>;Maximum Pool Size=100"
+dotnet user-secrets set --project EquipAI.WebAPI "Jwt:Secret" "<至少32位的本地开发密钥>"
+dotnet user-secrets set --project EquipAI.WebAPI "Gateway:AuthKey" "<至少32位的本地网关密钥>"
 dotnet run --project EquipAI.WebAPI
 # 后端监听 http://localhost:8080
 ```
@@ -84,11 +89,11 @@ npm run dev
 #### 4. 发送模拟数据（可选）
 
 ```bash
-cd tools/EquipAI.Simulator
-dotnet run -- --tenant 11111111-1111-1111-1111-111111111111 --devices 3 --interval 5
+dotnet run --project src/EquipAI.Simulator -- \
+  --tenant 11111111-1111-1111-1111-111111111111 --devices 3 --interval 5
 ```
 
-模拟器每 5 秒向 3 个虚拟设备发送遥测数据，5% 概率生成异常值触发告警。
+正式模拟器位于 `src/EquipAI.Simulator`；`tools/EquipAI.Simulator` 仅保留给现有故障场景单元测试使用，不作为运行入口。模拟器每 5 秒向 3 个虚拟设备发送遥测数据，5% 概率生成异常值触发告警。
 
 ## 项目结构
 
@@ -109,7 +114,7 @@ EquipSense/
 │       ├── i18n/                  # 国际化（中英文）
 │       └── types/                 # TypeScript 类型定义
 ├── tools/
-│   └── EquipAI.Simulator/         # MQTT 遥测数据模拟器
+│   └── EquipAI.Simulator/         # 测试用故障场景库（非运行入口）
 ├── docker/
 │   ├── Dockerfile.backend         # 后端多阶段构建
 │   ├── Dockerfile.frontend        # 前端 Nginx 构建
@@ -126,11 +131,12 @@ EquipSense/
 |------|------|------|--------|
 | `PG_PASSWORD` | PostgreSQL 密码 | 是 | - |
 | `JWT_SECRET` | JWT 签名密钥（≥32 字符） | 是 | - |
+| `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（≥32 位纯 ASCII） | 使用网关时必填 | - |
 | `PG_DB` | 数据库名 | 否 | `equipai` |
 | `PG_USER` | 数据库用户 | 否 | `postgres` |
 | `BACKEND_PORT` | 后端端口 | 否 | `8080` |
 | `FRONTEND_PORT` | 前端端口 | 否 | `80` |
-| `LLM_API_KEY` | LLM API 密钥 | 否 | 空（AI 分析降级为 L1 规则匹配） |
+| `LLM_API_KEY` | LLM API 密钥 | 否 | 空（AI 分析降级为通用经验诊断） |
 | `LLM_MODEL` | LLM 模型 ID | 否 | `qwen-plus` |
 | `LLM_ENDPOINT` | LLM API 端点 | 否 | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
 
@@ -160,7 +166,7 @@ EquipSense/
 
 ## 开发路线图
 
-- **Phase 1（当前）**：核心闭环 — 设备 CRUD、MQTT 遥测、告警引擎、AI 根因（L1-L3）、工单、前端完整页面、Docker 部署
+- **Phase 1（当前）**：核心闭环 — 设备 CRUD、MQTT 遥测、告警引擎、AI 根因（L1-L4）、工单、前端完整页面、Docker 部署
 - **Phase 2**：真实接入 — OPC UA / Modbus 适配器、边缘网关断网保护、知识沉淀闭环
 - **Phase 3**：产品化 — 工单完整工作流、钉钉/飞书集成、PWA、多租户 SaaS 完善
 - **Phase 4**：智能化 — ML.NET 异常检测（L4）、安全加固、压力测试、v1.0 发布

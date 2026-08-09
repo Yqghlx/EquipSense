@@ -33,7 +33,7 @@ Stage 3 [Docker 构建]     Stage 4 [E2E 测试]       ← main push 仅
 ```yaml
 branches: [main, develop]
 paths: ['src/**', 'tests/**', 'frontend/**', 'docker/**', 'tools/**',
-        '.github/workflows/ci.yml', 'EquipAI.slnx', 'Directory.Build.props']
+        '.github/workflows/ci.yml', 'EquipAI.sln', 'Directory.Build.props']
 workflow_dispatch: true  # 手动触发
 ```
 

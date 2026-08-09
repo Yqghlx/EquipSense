@@ -112,6 +112,9 @@ public static class ServiceCollectionExtensions
             return ConnectionMultiplexer.Connect(connectionString);
         });
 
+        // 告警聚合共享状态（Singleton），使用同一 Redis 连接保证多实例窗口计数一致。
+        services.AddSingleton<IAlertAggregationStateStore, RedisAlertAggregationStateStore>();
+
         // 分布式锁提供者，供后台服务在多实例部署下互斥执行（单实例下锁恒可获取，行为不变）
         services.AddSingleton<IDistributedLockProvider, RedisDistributedLockProvider>();
 
@@ -279,7 +282,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAlertRuleEvaluator, CombinedEvaluator>();
         services.AddSingleton<IAlertRuleEvaluator, BaselineEvaluator>();
 
-        // 告警聚合器（Singleton — 内存状态）
+        // 告警聚合器（Singleton — Redis 共享状态，Redis 故障时自动降级到本地窗口）
         services.AddSingleton<IAlertAggregator, AlertAggregator>();
 
         // 告警评估服务（Scoped — 需要 DbContext）

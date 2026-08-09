@@ -61,15 +61,18 @@ jobs:
           # suite：安全-扩展查询集，比默认更全面（含路径遍历、SSRF、日志注入等）
           queries: security-extended
 
-      # C# autobuild 需 .NET SDK 才能编译解决方案（CodeQL 分析需编译产物）
+      # C# 构建需要 .NET SDK；明确使用 .sln，避免 .NET 8 无法识别 slnx。
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
         if: matrix.language == 'csharp'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: 自动构建（${{ matrix.language }}）
-        uses: github/codeql-action/autobuild@v3
+      - name: 构建 C# 解决方案
+        if: matrix.language == 'csharp'
+        run: |
+          dotnet restore EquipAI.sln
+          dotnet build EquipAI.sln --configuration Release --no-restore
 
       - name: 执行 CodeQL 分析
         uses: github/codeql-action/analyze@v3

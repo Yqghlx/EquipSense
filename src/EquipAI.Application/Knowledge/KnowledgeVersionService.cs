@@ -31,9 +31,11 @@ public class KnowledgeVersionService
     /// <summary>
     /// 创建版本快照 — 在规则编辑前调用，保存当前状态
     /// </summary>
-    public async Task<KnowledgeRuleVersion> CreateVersionSnapshotAsync(
+    public Task<KnowledgeRuleVersion> CreateVersionSnapshotAsync(
         KnowledgeRule rule, Guid? changedBy, string? changeSummary, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         var snapshot = new KnowledgeRuleVersion
         {
             TenantId = rule.TenantId,
@@ -47,7 +49,7 @@ public class KnowledgeVersionService
         _dbContext.KnowledgeRuleVersions.Add(snapshot);
         _logger.LogInformation(
             "创建规则版本快照: RuleId={RuleId}, Version={Version}", rule.Id, rule.Version);
-        return snapshot;
+        return Task.FromResult(snapshot);
     }
 
     /// <summary>

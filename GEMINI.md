@@ -60,7 +60,7 @@ EquipSense 是一个端到端的工业 IoT 监控与预测维护平台。它通�
 
 ### 后端
 ```bash
-dotnet build EquipAI.slnx                   # 构建项目
+dotnet build EquipAI.sln                    # 构建项目（.NET 8 稳定入口）
 dotnet run --project src/EquipAI.WebAPI      # 启动 WebAPI (http://localhost:8080)
 dotnet test tests/EquipAI.Tests.Unit         # 运行单元测试
 dotnet ef database update                    # 手动更新数据库
@@ -77,7 +77,7 @@ npm run build                                # 生产构建
 
 ### 模拟器 (发送测试数据)
 ```bash
-dotnet run --project tools/EquipAI.Simulator -- --tenant <ID> --devices 3 --interval 5
+dotnet run --project src/EquipAI.Simulator -- --tenant <ID> --devices 3 --interval 5
 ```
 
 ---

@@ -46,6 +46,17 @@ try
     // 注册 HTTP 上下文访问器，供中间件和服务获取当前请求上下文
     builder.Services.AddHttpContextAccessor();
 
+    // 在注册任何事件发布后台服务前完成配置校验，避免未知 Provider 或生产弱配置静默降级。
+    EventBusConfiguration.ValidateForEnvironment(
+        builder.Configuration,
+        builder.Environment.EnvironmentName);
+    if (builder.Environment.IsProduction()
+        && EventBusConfiguration.ResolveProvider(builder.Configuration) == EventBusProvider.InMemory)
+    {
+        // 这是显式 break-glass 场景：允许进程继续运行，但必须留下最高级别审计信号。
+        Log.Fatal("生产环境已显式启用 InMemory 事件总线，应急期间进程重启会丢失未处理事件");
+    }
+
     // 分层注册：基础设施层 → 应用层 → 认证 → Swagger
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.AddApplication();
@@ -238,10 +249,52 @@ try
     // 生产环境启动校验：拒绝不安全的占位符 JWT 密钥
     var jwtSecret = builder.Configuration["Jwt:Secret"] ?? string.Empty;
     var insecureSecrets = new[] { "请修改为随机密钥-至少32个字符!!", "your-secret-key", "change-me", "secret" };
-    if (!app.Environment.IsDevelopment() && (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32 || insecureSecrets.Contains(jwtSecret, StringComparer.OrdinalIgnoreCase)))
+    if (!app.Environment.IsDevelopment()
+        && !app.Environment.IsEnvironment("Testing")
+        && (string.IsNullOrWhiteSpace(jwtSecret)
+            || jwtSecret.Length < 32
+            || insecureSecrets.Contains(jwtSecret, StringComparer.OrdinalIgnoreCase)))
     {
         Log.Fatal("JWT 密钥不安全（长度不足 32 位或为占位符值），请修改 .env 中的 JWT_SECRET 后重新启动");
         throw new InvalidOperationException("JWT 密钥不安全，应用拒绝启动。请在环境变量中设置至少 32 位的随机密钥");
+    }
+
+    // 生产环境启动校验：拒绝公开的网关认证密钥，避免设备配置接口被默认凭据保护。
+    var gatewayAuthKey = builder.Configuration["Gateway:AuthKey"] ?? string.Empty;
+    var insecureGatewayKeys = new[]
+    {
+        "SET_VIA_USER_SECRETS",
+        "equipai-gateway-dev-key-2024",
+        "PLEASE_CHANGE_THIS_TO_ASCII_STRONG_KEY_AT_LEAST_32_CHARS"
+    };
+    if (!app.Environment.IsDevelopment()
+        && !app.Environment.IsEnvironment("Testing")
+        && (string.IsNullOrWhiteSpace(gatewayAuthKey)
+            || gatewayAuthKey.Length < 32
+            || insecureGatewayKeys.Contains(gatewayAuthKey, StringComparer.OrdinalIgnoreCase)))
+    {
+        Log.Fatal("网关认证密钥不安全（长度不足 32 位或为占位符值），请修改 .env 中的 GATEWAY_AUTH_KEY 后重新启动");
+        throw new InvalidOperationException("网关认证密钥不安全，应用拒绝启动。请在环境变量中设置至少 32 位的随机密钥");
+    }
+
+    // ASP.NET Core 不会展开 JSON 中的 ${VAR} 占位符；生产配置必须由环境变量覆盖连接串，
+    // 否则服务会以字面量占位符连接基础设施并在重试后才失败，部署排障成本很高。
+    var defaultConnectionString = builder.Configuration.GetConnectionString("Default") ?? string.Empty;
+    var readOnlyConnectionString = builder.Configuration.GetConnectionString("ReadOnly") ?? string.Empty;
+    var redisConnectionString = builder.Configuration["Redis:ConnectionString"] ?? string.Empty;
+    var hasUnresolvedConnectionPlaceholder =
+        defaultConnectionString.Contains("SET_VIA_ENVIRONMENT", StringComparison.Ordinal)
+        || readOnlyConnectionString.Contains("SET_VIA_ENVIRONMENT", StringComparison.Ordinal)
+        || redisConnectionString.Contains("SET_VIA_ENVIRONMENT", StringComparison.Ordinal)
+        || defaultConnectionString.Contains("${", StringComparison.Ordinal)
+        || readOnlyConnectionString.Contains("${", StringComparison.Ordinal)
+        || redisConnectionString.Contains("${", StringComparison.Ordinal);
+    if (!app.Environment.IsDevelopment()
+        && !app.Environment.IsEnvironment("Testing")
+        && (string.IsNullOrWhiteSpace(defaultConnectionString) || hasUnresolvedConnectionPlaceholder))
+    {
+        Log.Fatal("生产环境基础设施连接配置未解析，请通过 ConnectionStrings__Default、ConnectionStrings__ReadOnly 和 Redis__ConnectionString 注入真实值");
+        throw new InvalidOperationException("生产环境基础设施连接配置缺失或仍包含占位符，应用拒绝启动");
     }
 
     // MQTT 安全配置在启动阶段校验，避免生产服务先启动后才在后台重连中暴露配置错误。

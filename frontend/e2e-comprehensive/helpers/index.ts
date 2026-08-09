@@ -10,8 +10,13 @@ export {
   BASE_URL,
   login,
   loginAs,
+  loginAsFast,
+  loginViaUI,
   getToken,
   getTokenForRole,
+  getAuthState,
+  isLoggedIn,
+  verifyAuthCookie,
 } from './auth';
 
 // API 请求封装

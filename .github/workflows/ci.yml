@@ -69,10 +69,10 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 还原依赖
-        run: dotnet restore EquipAI.slnx
+        run: dotnet restore EquipAI.sln
 
       - name: 构建后端
-        run: dotnet build EquipAI.slnx --configuration Release --no-restore
+        run: dotnet build EquipAI.sln --configuration Release --no-restore
 
       - name: 安装 ReportGenerator（合并覆盖率报告）
         run: dotnet tool install -g dotnet-reportgenerator-globaltool --version 5.5.11
@@ -82,10 +82,10 @@ jobs:
       # 按程序集分级门禁（Core 80% / Application 78% / WebAPI 50% / Edge 28%，
       # Infrastructure 与 Simulator 豁免 — 见脚本头注释）
       - name: 运行单元测试（采集覆盖率）
-        run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s Tests/coverage.runsettings --results-directory ./coverage-results
+        run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s tests/coverage.runsettings --results-directory ./coverage-results
 
       - name: 运行集成测试（采集覆盖率）
-        run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s Tests/coverage.runsettings --results-directory ./coverage-results
+        run: dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s tests/coverage.runsettings --results-directory ./coverage-results
 
       # 合并单元 + 集成覆盖率为单份 Cobertura XML，供门禁脚本读取
       - name: 合并覆盖率报告
@@ -120,7 +120,7 @@ jobs:
       # NuGet 包漏洞检查 — 发现已知 CVE 即阻断 CI
       # 若确需暂缓修复某 CVE，在 nuget 包配置中显式忽略，而非关闭门禁
       - name: 检查 NuGet 依赖漏洞（阻断）
-        run: dotnet list EquipAI.slnx package --vulnerable --include-transitive
+        run: dotnet list EquipAI.sln package --vulnerable --include-transitive
 
   # ============================================================================
   # 前端构建 + 测试
@@ -519,8 +519,8 @@ jobs:
 
       - name: 还原并构建后端
         run: |
-          dotnet restore EquipAI.slnx
-          dotnet build EquipAI.slnx --configuration Release --no-restore
+          dotnet restore EquipAI.sln
+          dotnet build EquipAI.sln --configuration Release --no-restore
 
       - name: 启动后端服务
         env:
@@ -618,8 +618,8 @@ jobs:
 
       - name: 还原并构建后端
         run: |
-          dotnet restore EquipAI.slnx
-          dotnet build EquipAI.slnx --configuration Release --no-restore
+          dotnet restore EquipAI.sln
+          dotnet build EquipAI.sln --configuration Release --no-restore
 
       - name: 安装前端依赖
         working-directory: frontend

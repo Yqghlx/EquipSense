@@ -99,7 +99,7 @@
 5. 完成代码修改后执行：
 
    ```bash
-   dotnet build EquipAI.slnx --configuration Release --no-restore
+   dotnet build EquipAI.sln --configuration Release --no-restore
    dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build
    dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --configuration Release --no-build
    cd frontend && npx tsc -p tsconfig.json --noEmit
@@ -107,7 +107,7 @@
    cd frontend && npm run check:i18n
    cd frontend && npm run test
    cd frontend && npm run build
-   dotnet list EquipAI.slnx package --vulnerable --include-transitive
+   dotnet list EquipAI.sln package --vulnerable --include-transitive
    cd frontend && npm audit --omit=dev --audit-level=high
    ```
 
@@ -118,4 +118,3 @@
 - NuGet EdgeGateway 运行时 High 漏洞消除；前端生产依赖树无 High/Critical，或每项都有明确的阻断理由和记录。
 - 全部后端、前端质量门禁通过，新增回归测试覆盖上述配置行为。
 - 部署文档、环境变量样例和 CI 配置与实际行为一致。
-

@@ -83,7 +83,7 @@ public class AlertEvaluationService : IAlertEvaluationService
             .Where(r => r.TenantId == tenantId && r.Enabled && r.Metric == metric)
             .Where(r => r.DeviceId == null || r.DeviceId == deviceId)
             .Where(r => r.DeviceType == null || r.DeviceType == deviceType)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         if (rules.Count == 0)
             return;
@@ -114,7 +114,8 @@ public class AlertEvaluationService : IAlertEvaluationService
 
             // 通过聚合器判断告警处理策略（防风暴）。窗口按 设备+规则+指标 维度，
             // 避免同指标的多条规则（分层阈值）共享窗口互相吞并。
-            var (shouldCreate, shouldUpdate, silenced) = _aggregator.Evaluate(deviceId, rule.Id, metric);
+            var (shouldCreate, shouldUpdate, silenced) = await _aggregator.EvaluateAsync(
+                deviceId, rule.Id, metric, cancellationToken);
 
             if (silenced)
             {
@@ -148,11 +149,11 @@ public class AlertEvaluationService : IAlertEvaluationService
                 if (hasActive)
                 {
                     _logger.LogDebug("已存在活跃告警，降级为更新避免重复（聚合器可能因重启重置计数）: 设备={DeviceId}, 指标={Metric}", deviceId, metric);
-                    await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value);
+                    await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value, cancellationToken);
                 }
                 else
                 {
-                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context);
+                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
                     if (alert != null)
                     {
                         // 发布告警触发事件，供 SignalR 推送、工单创建等下游模块消费
@@ -160,13 +161,13 @@ public class AlertEvaluationService : IAlertEvaluationService
                             Guid.NewGuid(), DateTime.UtcNow, tenantId,
                             alert.Id, deviceId, rule.Id,
                             metric, value, rule.Severity.ToString());
-                        await _eventBus.PublishAsync(evt);
+                        await _eventBus.PublishAsync(evt, cancellationToken);
                     }
                 }
             }
             else if (shouldUpdate)
             {
-                var updated = await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value);
+                var updated = await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value, cancellationToken);
                 if (!updated)
                 {
                     // 防丢失：shouldUpdate 但无活跃告警可更新——常见于指标在阈值附近震荡：首次越限创建告警 →
@@ -175,13 +176,13 @@ public class AlertEvaluationService : IAlertEvaluationService
                     // 运维此前收到"已恢复"通知后误以为问题解决，实际复发却不再告警/通知。对在阈值附近波动的
                     // 工业指标（温度/振动/压力）是严重监控盲区。降级为创建新告警 + 发布事件（复发是新事件，需重新通知）。
                     // 仍受聚合器防风暴约束（窗口内至多创建/更新 3 次，超过即静默），不会因震荡产生告警风暴。
-                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context);
+                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
                     if (alert != null)
                     {
                         await _eventBus.PublishAsync(new AlertTriggeredEvent(
                             Guid.NewGuid(), DateTime.UtcNow, tenantId,
                             alert.Id, deviceId, rule.Id,
-                            metric, value, rule.Severity.ToString()));
+                            metric, value, rule.Severity.ToString()), cancellationToken);
                     }
                     BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
                 }
@@ -194,7 +195,8 @@ public class AlertEvaluationService : IAlertEvaluationService
     /// 告警编码格式：ALT-{设备编码}-{指标}-{时间戳}
     /// </summary>
     private async Task<Alert?> CreateAlertAsync(AppDbContext dbContext, Guid tenantId,
-        Guid deviceId, AlertRule rule, string metric, double value, DeviceContext context)
+        Guid deviceId, AlertRule rule, string metric, double value, DeviceContext context,
+        CancellationToken cancellationToken)
     {
         // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让 FindAsync 返回 null
         var device = await dbContext.Devices
@@ -223,7 +225,7 @@ public class AlertEvaluationService : IAlertEvaluationService
         };
 
         dbContext.Alerts.Add(alert);
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("告警已创建: {AlertCode}", alertCode);
         return alert;
@@ -235,7 +237,7 @@ public class AlertEvaluationService : IAlertEvaluationService
     /// <param name="ruleId">按规则精确匹配，避免同指标不同规则的告警被互相更新（吞并）</param>
     /// <returns>true 表示找到并更新了活跃告警；false 表示无活跃告警可更新（调用方应降级为创建新告警）</returns>
     private async Task<bool> UpdateExistingAlertAsync(AppDbContext dbContext, Guid tenantId,
-        Guid deviceId, Guid ruleId, string metric, double value)
+        Guid deviceId, Guid ruleId, string metric, double value, CancellationToken cancellationToken)
     {
         // IgnoreQueryFilters: 同 CreateAlertAsync，后台处理器需绕过全局租户过滤器
         // 按 设备+规则+指标 精确匹配（与聚合器窗口键维度一致），不得仅按 设备+指标，
@@ -246,7 +248,7 @@ public class AlertEvaluationService : IAlertEvaluationService
                      && a.RuleId == ruleId
                      && a.Metric == metric && a.Status == AlertStatus.Active)
             .OrderByDescending(a => a.OccurredAt)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(cancellationToken);
 
         if (existingAlert == null)
             return false;
@@ -255,7 +257,7 @@ public class AlertEvaluationService : IAlertEvaluationService
         existingAlert.OccurredAt = DateTime.UtcNow;
         existingAlert.TriggerCount += 1;
 
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         _logger.LogDebug("告警已更新: {AlertCode}（新值: {Value}）", existingAlert.AlertCode, value);
         return true;

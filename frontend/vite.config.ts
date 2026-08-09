@@ -1,10 +1,13 @@
-import path from 'path'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
-// https://vite.dev/config/
+const currentDirectory = path.dirname(fileURLToPath(import.meta.url))
+
+// Vite 配置使用 ESM，显式从 import.meta.url 解析目录，兼容 Node 18+ 并避免 __dirname 弃用警告。
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify('1.0.0'),
@@ -78,7 +81,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(currentDirectory, './src'),
     },
   },
   server: {

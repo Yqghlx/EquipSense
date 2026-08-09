@@ -1,5 +1,6 @@
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from './ReactECharts';
 import { useTheme } from '../../hooks/useTheme';
+import { echarts } from './echarts';
 
 interface TrendChartProps {
   /** 图表标题 */
@@ -66,5 +67,5 @@ export function TrendChart({ title, data, color = '#3b82f6', height = 300 }: Tre
     ],
   };
 
-  return <ReactECharts option={option} style={{ height }} />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height }} />;
 }

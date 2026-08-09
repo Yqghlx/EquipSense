@@ -90,6 +90,28 @@ public class KnowledgeVersionServiceTests
     }
 
     [Fact]
+    public async Task CreateVersionSnapshotAsync_收到已取消令牌时_应立即取消()
+    {
+        var rule = new KnowledgeRule
+        {
+            TenantId = _tenantId,
+            DeviceType = "电机",
+            Name = "取消测试",
+            Conditions = "[]",
+            Conclusion = "结论",
+            Version = 1
+        };
+
+        var act = () => _sut.CreateVersionSnapshotAsync(
+            rule,
+            changedBy: null,
+            changeSummary: "取消测试",
+            new CancellationToken(canceled: true));
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task GetVersionHistoryAsync_当规则有多个版本时_应按版本号降序返回()
     {
         // Arrange

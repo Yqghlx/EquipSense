@@ -102,7 +102,7 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # RabbitMQ：事件总线（可选，EventBus__Provider=RabbitMQ 时启用）
+  # RabbitMQ：事件总线（可选，EventBus__Provider=RabbitMQ 时启用）；服务本身仍必须使用强密码。
   # 提供持久化 + 重试 + 死信队列，进程重启不丢业务事件（告警/工单/分析）
   # 默认不启用事件总线依赖此服务——backend 仍可降级到进程内事件总线
   rabbitmq:
@@ -114,8 +114,8 @@ services:
       - "${RABBITMQ_MGMT_PORT:-15672}:15672"
     environment:
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_USER:-equipai}"
-      # 软默认：未配置 RabbitMQ 事件总线时允许留空；启用 EventBus__Provider=RabbitMQ 时必须在 .env 设置
-      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:-changeme_rabbitmq}"
+      # RabbitMQ 服务始终会启动，禁止使用公开默认密码，避免管理端口暴露弱凭证。
+      RABBITMQ_DEFAULT_PASS: "${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -205,7 +205,7 @@ services:
       EventBus__RabbitMq__Host: "rabbitmq"
       EventBus__RabbitMq__Port: "5672"
       EventBus__RabbitMq__Username: "${RABBITMQ_USER:-equipai}"
-      EventBus__RabbitMq__Password: "${RABBITMQ_PASSWORD:-}"
+      EventBus__RabbitMq__Password: "${RABBITMQ_PASSWORD:?请在 .env 中设置 RABBITMQ_PASSWORD}"
     volumes:
       - ./mqtt-certs:/etc/equipai/mqtt-certs:ro
     depends_on:
@@ -343,7 +343,7 @@ services:
       - "${SEQ_PORT:-5341}:80"
     environment:
       ACCEPT_EULA: "Y"
-      SEQ_FIRSTRUN_ADMINPASSWORD: "${SEQ_ADMIN_PASSWORD:-SeqAdmin2026!}"
+      SEQ_FIRSTRUN_ADMINPASSWORD: "${SEQ_ADMIN_PASSWORD:?请在 .env 中设置 SEQ_ADMIN_PASSWORD}"
       # 限制内存中缓存的日志量，防止日志风暴撑满内存（默认会用容器内存上限的一半）
       SEQ_MEMORY_INGEST_RAM_TARGET: "128"
       # 日志保留策略：超过 30 天的事件自动删除（可通过 SEQ_RETENTION_TIME 覆盖）
@@ -417,7 +417,7 @@ services:
       - "${GRAFANA_PORT:-3000}:3000"
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_USER:-admin}"
-      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:?请在 .env 中设置 GRAFANA_PASSWORD}"
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana

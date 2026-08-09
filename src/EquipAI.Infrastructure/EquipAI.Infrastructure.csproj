@@ -9,6 +9,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.29" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="8.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.1" />
     <PackageReference Include="Microsoft.SemanticKernel" Version="1.77.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
     <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
@@ -29,6 +30,7 @@
   <!-- 允许单元测试项目访问 internal 成员 -->
   <ItemGroup>
     <InternalsVisibleTo Include="EquipAI.Tests.Unit" />
+    <InternalsVisibleTo Include="EquipAI.Tests.Integration" />
   </ItemGroup>
 
 </Project>

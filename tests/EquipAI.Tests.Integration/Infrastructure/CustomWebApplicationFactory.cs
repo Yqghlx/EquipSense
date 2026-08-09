@@ -39,6 +39,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        // 测试环境显式注入仅用于测试的长密钥，避免依赖 appsettings.json 中的占位符。
+        // 生产环境密钥仍由环境变量提供，测试凭据不会进入运行配置或仓库秘密。
+        builder.UseSetting("Jwt:Secret", "integration-test-jwt-secret-at-least-32-characters");
+        builder.UseSetting("Gateway:AuthKey", "integration-test-gateway-key-at-least-32-characters");
 
         builder.ConfigureServices(services =>
         {
@@ -94,6 +98,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             // ConnectionMultiplexer.Connect 在测试环境会立即失败抛 RedisConnectionException
             // 测试环境无组件解析 IConnectionMultiplexer（唯一消费者 RedisDistributedLockProvider 已被下方存根替换）
             services.RemoveAll<StackExchange.Redis.IConnectionMultiplexer>();
+
+            // 告警聚合在测试环境使用 AlertAggregator 的本地降级窗口，避免新增的 Redis 共享状态存储
+            // 因缺少真实多路复用器而尝试建立外部连接；Redis 共享计数由单元测试单独覆盖。
+            services.RemoveAll<EquipAI.Core.Interfaces.IAlertAggregationStateStore>();
 
             // 分布式锁：单实例测试环境用总是可获取的存根（无真实 Redis 依赖）
             services.RemoveAll<EquipAI.Core.Interfaces.IDistributedLockProvider>();

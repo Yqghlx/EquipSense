@@ -1,5 +1,6 @@
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from './ReactECharts';
 import { useTheme } from '../../hooks/useTheme';
+import { echarts } from './echarts';
 
 /** 饼图数据项 */
 interface PieDataItem {
@@ -66,5 +67,5 @@ export function PieChart({ title, data, height = 300 }: PieChartProps) {
     ],
   };
 
-  return <ReactECharts option={option} style={{ height }} />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height }} />;
 }

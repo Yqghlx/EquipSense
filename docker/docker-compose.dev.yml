@@ -9,7 +9,8 @@ services:
     environment:
       POSTGRES_DB: equipai_dev
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: dev123
+      # 开发密码通过环境变量传入，避免把可复制的凭据提交到仓库。
+      POSTGRES_PASSWORD: "${DEV_PG_PASSWORD:?请在启动开发依赖前设置 DEV_PG_PASSWORD}"
     volumes:
       - pgdev:/var/lib/postgresql/data
     healthcheck:

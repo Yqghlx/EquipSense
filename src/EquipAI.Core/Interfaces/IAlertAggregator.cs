@@ -17,6 +17,11 @@ public interface IAlertAggregator
     /// <param name="deviceId">设备 ID</param>
     /// <param name="ruleId">告警规则 ID（窗口维度之一，隔离同指标的不同规则）</param>
     /// <param name="metric">指标名称</param>
-    /// <returns>三元组：(是否创建新告警, 是否更新已有告警, 是否静默)</returns>
-    (bool ShouldCreate, bool ShouldUpdate, bool Silenced) Evaluate(Guid deviceId, Guid ruleId, string metric);
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>聚合处理决策</returns>
+    Task<AlertAggregationDecision> EvaluateAsync(
+        Guid deviceId,
+        Guid ruleId,
+        string metric,
+        CancellationToken cancellationToken = default);
 }

@@ -14,7 +14,7 @@ EquipSense（内部代号 EquipAI）是一个工业设备智能监控与预测�
 
 ```bash
 # 构建项目
-dotnet build EquipAI.slnx
+dotnet build EquipAI.sln
 
 # 运行后端（监听 http://localhost:8080）
 dotnet run --project src/EquipAI.WebAPI
@@ -109,7 +109,7 @@ k6 run tests/load/telemetry-write.js
 
 ```bash
 # 向指定租户的 3 个设备每 5 秒发送遥测数据（5% 概率触发异常）
-dotnet run --project tools/EquipAI.Simulator -- \
+dotnet run --project src/EquipAI.Simulator -- \
   --tenant 11111111-1111-1111-1111-111111111111 \
   --devices 3 \
   --interval 5
@@ -167,7 +167,7 @@ EquipSense/
 │   ├── EquipAI.Application/      # 应用层（业务逻辑，按模块分文件夹）
 │   ├── EquipAI.Infrastructure/   # 基础设施层（EF Core、Redis、MQTT、JWT）
 │   ├── EquipAI.EdgeGateway/      # 边缘网关（独立部署，独立 Dockerfile）
-│   └── EquipAI.Simulator/        # MQTT 遥测数据模拟器
+│   └── EquipAI.Simulator/        # 正式 MQTT 遥测数据模拟器入口
 ├── frontend/                      # 前端源码
 │   ├── src/
 │   │   ├── pages/                # 页面组件（22 个，全部懒加载）
@@ -441,7 +441,7 @@ dotnet ef database update --startup-project ../EquipAI.WebAPI
 使用模拟器发送异常数据：
 
 ```bash
-dotnet run --project tools/EquipAI.Simulator -- \
+dotnet run --project src/EquipAI.Simulator -- \
   --tenant <your-tenant-id> \
   --devices 1 \
   --interval 2 \

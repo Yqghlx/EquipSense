@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../charts/ReactECharts';
 import type { DataQualityDimensions } from '../../hooks/useDataQuality';
+import { echarts } from '../charts/echarts';
 
 interface DataQualityRadarProps {
   dimensions: DataQualityDimensions;
@@ -58,5 +59,5 @@ export function DataQualityRadar({ dimensions, overallScore }: DataQualityRadarP
     }],
   };
 
-  return <ReactECharts option={option} style={{ height: 260 }} />;
+  return <ReactECharts echarts={echarts} option={option} style={{ height: 260 }} />;
 }
