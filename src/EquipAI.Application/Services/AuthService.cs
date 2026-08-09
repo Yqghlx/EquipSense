@@ -423,7 +423,29 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("MFA 配置不可用，请联系系统管理员重置", ex);
         }
 
-        if (!_totpService.VerifyCode(plainTotpSecret, totpCode))
+        var totpVerified = _totpService.VerifyCode(plainTotpSecret, totpCode);
+        var recoveryCodeConsumed = false;
+        if (!totpVerified)
+        {
+            recoveryCodeConsumed = MfaRecoveryCodeService.TryConsume(
+                user.MfaRecoveryCodes,
+                totpCode,
+                out var remainingRecoveryCodes);
+
+            if (recoveryCodeConsumed)
+            {
+                user.MfaRecoveryCodes = remainingRecoveryCodes;
+                await _auditLogService.LogAsync(
+                    user.TenantId,
+                    "AuthMfaRecoveryCodeUsed",
+                    "User",
+                    user.Id.ToString(),
+                    $"用户 {user.Username} 使用一次性 MFA 恢复码登录",
+                    default);
+            }
+        }
+
+        if (!totpVerified && !recoveryCodeConsumed)
         {
             _logger.LogWarning("MFA 验证失败：用户 {Username} TOTP 验证码错误", user.Username);
             await _auditLogService.LogAsync(user.TenantId, "AuthMfaFailed", "User", user.Id.ToString(),
@@ -499,6 +521,8 @@ public class AuthService : IAuthService
 
         user.TotpSecret = _totpSecretProtector.Protect(secret);
         user.MfaEnabled = true;
+        var recoveryCodeSet = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = recoveryCodeSet.SerializedHashes;
         await _dbContext.SaveChangesAsync();
 
         // 成功确认后令牌立即失效，防止同一注册凭据被重复使用。
@@ -521,6 +545,7 @@ public class AuthService : IAuthService
             RefreshToken = refreshToken,
             ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
             UserInfo = _mapper.Map<UserDto>(user)!,
+            MfaRecoveryCodes = recoveryCodeSet.Codes.ToList(),
         };
     }
 
@@ -589,7 +614,7 @@ public class AuthService : IAuthService
     /// 确认 MFA 设置：用户扫码后输入验证码，验证成功后将临时密钥正式写入用户记录
     /// 若验证码错误，临时密钥保留（允许用户重试直到 10 分钟超时）
     /// </summary>
-    public async Task ConfirmMfaSetupAsync(Guid userId, string totpCode)
+    public async Task<MfaRecoveryCodesResponse> ConfirmMfaSetupAsync(Guid userId, string totpCode)
     {
         if (string.IsNullOrWhiteSpace(totpCode))
         {
@@ -618,6 +643,8 @@ public class AuthService : IAuthService
 
         user.TotpSecret = _totpSecretProtector.Protect(secret);
         user.MfaEnabled = true;
+        var recoveryCodeSet = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = recoveryCodeSet.SerializedHashes;
         await _dbContext.SaveChangesAsync();
 
         // 清理临时密钥
@@ -626,6 +653,62 @@ public class AuthService : IAuthService
         _logger.LogInformation("用户 {Username} 已成功启用 MFA", user.Username);
         await _auditLogService.LogAsync(user.TenantId, "MfaEnabled", "User", user.Id.ToString(),
             $"用户 {user.Username} 启用多因素认证", default);
+
+        return new MfaRecoveryCodesResponse
+        {
+            RecoveryCodes = recoveryCodeSet.Codes.ToList(),
+        };
+    }
+
+    /// <summary>
+    /// 使用当前 TOTP 验证码重新生成一次性 MFA 恢复码。
+    /// 重新生成会立即使旧恢复码全部失效，避免旧备份继续拥有登录能力。
+    /// </summary>
+    public async Task<MfaRecoveryCodesResponse> RegenerateMfaRecoveryCodesAsync(Guid userId, string totpCode)
+    {
+        if (string.IsNullOrWhiteSpace(totpCode))
+        {
+            throw new UnauthorizedAccessException("验证码不能为空");
+        }
+
+        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
+            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive)
+            ?? throw new UnauthorizedAccessException("用户不存在或已停用");
+
+        if (!HasConfiguredMfa(user) || string.IsNullOrWhiteSpace(user.TotpSecret))
+        {
+            throw new InvalidOperationException("请先启用 MFA，再生成恢复码");
+        }
+
+        string plainTotpSecret;
+        try
+        {
+            plainTotpSecret = _totpSecretProtector.Unprotect(user.TotpSecret);
+        }
+        catch (CryptographicException ex)
+        {
+            _logger.LogError(ex, "用户 {UserId} 的 TOTP 密钥无法解密，拒绝重新生成恢复码", user.Id);
+            throw new UnauthorizedAccessException("MFA 配置不可用，请联系系统管理员重置", ex);
+        }
+
+        if (!_totpService.VerifyCode(plainTotpSecret, totpCode))
+        {
+            await _auditLogService.LogAsync(user.TenantId, "MfaRecoveryCodesRegenerateFailed", "User",
+                user.Id.ToString(), $"用户 {user.Username} 重新生成恢复码时验证码错误", default);
+            throw new UnauthorizedAccessException("验证码错误，请重试");
+        }
+
+        var recoveryCodeSet = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = recoveryCodeSet.SerializedHashes;
+        await _dbContext.SaveChangesAsync();
+
+        await _auditLogService.LogAsync(user.TenantId, "MfaRecoveryCodesRegenerated", "User",
+            user.Id.ToString(), $"用户 {user.Username} 重新生成 MFA 恢复码，旧恢复码已全部失效", default);
+
+        return new MfaRecoveryCodesResponse
+        {
+            RecoveryCodes = recoveryCodeSet.Codes.ToList(),
+        };
     }
 
     /// <summary>
@@ -645,6 +728,7 @@ public class AuthService : IAuthService
         }
 
         user.TotpSecret = null;
+        user.MfaRecoveryCodes = null;
         user.MfaEnabled = false;
         await _dbContext.SaveChangesAsync();
 

@@ -978,6 +978,12 @@
     "codeInvalid": "Verification code must be 6 digits",
     "codeError": "Invalid verification code. Please check that the time in your authenticator app is accurate",
     "codeLabel": "Enter verification code to confirm",
+    "loginDesc": "Enter the 6-digit code from your Authenticator app. If the device is unavailable, you can use a one-time recovery code.",
+    "loginUser": "User",
+    "loginCodeLabel": "Verification or recovery code",
+    "loginCodePlaceholder": "000000 or ABCD-EFGH-JKLM-NPQR",
+    "verify": "Verify and sign in",
+    "codeOrRecoveryCodeInvalid": "Enter a 6-digit code or a valid recovery code",
     "manualKeyLabel": "Can't scan? Enter the key manually:",
     "copied": "Key copied to clipboard",
     "copy": "Copy",
@@ -989,6 +995,15 @@
     "enrollmentConfigDesc": "Scan the QR code with Google Authenticator or Microsoft Authenticator, then enter the 6-digit code.",
     "enrollmentConfirm": "Finish setup and sign in",
     "enrollmentConfirmFailed": "The code is invalid or enrollment expired. Check the time and retry.",
-    "enrollmentBack": "Back to sign in"
+    "enrollmentBack": "Back to sign in",
+    "recoveryCodesWarning": "Save these one-time recovery codes now. Each code works once and will not be shown again after leaving this page.",
+    "recoveryCodesCopy": "Copy recovery codes",
+    "recoveryCodesContinue": "I saved them, continue",
+    "recoveryCodesRegenerate": "Regenerate recovery codes",
+    "recoveryCodesRegenerateDesc": "Enter your current Authenticator code to generate new recovery codes. All old codes will expire immediately.",
+    "recoveryCodesConfirmRegenerate": "Confirm regeneration",
+    "recoveryCodesGenerated": "Recovery codes updated. Save them now.",
+    "recoveryCodesCopied": "Recovery codes copied",
+    "recoveryCodesGenerateFailed": "Failed to generate recovery codes. Please retry."
   }
 }

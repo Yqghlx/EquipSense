@@ -66,4 +66,16 @@ public class MfaRecoveryCodeServiceTests
         consumed.Should().BeFalse();
         remaining.Should().Be("not-json");
     }
+
+    [Fact]
+    public void 恢复码摘要为空时应安全失败()
+    {
+        var consumed = MfaRecoveryCodeService.TryConsume(
+            "[null,\"not-hex\"]",
+            "ABCD-EFGH-JKLM-NPQR",
+            out var remaining);
+
+        consumed.Should().BeFalse();
+        remaining.Should().Be("[null,\"not-hex\"]");
+    }
 }

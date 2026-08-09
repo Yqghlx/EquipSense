@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace EquipAI.Infrastructure.Identity;
 
@@ -22,11 +23,22 @@ public sealed class TotpSecretProtector : ITotpSecretProtector
     /// </summary>
     /// <param name="configuration">应用配置，生产环境必须包含 Security:TotpEncryptionKey。</param>
     public TotpSecretProtector(IConfiguration configuration)
+        : this(configuration, null)
+    {
+    }
+
+    /// <summary>
+    /// 初始化 TOTP 密钥保护器，并使用宿主环境名判断是否允许开发环境后备密钥。
+    /// </summary>
+    /// <param name="configuration">应用配置。</param>
+    /// <param name="hostEnvironment">ASP.NET 宿主环境。</param>
+    public TotpSecretProtector(IConfiguration configuration, IHostEnvironment? hostEnvironment)
     {
         var configuredKey = configuration["Security:TotpEncryptionKey"];
         if (string.IsNullOrWhiteSpace(configuredKey))
         {
-            var environment = configuration["ASPNETCORE_ENVIRONMENT"]
+            var environment = hostEnvironment?.EnvironmentName
+                ?? configuration["ASPNETCORE_ENVIRONMENT"]
                 ?? configuration["DOTNET_ENVIRONMENT"]
                 ?? "Production";
             if (string.Equals(environment, "Production", StringComparison.OrdinalIgnoreCase))

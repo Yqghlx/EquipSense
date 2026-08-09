@@ -43,7 +43,7 @@ Security__Mfa__RequiredRoles__0=SystemAdmin
 Security__Mfa__RequiredRoles__1=MaintenanceLead
 ```
 
-高权限账户首次登录或公开注册后不会直接获得 JWT，而是进入 10 分钟的 MFA 注册流程；扫码并验证成功后才会建立会话。普通角色仍可在“安全与 MFA”页面自助启用，强制角色不能禁用 MFA。
+高权限账户首次登录或公开注册后不会直接获得 JWT，而是进入 10 分钟的 MFA 注册流程；扫码并验证成功后才会建立会话，并只显示一次 8 个一次性恢复码。登录时可用恢复码代替 TOTP，普通角色仍可在“安全与 MFA”页面自助启用，强制角色不能禁用 MFA。
 
 ## Redis
 

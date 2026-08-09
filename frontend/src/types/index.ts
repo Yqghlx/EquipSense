@@ -63,6 +63,8 @@ export interface AuthResponse {
   mfaEnrollmentRequired?: boolean;
   /** MFA 首次注册令牌（mfaEnrollmentRequired=true 时返回） */
   mfaEnrollmentToken?: string;
+  /** MFA 注册或重新生成时仅返回一次的恢复码 */
+  mfaRecoveryCodes?: string[];
 }
 
 /** MFA 初始化响应（/auth/mfa/setup） */
@@ -71,6 +73,12 @@ export interface MfaSetupResponse {
   secret: string;
   /** otpauth:// URI（前端用 QRCode 库将其渲染为二维码） */
   qrCodeUri: string;
+}
+
+/** MFA 恢复码生成响应 */
+export interface MfaRecoveryCodesResponse {
+  /** 仅在本次响应返回的明文一次性恢复码 */
+  recoveryCodes: string[];
 }
 
 /** 用户基本信息 */

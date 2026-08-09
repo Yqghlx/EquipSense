@@ -7,7 +7,7 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
-import type { AuthResponse, MfaSetupResponse } from '../types';
+import type { AuthResponse, MfaRecoveryCodesResponse, MfaSetupResponse } from '../types';
 
 /** MFA 登录验证请求参数 */
 interface MfaVerifyParams {
@@ -60,11 +60,27 @@ export function useMfaConfirm() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ totpCode }: MfaConfirmParams) => {
-      await api.post('/auth/mfa/confirm', { totpCode });
+      const response = await api.post<MfaRecoveryCodesResponse>('/auth/mfa/confirm', { totpCode });
+      return response.data;
     },
     onSuccess: () => {
       // 刷新当前用户信息（mfaEnabled 状态已变更）
       queryClient.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
+}
+
+/**
+ * 重新生成 MFA 一次性恢复码 Hook。
+ * 后端要求输入当前 TOTP，成功后旧恢复码全部失效。
+ */
+export function useMfaRecoveryCodesRegenerate() {
+  return useMutation({
+    mutationFn: async ({ totpCode }: MfaConfirmParams) => {
+      const response = await api.post<MfaRecoveryCodesResponse>('/auth/mfa/recovery-codes/regenerate', {
+        totpCode,
+      });
+      return response.data;
     },
   });
 }

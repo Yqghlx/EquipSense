@@ -64,6 +64,8 @@ export default function LoginPage() {
   const [mfaEnrollmentSetup, setMfaEnrollmentSetup] = useState<MfaSetupResponse | null>(null);
   const [mfaEnrollmentQrCode, setMfaEnrollmentQrCode] = useState<string | null>(null);
   const [mfaEnrollmentCode, setMfaEnrollmentCode] = useState('');
+  const [mfaEnrollmentRecoveryCodes, setMfaEnrollmentRecoveryCodes] = useState<string[] | null>(null);
+  const [mfaEnrollmentAuthenticated, setMfaEnrollmentAuthenticated] = useState(false);
 
   /** 登录表单校验规则 */
   const loginSchema = z.object({
@@ -73,7 +75,10 @@ export default function LoginPage() {
 
   /** TOTP 验证码校验规则：6 位数字 */
   const totpSchema = z.object({
-    totpCode: z.string().regex(/^\d{6}$/, '验证码必须为 6 位数字'),
+    totpCode: z.string().refine(
+      (value) => /^\d{6}$/.test(value) || /^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/i.test(value),
+      t('mfa.codeOrRecoveryCodeInvalid'),
+    ),
   });
 
   const {
@@ -176,8 +181,13 @@ export default function LoginPage() {
       });
       setAuth(response.data.userInfo);
       persistTokenExpiry(response.data.expiresIn);
-      const from = (location.state as { from?: string })?.from || '/dashboard';
-      navigate(from, { replace: true });
+      if (response.data.mfaRecoveryCodes?.length) {
+        setMfaEnrollmentRecoveryCodes(response.data.mfaRecoveryCodes);
+        setMfaEnrollmentAuthenticated(true);
+      } else {
+        const from = (location.state as { from?: string })?.from || '/dashboard';
+        navigate(from, { replace: true });
+      }
     } catch {
       setError(t('mfa.enrollmentConfirmFailed'));
     } finally {
@@ -221,7 +231,15 @@ export default function LoginPage() {
     setMfaEnrollmentSetup(null);
     setMfaEnrollmentQrCode(null);
     setMfaEnrollmentCode('');
+    setMfaEnrollmentRecoveryCodes(null);
+    setMfaEnrollmentAuthenticated(false);
     setError('');
+  };
+
+  /** 继续进入系统；恢复码已经在上一步展示过且不会再次返回。 */
+  const continueAfterMfaEnrollment = () => {
+    const from = (location.state as { from?: string })?.from || '/dashboard';
+    navigate(from, { replace: true });
   };
 
   // 强制 MFA 注册阶段 UI
@@ -240,7 +258,27 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {!mfaEnrollmentSetup ? (
+          {mfaEnrollmentRecoveryCodes ? (
+            <div className="space-y-4">
+              <p className="text-sm text-destructive">{t('mfa.recoveryCodesWarning')}</p>
+              <div className="grid grid-cols-2 gap-2 rounded bg-muted p-3 font-mono text-sm">
+                {mfaEnrollmentRecoveryCodes.map((code) => (
+                  <code key={code}>{code}</code>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => navigator.clipboard?.writeText(mfaEnrollmentRecoveryCodes.join('\n'))}
+              >
+                {t('mfa.recoveryCodesCopy')}
+              </Button>
+              <Button type="button" onClick={continueAfterMfaEnrollment} className="w-full">
+                {t('mfa.recoveryCodesContinue')}
+              </Button>
+            </div>
+          ) : !mfaEnrollmentSetup ? (
             <Button onClick={setupMfaEnrollment} className="w-full" disabled={loading}>
               {loading ? t('common.loading') : t('mfa.enrollmentSetup')}
             </Button>
@@ -275,9 +313,11 @@ export default function LoginPage() {
             </>
           )}
           {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="button" variant="ghost" className="w-full" onClick={backFromMfaEnrollment} disabled={loading}>
-            {t('mfa.enrollmentBack')}
-          </Button>
+          {!mfaEnrollmentAuthenticated && (
+            <Button type="button" variant="ghost" className="w-full" onClick={backFromMfaEnrollment} disabled={loading}>
+              {t('mfa.enrollmentBack')}
+            </Button>
+          )}
         </CardContent>
       </Card>
     );
@@ -288,33 +328,37 @@ export default function LoginPage() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>多因素认证</CardTitle>
+          <CardTitle>{t('mfa.title')}</CardTitle>
           <CardDescription>
-            请输入 Authenticator 应用中的 6 位验证码
-            {mfaUserInfo && <span className="block text-xs">用户：{mfaUserInfo.displayName || mfaUserInfo.username}</span>}
+            {t('mfa.loginDesc')}
+            {mfaUserInfo && (
+              <span className="block text-xs">
+                {t('mfa.loginUser')}: {mfaUserInfo.displayName || mfaUserInfo.username}
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmitTotp(onMfaSubmit)} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="totpCode">验证码</Label>
+              <Label htmlFor="totpCode">{t('mfa.loginCodeLabel')}</Label>
               <Input
                 id="totpCode"
                 {...registerTotp('totpCode')}
-                placeholder="000000"
-                maxLength={6}
+                placeholder={t('mfa.loginCodePlaceholder')}
+                maxLength={19}
                 autoComplete="one-time-code"
-                inputMode="numeric"
+                inputMode="text"
                 autoFocus
               />
               {totpErrors.totpCode && <p className="text-sm text-destructive">{totpErrors.totpCode.message}</p>}
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? t('common.loading') : '验证'}
+              {loading ? t('common.loading') : t('mfa.verify')}
             </Button>
             <Button type="button" variant="ghost" className="w-full" onClick={backToPassword} disabled={loading}>
-              返回
+              {t('common.previous')}
             </Button>
           </form>
         </CardContent>

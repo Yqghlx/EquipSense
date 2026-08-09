@@ -87,7 +87,7 @@ public interface IAuthService
     /// </summary>
     /// <param name="enrollmentToken">密码验证后签发的短期 MFA 注册令牌。</param>
     /// <param name="totpCode">Authenticator 生成的 6 位验证码。</param>
-    /// <returns>完整的认证响应（含 Access Token 和 Refresh Token）。</returns>
+    /// <returns>完整的认证响应（含 Access Token、Refresh Token 和一次性恢复码）。</returns>
     Task<AuthResponse> ConfirmMfaEnrollmentAsync(string enrollmentToken, string totpCode);
 
     /// <summary>
@@ -104,7 +104,15 @@ public interface IAuthService
     /// <param name="userId">目标用户 ID</param>
     /// <param name="totpCode">authenticator 生成的验证码（用于首次验证密钥正确性）</param>
     /// <exception cref="UnauthorizedAccessException">临时密钥不存在或验证码错误</exception>
-    Task ConfirmMfaSetupAsync(Guid userId, string totpCode);
+    Task<MfaRecoveryCodesResponse> ConfirmMfaSetupAsync(Guid userId, string totpCode);
+
+    /// <summary>
+    /// 使用当前 TOTP 验证码重新生成一次性 MFA 恢复码。
+    /// </summary>
+    /// <param name="userId">当前用户 ID。</param>
+    /// <param name="totpCode">当前 authenticator 生成的验证码。</param>
+    /// <returns>仅本次返回的明文恢复码。</returns>
+    Task<MfaRecoveryCodesResponse> RegenerateMfaRecoveryCodesAsync(Guid userId, string totpCode);
 
     /// <summary>
     /// 禁用 MFA：清除用户的 TOTP 密钥并标记 MfaEnabled=false

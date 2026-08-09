@@ -76,6 +76,11 @@ public static class MfaRecoveryCodeService
         var candidateHash = Convert.FromHexString(Hash(normalizedCandidate));
         for (var index = 0; index < hashes.Count; index++)
         {
+            if (string.IsNullOrWhiteSpace(hashes[index]))
+            {
+                continue;
+            }
+
             byte[] storedHash;
             try
             {

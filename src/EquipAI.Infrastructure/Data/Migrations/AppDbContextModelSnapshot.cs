@@ -1671,6 +1671,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("totp_secret");
 
+                    b.Property<string>("MfaRecoveryCodes")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("mfa_recovery_codes");
+
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(50)

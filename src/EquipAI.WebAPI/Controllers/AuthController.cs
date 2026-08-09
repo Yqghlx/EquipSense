@@ -300,7 +300,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/confirm")]
     [Authorize]
     [Audit("MfaConfirm", "User")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(MfaRecoveryCodesResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ConfirmMfa([FromBody] MfaConfirmRequest request)
     {
@@ -314,10 +314,46 @@ public class AuthController : ControllerBase
 
         try
         {
-            await _authService.ConfirmMfaSetupAsync(userId, request.TotpCode);
-            return Ok(new { message = "MFA 已成功启用" });
+            var response = await _authService.ConfirmMfaSetupAsync(userId, request.TotpCode);
+            return Ok(response);
         }
         catch (UnauthorizedAccessException ex)
+        {
+            return BadRequest(new { code = 400, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 使用当前 TOTP 验证码重新生成一次性 MFA 恢复码。
+    /// 旧恢复码会立即失效，明文仅在本次响应返回。
+    /// </summary>
+    [HttpPost("mfa/recovery-codes/regenerate")]
+    [Authorize]
+    [Audit("MfaRecoveryCodesRegenerate", "User")]
+    [ProducesResponseType(typeof(MfaRecoveryCodesResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<MfaRecoveryCodesResponse>> RegenerateMfaRecoveryCodes(
+        [FromBody] MfaRecoveryCodesRegenerateRequest request)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+
+        if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+        {
+            return Unauthorized(new { code = 401, message = "无法识别用户身份" });
+        }
+
+        try
+        {
+            var response = await _authService.RegenerateMfaRecoveryCodesAsync(userId, request.TotpCode);
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { code = 401, message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
         {
             return BadRequest(new { code = 400, message = ex.Message });
         }
@@ -485,7 +521,7 @@ public class MfaVerifyRequest
     public string ChallengeToken { get; set; } = string.Empty;
 
     /// <summary>
-    /// 用户 authenticator 应用生成的 6 位数字 TOTP 验证码
+    /// 用户 authenticator 应用生成的 6 位数字 TOTP 验证码，或一次性恢复码
     /// </summary>
     public string TotpCode { get; set; } = string.Empty;
 }
@@ -497,6 +533,17 @@ public class MfaConfirmRequest
 {
     /// <summary>
     /// 用户 authenticator 应用生成的 6 位数字 TOTP 验证码（用于首次验证密钥正确性）
+    /// </summary>
+    public string TotpCode { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// MFA 恢复码重新生成请求 DTO。
+/// </summary>
+public class MfaRecoveryCodesRegenerateRequest
+{
+    /// <summary>
+    /// 当前 authenticator 应用生成的 6 位验证码。
     /// </summary>
     public string TotpCode { get; set; } = string.Empty;
 }

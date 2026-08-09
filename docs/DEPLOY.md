@@ -169,7 +169,7 @@ curl http://localhost:8080/api/v1/system/info
 
 `TOTP_ENCRYPTION_KEY` 用于保护数据库中的 MFA 密钥，应用启动时会校验它必须解码为 32 字节；该密钥必须与数据库备份分开保存并纳入密钥管理系统的备份策略。密钥丢失后，历史 MFA 密钥无法恢复；轮换前必须先制定批量重新加密和回滚方案。
 
-生产环境默认要求系统管理员和维保主管启用 TOTP MFA。首次登录或公开注册完成后，页面会进入 MFA 注册向导：使用 Authenticator 扫描二维码、输入 6 位验证码，验证成功后才会建立正式会话；注册令牌只在 Redis 中保留 10 分钟，成功后立即删除。若覆盖 `Security__Mfa__RequiredRoles__*`，仍必须保留 `SystemAdmin` 和 `MaintenanceLead`，否则应用拒绝启动。
+生产环境默认要求系统管理员和维保主管启用 TOTP MFA。首次登录或公开注册完成后，页面会进入 MFA 注册向导：使用 Authenticator 扫描二维码、输入 6 位验证码，验证成功后才会建立正式会话；注册令牌只在 Redis 中保留 10 分钟，成功后立即删除。注册成功会显示 8 个一次性恢复码，必须在离开页面前保存；登录时可使用恢复码代替 TOTP，每个恢复码成功使用后立即失效。已登录用户可在“安全与 MFA”中输入当前 TOTP 重新生成恢复码，旧码会全部失效。若覆盖 `Security__Mfa__RequiredRoles__*`，仍必须保留 `SystemAdmin` 和 `MaintenanceLead`，否则应用拒绝启动。
 
 > `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。
 

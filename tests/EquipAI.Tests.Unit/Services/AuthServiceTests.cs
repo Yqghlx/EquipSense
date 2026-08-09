@@ -1,6 +1,7 @@
 using AutoMapper;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.Mapping;
+using EquipAI.Application.Security;
 using EquipAI.Application.Services;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -162,6 +163,72 @@ public class AuthServiceTests : IAsyncDisposable
         (confirmResult.GetType().GetProperty("RefreshToken")!.GetValue(confirmResult) as string).Should().NotBeNullOrWhiteSpace();
         _stubRedis.GetStringKeyStartingWith("mfa_enrollment:").Should().BeNull();
         _stubRedis.GetStringKeyStartingWith("mfa_enrollment_setup:").Should().BeNull();
+        (confirmResult.GetType().GetProperty("MfaRecoveryCodes")!.GetValue(confirmResult) as List<string>)
+            .Should().HaveCount(8);
+        user.MfaRecoveryCodes.Should().NotContain("-");
+    }
+
+    [Fact]
+    public async Task VerifyMfa_有效恢复码_应签发令牌并立即销毁该恢复码()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var totp = (StubTotpService)scope.ServiceProvider
+            .GetRequiredService<EquipAI.Infrastructure.Identity.ITotpService>();
+
+        var user = CreateTestUser("mfarecoverylogin", _tenantId, "password123");
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        var recoveryCodes = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = recoveryCodes.SerializedHashes;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var loginResult = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = "password123"
+        });
+        loginResult.MfaRequired.Should().BeTrue();
+        loginResult.MfaChallengeToken.Should().NotBeNullOrWhiteSpace();
+        totp.SetVerifyResult(false);
+
+        var result = await service.VerifyMfaAsync(
+            loginResult.MfaChallengeToken!,
+            recoveryCodes.Codes[0]);
+
+        result.AccessToken.Should().NotBeNullOrWhiteSpace();
+        user.MfaRecoveryCodes.Should().NotBeNullOrWhiteSpace();
+        MfaRecoveryCodeService.TryConsume(
+            user.MfaRecoveryCodes,
+            recoveryCodes.Codes[0],
+            out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RegenerateMfaRecoveryCodes_验证码正确_应使旧恢复码失效并返回新恢复码()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("mfarecoveryregenerate", _tenantId, "password123");
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        var oldCodes = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = oldCodes.SerializedHashes;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var result = await service.RegenerateMfaRecoveryCodesAsync(user.Id, "123456");
+
+        result.RecoveryCodes.Should().HaveCount(8);
+        result.RecoveryCodes.Should().NotContain(oldCodes.Codes);
+        MfaRecoveryCodeService.TryConsume(user.MfaRecoveryCodes, oldCodes.Codes[0], out _)
+            .Should().BeFalse();
+        MfaRecoveryCodeService.TryConsume(user.MfaRecoveryCodes, result.RecoveryCodes[0], out _)
+            .Should().BeTrue();
     }
 
     [Fact]

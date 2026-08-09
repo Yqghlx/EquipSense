@@ -65,4 +65,10 @@ public class AuthResponse
     /// 令牌仅存活 10 分钟，完成注册后立即失效。
     /// </summary>
     public string? MfaEnrollmentToken { get; set; }
+
+    /// <summary>
+    /// MFA 注册成功时返回的一次性恢复码。
+    /// 仅在注册或重新生成当次响应返回，客户端应立即保存，服务端只存摘要。
+    /// </summary>
+    public List<string>? MfaRecoveryCodes { get; set; }
 }

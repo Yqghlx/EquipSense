@@ -4,12 +4,12 @@
  * 提供 MFA 的完整启用/禁用流程 UI：
  *   - 未启用：显示"启用 MFA"按钮，点击后调用 /auth/mfa/setup 获取 QR 码 URI
  *     → 渲染 QR 码图片供 authenticator 扫描 → 用户输入验证码确认 → 正式启用
- *   - 已启用：显示"已启用"状态 + "禁用 MFA"按钮
+ *   - 已启用：显示"已启用"状态、恢复码管理和"禁用 MFA"按钮
  *
  * 安全说明：
  *   - QR 码 URI 来自后端（otpauth:// 格式），前端仅负责渲染，不修改其内容
  *   - 临时密钥存 Redis（10 分钟过期），确认后才写入数据库，防止半启用状态
- *   - 用户禁用 MFA 时清除 TotpSecret，下次登录不再要求验证码
+ *   - 普通角色禁用 MFA 时清除 TotpSecret；生产强制角色的禁用请求由后端拒绝
  */
 import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,7 +23,12 @@ import { Shield, ShieldCheck, ShieldOff, Loader2 } from 'lucide-react';
 // 文件级禁用避免在每个 setState 上重复 disable 注释
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useAuthStore } from '../../stores/authStore';
-import { useMfaSetup, useMfaConfirm, useMfaDisable } from '../../hooks/useMfa';
+import {
+  useMfaSetup,
+  useMfaConfirm,
+  useMfaDisable,
+  useMfaRecoveryCodesRegenerate,
+} from '../../hooks/useMfa';
 import QRCode from 'qrcode';
 
 export default function MfaSettingsPanel() {
@@ -37,11 +42,15 @@ export default function MfaSettingsPanel() {
   const [totpCode, setTotpCode] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const [showRecoveryRegenerate, setShowRecoveryRegenerate] = useState(false);
+  const [recoveryTotpCode, setRecoveryTotpCode] = useState('');
   const qrCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const setupMutation = useMfaSetup();
   const confirmMutation = useMfaConfirm();
   const disableMutation = useMfaDisable();
+  const recoveryCodesMutation = useMfaRecoveryCodesRegenerate();
 
   /** 点击"启用 MFA"后，调用后端生成密钥并渲染 QR 码 */
   const handleSetup = async () => {
@@ -71,8 +80,9 @@ export default function MfaSettingsPanel() {
     }
     setError('');
     try {
-      await confirmMutation.mutateAsync({ totpCode });
+      const response = await confirmMutation.mutateAsync({ totpCode });
       setSuccess(t('mfa.enableSuccess'));
+      setRecoveryCodes(response.recoveryCodes);
       setQrCodeDataUrl(null);
       setSecret(null);
       setTotpCode('');
@@ -80,6 +90,32 @@ export default function MfaSettingsPanel() {
       const msg = err instanceof Error ? err.message : t('mfa.codeError');
       setError(msg);
     }
+  };
+
+  /** 使用当前 TOTP 验证码重新生成恢复码，旧恢复码会全部失效。 */
+  const handleRegenerateRecoveryCodes = async () => {
+    if (!/^\d{6}$/.test(recoveryTotpCode)) {
+      setError(t('mfa.codeInvalid'));
+      return;
+    }
+
+    setError('');
+    try {
+      const response = await recoveryCodesMutation.mutateAsync({ totpCode: recoveryTotpCode });
+      setRecoveryCodes(response.recoveryCodes);
+      setRecoveryTotpCode('');
+      setShowRecoveryRegenerate(false);
+      setSuccess(t('mfa.recoveryCodesGenerated'));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('mfa.recoveryCodesGenerateFailed'));
+    }
+  };
+
+  /** 将恢复码复制为逐行文本，便于保存到密码管理器。 */
+  const copyRecoveryCodes = () => {
+    if (!recoveryCodes) return;
+    navigator.clipboard?.writeText(recoveryCodes.join('\n'));
+    setSuccess(t('mfa.recoveryCodesCopied'));
   };
 
   /** 禁用 MFA */
@@ -91,6 +127,8 @@ export default function MfaSettingsPanel() {
     setSuccess('');
     try {
       await disableMutation.mutateAsync();
+      setRecoveryCodes(null);
+      setShowRecoveryRegenerate(false);
       setSuccess(t('mfa.disableSuccess'));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('mfa.disableFailed'));
@@ -106,7 +144,7 @@ export default function MfaSettingsPanel() {
   }, [mfaEnabled]);
 
   // 已启用状态：显示状态 + 禁用按钮
-  if (mfaEnabled) {
+  if (mfaEnabled || recoveryCodes) {
     return (
       <Card>
         <CardHeader>
@@ -119,6 +157,19 @@ export default function MfaSettingsPanel() {
         <CardContent className="space-y-4">
           {success && <p className="text-sm text-green-600">{success}</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
+          {recoveryCodes && (
+            <div className="space-y-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-950">
+              <p className="text-sm font-medium">{t('mfa.recoveryCodesWarning')}</p>
+              <div className="grid grid-cols-2 gap-2 font-mono text-sm">
+                {recoveryCodes.map((code) => (
+                  <code key={code}>{code}</code>
+                ))}
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={copyRecoveryCodes}>
+                {t('mfa.recoveryCodesCopy')}
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
               <ShieldCheck className="h-4 w-4" />
@@ -128,7 +179,40 @@ export default function MfaSettingsPanel() {
               {disableMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldOff className="h-4 w-4" />}
               <span className="ml-2">{t('mfa.disable')}</span>
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowRecoveryRegenerate((current) => !current);
+                setError('');
+              }}
+              disabled={recoveryCodesMutation.isPending}
+            >
+              {t('mfa.recoveryCodesRegenerate')}
+            </Button>
           </div>
+          {showRecoveryRegenerate && (
+            <div className="space-y-2 rounded-md border p-3">
+              <Label htmlFor="recoveryTotpCode">{t('mfa.recoveryCodesRegenerateDesc')}</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="recoveryTotpCode"
+                  value={recoveryTotpCode}
+                  onChange={(event) => setRecoveryTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  maxLength={6}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                />
+                <Button
+                  type="button"
+                  onClick={handleRegenerateRecoveryCodes}
+                  disabled={recoveryCodesMutation.isPending || recoveryTotpCode.length !== 6}
+                >
+                  {t('mfa.recoveryCodesConfirmRegenerate')}
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     );
