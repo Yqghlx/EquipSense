@@ -21,7 +21,18 @@ set -euo pipefail
 
 TAG="${1:?用法: deploy-bluegreen.sh <TAG>}"
 COMPOSE_DIR="${COMPOSE_DIR:-$(cd "$(dirname "$0")/../docker" && pwd)}"
-COMPOSE="docker compose -f $COMPOSE_DIR/docker-compose.yml -f $COMPOSE_DIR/docker-compose.prod.yml -f $COMPOSE_DIR/docker-compose.bluegreen.yml"
+if [ ! -f "$COMPOSE_DIR/.env" ]; then
+  echo "❌ 未找到生产环境配置文件: $COMPOSE_DIR/.env" >&2
+  exit 1
+fi
+
+COMPOSE=(
+  docker compose
+  --env-file "$COMPOSE_DIR/.env"
+  -f "$COMPOSE_DIR/docker-compose.yml"
+  -f "$COMPOSE_DIR/docker-compose.prod.yml"
+  -f "$COMPOSE_DIR/docker-compose.bluegreen.yml"
+)
 
 cd "$COMPOSE_DIR"
 
@@ -48,8 +59,8 @@ echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USER" --password-s
 # ── 3. 在目标色上拉取新镜像 + 启动（旧色仍服务流量，零停机） ──
 export TAG
 echo "拉取 $TAG 镜像到 $TARGET_COLOR..."
-$COMPOSE pull backend-$TARGET_COLOR frontend-$TARGET_COLOR
-$COMPOSE --profile "$TARGET_COLOR" up -d --no-deps backend-$TARGET_COLOR frontend-$TARGET_COLOR
+"${COMPOSE[@]}" pull backend-$TARGET_COLOR frontend-$TARGET_COLOR
+"${COMPOSE[@]}" --profile "$TARGET_COLOR" up -d --no-deps backend-$TARGET_COLOR frontend-$TARGET_COLOR
 
 # ── 4. 健康门禁：轮询目标色后端 /health（旧色仍在线，不影响用户） ──
 echo "等待 $TARGET_COLOR 后端健康检查..."
@@ -69,7 +80,7 @@ done
 if [ "$HEALTHY" != "true" ]; then
   echo "❌ $TARGET_COLOR 健康检查失败，不切换流量。旧色 $ACTIVE_COLOR 继续服务。"
   echo "清理失败的目标色容器..."
-  $COMPOSE --profile "$TARGET_COLOR" stop backend-$TARGET_COLOR frontend-$TARGET_COLOR || true
+  "${COMPOSE[@]}" --profile "$TARGET_COLOR" stop backend-$TARGET_COLOR frontend-$TARGET_COLOR || true
   exit 1
 fi
 
@@ -96,10 +107,10 @@ EOF
 # ── 6. 优雅停止旧色（drain 30s 让现有连接完成） ──
 echo "新色 $TARGET_COLOR 已接管流量。优雅停止旧色 $ACTIVE_COLOR（drain 30s）..."
 sleep 30
-$COMPOSE --profile "$ACTIVE_COLOR" stop backend-$ACTIVE_COLOR frontend-$ACTIVE_COLOR || true
+"${COMPOSE[@]}" --profile "$ACTIVE_COLOR" stop backend-$ACTIVE_COLOR frontend-$ACTIVE_COLOR || true
 
 # ── 7. 记录新活跃色 + 版本 ──
 echo "$TARGET_COLOR" > .active-color
 echo "$TAG" > .last-deployed-tag
 echo "=== 蓝绿部署成功: $TAG (active=$TARGET_COLOR) ==="
-$COMPOSE --profile "$TARGET_COLOR" ps
+"${COMPOSE[@]}" --profile "$TARGET_COLOR" ps

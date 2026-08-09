@@ -61,6 +61,33 @@ public class LocalFileStorageServiceTests
         }
     }
 
+    [Fact]
+    public async Task SaveAsync_读取源失败时_不应留下半成品文件()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"equipsense-storage-{Guid.NewGuid():N}");
+        var basePath = Path.Combine(root, "uploads");
+        var tenantId = Guid.NewGuid();
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var storage = CreateStorage(basePath);
+            await using var content = new FailingReadStream();
+
+            var act = () => storage.SaveAsync(
+                tenantId, "work-order", "failed.txt", content, "text/plain");
+
+            await act.Should().ThrowAsync<IOException>();
+            var tenantDirectory = Path.Combine(basePath, tenantId.ToString(), "work-order");
+            Directory.GetFiles(tenantDirectory).Should().BeEmpty(
+                "上传失败后不应把半截文件暴露为可下载附件");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static LocalFileStorageService CreateStorage(string basePath)
     {
         var configuration = new ConfigurationBuilder()
@@ -71,5 +98,46 @@ public class LocalFileStorageServiceTests
             .Build();
 
         return new LocalFileStorageService(configuration, NullLogger<LocalFileStorageService>.Instance);
+    }
+
+    /// <summary>
+    /// 模拟网络/请求流在写入过程中失败。
+    /// </summary>
+    private sealed class FailingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => 1;
+        public override long Position { get; set; }
+
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => throw new IOException("模拟文件读取失败");
+
+        public override int Read(Span<byte> buffer)
+            => throw new IOException("模拟文件读取失败");
+
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+            => ValueTask.FromException<int>(new IOException("模拟文件读取失败"));
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+            => Task.FromException<int>(new IOException("模拟文件读取失败"));
+
+        public override long Seek(long offset, SeekOrigin origin)
+            => throw new NotSupportedException();
+
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
     }
 }

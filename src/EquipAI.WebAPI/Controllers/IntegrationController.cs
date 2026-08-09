@@ -18,6 +18,7 @@ namespace EquipAI.WebAPI.Controllers;
 ///     "eam":      { "enabled": false, "type": "maximo", "endpoint": "", "apiKey": "" }
 ///   }
 /// }
+/// GET 响应中的凭证字段只返回“已配置/未配置”状态，URL 只返回协议、主机和端口摘要；原始值不会离开服务端。
 /// </summary>
 [ApiController]
 [Route("api/v1/settings/integrations")]
@@ -32,7 +33,7 @@ public class IntegrationController : ControllerBase
     }
 
     /// <summary>
-    /// 获取当前租户的所有集成配置
+    /// 获取当前租户的集成配置摘要（凭证和 URL 已脱敏）
     /// GET /api/v1/settings/integrations
     /// </summary>
     [RequirePermission("tenant:read")]

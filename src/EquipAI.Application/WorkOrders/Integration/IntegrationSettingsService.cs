@@ -16,6 +16,10 @@ namespace EquipAI.Application.WorkOrders.Integration;
 /// </summary>
 public class IntegrationSettingsService
 {
+    private const string ConfiguredMarker = "[已配置]";
+    private const string NotConfiguredMarker = "[未配置]";
+    private const string RedactedEndpointSuffix = "/…";
+
     /// <summary>支持的集成类型列表。</summary>
     public static readonly HashSet<string> SupportedTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -43,7 +47,7 @@ public class IntegrationSettingsService
     }
 
     /// <summary>
-    /// 获取当前租户的所有集成配置。TenantFound=false 表示租户不存在。
+    /// 获取当前租户的集成配置摘要。凭证和 URL 均已脱敏，TenantFound=false 表示租户不存在。
     /// </summary>
     public async Task<(Dictionary<string, object>? Settings, bool TenantFound)> GetAllAsync(CancellationToken ct = default)
     {
@@ -52,11 +56,11 @@ public class IntegrationSettingsService
         if (tenant == null)
             return (null, false);
 
-        return (ParseIntegrationSettings(tenant.Settings), true);
+        return (BuildSafeIntegrationSettings(tenant.Settings), true);
     }
 
     /// <summary>
-    /// 更新指定集成类型的配置（扁平合并）。
+    /// 更新指定集成类型的配置（扁平合并）。空的凭证/端点字段以及脱敏占位符不会覆盖已有服务端值。
     /// 返回 (Updated, Error) —— Error 非 null 时为业务错误（类型不支持/租户不存在/JSON 格式错误）。
     /// </summary>
     public async Task<(bool Updated, string? Error)> UpdateAsync(string type, UpdateIntegrationRequest request, CancellationToken ct = default)
@@ -106,7 +110,13 @@ public class IntegrationSettingsService
                 if (newConfig != null)
                 {
                     foreach (var kv in newConfig)
+                    {
+                        // GET 接口只返回脱敏摘要，前端再次保存时不能把摘要或空输入写回真实凭证/端点。
+                        if (ShouldPreserveExistingValue(kv.Key, kv.Value))
+                            continue;
+
                         existingConfig[kv.Key] = kv.Value;
+                    }
                 }
             }
             catch (JsonException ex)
@@ -130,6 +140,38 @@ public class IntegrationSettingsService
             type, request.Enabled, _tenantContext.TenantId);
 
         return (true, null);
+    }
+
+    /// <summary>
+    /// 判断更新值是否只是脱敏占位符或空输入。对于已有的凭证和服务端端点，保留原值避免配置被误清空。
+    /// </summary>
+    private static bool ShouldPreserveExistingValue(
+        string propertyName,
+        object? newValue)
+    {
+        var isSensitive = IsSensitiveProperty(propertyName);
+        var isEndpoint = IsEndpointProperty(propertyName);
+        if (!isSensitive && !isEndpoint)
+            return false;
+
+        var text = newValue switch
+        {
+            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+            string value => value,
+            _ => null,
+        };
+
+        if (string.IsNullOrWhiteSpace(text))
+            return true;
+
+        if (isSensitive && (text is ConfiguredMarker or NotConfiguredMarker))
+            return true;
+
+        if (isEndpoint && text.EndsWith(RedactedEndpointSuffix, StringComparison.Ordinal))
+            return true;
+
+        // 只有真实的新值才允许创建新的凭证/端点配置。
+        return false;
     }
 
     /// <summary>
@@ -246,22 +288,158 @@ public class IntegrationSettingsService
     }
 
     /// <summary>
-    /// 解析租户 Settings 中的 integrations 节点。
+    /// 构建可返回给管理端的集成配置摘要。
+    ///
+    /// 集成配置中通常包含机器人签名密钥、API Key、Basic Auth 密码以及 URL 中的访问令牌。
+    /// 这些值只允许留在服务端用于发起集成请求，不能随着管理 API 返回到浏览器或日志链路。
+    /// 同时只返回 integrations 节点，避免把 Tenant.Settings 中未来新增的其他敏感配置一并暴露。
     /// </summary>
-    private Dictionary<string, object>? ParseIntegrationSettings(string? settings)
+    private Dictionary<string, object> BuildSafeIntegrationSettings(string? settings)
     {
-        if (string.IsNullOrEmpty(settings) || settings == "{}")
-            return new Dictionary<string, object>();
+        var safeIntegrations = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
-        try
+        if (!string.IsNullOrWhiteSpace(settings) && settings != "{}")
         {
-            return JsonSerializer.Deserialize<Dictionary<string, object>>(settings);
+            try
+            {
+                using var document = JsonDocument.Parse(settings);
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && document.RootElement.TryGetProperty("integrations", out var integrations)
+                    && integrations.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var integration in integrations.EnumerateObject())
+                    {
+                        safeIntegrations[integration.Name] =
+                            SanitizeJsonValue(integration.Value, null) ?? new Dictionary<string, object?>();
+                    }
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "集成配置 JSON 解析失败，返回空摘要");
+            }
         }
-        catch (Exception ex)
+
+        return new Dictionary<string, object>
         {
-            _logger.LogWarning(ex, "集成配置 JSON 解析失败，返回空字典");
-            return new Dictionary<string, object>();
+            ["integrations"] = safeIntegrations,
+        };
+    }
+
+    /// <summary>
+    /// 递归脱敏 JSON 值。属性名匹配凭证字段时只返回是否已配置；URL 只保留协议、主机和端口。
+    /// </summary>
+    private static object? SanitizeJsonValue(JsonElement value, string? propertyName)
+    {
+        if (IsSensitiveProperty(propertyName))
+        {
+            return HasConfiguredValue(value) ? ConfiguredMarker : NotConfiguredMarker;
         }
+
+        if (IsEndpointProperty(propertyName))
+        {
+            return value.ValueKind == JsonValueKind.String
+                ? RedactEndpoint(value.GetString())
+                : ConfiguredMarker;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Object => SanitizeObject(value),
+            JsonValueKind.Array => value.EnumerateArray()
+                .Select(item => SanitizeJsonValue(item, null))
+                .ToList(),
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.TryGetInt64(out var integer) ? integer : value.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            _ => "[已隐藏]",
+        };
+    }
+
+    /// <summary>
+    /// 递归转换对象并允许重复 JSON 属性以后者覆盖，避免异常配置导致管理接口返回 500。
+    /// </summary>
+    private static Dictionary<string, object?> SanitizeObject(JsonElement value)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var property in value.EnumerateObject())
+            result[property.Name] = SanitizeJsonValue(property.Value, property.Name);
+
+        return result;
+    }
+
+    /// <summary>
+    /// 判断属性名是否代表凭证。归一化后同时覆盖 camelCase、snake_case 和 HTTP Header 写法。
+    /// </summary>
+    private static bool IsSensitiveProperty(string? propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(propertyName))
+            return false;
+
+        var normalized = new string(propertyName
+            .Where(char.IsLetterOrDigit)
+            .ToArray())
+            .ToLowerInvariant();
+
+        return normalized.Contains("secret", StringComparison.Ordinal)
+            || normalized.Contains("password", StringComparison.Ordinal)
+            || normalized.Contains("apikey", StringComparison.Ordinal)
+            || normalized.Contains("accesskey", StringComparison.Ordinal)
+            || normalized.Contains("token", StringComparison.Ordinal)
+            || normalized.Contains("privatekey", StringComparison.Ordinal)
+            || normalized.Contains("credential", StringComparison.Ordinal)
+            || normalized.Contains("authorization", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 判断属性名是否可能包含访问令牌的 URL 或服务端请求端点。
+    /// </summary>
+    private static bool IsEndpointProperty(string? propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(propertyName))
+            return false;
+
+        var normalized = new string(propertyName
+            .Where(char.IsLetterOrDigit)
+            .ToArray())
+            .ToLowerInvariant();
+
+        return normalized.EndsWith("url", StringComparison.Ordinal)
+            || normalized.EndsWith("uri", StringComparison.Ordinal)
+            || normalized.EndsWith("endpoint", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// 将 URL 脱敏为 origin 摘要，避免泄露查询参数或路径中的机器人令牌。
+    /// </summary>
+    private static string RedactEndpoint(string? rawEndpoint)
+    {
+        if (string.IsNullOrWhiteSpace(rawEndpoint))
+            return NotConfiguredMarker;
+
+        if (!Uri.TryCreate(rawEndpoint, UriKind.Absolute, out var uri)
+            || string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return ConfiguredMarker;
+        }
+
+        var port = uri.IsDefaultPort ? string.Empty : $":{uri.Port}";
+        return $"{uri.Scheme}://{uri.Host}{port}{RedactedEndpointSuffix}";
+    }
+
+    /// <summary>
+    /// 判断凭证值是否实际存在，便于前端区分“已配置”和“未配置”。
+    /// </summary>
+    private static bool HasConfiguredValue(JsonElement value)
+    {
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => !string.IsNullOrWhiteSpace(value.GetString()),
+            JsonValueKind.Null or JsonValueKind.Undefined => false,
+            _ => true,
+        };
     }
 
     /// <summary>

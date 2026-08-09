@@ -14,15 +14,23 @@ export const options = {
   },
 };
 
+const AUTH_PASS = __ENV.AUTH_PASS || '';
+if (!AUTH_PASS) {
+  throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入压测凭据');
+}
+
 export default function () {
   const resp = http.post(`${BASE_URL}/api/v1/auth/login`,
-    JSON.stringify({ username: 'admin', password: 'Admin@123' }),
+    JSON.stringify({ username: __ENV.AUTH_USER || 'admin', password: AUTH_PASS }),
     { headers: { 'Content-Type': 'application/json' } }
   );
 
   check(resp, {
     '登录成功': (r) => r.status === 200,
-    '返回 token': (r) => r.json('token') !== undefined,
+    '返回 token': (r) => {
+      const body = r.json();
+      return (body.accessToken || body.token) !== undefined;
+    },
     '响应时间 < 200ms': (r) => r.timings.duration < 200,
   });
 

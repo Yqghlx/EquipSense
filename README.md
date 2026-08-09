@@ -45,7 +45,7 @@ cp docker/.env.example docker/.env
 # 编辑 .env，设置所有必填密码、JWT_SECRET 和固定的 RABBITMQ_IMAGE
 
 # 3. 启动全套服务
-docker compose -f docker/docker-compose.yml up -d --build
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
 
 # 4. 访问应用
 # 前端：https://localhost:8443（默认 8443 HTTPS，可通过 FRONTEND_PORT 修改）

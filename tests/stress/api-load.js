@@ -24,15 +24,22 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const AUTH_USER = __ENV.AUTH_USER || 'admin';
+const AUTH_PASS = __ENV.AUTH_PASS || '';
+
+if (!AUTH_PASS) {
+  throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入压测凭据');
+}
 
 function login() {
   const res = http.post(`${BASE_URL}/api/v1/auth/login`, JSON.stringify({
-    username: 'admin',
-    password: 'Admin@123',
+    username: AUTH_USER,
+    password: AUTH_PASS,
   }), { headers: { 'Content-Type': 'application/json' } });
 
   if (res.status === 200) {
-    return res.json('accessToken');
+    const body = res.json();
+    return body.accessToken || body.token;
   }
   return null;
 }
@@ -60,8 +67,8 @@ export default function () {
   // 认证端点：登录本身
   {
     const res = http.post(`${BASE_URL}/api/v1/auth/login`, JSON.stringify({
-      username: 'admin',
-      password: 'Admin@123',
+      username: AUTH_USER,
+      password: AUTH_PASS,
     }), { headers: { 'Content-Type': 'application/json' } });
     const ok = check(res, { 'auth/login 200': (r) => r.status === 200 });
     if (!ok) errorRate.add(1);

@@ -51,12 +51,17 @@
 dotnet run --project src/EquipAI.WebAPI
 
 # 跑全部三套（约 2 分钟）
-k6 run tests/load/api-read.js
-k6 run tests/load/mqtt-publish.js
-k6 run tests/load/telemetry-write.js
+export AUTH_USER=admin
+export AUTH_PASS='<与后端 SEED_ADMIN_PASSWORD 相同的测试密码>'
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/api-read.js
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/mqtt-publish.js
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/telemetry-write.js
 
 # 高压测试（200 VU）
-k6 run -e VUS=200 tests/load/api-read.js
+k6 run -e VUS=200 -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/api-read.js
 ```
+
+> 压测脚本不内置任何公开账户密码。生产 MQTT 压测还必须显式设置
+> `MQTT_USERNAME`、`MQTT_PASSWORD`、`MQTT_PORT=8883`、`MQTT_USE_TLS=true` 和 `MQTT_CA_FILE`。
 
 如果任何指标退化超过 30%（如 P95 从 30ms 变成 40ms），需要排查是否有性能回归。

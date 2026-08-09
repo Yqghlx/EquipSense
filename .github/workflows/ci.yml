@@ -564,6 +564,9 @@ jobs:
           dotnet restore EquipAI.sln
           dotnet build EquipAI.sln --configuration Release --no-restore
 
+      - name: 生成性能测试临时凭据
+        run: echo "LOADTEST_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+
       - name: 启动后端服务
         env:
           ASPNETCORE_ENVIRONMENT: Development
@@ -573,7 +576,7 @@ jobs:
           Jwt__Secret: "loadtest-secret-key-that-is-at-least-32-characters-long!!"
           DISABLE_RATE_LIMITING: "true"
         run: |
-          dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
+          SEED_ADMIN_PASSWORD="$LOADTEST_PASSWORD" dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
           for i in $(seq 1 45); do
             if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
               echo "后端服务已启动"
@@ -583,13 +586,20 @@ jobs:
             sleep 2
           done
 
+      - name: 检查压测工具凭据卫生
+        run: |
+          if rg -n --glob '*.js' --glob '*.sh' 'Admin@123|device123' tests/load tests/stress; then
+            echo "压测/混沌工具不得内置公开默认凭据"
+            exit 1
+          fi
+
       # 读路径压测：20 VU × 30s（CI 轻量，P95<500ms、错误率<1%）
       - name: K6 API 读取压测（读路径回归）
         working-directory: tests/load
         env:
           BASE_URL: http://localhost:8080
           VUS: '20'
-        run: k6 run --quiet api-read.js
+        run: k6 run --quiet -e AUTH_USER=admin -e AUTH_PASS="$LOADTEST_PASSWORD" api-read.js
 
       # 导出性能指标为 JSON，上传为 artifact 便于跨版本对比回归
       - name: K6 API 读取压测（导出 JSON 指标）
@@ -597,7 +607,7 @@ jobs:
         env:
           BASE_URL: http://localhost:8080
           VUS: '20'
-        run: k6 run --quiet --out json=api-read-results.json api-read.js
+        run: k6 run --quiet -e AUTH_USER=admin -e AUTH_PASS="$LOADTEST_PASSWORD" --out json=api-read-results.json api-read.js
         # 第二次跑用于留档，不阻断（首次已验证阈值）
         continue-on-error: true
 

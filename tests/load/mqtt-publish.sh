@@ -6,8 +6,9 @@
 # 直接测量 Mosquitto broker + 后端 MQTT 订阅者的真实吞吐量。
 #
 # 运行方式：
-#   DEVICES=100 INTERVAL=2 DURATION=60 ./tests/load/mqtt-publish.sh
-#   DEVICES=500 INTERVAL=5 DURATION=120 ./tests/load/mqtt-publish.sh
+#   MQTT_USERNAME=loadtest MQTT_PASSWORD='<密码>' DEVICES=100 INTERVAL=2 DURATION=60 ./tests/load/mqtt-publish.sh
+#   MQTT_USERNAME=loadtest MQTT_PASSWORD='<密码>' MQTT_USE_TLS=true \
+#     MQTT_CA_FILE=docker/mqtt-certs/ca.crt MQTT_PORT=8883 ./tests/load/mqtt-publish.sh
 #
 # 依赖：brew install mosquitto（提供 mosquitto_pub）
 
@@ -19,9 +20,24 @@ TENANT="${TENANT_ID:-11111111-1111-1111-1111-111111111111}"
 DEVICES="${DEVICES:-100}"
 INTERVAL="${INTERVAL:-2}"
 DURATION="${DURATION:-60}"
-# Mosquitto 启用了认证（docker-compose.yml 里 MQTT_USERNAME / MQTT_PASSWORD 默认 device/device123）
-MQTT_USER="${MQTT_USERNAME:-device}"
-MQTT_PASS="${MQTT_PASSWORD:-device123}"
+# 凭据必须显式传入，避免压力测试工具把公开默认密码带入真实环境。
+MQTT_USER="${MQTT_USERNAME:-}"
+MQTT_PASS="${MQTT_PASSWORD:-}"
+if [ -z "$MQTT_USER" ] || [ -z "$MQTT_PASS" ]; then
+  echo "错误：必须设置 MQTT_USERNAME 和 MQTT_PASSWORD" >&2
+  exit 1
+fi
+
+# 生产 Broker 使用 8883/TLS；显式提供 CA 文件后才允许发布，禁止通过 --insecure 绕过证书校验。
+MQTT_USE_TLS="${MQTT_USE_TLS:-false}"
+MQTT_TLS_ARGS=()
+if [ "$PORT" = "8883" ] || [ "$MQTT_USE_TLS" = "true" ]; then
+  if [ -z "${MQTT_CA_FILE:-}" ] || [ ! -f "$MQTT_CA_FILE" ]; then
+    echo "错误：TLS MQTT 压测必须设置存在的 MQTT_CA_FILE" >&2
+    exit 1
+  fi
+  MQTT_TLS_ARGS=(--cafile "$MQTT_CA_FILE")
+fi
 
 echo "=== MQTT 吞吐测试 ==="
 echo "Broker:     $BROKER:$PORT"
@@ -57,6 +73,7 @@ JSON
 )
     mosquitto_pub -h "$BROKER" -p "$PORT" \
       -u "$MQTT_USER" -P "$MQTT_PASS" \
+      "${MQTT_TLS_ARGS[@]}" \
       -t "factory/$TENANT/telemetry/device-$i" \
       -m "$payload" -q 1 &
     count=$(( count + 1 ))

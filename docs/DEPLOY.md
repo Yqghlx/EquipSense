@@ -54,6 +54,8 @@ cd docker && ./setup.sh && cd ..
 
 `setup.sh` 会在启动前一次性校验生产 Compose 所需的凭证、JWT 长度、证书/监控配置文件，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。
 
+> 注意：Docker Compose 默认只从当前工作目录加载 `.env`。本项目配置文件位于 `docker/.env`，因此从仓库根目录执行 Compose 命令时必须带 `--env-file docker/.env`；本手册的生产命令已统一显式指定该参数。
+
 生产 Compose 的基础设施镜像使用 digest 固定版本；升级镜像时应先更新 digest、完成全量验证，再进行部署。RabbitMQ 通过 `RABBITMQ_IMAGE` 显式注入，生产环境应使用带 digest 的镜像引用。
 
 生成 VAPID 密钥：
@@ -90,7 +92,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 ### 3. 启动服务
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
 ```
 
 首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。
@@ -99,7 +101,7 @@ docker compose -f docker/docker-compose.yml up -d
 
 ```bash
 # 检查所有服务状态
-docker compose -f docker/docker-compose.yml ps
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps
 
 # 检查后端健康
 curl http://localhost:8080/health/startup
@@ -132,6 +134,7 @@ curl http://localhost:8080/api/v1/system/info
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
 | `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（至少 32 位纯 ASCII） | - | 使用边缘网关时必填 |
+| `FILE_STORAGE_BASE_PATH` | 工单附件目录，必须与 `attachments_data` 卷挂载点一致 | `/app/uploads` | 否 |
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码 | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
@@ -151,6 +154,8 @@ curl http://localhost:8080/api/v1/system/info
 1. 创建数据库表（EF Core 迁移）
 2. 创建 TimescaleDB 超级表和连续聚合
 3. 种子数据（角色、权限、系统管理员）
+
+工单附件写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机或 Kubernetes 部署时应改用 S3/MinIO 等共享对象存储，并将数据库备份与附件卷分别纳入备份策略。
 
 管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。所有种子用户首次登录后必须修改密码。
 
@@ -202,6 +207,8 @@ SMTP_ENABLE_SSL=true
 
 > 出于 SSRF 防护，集成 URL 默认不得指向回环、云元数据或私网地址；企业内网 EAM 需显式设置 `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS=true`。
 
+> 安全约束：`GET /api/v1/settings/integrations` 只返回集成配置摘要，不返回 Secret、AppSecret、API Key、密码或 URL 查询令牌；凭证字段显示为“已配置/未配置”，URL 仅显示协议、主机和端口。更新配置时，空凭证和脱敏占位符会保留服务端已有值，避免页面刷新后误清空集成。
+
 ### 设备健康度定时刷新
 
 设备健康度（health_score）默认手动刷新。如需定时自动更新，可配置定时任务调用：
@@ -218,11 +225,11 @@ curl -X POST http://localhost:8080/api/v1/devices/health-score/refresh-all \
 
 ```bash
 # 手动备份
-docker compose -f docker/docker-compose.yml exec postgres \
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
   pg_dump -U postgres equipai > backup_$(date +%Y%m%d).sql
 
 # 恢复
-docker compose -f docker/docker-compose.yml exec -T postgres \
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
   psql -U postgres equipai < backup_20260602.sql
 ```
 
@@ -232,6 +239,12 @@ docker compose -f docker/docker-compose.yml exec -T postgres \
 # 列出所有 volume
 docker volume ls | grep equipai
 
+# 备份工单附件（将 equipsense_attachments_data 替换为实际 volume 名称）
+docker run --rm \
+  -v equipsense_attachments_data:/data:ro \
+  -v "$PWD":/backup \
+  alpine:3.20 tar czf /backup/attachments_$(date +%Y%m%d).tar.gz -C /data .
+
 # 仅清理备份 volume
 docker volume rm equipai_pg_backup
 ```
@@ -240,14 +253,14 @@ docker volume rm equipai_pg_backup
 
 ```bash
 # 查看所有服务日志
-docker compose -f docker/docker-compose.yml logs -f
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f
 
 # 查看特定服务日志
-docker compose -f docker/docker-compose.yml logs -f backend
-docker compose -f docker/docker-compose.yml logs -f frontend
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f frontend
 
 # 最近 100 行
-docker compose -f docker/docker-compose.yml logs --tail 100 backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail 100 backend
 ```
 
 ## 升级步骤
@@ -257,14 +270,14 @@ docker compose -f docker/docker-compose.yml logs --tail 100 backend
 git pull origin main
 
 # 2. 备份数据库
-docker compose -f docker/docker-compose.yml exec postgres \
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
   pg_dump -U postgres equipai > pre_upgrade_backup.sql
 
 # 3. 重新构建并启动（自动迁移）
-docker compose -f docker/docker-compose.yml up -d --build
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
 
 # 4. 验证
-docker compose -f docker/docker-compose.yml ps
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps
 curl http://localhost:8080/health/ready
 ```
 
@@ -301,7 +314,7 @@ sudo certbot renew
 # 更新 Docker 中的证书
 cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/cert.pem
 cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/key.pem
-docker compose -f docker/docker-compose.yml restart frontend
+docker compose --env-file docker/.env -f docker/docker-compose.yml restart frontend
 ```
 
 ---

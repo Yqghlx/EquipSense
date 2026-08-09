@@ -1,9 +1,9 @@
 # EquipSense 落地就绪检查报告
 
-> 生成时间：2026-06-14
+> 基线生成时间：2026-06-14
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-09）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证已包含事务 Outbox/Inbox、RabbitMQ v2 真实 broker 测试、自动建单事务回滚、1115 个后端单元测试、158 个后端集成测试、前端 342 个单元测试，以及前后端生产构建。生产部署仍必须先通过 `cd docker && ./setup.sh` 的凭证与证书前置检查。
+> **当前状态说明（2026-08-09）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证已包含事务 Outbox/Inbox、RabbitMQ v2 真实 broker 测试、自动建单事务回滚、1147 个后端单元测试、159 个后端集成测试、前端 342 个单元测试，以及前后端生产构建。生产部署仍必须先通过 `cd docker && ./setup.sh` 的凭证与证书前置检查。
 
 ## 一、项目规模
 
@@ -12,9 +12,9 @@
 | 后端代码行（Core+Application+Infrastructure+WebAPI） | 51,534 行 |
 | 后端 API 端点 | 135 个（25 个 Controller） |
 | 前端页面 | 27 个 |
-| 单元测试 | 629 个（后端）+ 293 个（前端） |
-| 集成测试 | 19 个文件 |
-| E2E 测试 | 42 个场景（Playwright） |
+| 单元测试 | 1147 个（后端）+ 342 个（前端） |
+| 集成测试 | 159 个用例（19 个文件） |
+| E2E 测试 | 440 个用例（Playwright） |
 | 压力测试 | 11 个脚本（k6） |
 
 ## 二、功能完备性核验（对照行业产品）
@@ -60,10 +60,10 @@
 
 | 维度 | 状态 | 详情 |
 |------|------|------|
-| 容器化 | ✅ | docker-compose.yml（10 服务）+ 后端/前端多阶段 Dockerfile |
+| 容器化 | ✅ | docker-compose.yml（12 服务）+ 后端/前端多阶段 Dockerfile |
 | 反向代理 | ✅ | Nginx（TLS 终止、静态资源、API/WebSocket 代理） |
 | 配置管理 | ✅ | .env.example 完整（PG/Redis/MQTT/JWT/LLM/SMTP/VAPID/TLS/监控） |
-| 数据持久化 | ✅ | TimescaleDB 7天压缩 + 90天保留 + 连续聚合 |
+| 数据持久化 | ✅ | TimescaleDB 7天压缩 + 90天保留 + 连续聚合；工单附件使用 `attachments_data` 命名卷并纳入备份 |
 | 迁移自动化 | ✅ | 启动自动 MigrateAsync + 种子初始化 |
 | 健康检查 | ✅ | 三级探针（startup/liveness/ready），含 PG+Redis+MQTT+LLM |
 | 日志聚合 | ✅ | Serilog + Seq 结构化日志 |
@@ -85,7 +85,7 @@
 | 密码重置防邮箱枚举 | ✅ |
 | 审计日志全操作可追溯 | ✅ |
 
-## 五、本轮提交记录（17 次）
+## 五、历史提交记录（功能基线）
 
 | 提交 | 类型 | 说明 |
 |------|------|------|
@@ -120,13 +120,14 @@
 |------|------|
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
 | 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
-| 后端单元测试 | ✅ 629/629 通过 |
+| 后端单元测试 | ✅ 1147/1147 通过 |
+| 后端集成测试 | ✅ 159/159 通过（含真实 RabbitMQ broker） |
 | 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
-| 前端单元测试 | ✅ 293/293 通过 |
-| E2E 测试 | ✅ 431 个测试被发现可执行 |
-| i18n 完整性 | ✅ 660 键中英文完全对齐，23 处硬编码中文清零 |
-| 生产构建 | ✅ PWA SW 产出 + precache 90 entries |
+| 前端单元测试 | ✅ 342/342 通过 |
+| E2E 测试 | ✅ 440 个测试被发现可执行 |
+| i18n 完整性 | ✅ 729 个键在中英文资源中完全对齐 |
+| 生产构建 | ✅ PWA SW 产出 + precache 124 entries |
 | 生产配置 | ✅ appsettings.Production.json |
 
 ## 七、部署前检查清单
@@ -141,6 +142,7 @@
 - [ ] `DOMAIN` 指向实际域名（影响 HSTS/Cookie）
 - [ ] TLS 证书已挂载（`SSL_CERT_PATH` / `SSL_KEY_PATH`）
 - [ ] `GRAFANA_PASSWORD` 已修改
+- [ ] `attachments_data` 附件卷已纳入备份策略（跨主机部署改用 S3/MinIO）
 - [ ] 钉钉/飞书集成在租户 Settings 配置（如需机器人推送）
 - [ ] 首次启动验证：`/health` 返回 Healthy，使用 `SEED_ADMIN_PASSWORD` 配置的管理员初始密码登录后立即改密（不再使用公开默认密码）
 

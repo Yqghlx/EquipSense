@@ -28,7 +28,8 @@ RUN groupadd -r equipai && useradd -r -g equipai equipai
 COPY --from=build /app/publish .
 
 # 设置文件所有权
-RUN chown -R equipai:equipai /app
+RUN mkdir -p /app/uploads \
+    && chown -R equipai:equipai /app
 
 # 复制启动脚本（等待 PG 就绪 + 自动迁移准备）
 COPY docker/entrypoint.sh /app/entrypoint.sh

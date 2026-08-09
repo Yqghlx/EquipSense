@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# 生产环境变量校验器。
+# setup.sh 和人工部署可以复用同一套校验，避免 Compose 只报出第一个缺失变量。
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="${1:-$SCRIPT_DIR/.env}"
+ERRORS=0
+
+error() {
+  printf '  [✗] %s\n' "$*" >&2
+  ERRORS=$((ERRORS + 1))
+}
+
+read_env_value() {
+  local key="$1"
+  local line
+  line="$(grep -E "^$key=" "$ENV_FILE" | tail -n 1 || true)"
+  printf '%s' "${line#*=}"
+}
+
+get_file_mode() {
+  if stat -c '%a' "$ENV_FILE" >/dev/null 2>&1; then
+    stat -c '%a' "$ENV_FILE"
+  else
+    stat -f '%Lp' "$ENV_FILE"
+  fi
+}
+
+if [ ! -f "$ENV_FILE" ]; then
+  error "环境变量文件不存在：$ENV_FILE"
+else
+  # 生产凭据文件禁止被同组或其他用户读取；setup.sh 会在首次创建后自动设置为 600。
+  env_mode="$(get_file_mode)"
+  case "$env_mode" in
+    400|600)
+      ;;
+    *)
+      error ".env 文件权限不安全（当前 $env_mode），请设置为 600"
+      ;;
+  esac
+
+  REQUIRED_ENV_VARS=(
+    "PG_PASSWORD"
+    "REDIS_PASSWORD"
+    "RABBITMQ_IMAGE"
+    "RABBITMQ_PASSWORD"
+    "JWT_SECRET"
+    "GATEWAY_AUTH_KEY"
+    "MQTT_USERNAME"
+    "MQTT_PASSWORD"
+    "SEED_ADMIN_PASSWORD"
+    "SEED_LEAD_PASSWORD"
+    "SEED_TECH_PASSWORD"
+    "SEED_OPERATOR_PASSWORD"
+    "SEED_VIEWER_PASSWORD"
+    "FRONTEND_URL"
+    "SEQ_ADMIN_PASSWORD"
+    "GRAFANA_PASSWORD"
+  )
+
+  for key in "${REQUIRED_ENV_VARS[@]}"; do
+    value="$(read_env_value "$key")"
+    if [ -z "$value" ] +      || [[ "$value" == *"请修改"* ]] +      || [[ "$value" == *"PLEASE_CHANGE"* ]] +      || { [ "$key" = "MQTT_USERNAME" ] && [ "$value" = "device" ]; } +      || { [ "$key" = "MQTT_PASSWORD" ] && [ "$value" = "device123" ]; }; then
+      error "必填环境变量 $key 缺失或仍为占位值（不会打印其内容）"
+    fi
+  done
+
+  jwt_value="$(read_env_value JWT_SECRET)"
+  if [ -n "$jwt_value" ] && [[ "$jwt_value" != *"请修改"* ]] && [ "${#jwt_value}" -lt 32 ]; then
+    error "JWT_SECRET 长度不足 32 个字符"
+  fi
+
+  gateway_auth_key="$(read_env_value GATEWAY_AUTH_KEY)"
+  if [ -n "$gateway_auth_key" ] && [[ "$gateway_auth_key" != *"PLEASE_CHANGE"* ]]; then
+    if [ "${#gateway_auth_key}" -lt 32 ]; then
+      error "GATEWAY_AUTH_KEY 长度不足 32 个字符"
+    fi
+    if printf '%s' "$gateway_auth_key" | LC_ALL=C grep -q '[^ -~]'; then
+      error "GATEWAY_AUTH_KEY 必须只包含 ASCII 字符"
+    fi
+  fi
+
+  rabbitmq_password="$(read_env_value RABBITMQ_PASSWORD)"
+  if [ -n "$rabbitmq_password" ] && [[ "$rabbitmq_password" != *"请修改"* ]] +    && [ "${#rabbitmq_password}" -lt 16 ]; then
+    error "RABBITMQ_PASSWORD 长度不足 16 个字符"
+  fi
+
+  rabbitmq_user="$(read_env_value RABBITMQ_USER)"
+  if [ "$rabbitmq_user" = "guest" ]; then
+    error "RABBITMQ_USER 不得使用 guest"
+  fi
+
+  rabbitmq_image="$(read_env_value RABBITMQ_IMAGE)"
+  if [ -n "$rabbitmq_image" ] && [[ "$rabbitmq_image" != *@sha256:* ]]; then
+    error "RABBITMQ_IMAGE 必须使用带 digest 的固定镜像引用"
+  fi
+
+  tenant2_account="$(read_env_value SEED_TENANT2_ACCOUNT)"
+  if [[ "$tenant2_account" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
+    tenant2_password="$(read_env_value SEED_TENANT2_PASSWORD)"
+    if [ -z "$tenant2_password" ] +      || [[ "$tenant2_password" == *"请修改"* ]] +      || [ "$tenant2_password" = "Tenant2@123" ]; then
+      error "SEED_TENANT2_ACCOUNT 已开启，但 SEED_TENANT2_PASSWORD 缺失或仍为公开默认值"
+    fi
+  fi
+fi
+
+if [ "$ERRORS" -gt 0 ]; then
+  printf '环境变量校验失败：共 %s 个问题，请修复后重新运行。\n' "$ERRORS" >&2
+  exit 1
+fi
+
+printf '环境变量校验通过：%s\n' "$ENV_FILE"

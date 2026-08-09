@@ -23,6 +23,11 @@ import { check, sleep } from 'k6';
 import { Rate, Trend } from 'k6/metrics';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const AUTH_USER = __ENV.AUTH_USER || 'admin';
+const AUTH_PASS = __ENV.AUTH_PASS || '';
+if (!AUTH_PASS) {
+  throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入混沌探针凭据');
+}
 
 // 自定义指标：健康检查成功率（区分于业务 API 错误率）
 const healthCheckSuccess = new Rate('chaos_health_check_success');
@@ -50,8 +55,8 @@ let authToken = null;
 function getAuthToken() {
   if (authToken) return authToken;
   const resp = http.post(`${BASE_URL}/api/v1/auth/login`, JSON.stringify({
-    username: 'admin',
-    password: 'Admin@123',
+    username: AUTH_USER,
+    password: AUTH_PASS,
   }), { headers: { 'Content-Type': 'application/json' } });
 
   if (resp.status === 200) {

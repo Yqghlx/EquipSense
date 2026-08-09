@@ -61,8 +61,47 @@ public class LocalFileStorageService : IFileStorageService
         var relativePath = Path.Combine(tenantId.ToString(), safeCategory, uniqueName)
             .Replace('\\', '/');
 
-        await using var fileStream = new FileStream(fullPath, FileMode.Create, FileAccess.Write);
-        await stream.CopyToAsync(fileStream);
+        // 先写入同目录临时文件，只有完整写入成功后才原子移动到正式路径。
+        // 直接写正式文件时，网络流中断会留下带完整扩展名的半成品，可能被后续下载或扫描流程误认为有效附件。
+        var temporaryPath = Path.Combine(directory, $".{uniqueName}.uploading");
+        EnsureInsideBasePath(temporaryPath);
+        try
+        {
+            await using (var fileStream = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                options: FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await stream.CopyToAsync(fileStream);
+                await fileStream.FlushAsync();
+            }
+
+            File.Move(temporaryPath, fullPath);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+            catch (Exception cleanupException)
+            {
+                _logger.LogError(
+                    cleanupException,
+                    "上传临时文件清理失败：Path={Path}",
+                    temporaryPath);
+            }
+
+            _logger.LogWarning(
+                exception,
+                "文件写入未完成，已放弃临时文件：Path={Path}",
+                relativePath);
+            throw;
+        }
 
         _logger.LogInformation("文件已保存：{Path}，大小：{Size} 字节", relativePath, stream.Length);
         return relativePath;

@@ -36,6 +36,8 @@ PROBE_SCRIPT="$SCRIPT_DIR/chaos-probe.js"
 # k6 探针配置（故障注入期间持续验证韧性）
 PROBE_DURATION="${PROBE_DURATION:-60s}"    # 单场景探针时长
 PROBE_VUS="${PROBE_VUS:-10}"               # 并发虚拟用户
+BASE_URL="${BASE_URL:-http://localhost:8080}"
+AUTH_USER="${AUTH_USER:-admin}"
 
 # 故障注入参数
 DELAY_MS="${DELAY_MS:-500}"                # 网络延迟（毫秒）
@@ -59,6 +61,7 @@ preflight() {
   command -v docker >/dev/null 2>&1 || { err "docker 未安装"; exit 1; }
   command -v k6 >/dev/null 2>&1 || { err "k6 未安装（brew install k6 / 参考 tests/stress/k6）"; exit 1; }
   [ -f "$PROBE_SCRIPT" ] || { err "探针脚本不存在: $PROBE_SCRIPT"; exit 1; }
+  [ -n "${AUTH_PASS:-}" ] || { err "必须设置 AUTH_PASS，禁止使用公开默认凭据运行混沌测试"; exit 1; }
 
   # 验证目标服务存活
   if ! docker ps --format '{{.Names}}' | grep -q "$TARGET_BACKEND"; then
@@ -73,13 +76,25 @@ preflight() {
 run_probe() {
   local scenario="$1"
   local outfile="$SCRIPT_DIR/chaos-result-${scenario}.xml"
+  local k6_status=0
   log "启动 k6 探针（场景: $scenario, 时长: $PROBE_DURATION, VUs: $PROBE_VUS）"
+  # 不吞掉 k6 失败状态；否则脚本会在阈值失败或探针配置错误时错误地报告“完成”。
+  set +e
   k6 run \
+    -e "BASE_URL=$BASE_URL" \
+    -e "AUTH_USER=$AUTH_USER" \
+    -e "AUTH_PASS=$AUTH_PASS" \
     --vus "$PROBE_VUS" \
     --duration "$PROBE_DURATION" \
     --out json="$SCRIPT_DIR/chaos-probe-${scenario}.json" \
     --summary-export="$SCRIPT_DIR/chaos-summary-${scenario}.json" \
-    "$PROBE_SCRIPT" 2>&1 | tee "$SCRIPT_DIR/chaos-probe-${scenario}.log" || true
+    "$PROBE_SCRIPT" 2>&1 | tee "$SCRIPT_DIR/chaos-probe-${scenario}.log"
+  k6_status=${PIPESTATUS[0]}
+  set -e
+  if [ "$k6_status" -ne 0 ]; then
+    err "k6 探针失败（场景: $scenario，退出码: $k6_status）"
+    return "$k6_status"
+  fi
   log "探针完成，结果: $outfile"
 }
 
@@ -186,6 +201,9 @@ usage() {
   CHAOS_DURATION    单次故障持续时长（默认 45s）
   PROBE_DURATION    k6 探针时长（默认 60s）
   PROBE_VUS         k6 并发用户数（默认 10）
+  BASE_URL          被测后端地址（默认 http://localhost:8080）
+  AUTH_USER         压测账户（默认 admin）
+  AUTH_PASS         压测账户密码（必填，不提供公开默认值）
 EOF
 }
 

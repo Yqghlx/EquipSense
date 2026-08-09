@@ -82,6 +82,14 @@ Webhook、钉钉、飞书和 EAM 配置会触发后端出站 HTTP 请求。应�
 |--------|------|--------|------|
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许租户集成访问 RFC1918/IPv6 ULA 私网地址 | `false` | 否 |
 
+## 工单附件存储
+
+Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名卷；跨主机部署应替换为 S3/MinIO 等共享对象存储实现。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `FileStorage__BasePath` / `FILE_STORAGE_BASE_PATH` | 工单附件物理存储目录；Docker 中必须与卷挂载点一致 | `/app/uploads` | 否 |
+
 ## SMTP 邮件
 
 | 变量名 | 说明 | 默认值 | 必填 |

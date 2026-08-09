@@ -2,6 +2,7 @@
 
 > 本文档面向运维人员，覆盖日常告警处理、故障排查、容量扩容、备份恢复等运维场景。
 > 部署相关请参考 [DEPLOY.md](./DEPLOY.md)，架构设计请参考 [FINAL_TECHNICAL_DESIGN.md](./FINAL_TECHNICAL_DESIGN.md)。
+> 生产 Compose 配置位于 `docker/.env`；从仓库根目录执行本手册中的生产 Compose 命令时，必须使用 `--env-file docker/.env`。
 
 ---
 
@@ -25,10 +26,10 @@
 
 ```bash
 # 1. 检查容器状态
-docker compose -f docker/docker-compose.yml ps backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps backend
 
 # 2. 如果 Exited，查看退出原因
-docker compose -f docker/docker-compose.yml logs --tail=100 backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=100 backend
 
 # 3. 常见原因排查：
 #    - 数据库连接失败 → 检查 PostgreSQL 容器 + 密码
@@ -37,7 +38,7 @@ docker compose -f docker/docker-compose.yml logs --tail=100 backend
 #    - JWT_SECRET 未配 → 检查 .env
 
 # 4. 重启
-docker compose -f docker/docker-compose.yml restart backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml restart backend
 
 # 5. 验证恢复
 curl http://localhost:8080/health
@@ -49,7 +50,7 @@ curl http://localhost:8080/health
 # 边缘网关部署在工厂现场，可能网络抖动
 # 1. 确认是否预期维护（联系现场工程师）
 # 2. 检查网关心跳：
-docker compose logs --tail=50 edgegateway | grep -i heartbeat
+docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=50 edgegateway | grep -i heartbeat
 # 3. 如长时间未恢复（>30 分钟），远程指导现场重启
 ```
 
@@ -58,12 +59,12 @@ docker compose logs --tail=50 edgegateway | grep -i heartbeat
 ```bash
 # P95 > 2s 说明规则匹配或 DB 查询有性能问题
 # 1. 检查告警规则数量（>1000 条规则会拖慢评估）
-docker exec equipai-postgres psql -U postgres -d equipai_dev \
-  -c "SELECT count(*) FROM alert_rules WHERE enabled = true;"
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+  sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM alert_rules WHERE enabled = true;\""
 
 # 2. 检查 PostgreSQL 慢查询
-docker exec equipai-postgres psql -U postgres -d equipai_dev \
-  -c "SELECT * FROM pg_stat_activity WHERE state='active' AND now()-query_start > '5s';"
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+  sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT * FROM pg_stat_activity WHERE state = 'active' AND now()-query_start > interval '5 seconds';\""
 
 # 3. 检查后端内存（可能 GC 压力大）
 docker stats equipai-backend --no-stream
@@ -91,8 +92,9 @@ docker stats equipai-backend --no-stream
 1. 浏览器控制台 → 确认 API 请求是否发出
 2. curl 测试后端 → curl -X POST http://localhost:8080/api/v1/auth/login ...
 3. 后端健康检查 → curl http://localhost:8080/health
-4. 数据库连通性 → docker exec equipai-postgres pg_isready
-5. 默认账号 → admin / Admin@123（首次启动种子数据）
+4. 数据库连通性 → `docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`
+5. 管理员账号 → `admin`；密码只从部署时的 `SEED_ADMIN_PASSWORD` 或密钥管理系统获取，
+   本手册不记录默认密码。生产环境首次登录后仍必须立即修改密码。
 ```
 
 ### 2.2 告警不触发
@@ -101,10 +103,13 @@ docker stats equipai-backend --no-stream
 症状：设备数据异常但告警中心无新告警
 排查：
 1. 确认遥测数据入库
-   docker exec equipai-postgres psql -U postgres -d equipai_dev \
-     -c "SELECT * FROM device_telemetry ORDER BY time DESC LIMIT 5;"
+   docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+     sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+       -c "SELECT * FROM device_telemetry ORDER BY time DESC LIMIT 5;"'
 2. 确认告警规则存在且启用
-   psql -c "SELECT name, metric, operator, threshold, enabled FROM alert_rules WHERE enabled=true;"
+   docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+     sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+       -c "SELECT name, metric, operator, threshold, enabled FROM alert_rules WHERE enabled=true;"'
 3. 确认规则 DeviceType 与设备 Type 匹配（空压机规则只匹配 Type='空压机' 的设备）
 4. 检查 CooldownSeconds — 冷却期内不重复触发
 5. 查后端日志：grep "告警规则" /tmp/backend.log
@@ -118,7 +123,9 @@ docker stats equipai-backend --no-stream
 1. 确认 LLM API Key 是否配置（未配置则降级到 L2 规则匹配）
    grep "LLM" /tmp/backend.log | grep -i "降级\|degrade"
 2. 确认知识规则存在（L2 需要 knowledge_rules 表有匹配规则）
-   psql -c "SELECT name, device_type FROM knowledge_rules WHERE enabled=true;"
+   docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+     sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+       -c "SELECT name, device_type FROM knowledge_rules WHERE enabled=true;"'
 3. 检查 AlertTriggeredEvent 是否发布
    grep "AlertTriggeredEvent" /tmp/backend.log
 4. 检查 `/health/ready` 中 `rabbitmq-eventbus`，再查看 `equipai.v2.*.retry` 和 `*.dead` 队列积压
@@ -130,9 +137,15 @@ docker stats equipai-backend --no-stream
 症状：设备停止上报数据
 排查：
 1. Mosquitto 容器状态
-   docker compose ps mosquitto
+   docker compose --env-file docker/.env -f docker/docker-compose.yml ps mosquitto
 2. MQTT 订阅测试
-   docker exec equipai-mosquitto mosquitto_sub -h localhost -t "factory/#" -C 1 -v
+   # 从密钥管理器临时注入，勿把真实值写入脚本或提交到仓库
+   read -r -p "MQTT 用户名: " MQTT_USERNAME
+   read -r -s -p "MQTT 密码: " MQTT_PASSWORD
+   export MQTT_USERNAME MQTT_PASSWORD
+   docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T mosquitto \
+     mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/config/certs/ca.crt \
+     -u "$MQTT_USERNAME" -P "$MQTT_PASSWORD" -t "factory/#" -C 1 -v
 3. 边缘网关连接状态
    docker logs equipai-edgegateway | grep -i "mqtt\|connect"
 4. 确认 MQTT 认证（MQTT_USERNAME / MQTT_PASSWORD）
@@ -193,31 +206,36 @@ docker stats equipai-backend --no-stream
 ./docker/backup.sh
 
 # 或手动执行
-docker exec equipai-postgres pg_dump -U postgres equipai_dev | gzip > backup_$(date +%Y%m%d).sql.gz
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | gzip > backup_$(date +%Y%m%d).sql.gz
 
-# Redis RDB 快照（缓存数据非关键，可选）
-docker exec equipai-redis redis-cli -a $REDIS_PASSWORD BGSAVE
-docker cp equipai-redis:/data/dump.rdb ./redis_backup_$(date +%Y%m%d).rdb
+# Redis RDB 快照（缓存数据非关键，可选；从密钥管理器临时注入密码）
+read -r -s -p "Redis 密码: " REDISCLI_AUTH
+export REDISCLI_AUTH
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T \
+  -e "REDISCLI_AUTH=$REDISCLI_AUTH" redis redis-cli BGSAVE
+docker compose --env-file docker/.env -f docker/docker-compose.yml cp redis:/data/dump.rdb ./redis_backup_$(date +%Y%m%d).rdb
 
 # Grafana 仪表盘配置（已版本化在 git，但用户自定义的需导出）
-docker exec equipai-grafana grafana-cli admin export-dashboard
+docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T grafana grafana-cli admin export-dashboard
 ```
 
 ### 4.2 恢复流程
 
 ```bash
 # 1. 停止后端（避免恢复期间有写入）
-docker compose stop backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend
 
 # 2. 恢复 PostgreSQL
-gunzip -c backup_20260614.sql.gz | docker exec -i equipai-postgres psql -U postgres -d equipai_dev
+gunzip -c backup_20260614.sql.gz | docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
 # 3. 恢复 Redis（如需要）
 docker cp ./redis_backup_20260614.rdb equipai-redis:/data/dump.rdb
-docker compose restart redis
+docker compose --env-file docker/.env -f docker/docker-compose.yml restart redis
 
 # 4. 启动后端并验证
-docker compose start backend
+docker compose --env-file docker/.env -f docker/docker-compose.yml start backend
 curl http://localhost:8080/health
 ```
 
@@ -237,7 +255,7 @@ curl http://localhost:8080/health
 
 ### 每日检查（5 分钟）
 
-- [ ] `docker compose ps` 所有服务 Up
+- [ ] `docker compose --env-file docker/.env -f docker/docker-compose.yml ps` 所有服务 Up
 - [ ] `curl http://localhost:8080/health` 返回 healthy
 - [ ] Grafana 仪表盘无异常指标（CPU/内存/错误率）
 - [ ] AlertManager 无未处理的 critical 告警
@@ -246,6 +264,7 @@ curl http://localhost:8080/health
 ### 每周检查（15 分钟）
 
 - [ ] 备份文件存在且大小正常
+- [ ] `attachments_data` 附件卷已纳入备份，且磁盘空间足够
 - [ ] Seq 日志无持续 ERROR（`http://localhost:5341`）
 - [ ] 时序数据保留正常（`SELECT min(time), max(time) FROM device_telemetry;`）
 - [ ] 审计日志导出归档
@@ -270,21 +289,32 @@ curl http://localhost:8080/health
 
 ### 6.2 全系统不可用
 
-1. `docker compose down && docker compose up -d` 全量重启
+1. `docker compose --env-file docker/.env -f docker/docker-compose.yml down && docker compose --env-file docker/.env -f docker/docker-compose.yml up -d` 全量重启
 2. 如仍不可用 → 检查 `.env` 配置（密码/密钥是否正确）
-3. 联系开发团队：提供 `/tmp/backend.log` + `docker compose logs` 输出
+3. 联系开发团队：提供 `/tmp/backend.log` + `docker compose --env-file docker/.env -f docker/docker-compose.yml logs` 输出
 
 ### 6.3 安全事件（疑似入侵）
 
-1. 立即 `docker compose stop backend` 隔离系统
-2. 导出审计日志 `psql -c "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 1000;" > security_audit.csv`
-3. 检查异常登录 `psql -c "SELECT * FROM audit_logs WHERE action='LoginFailed' AND created_at > now() - interval '24 hours';"`
+1. 立即 `docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend` 隔离系统
+2. 导出审计日志：
+   ```bash
+   docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+     sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+       -c "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 1000;"' > security_audit.csv
+   ```
+3. 检查异常登录：
+   ```bash
+   docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+     sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+       -c "SELECT * FROM audit_logs WHERE action = '\''LoginFailed'\'' \
+         AND created_at > now() - interval '\''24 hours'\'';"'
+   ```
 4. 修改所有密码（admin/数据库/Redis/JWT_SECRET）
 5. 联系安全团队评估影响范围
 
 ### 6.4 RabbitMQ 不可用或版本升级
 
-1. 先检查 `docker compose ps rabbitmq`、`rabbitmq-diagnostics -q check_running` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
+1. 先检查 `docker compose --env-file docker/.env -f docker/docker-compose.yml ps rabbitmq`、`rabbitmq-diagnostics -q check_running` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
 2. 验证 v2 policy：`rabbitmqctl list_policies -p /`，并用 `rabbitmqctl list_queues -p / name durable arguments policy` 检查 `equipai.v2.*` 队列。
 3. 既有 3.13 数据卷需要保留时，先完整备份，排空旧 `equipai.events.*` 主/retry 队列，再按官方支持路径升级到 4.2、启用稳定 feature flags，最后升级到 4.3.4。
 4. v2 切换后保留旧 dead 队列供人工核对；应用和脚本不得自动删除旧队列或 `rabbitmq_data` 卷。

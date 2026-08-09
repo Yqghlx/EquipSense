@@ -17,8 +17,8 @@ export const config = {
   /** 认证用户 */
   username: __ENV.AUTH_USER || 'admin',
 
-  /** 认证密码 */
-  password: __ENV.AUTH_PASS || 'Admin@123',
+  /** 认证密码，必须由运行者显式传入，避免压测误用公开默认凭据 */
+  password: __ENV.AUTH_PASS || '',
 };
 
 /** 标准性能阈值 — 读路径 SLO：P95 < 500ms、P99 < 1000ms，错误率 < 0.1% */
@@ -47,6 +47,10 @@ let cachedToken = null;
  */
 export function getToken() {
   if (cachedToken) return cachedToken;
+
+  if (!config.password) {
+    throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入压测凭据');
+  }
 
   const res = http.post(`${config.baseUrl}/api/v1/auth/login`, JSON.stringify({
     username: config.username,

@@ -17,8 +17,8 @@ namespace EquipAI.Tests.Unit.Web;
 /// <c>[RequirePermission]</c> 的端点**直接放行**（仅检查认证，不限角色）。因此 RBAC 五角色矩阵的执行
 /// 完全依赖每个敏感端点都标注了权限。多个写操作 Controller 历史漏标注 → 只读 Viewer 都能：
 /// - <c>DeviceConfigController.QuickRegister</c> 建设备（应 device:create）；
-/// - <c>IntegrationController</c> 读取 webhook/secret/appSecret/apiKey 凭证（应 tenant:read）并篡改
-///   集成配置、触发外部推送（应 tenant:update）—— P0 凭证泄露/篡改；
+/// - <c>IntegrationController</c> 读取集成配置摘要（应 tenant:read）并篡改
+///   集成配置、触发外部推送（应 tenant:update）—— P0 凭证访问/篡改；
 /// - <c>DispatchController.UpsertTechnician</c> 改技术人员画像（应 workorder:dispatch）。
 ///
 /// 本测试把"这些端点必须标注正确权限"锁定为回归不变量——若未来有人误删 <c>[RequirePermission]</c>，

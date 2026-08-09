@@ -1,6 +1,7 @@
 # docker/docker-compose.yml
 # 生产环境：全套服务一键启动
-# 使用方式：docker compose up -d
+# 使用方式（在 docker/ 目录）：docker compose --env-file .env up -d
+# 在仓库根目录执行时必须显式传入：--env-file docker/.env
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
@@ -184,6 +185,8 @@ services:
       Llm__ApiKey: "${LLM_API_KEY:-}"
       Llm__ModelId: "${LLM_MODEL:-qwen-plus}"
       Llm__Endpoint: "${LLM_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+      # 附件目录必须与 attachments_data 命名卷保持一致，避免工作目录变化导致读写分裂。
+      FileStorage__BasePath: "${FILE_STORAGE_BASE_PATH:-/app/uploads}"
       # v1.4 OpenTelemetry：OTLP 推送到 Jaeger（未配置则降级 Console 输出）
       # 开发环境留空 → Console exporter；生产配置 http://jaeger:4317 → OTLP exporter
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
@@ -224,6 +227,8 @@ services:
       EventBus__Outbox__RetentionDays: "${EVENTBUS_OUTBOX_RETENTION_DAYS:-7}"
     volumes:
       - ./mqtt-certs:/etc/equipai/mqtt-certs:ro
+      # 工单附件默认写入 /app/uploads；使用命名卷避免容器重建丢失文件。
+      - attachments_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -493,3 +498,4 @@ volumes:
   alertmanager_data:
   edgegateway_data:
   grafana_data:
+  attachments_data:
