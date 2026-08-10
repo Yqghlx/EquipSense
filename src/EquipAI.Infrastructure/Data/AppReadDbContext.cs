@@ -31,7 +31,18 @@ public class AppReadDbContext : AppDbContext
     /// 字段识别上下文身份（AppReadDbContext），不依赖泛型参数匹配，因此非泛型转发是安全的。
     /// </summary>
     public AppReadDbContext(DbContextOptions<AppReadDbContext> options, ITenantContext tenantContext)
-        : base((DbContextOptions)options, tenantContext)
+        : this(options, tenantContext, null)
+    {
+    }
+
+    /// <summary>
+    /// 构造只读上下文并注入联系方式保护器，使读副本可以解密用户 DTO。
+    /// </summary>
+    public AppReadDbContext(
+        DbContextOptions<AppReadDbContext> options,
+        ITenantContext tenantContext,
+        IPiiProtector? piiProtector)
+        : base((DbContextOptions)options, tenantContext, piiProtector)
     {
     }
 

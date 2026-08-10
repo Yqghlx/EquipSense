@@ -36,6 +36,14 @@ TOTP 密钥使用 AES-256-GCM 加密后写入数据库。生产环境必须注�
 openssl rand -base64 32
 ```
 
+用户邮箱和手机号使用独立的 AES-256-GCM 密钥加密写入 `users` 表，同时保存字段级 HMAC-SHA256 盲索引供等值查找。生产环境必须注入稳定的 PII 密钥；应用会在数据库迁移完成后先将历史明文联系方式原子迁移为密文，再执行种子初始化。密钥丢失会导致联系方式无法解密，轮换前必须设计批量重新加密和回滚方案；该密钥不能与 TOTP、JWT 或基础设施凭据复用：
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `PII_ENCRYPTION_KEY` / `Security__PiiEncryptionKey` | Base64 编码的 32 字节 AES-256-GCM 用户联系方式密钥；通过密钥管理系统注入，不进入镜像或数据库备份 | — | 生产环境必填 |
+
+开发/测试环境在未配置时使用固定的开发专用后备密钥；Production 会在应用启动和部署脚本两处拒绝缺失、非法 Base64 或非 32 字节密钥。数据库中保存的是 `enc:v1:` 密文和盲索引，不支持按邮箱或手机号模糊搜索。
+
 生产环境 `appsettings.Production.json` 默认强制 `SystemAdmin` 和 `MaintenanceLead` 启用 TOTP MFA。也可以使用配置数组环境变量覆盖角色列表，但生产门禁要求这两个高权限角色都必须保留：
 
 ```bash
@@ -44,6 +52,17 @@ Security__Mfa__RequiredRoles__1=MaintenanceLead
 ```
 
 高权限账户首次登录或公开注册后不会直接获得 JWT，而是进入 10 分钟的 MFA 注册流程；扫码并验证成功后才会建立会话，并只显示一次 8 个一次性恢复码。登录时可用恢复码代替 TOTP，普通角色仍可在“安全与 MFA”页面自助启用，强制角色不能禁用 MFA。
+
+## 反向代理与客户端来源
+
+生产 Compose 默认由 Nginx 终止 TLS。后端只在 `BEHIND_PROXY=true` 时处理
+`X-Forwarded-For`/`X-Forwarded-Proto`，并且仅信任 `TRUSTED_PROXY_NETWORKS` 中的
+CIDR 网段；这样认证限流可以按真实客户端 IP 工作，同时不会接受公网客户端伪造的来源头。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `BEHIND_PROXY` | 是否位于反向代理之后 | `true`（Docker） | 否 |
+| `TRUSTED_PROXY_NETWORKS` | 可信代理 CIDR 网段，多个网段用逗号分隔 | `172.16.0.0/12` | 使用反向代理时需按实际网络确认 |
 
 ## 依赖许可证
 
@@ -87,7 +106,7 @@ Security__Mfa__RequiredRoles__1=MaintenanceLead
 | `SEED_TENANT2_ACCOUNT` | 是否创建测试用第二租户账户 | `false` | 否 |
 | `SEED_TENANT2_PASSWORD` | 第二租户测试账户密码 | — | 启用第二租户账户时必填 |
 
-五个 `SEED_*_PASSWORD` 必须分别生成，不能在不同账户之间复用；同样不能与 PG、Redis、RabbitMQ、MQTT、Seq、Grafana、JWT、TOTP 或网关认证密钥相同。`docker/validate-env.sh` 会在部署前执行这项 fail-closed 检查，并仅报告发生冲突的变量名。
+五个 `SEED_*_PASSWORD` 必须分别生成，不能在不同账户之间复用；同样不能与 PG、Redis、RabbitMQ、MQTT、Seq、Grafana、JWT、TOTP、PII 或网关认证密钥相同。`docker/validate-env.sh` 会在部署前执行这项 fail-closed 检查，并仅报告发生冲突的变量名。
 
 隔离验收或 CI 需要覆盖第二租户时，测试进程使用 `E2E_TENANT2_PASSWORD`，其值必须与 `SEED_TENANT2_PASSWORD` 一致；该变量只注入 Playwright，不应写入生产业务环境，也不应在生产业务数据库开启 `SEED_TENANT2_ACCOUNT`。
 
@@ -119,11 +138,20 @@ Webhook、钉钉、飞书和 EAM 配置会触发后端出站 HTTP 请求。应�
 
 ## 工单附件存储
 
-Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名卷；跨主机部署应替换为 S3/MinIO 等共享对象存储实现。
+Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名卷；跨主机、多副本或 Kubernetes 部署应切换为 S3/MinIO 等共享对象存储。项目不会自动启动或创建 MinIO，启用 S3 前必须由运维准备桶、最小权限服务账号、生命周期策略和恢复演练。
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
+| `FILE_STORAGE_PROVIDER` | 附件存储实现：`Local` / `S3`；未知值会阻止后端启动 | `Local` | 否 |
 | `FileStorage__BasePath` / `FILE_STORAGE_BASE_PATH` | 工单附件物理存储目录；Docker 中必须与卷挂载点一致 | `/app/uploads` | 否 |
+| `FILE_STORAGE_S3_BUCKET` | S3 对象存储桶名称 | — | Provider=S3 时必填 |
+| `FILE_STORAGE_S3_REGION` | S3 签名区域 | `us-east-1` | Provider=S3 时建议显式配置 |
+| `FILE_STORAGE_S3_ENDPOINT` | 自定义 S3 兼容端点；为空时使用 AWS 标准端点 | — | 使用 MinIO/OSS 网关时必填 |
+| `FILE_STORAGE_S3_ACCESS_KEY` / `FILE_STORAGE_S3_SECRET_KEY` | 对象存储访问凭据；自定义端点必须同时配置，标准 AWS 端点可使用任务角色 | — | 按端点类型 |
+| `FILE_STORAGE_S3_USE_PATH_STYLE` | 是否使用路径风格地址；MinIO 通常为 `true` | `false` | 否 |
+| `FILE_STORAGE_S3_KEY_PREFIX` | 对象键安全前缀，不允许绝对路径或 `..` | `attachments` | 否 |
+
+S3 模式下，实际对象键为 `KeyPrefix/{tenantId}/{category}/{uniqueName}`。应用会校验文件扩展名、MIME 类型、20 MiB 大小上限和对象键路径；生产自定义端点必须使用 HTTPS。切换 Provider 前先迁移历史附件并完成隔离恢复演练，确认后才能移除旧的 `attachments_data` 卷。
 
 ## 备份
 
@@ -143,6 +171,7 @@ PostgreSQL 新备份使用 custom format（文件名为 `*.dump`，由容器内 
 | `BACKUP_ATTACHMENTS` | 是否归档后端 `/app/uploads` 工单附件 | `true` | 生产建议保持 `true` |
 | `ATTACHMENTS_CONTAINER` | 附件所在容器名 | `equipai-backend` | 否 |
 | `ATTACHMENTS_PATH` | 容器内附件目录 | `/app/uploads` | 否 |
+| `REDIS_CONTAINER` | Redis 容器名 | `equipai-redis` | 否 |
 | `BACKUP_REDIS` | 是否备份 Redis RDB；开启后快照或复制失败会使备份返回非零 | `true` | 否 |
 | `S3_SYNC` / `S3_BUCKET` | 是否将备份同步到 S3/OSS 及目标桶；开启后缺少目标、aws-cli 或同步失败都会让备份返回非零 | `false` / — | 异地备份时必填 |
 
@@ -181,6 +210,8 @@ PostgreSQL 新备份使用 custom format（文件名为 `*.dump`，由容器内 
 | `Gateway__DefaultGatewayId` | 默认网关标识 | `gateway-001` | 否 |
 | `Gateway__HealthPort` | 网关健康端点端口 | `8081` | 否 |
 | `Gateway__Host` | 网关主机地址 | `localhost` | 否 |
+| `Gateway__BackendUrl` / `GATEWAY_BACKEND_URL` | 网关上传目标后端；蓝绿部署由编排脚本临时切到目标颜色 | `http://backend:8080` | 否 |
+| `EDGE_BLUEGREEN_PORT` | 蓝绿部署边缘网关健康探针宿主端口 | `18081` | 否 |
 
 ## 事件总线
 
@@ -209,14 +240,24 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `RABBITMQ_USER` | docker-compose rabbitmq 服务默认用户 | `equipai` | 否 |
 | `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | — | Docker 生产必填 |
 | `GRAFANA_PASSWORD` | Grafana 管理员密码 | — | Docker 生产必填 |
+| `ALERT_WEBHOOK_URL` | Alertmanager 外部告警接收地址；为空时告警仅保留在 Alertmanager/Grafana | — | 否 |
+| `JAEGER_SPAN_STORAGE_TYPE` | Jaeger trace 存储类型；单机生产默认 `badger`，多副本可切换外部存储 | `badger` | 否 |
+| `JAEGER_BADGER_EPHEMERAL` | 是否使用临时 Badger 存储；生产必须为 `false` | `false` | 否 |
 
 ## 限流与调试
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
-| `DISABLE_RATE_LIMITING` | 禁用 API 限流（测试环境用） | `false` | 否 |
+| `RATE_LIMITING_PERMIT_LIMIT` | 普通 API 在时间窗口内的请求额度 | `60` | 否 |
+| `RATE_LIMITING_AUTH_PERMIT_LIMIT` | 登录、注册等认证 API 在时间窗口内的请求额度 | `10` | 否 |
+| `RATE_LIMITING_TENANT_PERMIT_LIMIT` | 单租户所有 API 在时间窗口内的总请求额度 | `1000` | 否 |
+| `RATE_LIMITING_WINDOW` | 限流时间窗口，格式为 `hh:mm:ss` | `00:01:00` | 否 |
+| `DISABLE_RATE_LIMITING` | 仅 Testing/本地调试环境可禁用 API 限流；Production 会强制忽略该变量 | `false` | 否 |
 | `ASPNETCORE_ENVIRONMENT` | 运行环境 | `Production` | 否 |
 | `ASPNETCORE_URLS` | 监听地址 | `http://0.0.0.0:8080` | 否 |
+
+生产镜像始终启用限流；隔离 Production E2E 只会在临时 Compose 环境把三个额度调高，避免并行
+验收请求被误判为暴力破解，限流中间件本身仍然运行。生产环境不得通过环境变量关闭限流。
 
 ## 边缘网关（EquipAI.EdgeGateway）
 
@@ -225,6 +266,7 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `Gateway__Id` | 网关唯一标识 | `gateway-001` | 否 |
 | `Gateway__TenantId` | 所属租户 ID | — | 是 |
 | `Gateway__BackendUrl` | 后端 API 地址 | `http://localhost:8080` | 是 |
+| `Gateway__BufferPath` | SQLite 断网缓冲数据库路径；Docker 生产必须指向 `/data` 持久化卷 | `data/buffer.db`（开发） | 生产环境必须为绝对路径 |
 | `Gateway__RequireHttps` | 强制后端 API 走 HTTPS（AuthKey 经 `X-Gateway-Auth-Key` 头明文传输，HTTP 下会泄露密钥） | `false` | 网关独立部署（跨网络访问后端）时必填 `true`；Docker Compose 内网（容器间通信）可保持 `false` |
 | `Gateway__MqttBroker` | MQTT Broker 地址 | `localhost:1883` | 否 |
 | `Gateway__MqttUseTls` | 是否启用 MQTT TLS | `false` | 生产环境必填为 `true` |
@@ -238,3 +280,5 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `Gateway__OpcUaClientCertificatePath` | OPC UA 客户端证书路径（PFX） | — | 否 |
 | `Gateway__OpcUaClientCertificatePassword` | 客户端证书密码 | — | 否 |
 | `Gateway__OpcUaTrustedCertificatesPath` | 受信任服务器证书目录 | `certificates/trusted` | 否 |
+
+生产环境还会统一注入 `DOTNET_ENVIRONMENT=Production`，并在启动时校验租户 UUID、网关认证密钥和 SQLite 绝对路径；缺失配置会以非零退出码结束进程，交给容器编排系统重启和告警。

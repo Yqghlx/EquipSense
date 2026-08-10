@@ -23,4 +23,15 @@ public class DatabaseInitializationPolicyTests
         DatabaseInitializationPolicy.ShouldApplyMigrations(environmentName)
             .Should().BeTrue();
     }
+
+    [Theory]
+    [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", true)]
+    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", false)]
+    [InlineData("Microsoft.EntityFrameworkCore.InMemory", false)]
+    [InlineData(null, false)]
+    public void 只有PostgreSQL启动初始化需要跨进程数据库锁(string? providerName, bool expected)
+    {
+        DatabaseInitializationLock.RequiresAdvisoryLock(providerName)
+            .Should().Be(expected);
+    }
 }

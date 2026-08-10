@@ -13,15 +13,21 @@ export {
   loginAs,
   loginAsFast,
   loginViaUI,
+  completeProductionMfaIfShown,
   getToken,
   getTokenForRole,
+  getTokenForCredentials,
   getAuthState,
   isLoggedIn,
   verifyAuthCookie,
   getCurrentUserId,
 } from './auth';
 
-export { getE2EPassword, getE2ETenant2Password } from './credentials';
+export {
+  getE2EPassword,
+  getE2ETenant2Password,
+  getE2ETenant2TotpSecret,
+} from './credentials';
 
 // API 请求封装
 export {

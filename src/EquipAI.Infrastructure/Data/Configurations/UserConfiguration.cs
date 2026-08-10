@@ -58,11 +58,21 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(e => e.Phone)
             .HasColumnName("phone")
-            .HasMaxLength(20);
+            // AES-GCM 密文包含版本、nonce、认证标签和 Base64 编码，长度会大于原始手机号。
+            .HasMaxLength(256);
 
         builder.Property(e => e.Email)
             .HasColumnName("email")
-            .HasMaxLength(100);
+            // 为最长合法邮箱预留加密后长度，避免 ValueConverter 截断密文。
+            .HasMaxLength(256);
+
+        builder.Property(e => e.EmailLookupHash)
+            .HasColumnName("email_lookup_hash")
+            .HasMaxLength(64);
+
+        builder.Property(e => e.PhoneLookupHash)
+            .HasColumnName("phone_lookup_hash")
+            .HasMaxLength(64);
 
         builder.Property(e => e.Language)
             .HasColumnName("language")
@@ -109,6 +119,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 
         // 唯一复合索引 — 确保同一租户内用户名唯一
         builder.HasIndex(e => new { e.TenantId, e.Username }).IsUnique();
+
+        // 盲索引只支持等值查找，不能用于模糊搜索；不设唯一约束以兼容不同租户使用同一联系方式。
+        builder.HasIndex(e => e.EmailLookupHash)
+            .HasDatabaseName("IX_users_email_lookup_hash");
+        builder.HasIndex(e => e.PhoneLookupHash)
+            .HasDatabaseName("IX_users_phone_lookup_hash");
 
         // 外键关系 — 租户删除时禁止级联（Restrict），防止误删租户导致用户数据丢失
         builder.HasOne(e => e.Tenant)

@@ -1,5 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
+using Microsoft.AspNetCore.HttpOverrides;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
@@ -16,6 +17,7 @@ using EquipAI.Infrastructure.Messaging;
 using Microsoft.EntityFrameworkCore;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
+using EquipAI.Infrastructure.Services;
 using EquipAI.Infrastructure.Security;
 using EquipAI.Application.Security;
 using EquipAI.WebAPI.Extensions;
@@ -48,6 +50,11 @@ try
     // 注册 HTTP 上下文访问器，供中间件和服务获取当前请求上下文
     builder.Services.AddHttpContextAccessor();
 
+    // 生产环境通常由 Nginx 终止 TLS 并转发 X-Forwarded-* 头。
+    // 先注册可信代理网段，后续在请求管线最前面还原真实客户端 IP，
+    // 这样登录限流不会把所有用户误判成同一个 Docker 代理地址。
+    builder.Services.AddTrustedForwardedHeaders(builder.Configuration);
+
     // 在注册任何事件发布后台服务前完成配置校验，避免未知 Provider 或生产弱配置静默降级。
     MfaPolicyValidator.ValidateForEnvironment(
         builder.Configuration,
@@ -55,7 +62,13 @@ try
     TotpSecretProtectionValidator.ValidateForEnvironment(
         builder.Configuration,
         builder.Environment.EnvironmentName);
+    PiiProtectionValidator.ValidateForEnvironment(
+        builder.Configuration,
+        builder.Environment.EnvironmentName);
     EventBusConfiguration.ValidateForEnvironment(
+        builder.Configuration,
+        builder.Environment.EnvironmentName);
+    FileStorageConfiguration.Validate(
         builder.Configuration,
         builder.Environment.EnvironmentName);
     AutoMapperLicenseConfigurationValidator.Validate(
@@ -69,7 +82,7 @@ try
     }
 
     // 分层注册：基础设施层 → 应用层 → 认证 → Swagger
-    builder.Services.AddInfrastructure(builder.Configuration);
+    builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
     builder.Services.AddApplication(builder.Configuration);
     builder.Services.AddJwtAuthentication(builder.Configuration);
     builder.Services.AddSwagger();
@@ -346,6 +359,13 @@ try
     // 生产环境 HTTPS 安全（当不在反向代理之后时启用）
     // BEHIND_PROXY=true 时由 Nginx 负责 TLS 终止，后端不需要 HTTPS 重定向
     var behindProxy = builder.Configuration["BEHIND_PROXY"]?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+    if (behindProxy)
+    {
+        // 必须在 HSTS、请求日志、限流和审计之前执行，确保后续中间件看到的是
+        // 经过可信代理校验后的 Scheme、RemoteIpAddress，而不是代理容器地址。
+        app.UseForwardedHeaders();
+    }
+
     if (!behindProxy && !app.Environment.IsDevelopment())
     {
         app.UseHsts();
@@ -400,23 +420,25 @@ try
     app.UseSerilogRequestLogging();
     // 3. CORS — 跨域处理，在认证之前执行
     app.UseCors();
-    // 3.5 IP 限流 — 固定窗口策略，每 IP 每分钟 60 次请求，在 CORS 之后、认证之前执行
+    // 3.5 JWT 认证 — 必须先于全局限流，才能让限流器读取 tenant_id，
+    // 否则所有已认证请求都会错误地退化为按代理 IP 共用一个限流桶。
+    app.UseAuthentication();
+    // 3.6 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（认证之后）
+    app.UseMiddleware<TenantResolutionMiddleware>();
+    // 3.7 IP/租户限流 — 未认证请求按真实客户端 IP，已认证请求按 tenant_id
     // 测试环境和 CI E2E 测试禁用限流，避免高频测试请求被拦截
-    var disableRateLimiting = app.Environment.IsEnvironment("Testing")
-        || Environment.GetEnvironmentVariable("DISABLE_RATE_LIMITING") == "true";
+    var disableRateLimiting = RateLimitingConfiguration.ShouldDisable(
+        app.Environment.EnvironmentName,
+        app.Configuration);
     if (!disableRateLimiting)
     {
         app.UseRateLimiter();
     }
-    // 4. JWT 认证 — 解析并验证 Bearer Token，填充 context.User
-    app.UseAuthentication();
-    // 5. 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（必须在认证之后）
-    app.UseMiddleware<TenantResolutionMiddleware>();
-    // 5.5 用量限制 — 在创建资源前检查租户配额（必须在租户解析之后、权限校验之前）
+    // 4. 用量限制 — 在创建资源前检查租户配额（必须在租户解析之后、权限校验之前）
     app.UseMiddleware<UsageLimitMiddleware>();
-    // 6. 权限校验 — 基于角色和权限标识的细粒度访问控制
+    // 5. 权限校验 — 基于角色和权限标识的细粒度访问控制
     app.UseMiddleware<PermissionMiddleware>();
-    // 7. 授权 — ASP.NET Core 内置的 [Authorize] 特性支持
+    // 6. 授权 — ASP.NET Core 内置的 [Authorize] 特性支持
     app.UseAuthorization();
 
     // 开发环境启用 Swagger UI
@@ -486,36 +508,45 @@ try
     });
 
     // 生产/开发环境统一先执行 EF Core 迁移，再初始化种子数据和 TimescaleDB。
+    // 蓝绿发布时新旧后端可能并行启动，必须让三步初始化共享同一把 PostgreSQL 会话锁，
+    // 避免两个实例同时创建迁移、种子数据或 TimescaleDB 策略。
     // Testing 环境由集成测试夹具使用 SQLite EnsureCreatedAsync 创建 schema。
-    if (DatabaseInitializationPolicy.ShouldApplyMigrations(app.Environment.EnvironmentName))
+    var shouldSeed = args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction();
+    if (DatabaseInitializationPolicy.ShouldApplyMigrations(app.Environment.EnvironmentName) || shouldSeed)
     {
-        using var migrateScope = app.Services.CreateScope();
-        var db = migrateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        using var initializationScope = app.Services.CreateScope();
+        var db = initializationScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await using var initializationLock = await DatabaseInitializationLock.AcquireAsync(db);
+
         try
         {
-            Log.Information("正在检查数据库迁移...");
-            await db.Database.MigrateAsync();
-            Log.Information("数据库迁移完成");
+            if (DatabaseInitializationPolicy.ShouldApplyMigrations(app.Environment.EnvironmentName))
+            {
+                Log.Information("正在检查数据库迁移...");
+                await db.Database.MigrateAsync();
+                Log.Information("数据库迁移完成");
+
+                // EF ValueConverter 只接受新密文；历史数据库中的明文必须在 Seeder 和业务查询前完成回填。
+                var piiMigration = initializationScope.ServiceProvider
+                    .GetRequiredService<UserPiiMigrationService>();
+                await piiMigration.MigrateLegacyValuesAsync();
+            }
+
+            if (shouldSeed)
+            {
+                // 种子数据：插入初始用户、角色、租户等基础数据
+                var seeder = initializationScope.ServiceProvider.GetRequiredService<DataSeeder>();
+                await seeder.SeedAsync();
+
+                // TimescaleDB：创建超级表、配置压缩和保留策略
+                var timescaleSetup = initializationScope.ServiceProvider.GetRequiredService<TimescaleDbSetup>();
+                await timescaleSetup.InitializeAsync();
+            }
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "数据库迁移失败，服务拒绝启动");
+            Log.Error(ex, "数据库启动初始化失败，服务拒绝启动");
             throw;
-        }
-    }
-
-    // 种子数据初始化 + TimescaleDB 初始化：首次启动自动执行，确保生产环境有基础数据
-    if (args.Contains("--seed") || app.Environment.IsDevelopment() || app.Environment.IsProduction())
-    {
-        using (var scope = app.Services.CreateScope())
-        {
-            // 种子数据：插入初始用户、角色、租户等基础数据
-            var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
-            await seeder.SeedAsync();
-
-            // TimescaleDB：创建超级表、配置压缩和保留策略
-            var timescaleSetup = scope.ServiceProvider.GetRequiredService<TimescaleDbSetup>();
-            await timescaleSetup.InitializeAsync();
         }
     }
 

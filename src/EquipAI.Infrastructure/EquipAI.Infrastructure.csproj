@@ -19,6 +19,8 @@
     <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
     <PackageReference Include="MQTTnet.Extensions.ManagedClient" Version="4.3.7.1207" />
     <PackageReference Include="RabbitMQ.Client" Version="7.2.2" />
+    <!-- S3 兼容附件存储；默认 Provider 仍为本地文件系统，按需启用。 -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.416.27" />
     <PackageReference Include="Otp.NET" Version="1.4.1" />
     <PackageReference Include="prometheus-net" Version="8.2.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.7.4" />

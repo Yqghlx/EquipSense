@@ -1,4 +1,7 @@
 using System.Text;
+using Amazon;
+using Amazon.Runtime;
+using Amazon.S3;
 using EquipAI.Application.Notifications;
 using EquipAI.Application.Alerts;
 using EquipAI.Application.Dashboard;
@@ -27,6 +30,7 @@ using EquipAI.Infrastructure.Identity;
 using EquipAI.Infrastructure.HealthChecks;
 using EquipAI.Infrastructure.Messaging;
 using EquipAI.Infrastructure.Middleware;
+using EquipAI.Infrastructure.Security;
 using EquipAI.Infrastructure.Tenant;
 using StackExchange.Redis;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -34,6 +38,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Microsoft.Extensions.Options;
 using System.Threading.RateLimiting;
 using Microsoft.Extensions.Hosting;
 
@@ -50,7 +55,10 @@ public static class ServiceCollectionExtensions
     /// </summary>
     /// <param name="services">DI 服务集合</param>
     /// <param name="configuration">应用配置</param>
-    public static void AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static void AddInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        IHostEnvironment? hostEnvironment = null)
     {
         // 注册数据库上下文，使用 Npgsql 连接 PostgreSQL
         // EnableRetryOnFailure：对瞬时故障（网络抖动、连接池耗尽、锁超时）自动重试
@@ -58,6 +66,7 @@ public static class ServiceCollectionExtensions
         // 注意：启用重试后，SaveChanges 中的非幂等操作需确保幂等性，否则会重复执行
         services.AddDbContext<AppDbContext>(options =>
         {
+            options.ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, PiiModelCacheKeyFactory>();
             options.UseNpgsql(
                 configuration.GetConnectionString("Default"),
                 npgsqlOptions => npgsqlOptions.EnableRetryOnFailure(
@@ -71,6 +80,7 @@ public static class ServiceCollectionExtensions
         // NoTracking 跳过变更跟踪，复杂分析查询更快；SaveChanges 被重写为抛异常防误写。
         services.AddDbContext<AppReadDbContext>(options =>
         {
+            options.ReplaceService<Microsoft.EntityFrameworkCore.Infrastructure.IModelCacheKeyFactory, PiiModelCacheKeyFactory>();
             options.UseNpgsql(
                 configuration.GetConnectionString("ReadOnly") ?? configuration.GetConnectionString("Default"),
                 npgsqlOptions => npgsqlOptions.EnableRetryOnFailure(
@@ -79,6 +89,13 @@ public static class ServiceCollectionExtensions
                     errorCodesToAdd: null));
             options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
         });
+
+        // 用户联系方式由 ValueConverter 使用 AES-GCM 加密，盲索引由同一保护器生成。
+        // 单例保证所有 DbContext 使用同一密钥，同时避免每个请求重复派生子密钥。
+        // 使用方法参数中的配置，避免单元测试或宿主自定义注册遗漏 IConfiguration 时在解析阶段才出现无关错误。
+        services.AddSingleton<IPiiProtector>(_ =>
+            new PiiProtector(configuration, hostEnvironment));
+        services.AddScoped<UserPiiMigrationService>();
 
         // 租户上下文注册为 Scoped，从 HttpContext.Items["TenantContext"] 中获取
         // TenantResolutionMiddleware 在管道中先于业务逻辑执行，将解析好的 ITenantContext 存入 HttpContext.Items
@@ -133,8 +150,55 @@ public static class ServiceCollectionExtensions
         // 通用仓储注册，Scoped 生命周期，随请求创建和释放
         services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
-        // 文件存储服务（本地文件系统实现，后续可替换为 S3/MinIO）
-        services.AddScoped<Core.Interfaces.IFileStorageService, Infrastructure.Services.LocalFileStorageService>();
+        // 文件存储默认使用本地文件系统；跨主机/多副本部署可显式切换到 S3 兼容对象存储。
+        services.Configure<Infrastructure.Services.FileStorageOptions>(
+            configuration.GetSection(Infrastructure.Services.FileStorageOptions.SectionName));
+        var fileStorageProvider = Infrastructure.Services.FileStorageConfiguration.ResolveProvider(configuration);
+        if (fileStorageProvider == Infrastructure.Services.FileStorageProvider.S3)
+        {
+            services.AddSingleton<IAmazonS3>(sp =>
+            {
+                var options = sp.GetRequiredService<IOptions<Infrastructure.Services.FileStorageOptions>>().Value.S3;
+                var regionName = string.IsNullOrWhiteSpace(options.Region)
+                    ? "us-east-1"
+                    : options.Region.Trim();
+                var endpointValue = options.Endpoint?.Trim();
+                var accessKey = options.AccessKey?.Trim();
+                var secretKey = options.SecretKey?.Trim();
+                var clientConfig = new AmazonS3Config
+                {
+                    ForcePathStyle = options.UsePathStyle,
+                };
+
+                if (!string.IsNullOrWhiteSpace(endpointValue))
+                {
+                    var endpoint = new Uri(endpointValue, UriKind.Absolute);
+                    clientConfig.ServiceURL = endpoint.ToString().TrimEnd('/');
+                    clientConfig.AuthenticationRegion = regionName;
+                    clientConfig.UseHttp = endpoint.Scheme == Uri.UriSchemeHttp;
+                }
+                else
+                {
+                    clientConfig.RegionEndpoint = RegionEndpoint.GetBySystemName(regionName);
+                }
+
+                if (!string.IsNullOrWhiteSpace(accessKey)
+                    && !string.IsNullOrWhiteSpace(secretKey))
+                {
+                    return new AmazonS3Client(
+                        new BasicAWSCredentials(accessKey, secretKey),
+                        clientConfig);
+                }
+
+                // AWS S3 标准端点可以使用 ECS/EKS/EC2 的任务角色或默认凭据链，避免静态密钥落盘。
+                return new AmazonS3Client(clientConfig);
+            });
+            services.AddScoped<Core.Interfaces.IFileStorageService, Infrastructure.Services.S3FileStorageService>();
+        }
+        else
+        {
+            services.AddScoped<Core.Interfaces.IFileStorageService, Infrastructure.Services.LocalFileStorageService>();
+        }
 
         // 租户可配置出站地址的 SSRF 防护策略，保存时与实际发送时均执行校验。
         services.AddSingleton<OutboundEndpointPolicy>();
@@ -205,8 +269,13 @@ public static class ServiceCollectionExtensions
         // 自动按环境区分：
         // - Production：强制开启限流（忽略 DISABLE_RATE_LIMITING，防暴力破解）
         // - Development / Testing：允许通过 DISABLE_RATE_LIMITING=true 关闭（E2E 测试需要）
-        var env = configuration["ASPNETCORE_ENVIRONMENT"] ?? "Production";
-        var disableRateLimiting = env is not "Production" && configuration.GetValue("DisableRateLimiting", false);
+        var environmentName = hostEnvironment?.EnvironmentName
+            ?? configuration["ASPNETCORE_ENVIRONMENT"]
+            ?? Environments.Production;
+        var rateLimitingOptions = RateLimitingOptions.FromConfiguration(configuration);
+        var disableRateLimiting = RateLimitingConfiguration.ShouldDisable(
+            environmentName,
+            configuration);
         if (disableRateLimiting)
         {
             // E2E 测试模式：注册一个空限流器（所有请求放行）
@@ -235,8 +304,8 @@ public static class ServiceCollectionExtensions
                     return RateLimitPartition.GetFixedWindowLimiter(tenantClaim, _ =>
                         new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                         {
-                            PermitLimit = 1000,             // 单租户每分钟 1000 次（约 16 QPS）
-                            Window = TimeSpan.FromMinutes(1),
+                            PermitLimit = rateLimitingOptions.TenantPermitLimit,
+                            Window = rateLimitingOptions.Window,
                             QueueLimit = 0,                  // 超限立即拒绝，不排队（避免请求堆积）
                         });
                 }
@@ -246,8 +315,8 @@ public static class ServiceCollectionExtensions
                 return RateLimitPartition.GetFixedWindowLimiter(ip, _ =>
                     new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                     {
-                        PermitLimit = 60,
-                        Window = TimeSpan.FromMinutes(1),
+                        PermitLimit = rateLimitingOptions.PermitLimit,
+                        Window = rateLimitingOptions.Window,
                         QueueLimit = 0,
                     });
             });
@@ -255,16 +324,16 @@ public static class ServiceCollectionExtensions
             // 兼容旧策略名（部分 Controller 仍引用 "fixed"）— 行为等价于 GlobalLimiter 的 IP 分支
             options.AddFixedWindowLimiter("fixed", opt =>
             {
-                opt.PermitLimit = 60;
-                opt.Window = TimeSpan.FromMinutes(1);
+                opt.PermitLimit = rateLimitingOptions.PermitLimit;
+                opt.Window = rateLimitingOptions.Window;
                 opt.QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst;
                 opt.QueueLimit = 0;
             });
             // 登录端点专用限流：每 IP 每分钟最多 10 次，防御暴力破解
             options.AddFixedWindowLimiter("auth", opt =>
             {
-                opt.PermitLimit = 10;
-                opt.Window = TimeSpan.FromMinutes(1);
+                opt.PermitLimit = rateLimitingOptions.AuthPermitLimit;
+                opt.Window = rateLimitingOptions.Window;
                 opt.QueueLimit = 0;
             });
         });

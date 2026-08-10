@@ -82,6 +82,18 @@ docker stats equipai-backend --no-stream
 # 4. 根因方案：修复或更换异常设备
 ```
 
+### 1.3 Alertmanager 外部通知与就绪检查
+
+基础设施告警通过 `ALERT_WEBHOOK_URL` 配置统一接收地址。修改后先运行发布门禁，再只重建 Alertmanager：
+
+```bash
+bash docker/validate-env.sh docker/.env --check-runtime-files
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --no-deps --force-recreate alertmanager
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanager
+```
+
+`alertmanager` 应显示 `healthy`。未配置 Webhook 时，外部通知会明确降级为 `dev-null`，告警仍可在 Alertmanager/Grafana 中查询。
+
 ---
 
 ## 二、故障排查手册
@@ -225,9 +237,9 @@ cd /path/to/EquipSense
 ls -lht docker/backups
 ```
 
-`backup.sh` 会逐个执行 PostgreSQL custom/tar 完整性校验；生产环境默认必须同时生成
-`*.dump` 和 `attachments_*.tar.gz`。历史 `*.sql.gz` 仍可用于兼容恢复。显式启用 `BACKUP_REDIS=true` 后，Redis
-快照或复制失败会使脚本返回非零；启用 `S3_SYNC=true` 后，异地目标缺失、未安装
+`backup.sh` 会逐个执行 PostgreSQL custom/tar 完整性校验；本地附件模式默认必须同时生成
+`*.dump` 和 `attachments_*.tar.gz`。S3 附件模式会从配置的对象前缀同步后再生成同名归档，避免只归档空的本地卷。历史 `*.sql.gz` 仍可用于兼容恢复。显式启用 `BACKUP_REDIS=true` 后，Redis
+快照会等待 `INFO persistence` 报告后台保存完成，并校验 `REDIS` 文件头；快照或复制失败会使脚本返回非零。启用 `S3_SYNC=true` 后，异地目标缺失、未安装
 `aws-cli` 或同步失败也会返回非零。备份文件和目录应保持 600/700 权限，并在
 密钥管理系统之外单独保护 `TOTP_ENCRYPTION_KEY`。
 `.dump` 使用容器内 `pg_restore --list` 校验；恢复脚本会先执行 TimescaleDB
@@ -276,7 +288,7 @@ fi
 提供 `--redis-backup` 时，脚本会先清理旧 AOF 并修正 RDB 属主，确保生产
 `appendonly` 配置不会覆盖 RDB。恢复失败时脚本返回非零：数据库导入使用单事务，
 附件替换不自动回滚，需保留原备份并按故障剧本处理。恢复完成后必须核对脚本输出的
-PostgreSQL、附件目录和 `/health` 检查结果，并记录实际 RTO/RPO。
+PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health` 检查结果，并记录实际 RTO/RPO。
 
 ### 4.3 RTO/RPO 目标
 
@@ -303,7 +315,7 @@ PostgreSQL、附件目录和 `/health` 检查结果，并记录实际 RTO/RPO。
 ### 每周检查（15 分钟）
 
 - [ ] 备份文件存在且大小正常
-- [ ] `attachments_data` 附件卷已纳入备份，且磁盘空间足够
+- [ ] 本地模式 `attachments_data` 附件卷已纳入备份；S3 模式对象前缀已完成同步备份，且恢复演练通过
 - [ ] Seq 日志无持续 ERROR（`http://localhost:5341`）
 - [ ] 时序数据保留正常（`SELECT min(time), max(time) FROM device_telemetry;`）
 - [ ] 审计日志导出归档
@@ -362,8 +374,9 @@ PostgreSQL、附件目录和 `/health` 检查结果，并记录实际 RTO/RPO。
 
 ### 6.5 生产部署自动回滚失败
 
-默认滚动部署只重建 backend/frontend。目标版本异常时，`deploy-production.sh` 会使用
-`.last-deployed-tag` 对应的本机旧镜像回滚，并重新验证后端 readiness 与前端 health。
+默认滚动部署只重建 backend/frontend/edgegateway。目标版本异常时，`deploy-production.sh` 会使用
+`.last-deployed-tag` 对应的本机旧镜像回滚，并重新验证后端 readiness、边缘网关 `/health`
+与前端 health；网关的 SQLite 缓冲仍保留在 `edgegateway_data` 命名卷中。
 若日志出现“严重：回滚健康检查失败”或“旧版本容器重建失败”，执行：
 
 ```bash
@@ -372,21 +385,22 @@ cd "$DEPLOY_PATH"
 # 核对版本记录；失败部署不会覆盖该文件
 cat .last-deployed-tag
 
-# 检查两个无状态服务及最近日志
+# 检查三个无状态应用服务及最近日志
 docker compose --env-file .env \
   -f docker-compose.yml -f docker-compose.prod.yml \
-  ps backend frontend
+  ps backend frontend edgegateway
 docker compose --env-file .env \
   -f docker-compose.yml -f docker-compose.prod.yml \
-  logs --tail=200 backend frontend
+  logs --tail=200 backend frontend edgegateway
 
 # 验证后端依赖就绪；前端 health 仍需结合上面的 ps 输出
 curl --fail --show-error http://localhost:8080/health/ready
+curl --fail --show-error http://localhost:8081/health
 ```
 
 处置原则：
 
 1. 不要修改 `.last-deployed-tag`，除非旧版本容器和双健康门禁已经人工验证通过。
-2. 不要删除旧 backend/frontend 镜像；`--pull never` 回滚依赖本机已有旧镜像。
+2. 不要删除旧 backend/frontend/edgegateway 镜像；`--pull never` 回滚依赖本机已有旧镜像。
 3. 不要重建 PostgreSQL、Redis、RabbitMQ、Mosquitto 或数据卷；它们不属于应用版本回滚范围。
 4. 保留失败容器日志和目标 tag，排查镜像启动、配置迁移及依赖 readiness 后再重新发布。

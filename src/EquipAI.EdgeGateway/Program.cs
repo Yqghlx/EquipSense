@@ -26,6 +26,10 @@ try
     builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<IOptions<GatewayOptions>>().Value);
 
+    var gatewayOpts = new GatewayOptions();
+    builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(gatewayOpts);
+    GatewayConfigurationValidator.Validate(builder.Environment.EnvironmentName, gatewayOpts);
+
     // 注册协议适配器工厂
     builder.Services.AddSingleton<CertificateManager>();
     var adapterFactory = new Func<IServiceProvider, string, IProtocolAdapter>((sp, protocol) => protocol switch
@@ -39,14 +43,18 @@ try
         _ => throw new ArgumentException($"不支持的协议: {protocol}")
     });
 
-    // 注册离线缓冲存储（SQLite 持久化 + 内存环形队列）
-    System.IO.Directory.CreateDirectory("data");
-    var sqliteStore = new SqliteBufferStore("data/buffer.db");
+    // 注册离线缓冲存储（SQLite 持久化 + 内存环形队列）。
+    // 路径由配置决定：Docker 生产环境指向 /data 命名卷，避免容器重建丢失断网数据。
+    if (!string.Equals(gatewayOpts.BufferPath, ":memory:", StringComparison.OrdinalIgnoreCase))
+    {
+        var bufferDirectory = Path.GetDirectoryName(Path.GetFullPath(gatewayOpts.BufferPath));
+        if (!string.IsNullOrWhiteSpace(bufferDirectory))
+            Directory.CreateDirectory(bufferDirectory);
+    }
+
+    var sqliteStore = new SqliteBufferStore(gatewayOpts.BufferPath);
     await sqliteStore.InitializeAsync();
     builder.Services.AddSingleton(sqliteStore);
-
-    var gatewayOpts = new GatewayOptions();
-    builder.Configuration.GetSection(GatewayOptions.SectionName).Bind(gatewayOpts);
 
     // 安全门禁：RequireHttps=true 时强制 BackendUrl 必须是 https
     // AuthKey 经 X-Gateway-Auth-Key 头明文传输，HTTP 下会泄露网关认证密钥
@@ -217,6 +225,8 @@ try
 catch (Exception ex)
 {
     Log.Fatal(ex, "边缘网关启动失败");
+    // 启动失败必须返回非零码，让 Docker/Kubernetes 触发重启和告警，而不是留下假健康容器。
+    Environment.ExitCode = 1;
 }
 finally
 {

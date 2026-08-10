@@ -165,6 +165,8 @@ services:
       Jwt__Secret: "${JWT_SECRET:?请在 .env 中设置 JWT_SECRET}"
       # AES-256-GCM TOTP 密钥必须来自外部密钥管理并在重启间保持不变
       Security__TotpEncryptionKey: "${TOTP_ENCRYPTION_KEY:?请在 .env 中设置 TOTP_ENCRYPTION_KEY}"
+      # 用户邮箱/手机号的 AES-256-GCM 密钥必须来自外部密钥管理并在重启间保持不变
+      Security__PiiEncryptionKey: "${PII_ENCRYPTION_KEY:?请在 .env 中设置 PII_ENCRYPTION_KEY}"
       # AutoMapper 15+ 生产许可证由外部密钥管理注入，不写入镜像或配置文件
       AutoMapper__LicenseKey: "${AUTOMAPPER_LICENSE_KEY:?请在 .env 中设置 AUTOMAPPER_LICENSE_KEY}"
       Jwt__Issuer: "EquipAI"
@@ -189,11 +191,23 @@ services:
       SEED_TECH_PASSWORD: "${SEED_TECH_PASSWORD:?请在 .env 中设置 SEED_TECH_PASSWORD}"
       SEED_OPERATOR_PASSWORD: "${SEED_OPERATOR_PASSWORD:?请在 .env 中设置 SEED_OPERATOR_PASSWORD}"
       SEED_VIEWER_PASSWORD: "${SEED_VIEWER_PASSWORD:?请在 .env 中设置 SEED_VIEWER_PASSWORD}"
+      # 仅隔离 E2E/验收环境可显式开启第二租户账户；生产默认关闭且不需要该密码。
+      SEED_TENANT2_ACCOUNT: "${SEED_TENANT2_ACCOUNT:-false}"
+      SEED_TENANT2_PASSWORD: "${SEED_TENANT2_PASSWORD:-}"
       Llm__ApiKey: "${LLM_API_KEY:-}"
       Llm__ModelId: "${LLM_MODEL:-qwen-plus}"
       Llm__Endpoint: "${LLM_ENDPOINT:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+      # 附件默认写入命名卷；跨主机/多副本部署可通过 .env 显式切换到 S3。
+      FileStorage__Provider: "${FILE_STORAGE_PROVIDER:-Local}"
       # 附件目录必须与 attachments_data 命名卷保持一致，避免工作目录变化导致读写分裂。
       FileStorage__BasePath: "${FILE_STORAGE_BASE_PATH:-/app/uploads}"
+      FileStorage__S3__BucketName: "${FILE_STORAGE_S3_BUCKET:-}"
+      FileStorage__S3__Region: "${FILE_STORAGE_S3_REGION:-us-east-1}"
+      FileStorage__S3__Endpoint: "${FILE_STORAGE_S3_ENDPOINT:-}"
+      FileStorage__S3__AccessKey: "${FILE_STORAGE_S3_ACCESS_KEY:-}"
+      FileStorage__S3__SecretKey: "${FILE_STORAGE_S3_SECRET_KEY:-}"
+      FileStorage__S3__UsePathStyle: "${FILE_STORAGE_S3_USE_PATH_STYLE:-false}"
+      FileStorage__S3__KeyPrefix: "${FILE_STORAGE_S3_KEY_PREFIX:-attachments}"
       # v1.4 OpenTelemetry：OTLP 推送到 Jaeger（未配置则降级 Console 输出）
       # 开发环境留空 → Console exporter；生产配置 http://jaeger:4317 → OTLP exporter
       OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
@@ -209,10 +223,17 @@ services:
       Smtp__Password: "${SMTP_PASSWORD:-}"
       Smtp__EnableSsl: "${SMTP_ENABLE_SSL:-true}"
       BEHIND_PROXY: "${BEHIND_PROXY:-true}"
+      # 仅信任 Docker 内部反向代理网段注入的 X-Forwarded-*，避免客户端伪造来源 IP。
+      TRUSTED_PROXY_NETWORKS: "${TRUSTED_PROXY_NETWORKS:-172.16.0.0/12}"
       # Serilog 日志配置由 appsettings.Production.json 提供（Seq Warning+ / Console）
       # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
+      # 限流参数：生产使用安全默认值；隔离 E2E 可提高窗口额度，但不能关闭限流中间件。
+      RateLimiting__PermitLimit: "${RATE_LIMITING_PERMIT_LIMIT:-60}"
+      RateLimiting__AuthPermitLimit: "${RATE_LIMITING_AUTH_PERMIT_LIMIT:-10}"
+      RateLimiting__TenantPermitLimit: "${RATE_LIMITING_TENANT_PERMIT_LIMIT:-1000}"
+      RateLimiting__Window: "${RATE_LIMITING_WINDOW:-00:01:00}"
       # AI 评估标准答案上报默认关闭；只有内部联调时显式开启并绑定固定租户/API Key
       Evaluation__AllowGroundTruthIngestion: "${EVALUATION_ALLOW_GROUND_TRUTH_INGESTION:-false}"
       Evaluation__IngestionApiKey: "${EVALUATION_INGESTION_API_KEY:-}"
@@ -276,15 +297,20 @@ services:
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${EDGE_PORT:-8081}:8081"
     environment:
+      # 与后端统一环境名，避免仅设置 ASPNETCORE_ENVIRONMENT 时网关仍使用默认环境。
+      DOTNET_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
       Gateway__Id: "${GATEWAY_ID:-gateway-001}"
       Gateway__TenantId: "${GATEWAY_TENANT_ID:-}"
+      # 必须落在 edgegateway_data 命名卷中，保障断网缓冲跨容器重建保留。
+      Gateway__BufferPath: "${GATEWAY_BUFFER_PATH:-/data/buffer.db}"
       Gateway__MqttBroker: "mosquitto:8883"
       Gateway__MqttUseTls: "true"
       Gateway__MqttAllowUntrustedCertificates: "false"
       Gateway__MqttCaCertificatePath: "/app/mqtt-certs/ca.crt"
       Gateway__MqttUsername: "${MQTT_USERNAME:?请在 .env 中设置 MQTT_USERNAME}"
       Gateway__MqttPassword: "${MQTT_PASSWORD:?请在 .env 中设置 MQTT_PASSWORD}"
-      Gateway__BackendUrl: "http://backend:8080"
+      # 蓝绿部署通过该变量把网关切到已通过健康门禁的目标后端；普通部署保持默认服务名。
+      Gateway__BackendUrl: "${GATEWAY_BACKEND_URL:-http://backend:8080}"
       Gateway__AuthKey: "${GATEWAY_AUTH_KEY:-}"
       Gateway__UploadIntervalSeconds: "${GATEWAY_UPLOAD_INTERVAL:-5}"
       Gateway__Host: "edgegateway"
@@ -422,9 +448,21 @@ services:
     restart: unless-stopped
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${ALERTMANAGER_PORT:-9093}:9093"
+    environment:
+      # 外部通知地址可选；未配置时启动包装器会将路由降级到 dev-null。
+      ALERT_WEBHOOK_URL: "${ALERT_WEBHOOK_URL:-}"
     volumes:
-      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml.template:ro
+      - ./alertmanager-entrypoint.sh:/usr/local/bin/equipai-alertmanager-entrypoint.sh:ro
       - alertmanager_data:/alertmanager
+    entrypoint: ["/bin/sh", "/usr/local/bin/equipai-alertmanager-entrypoint.sh"]
+    command: ["--config.file=/tmp/equipai-alertmanager.yml", "--storage.path=/alertmanager"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9093/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     # 安全加固
     security_opt:
       - no-new-privileges:true
@@ -462,6 +500,23 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  # Jaeger 数据卷初始化：Badger 目录需要由 Jaeger 非 root 用户写入。
+  # 单独使用一次性 root 容器设置权限，避免让长期运行的追踪服务获得 root 权限。
+  jaeger-init:
+    image: jaegertracing/all-in-one:1.62.0@sha256:836e9b69c88afbedf7683ea7162e179de63b1f981662e83f5ebb68badadc710f
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["mkdir -p /badger/data /badger/key && chmod 700 /badger /badger/data /badger/key && chown -R 10001:0 /badger"]
+    volumes:
+      - jaeger_data:/badger
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+
   # Jaeger — OpenTelemetry 分布式追踪 UI（v1.4 接入）
   #
   # 后端通过 OTLP gRPC 推送 trace 到 Jaeger（端口 4317），
@@ -469,6 +524,7 @@ services:
   #
   # 配置：后端 OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
   # 生产环境可换为 Tempo（与 Grafana 一体化）或 OTel Collector 多导出。
+  # 单机默认使用 Badger 持久化到 jaeger_data；多副本/高吞吐部署应改用外部存储。
   jaeger:
     image: jaegertracing/all-in-one:1.62.0@sha256:836e9b69c88afbedf7683ea7162e179de63b1f981662e83f5ebb68badadc710f
     container_name: equipai-jaeger
@@ -479,10 +535,18 @@ services:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${JAEGER_OTLP_HTTP_PORT:-4318}:4318"  # OTLP HTTP（备选）
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-      # 内存存储（重启清空），适合开发/中小规模；生产应换 Elasticsearch/Cassandra 后端
-      SPAN_STORAGE_TYPE: memory
+      # 单机生产默认持久化；如接入 OpenSearch/Tempo，可通过 JAEGER_SPAN_STORAGE_TYPE 切换。
+      SPAN_STORAGE_TYPE: "${JAEGER_SPAN_STORAGE_TYPE:-badger}"
+      BADGER_EPHEMERAL: "${JAEGER_BADGER_EPHEMERAL:-false}"
+      BADGER_DIRECTORY_VALUE: "/badger/data"
+      BADGER_DIRECTORY_KEY: "/badger/key"
       # 限制内存使用，避免 span 暴涨
       QUERY_MAX_TRAFFIC: "1000"
+    depends_on:
+      jaeger-init:
+        condition: service_completed_successfully
+    volumes:
+      - jaeger_data:/badger
     # 安全加固
     security_opt:
       - no-new-privileges:true
@@ -506,3 +570,4 @@ volumes:
   edgegateway_data:
   grafana_data:
   attachments_data:
+  jaeger_data:

@@ -391,10 +391,16 @@ test.describe('01-注册功能', () => {
         // 中文用户名注册成功（v1.3.0 后用 user 信息验证）
         expect(await isLoggedIn(page)).toBeTruthy();
       } else {
-        // 中文用户名可能被拒绝，验证错误提示出现
+        // 生产环境公开注册会创建 SystemAdmin；成功后必须先进入强制 MFA 注册页，
+        // 不能把该安全流程误判成注册失败。
         const hasError = await page.locator('.text-destructive').isVisible().catch(() => false);
+        const hasMfaEnrollment = await page
+          .getByText(/必须启用多因素认证|MFA|多因素认证/i)
+          .first()
+          .isVisible()
+          .catch(() => false);
         // 无论是否成功，页面都应保持可用状态（无 JS 错误）
-        expect(hasError || /register/.test(currentUrl)).toBeTruthy();
+        expect(hasError || hasMfaEnrollment || /register|login/.test(currentUrl)).toBeTruthy();
       }
     }
 

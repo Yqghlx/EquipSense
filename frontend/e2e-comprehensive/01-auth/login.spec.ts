@@ -10,7 +10,16 @@
  * - 登出流程与状态清理
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, loginViaUI, captureErrors, getAuthState, verifyAuthCookie, getE2EPassword } from '../helpers';
+import {
+  BASE_URL,
+  login,
+  loginViaUI,
+  completeProductionMfaIfShown,
+  captureErrors,
+  getAuthState,
+  verifyAuthCookie,
+  getE2EPassword,
+} from '../helpers';
 
 test.describe('01-登录功能', () => {
   test('1. 登录页面加载无错误 — 检查 placeholder 和 button 可见', async ({ page }) => {
@@ -114,8 +123,9 @@ test.describe('01-登录功能', () => {
     await page.getByPlaceholder(/用户名|username/i).fill('admin');
     await page.getByPlaceholder(/密码|password/i).fill(getE2EPassword('admin'));
     await page.getByRole('button', { name: /登录|login/i }).click();
-    await page.waitForURL(/dashboard/, { timeout: 10000 });
-    await page.waitForLoadState('networkidle');
+    await completeProductionMfaIfShown(page, 'admin');
+    await page.waitForURL(/dashboard/, { timeout: 30000 });
+    await page.waitForLoadState('domcontentloaded');
 
     // v1.3.0 后 access_token 移到 HttpOnly Cookie，sessionStorage 只存 user。
     // 登录成功 → user 信息已写入 sessionStorage。

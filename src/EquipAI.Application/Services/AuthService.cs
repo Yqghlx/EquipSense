@@ -35,6 +35,7 @@ public class AuthService : IAuthService
     private readonly ITotpSecretProtector _totpSecretProtector;
     private readonly IDistributedLockProvider _distributedLockProvider;
     private readonly MfaPolicyOptions _mfaPolicy;
+    private readonly IPiiProtector _piiProtector;
 
     /// <summary>
     /// 连续登录失败达到此数值时自动锁定账户
@@ -137,7 +138,8 @@ public class AuthService : IAuthService
         ITotpService totpService,
         IConfiguration configuration,
         ITotpSecretProtector totpSecretProtector,
-        IDistributedLockProvider distributedLockProvider)
+        IDistributedLockProvider distributedLockProvider,
+        IPiiProtector piiProtector)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
@@ -149,6 +151,7 @@ public class AuthService : IAuthService
         _totpService = totpService;
         _totpSecretProtector = totpSecretProtector;
         _distributedLockProvider = distributedLockProvider;
+        _piiProtector = piiProtector;
         _mfaPolicy = MfaPolicyOptions.FromConfiguration(configuration);
     }
 
@@ -879,13 +882,24 @@ public class AuthService : IAuthService
     /// <param name="ct">取消令牌</param>
     public async Task RequestPasswordResetAsync(string email, string resetUrlTemplate, CancellationToken ct = default)
     {
-        // 无论用户是否存在都走完流程，最后才决定是否发邮件，防止邮箱枚举
-        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Email == email, ct);
+        // 数据库只保存联系方式密文，认证查找必须使用盲索引；否则随机 nonce 密文无法等值匹配。
+        var emailLookupHash = _piiProtector.CreateLookupHash("email", email);
+        var normalizedEmail = _piiProtector.Normalize("email", email);
+        var user = emailLookupHash is null
+            ? null
+            : await _dbContext.UnfilteredSet<Core.Entities.User>()
+                .FirstOrDefaultAsync(u => u.EmailLookupHash == emailLookupHash, ct);
 
-        if (user is null || string.IsNullOrEmpty(user.Email) || !user.IsActive)
+        // 盲索引碰撞概率极低，但仍用解密后的值做二次核验，避免错误命中。
+        if (user is null
+            || string.IsNullOrEmpty(user.Email)
+            || !string.Equals(
+                _piiProtector.Normalize("email", user.Email),
+                normalizedEmail,
+                StringComparison.Ordinal)
+            || !user.IsActive)
         {
-            _logger.LogWarning("密码重置请求：邮箱 {Email} 未找到或账户已停用", email);
+            _logger.LogWarning("密码重置请求未匹配到启用账户");
             return; // 静默返回，不暴露用户是否存在
         }
 

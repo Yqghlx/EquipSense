@@ -18,7 +18,7 @@
 #   GHCR_PULL_USER     — GHCR 拉取用户名（个人访问令牌所属用户）
 #   GHCR_PULL_TOKEN    — GHCR 拉取令牌（read:packages 权限）
 #
-# 镜像 registry：ghcr.io/yqghlx/equipsense/{backend,frontend}
+# 镜像 registry：ghcr.io/yqghlx/equipsense/{backend,frontend,edgegateway}
 
 services:
   backend:
@@ -29,5 +29,10 @@ services:
 
   frontend:
     image: ghcr.io/yqghlx/equipsense/frontend:${TAG:?请设置 TAG 环境变量（如 1.2.0）}
+    build: !reset null
+    pull_policy: always
+
+  edgegateway:
+    image: ghcr.io/yqghlx/equipsense/edgegateway:${TAG:?请设置 TAG 环境变量（如 1.2.0）}
     build: !reset null
     pull_policy: always

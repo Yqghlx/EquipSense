@@ -128,12 +128,22 @@ E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
 
 ### Production 容器运行时 Smoke Gate
 
-完整业务 E2E 继续在 Development 环境运行；CI 另有
-`tests/scripts/production-runtime-smoke.sh`，使用当前提交实际构建的 backend/frontend
+`tests/scripts/production-runtime-smoke.sh` 使用当前提交实际构建的 backend/frontend/edgegateway
 镜像和 Production 配置启动 PostgreSQL、Redis、Mosquitto、RabbitMQ、backend、frontend，
 验证迁移/种子、观察者账户真实登录与 `/auth/me` 受保护接口、startup/liveness/ready 探针、HTTPS、Nginx `/health` 和 `/api/` 反向代理。
-Smoke 使用临时随机凭据及临时证书，不替代正式许可证、正式域名证书、现场协议和生产全量
-用户流程验收；版本发布 job 必须先通过该启动门禁。
+PR 默认执行上述快速门禁；main 推送和版本 tag 额外设置 `SMOKE_RUN_E2E=true`，在同一组
+Production 镜像中执行默认 442 个业务 E2E（5 个显式跳过），确保发布镜像本身通过完整用户流程验收。
+完整验收会在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户隔离测试账户的 TOTP，
+再由 Playwright 完成登录验证；不会关闭生产 MFA 策略。第二租户账户仅由 `SMOKE_RUN_E2E=true` 临时创建。
+
+本地执行完整 Production 验收：
+
+```bash
+SMOKE_RUN_E2E=true bash tests/scripts/production-runtime-smoke.sh
+```
+
+Smoke 使用临时随机凭据及临时证书，不替代正式许可证、正式域名证书、现场协议、容量基线和
+真实生产数据恢复演练；版本发布 job 必须先通过该启动门禁及 Production 全量 E2E。
 
 ### 哪些用例不能用快速路径
 

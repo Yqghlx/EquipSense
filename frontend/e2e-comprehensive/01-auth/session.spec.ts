@@ -10,7 +10,16 @@
  * - 记住登录状态跨浏览器重启
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, captureErrors, getToken, getAuthState, isLoggedIn, getE2EPassword } from '../helpers';
+import {
+  BASE_URL,
+  login,
+  completeProductionMfaIfShown,
+  captureErrors,
+  getToken,
+  getAuthState,
+  isLoggedIn,
+  getE2EPassword,
+} from '../helpers';
 
 test.describe('01-会话管理', () => {
   test('1. Token 过期时间读取正确', async ({ page }) => {
@@ -125,6 +134,7 @@ test.describe('01-会话管理', () => {
       await passwordInput2.fill(getE2EPassword('admin'));
 
       await page2.getByRole('button', { name: /登录|login/i }).click();
+      await completeProductionMfaIfShown(page2, 'admin');
       await page2.waitForURL(/dashboard/, { timeout: 15000 });
     }
 

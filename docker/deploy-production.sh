@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # EquipSense 默认生产滚动部署脚本。
 #
-# 该脚本只编排 backend/frontend；有状态服务和数据卷不属于部署变更范围。
+# 该脚本只编排 backend/frontend/edgegateway；有状态服务和数据卷不属于部署变更范围。
 
 set -Eeuo pipefail
 umask 077
@@ -9,6 +9,7 @@ umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_DIR="${COMPOSE_DIR:-$SCRIPT_DIR}"
 DEPLOY_HEALTH_URL="${DEPLOY_HEALTH_URL:-http://localhost:8080/health/ready}"
+DEPLOY_EDGE_HEALTH_URL="${DEPLOY_EDGE_HEALTH_URL:-}"
 DEPLOY_MAX_ATTEMPTS="${DEPLOY_MAX_ATTEMPTS:-12}"
 DEPLOY_POLL_INTERVAL_SECONDS="${DEPLOY_POLL_INTERVAL_SECONDS:-10}"
 DEPLOY_INITIAL_DELAY_SECONDS="${DEPLOY_INITIAL_DELAY_SECONDS:-30}"
@@ -44,6 +45,7 @@ wait_for_health() {
   local initial_delay="$2"
   local attempt
   local http_code
+  local edge_http_code
   local frontend_container
   local frontend_status
 
@@ -59,6 +61,12 @@ wait_for_health() {
       "$DEPLOY_HEALTH_URL" 2>/dev/null)"; then
       http_code="000"
     fi
+    if ! edge_http_code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+      --connect-timeout "$DEPLOY_HEALTH_TIMEOUT_SECONDS" \
+      --max-time "$DEPLOY_HEALTH_TIMEOUT_SECONDS" \
+      "$DEPLOY_EDGE_HEALTH_URL" 2>/dev/null)"; then
+      edge_http_code="000"
+    fi
     frontend_container="$("${COMPOSE[@]}" ps -q frontend 2>/dev/null || true)"
     frontend_status=""
     if [[ -n "$frontend_container" ]]; then
@@ -67,13 +75,13 @@ wait_for_health() {
         "$frontend_container" 2>/dev/null || true)"
     fi
 
-    if [[ "$http_code" = "200" && "$frontend_status" = "healthy" ]]; then
+    if [[ "$http_code" = "200" && "$edge_http_code" = "200" && "$frontend_status" = "healthy" ]]; then
       printf '✅ %s健康检查通过（第 %s 次探测）\n' "$label" "$attempt"
       return 0
     fi
 
-    printf '等待 %s健康检查……（%s/%s，backend=%s，frontend=%s）\n' \
-      "$label" "$attempt" "$DEPLOY_MAX_ATTEMPTS" "$http_code" "${frontend_status:-missing}"
+    printf '等待 %s健康检查……（%s/%s，backend=%s，edgegateway=%s，frontend=%s）\n' \
+      "$label" "$attempt" "$DEPLOY_MAX_ATTEMPTS" "$http_code" "$edge_http_code" "${frontend_status:-missing}"
     if [[ "$attempt" -lt "$DEPLOY_MAX_ATTEMPTS" ]]; then
       sleep "$DEPLOY_POLL_INTERVAL_SECONDS"
     fi
@@ -90,7 +98,7 @@ rollback() {
 
   printf '开始回滚到 %s（仅使用本机已有镜像）……\n' "$CURRENT_TAG" >&2
   export TAG="$CURRENT_TAG"
-  if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --pull never backend frontend; then
+  if ! "${COMPOSE[@]}" up -d --no-deps --force-recreate --pull never backend frontend edgegateway; then
     printf '🚨 严重：旧版本容器重建失败，自动回滚未完成。\n' >&2
     return 1
   fi
@@ -149,6 +157,21 @@ for required_file in \
   [[ -f "$required_file" ]] || fatal "缺少必需文件 $required_file"
 done
 
+# 部署脚本不会 source .env，避免把生产凭据带入当前 shell；仅读取并校验 EDGE_PORT，
+# 让自定义边缘网关端口仍能被健康门禁覆盖。显式设置 DEPLOY_EDGE_HEALTH_URL 时优先使用它。
+if [[ -z "$DEPLOY_EDGE_HEALTH_URL" ]]; then
+  edge_port="${EDGE_PORT:-}"
+  if [[ -z "$edge_port" ]]; then
+    edge_port="$(awk -F= '$1 == "EDGE_PORT" { print $2 }' "$COMPOSE_DIR/.env" | tail -n 1)"
+  fi
+  edge_port="${edge_port:-8081}"
+  [[ "$edge_port" =~ ^[0-9]{1,5}$ && "$edge_port" -ge 1 && "$edge_port" -le 65535 ]] \
+    || fatal "EDGE_PORT 必须是 1-65535 的端口"
+  DEPLOY_EDGE_HEALTH_URL="http://localhost:${edge_port}/health"
+fi
+[[ "$DEPLOY_EDGE_HEALTH_URL" =~ ^https?://[^[:space:]]+$ ]] \
+  || fatal "DEPLOY_EDGE_HEALTH_URL 必须是 http:// 或 https:// URL"
+
 command -v docker >/dev/null 2>&1 || fatal "未找到 docker 命令"
 command -v curl >/dev/null 2>&1 || fatal "未找到 curl 命令"
 
@@ -190,10 +213,10 @@ printf '%s' "$GHCR_PULL_TOKEN" \
   | docker login ghcr.io -u "$GHCR_PULL_USER" --password-stdin
 
 # 拉取失败不会改变运行态，因此尚不需要回滚。
-"${COMPOSE[@]}" pull backend frontend
+"${COMPOSE[@]}" pull backend frontend edgegateway
 
 MUTATION_STARTED=true
-"${COMPOSE[@]}" up -d --no-deps --force-recreate --pull never backend frontend
+"${COMPOSE[@]}" up -d --no-deps --force-recreate --pull never backend frontend edgegateway
 
 if ! wait_for_health "目标版本 $TARGET_TAG " "$DEPLOY_INITIAL_DELAY_SECONDS"; then
   printf '目标版本健康检查失败。\n' >&2
@@ -208,7 +231,7 @@ MUTATION_STARTED=false
 trap - ERR
 
 printf '=== 部署成功：%s ===\n' "$TARGET_TAG"
-if ! "${COMPOSE[@]}" ps backend frontend; then
+if ! "${COMPOSE[@]}" ps backend frontend edgegateway; then
   # 此处仅用于展示状态；目标版本已经通过健康检查并完成原子记账，
   # 短暂的 Docker 查询失败不应把一次成功部署误报为失败。
   printf '警告：部署已成功，但暂时无法展示容器状态，请稍后手工检查。\n' >&2

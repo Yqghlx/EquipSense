@@ -5,8 +5,9 @@
 # - warning: 5 分钟分组聚合后发送
 # - info: 仅记录不通知（供 Dashboard 查看）
 #
-# 通知渠道：webhook（接入钉钉/飞书/企业微信机器人）
-# 生产环境通过 ALERT_WEBHOOK_URL 环境变量配置实际地址
+# 通知渠道：可选 webhook（接入钉钉/飞书/企业微信机器人）。
+# 启动包装器会把 ALERT_WEBHOOK_URL 写入临时文件；未配置时降级到 dev-null，
+# 避免把告警错误投递到 localhost。
 
 global:
   resolve_timeout: 5m
@@ -38,20 +39,20 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: 'webhook-default'
+  receiver: '__ALERTMANAGER_DEFAULT_RECEIVER__'
 
   routes:
     # critical 立即发送
     - match:
         severity: critical
-      receiver: 'webhook-critical'
+      receiver: '__ALERTMANAGER_CRITICAL_RECEIVER__'
       group_wait: 0s
       repeat_interval: 1h
 
     # warning 5 分钟聚合
     - match:
         severity: warning
-      receiver: 'webhook-warning'
+      receiver: '__ALERTMANAGER_WARNING_RECEIVER__'
       group_wait: 5m
 
     # info 不发送通知
@@ -62,18 +63,12 @@ route:
 receivers:
   - name: 'dev-null'
 
-  # 默认 webhook（通过环境变量 ALERT_WEBHOOK_URL 配置）
+  # 以下三个 receiver 在启动时共享同一个外部 Webhook 地址；未配置时不启用通知。
   - name: 'webhook-default'
-    webhook_configs:
-      - url: 'http://localhost:5001/alert'
-        send_resolved: true
+__ALERTMANAGER_WEBHOOK_CONFIG__
 
   - name: 'webhook-critical'
-    webhook_configs:
-      - url: 'http://localhost:5001/alert-critical'
-        send_resolved: true
+__ALERTMANAGER_WEBHOOK_CONFIG__
 
   - name: 'webhook-warning'
-    webhook_configs:
-      - url: 'http://localhost:5001/alert-warning'
-        send_resolved: true
+__ALERTMANAGER_WEBHOOK_CONFIG__

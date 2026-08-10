@@ -1,7 +1,10 @@
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data.Entities;
+using EquipAI.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace EquipAI.Infrastructure.Data;
 
@@ -11,11 +14,16 @@ namespace EquipAI.Infrastructure.Data;
 public class AppDbContext : DbContext
 {
     private readonly ITenantContext _tenantContext;
+    private readonly IPiiProtector _piiProtector;
 
-    public AppDbContext(DbContextOptions<AppDbContext> options, ITenantContext tenantContext)
+    public AppDbContext(
+        DbContextOptions<AppDbContext> options,
+        ITenantContext tenantContext,
+        IPiiProtector? piiProtector = null)
         : base(options)
     {
         _tenantContext = tenantContext;
+        _piiProtector = piiProtector ?? PlaintextPiiProtector.Instance;
     }
 
     /// <summary>
@@ -24,10 +32,28 @@ public class AppDbContext : DbContext
     /// 内部按 options 的 ContextType 字段识别上下文身份。
     /// protected 限制仅子类可调用，不对外暴露（主代码继续用泛型构造函数）。
     /// </summary>
-    protected AppDbContext(DbContextOptions options, ITenantContext tenantContext)
+    protected AppDbContext(
+        DbContextOptions options,
+        ITenantContext tenantContext,
+        IPiiProtector? piiProtector = null)
         : base(options)
     {
         _tenantContext = tenantContext;
+        _piiProtector = piiProtector ?? PlaintextPiiProtector.Instance;
+    }
+
+    /// <summary>
+    /// PII 密钥指纹，供 EF Core 模型缓存区分不同保护器配置。
+    /// </summary>
+    internal string PiiModelCacheKey => _piiProtector.ModelCacheKey;
+
+    /// <summary>
+    /// 即使上下文由测试或设计时工厂直接构造，也必须使用包含 PII 密钥指纹的模型缓存键。
+    /// </summary>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.ReplaceService<IModelCacheKeyFactory, PiiModelCacheKeyFactory>();
+        base.OnConfiguring(optionsBuilder);
     }
 
     /// <summary>
@@ -189,6 +215,14 @@ public class AppDbContext : DbContext
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
 
+        // 业务实体在内存中保留明文，只有 EF 写入数据库时才转换为密文；
+        // 读取时认证失败会直接抛错，避免把损坏或未迁移的值静默当成空联系方式。
+        var piiConverter = new ValueConverter<string?, string?>(
+            value => _piiProtector.Protect(value),
+            storedValue => _piiProtector.Unprotect(storedValue));
+        modelBuilder.Entity<User>().Property(user => user.Email).HasConversion(piiConverter);
+        modelBuilder.Entity<User>().Property(user => user.Phone).HasConversion(piiConverter);
+
         // 全局多租户查询过滤器
         // 关键：不能直接引用 _tenantContext，因为 OnModelCreating 只执行一次（模型缓存）
         // 必须通过 Expression 访问 ITenantContext.TenantId，使其每次查询时动态评估
@@ -217,6 +251,39 @@ public class AppDbContext : DbContext
         }
 
         base.OnModelCreating(modelBuilder);
+    }
+
+    /// <summary>
+    /// 在 EF 转换前同步用户联系方式盲索引。
+    /// </summary>
+    private void PrepareUserPii()
+    {
+        foreach (var entry in ChangeTracker.Entries<User>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified))
+            {
+                continue;
+            }
+
+            entry.Entity.EmailLookupHash = _piiProtector.CreateLookupHash("email", entry.Entity.Email);
+            entry.Entity.PhoneLookupHash = _piiProtector.CreateLookupHash("phone", entry.Entity.Phone);
+        }
+    }
+
+    /// <inheritdoc />
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        PrepareUserPii();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    /// <inheritdoc />
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        PrepareUserPii();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     /// <summary>

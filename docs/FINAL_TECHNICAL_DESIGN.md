@@ -75,7 +75,7 @@
 
 **Phase 1 基础设施**：PG + TimescaleDB + Redis + Mosquitto + 后端 + 前端。
 
-**当前部署边界**：生产事件总线使用 RabbitMQ 4.3，开发/测试保留进程内实现；暂不引入 MinIO、K8s 和 YARP。
+**当前部署边界**：生产事件总线使用 RabbitMQ 4.3，开发/测试保留进程内实现；附件存储默认使用本地命名卷，并提供显式可选的 S3 兼容后端用于跨主机/多副本部署；不在 Compose 中内置 MinIO、K8s 和 YARP。
 
 ### 2.1 后端项目结构
 

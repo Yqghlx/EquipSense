@@ -14,8 +14,10 @@ import {
   BASE_URL,
   loginAs,
   getE2ETenant2Password,
+  getE2ETenant2TotpSecret,
   captureErrors,
   getTokenForRole,
+  getTokenForCredentials,
   navigateViaSidebar,
   createDeviceViaAPI,
   
@@ -499,12 +501,12 @@ test.describe('RBAC 权限拒绝', () => {
     expect(adminDeviceNames).toContain('租户隔离测试设备');
 
     // 使用第二租户的 admin 登录，验证看不到默认租户的设备
-    const tenant2TokenResp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-      data: { username: 'tenant2admin', password: getE2ETenant2Password() },
-    });
-    expect(tenant2TokenResp.ok()).toBeTruthy();
-    const tenant2Body = await tenant2TokenResp.json();
-    const tenant2Token = tenant2Body.accessToken || tenant2Body.token;
+    const tenant2Token = await getTokenForCredentials(
+      page,
+      'tenant2admin',
+      getE2ETenant2Password(),
+      getE2ETenant2TotpSecret(),
+    );
 
     // 第二租户查询设备列表，不应包含默认租户的设备
     const tenant2Resp = await page.request.get(`${BASE_URL}/api/v1/devices`, {

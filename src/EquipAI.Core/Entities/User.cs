@@ -53,6 +53,16 @@ public class User : BaseEntity
     public string? Email { get; set; }
 
     /// <summary>
+    /// 邮箱规范化值的盲索引，仅用于等值查询，不可逆还原联系方式。
+    /// </summary>
+    public string? EmailLookupHash { get; set; }
+
+    /// <summary>
+    /// 手机号规范化值的盲索引，仅用于等值查询，不可逆还原联系方式。
+    /// </summary>
+    public string? PhoneLookupHash { get; set; }
+
+    /// <summary>
     /// 界面语言偏好（默认 zh-CN）
     /// </summary>
     public string Language { get; set; } = "zh-CN";

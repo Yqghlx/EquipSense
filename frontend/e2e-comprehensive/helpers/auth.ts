@@ -12,8 +12,9 @@
  * 提供 getAuthState / isLoggedIn / verifyAuthCookie 三个新辅助函数，
  * 让测试改用「user 信息 + /auth/me 探活」验证登录态，而不是读 token 字符串。
  */
+import { createHmac } from 'node:crypto';
 import { type Page, type APIResponse } from '@playwright/test';
-import { getE2EPassword } from './credentials';
+import { getE2EPassword, getE2ETotpSecret, type E2ERole } from './credentials';
 
 /** E2E 测试基础 URL — CI 中通过 PLAYWRIGHT_BASE_URL 环境变量覆盖 */
 export const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'https://localhost:8443';
@@ -46,20 +47,35 @@ export const BACKEND_URL = process.env.PLAYWRIGHT_API_BASE_URL
 export async function getAuthState(
   page: Page,
 ): Promise<{ user: unknown | null; tokenExpiryMs: number | null }> {
-  return page.evaluate(() => {
-    const userStr = sessionStorage.getItem('user');
-    let user: unknown | null = null;
-    if (userStr) {
-      try {
-        user = JSON.parse(userStr);
-      } catch {
-        user = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await page.evaluate(() => {
+        const userStr = sessionStorage.getItem('user');
+        let user: unknown | null = null;
+        if (userStr) {
+          try {
+            user = JSON.parse(userStr);
+          } catch {
+            user = null;
+          }
+        }
+        const expiryStr = sessionStorage.getItem('token_expires_at_ms');
+        const tokenExpiryMs = expiryStr ? Number(expiryStr) : null;
+        return { user, tokenExpiryMs: Number.isFinite(tokenExpiryMs) ? tokenExpiryMs : null };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt === 3 || !message.includes('Execution context was destroyed')) {
+        throw error;
       }
+
+      // 登录后的 AuthGuard 可能正在完成一次短暂路由切换；等一个事件循环再读取，
+      // 避免把正常的页面导航竞态误报为登录态丢失。
+      await page.waitForTimeout(attempt * 100);
     }
-    const expiryStr = sessionStorage.getItem('token_expires_at_ms');
-    const tokenExpiryMs = expiryStr ? Number(expiryStr) : null;
-    return { user, tokenExpiryMs: Number.isFinite(tokenExpiryMs) ? tokenExpiryMs : null };
-  });
+  }
+
+  throw new Error('读取浏览器认证状态失败');
 }
 
 /**
@@ -119,6 +135,144 @@ const ROLE_CREDENTIALS: Record<string, { username: string; password: string }> =
 };
 
 /**
+ * 解码隔离 Production E2E 使用的 Base32 TOTP 密钥。
+ * 采用 Node 内置能力，避免为验收脚本增加第三方依赖和供应链风险。
+ */
+function decodeBase32Secret(secret: string): Buffer {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const normalized = secret.toUpperCase().replace(/=|\s/g, '');
+  const bytes: number[] = [];
+  let buffer = 0;
+  let bitCount = 0;
+
+  for (const character of normalized) {
+    const value = alphabet.indexOf(character);
+    if (value < 0) {
+      throw new Error('Production E2E 的 TOTP 密钥格式无效');
+    }
+
+    buffer = (buffer << 5) | value;
+    bitCount += 5;
+    if (bitCount >= 8) {
+      bitCount -= 8;
+      bytes.push((buffer >> bitCount) & 0xff);
+      buffer &= bitCount === 0 ? 0 : (1 << bitCount) - 1;
+    }
+  }
+
+  return Buffer.from(bytes);
+}
+
+/**
+ * 生成当前 6 位 TOTP 验证码，供 Production 隔离验收完成真实 MFA 二次验证。
+ */
+function generateTotpCode(secret: string, timestamp = Date.now()): string {
+  const counter = BigInt(Math.floor(timestamp / 1000 / 30));
+  const counterBuffer = Buffer.alloc(8);
+  counterBuffer.writeBigUInt64BE(counter);
+  const digest = createHmac('sha1', decodeBase32Secret(secret)).update(counterBuffer).digest();
+  const offset = digest[digest.length - 1] & 0x0f;
+  const binaryCode = ((digest[offset] & 0x7f) << 24)
+    | (digest[offset + 1] << 16)
+    | (digest[offset + 2] << 8)
+    | digest[offset + 3];
+  return String(binaryCode % 1_000_000).padStart(6, '0');
+}
+
+/**
+ * 使用指定账号执行一次 API 登录，并在需要时完成 TOTP 二次验证。
+ *
+ * 第二租户隔离测试账户不属于常规五角色，因此单独接收账号和 TOTP 密钥；
+ * 这样可以复用同一套 MFA 流程，不会为了测试而放宽生产认证策略。
+ */
+async function loginApiOnceWithCredentials(
+  page: Page,
+  username: string,
+  password: string,
+  accountLabel: string,
+  totpSecret?: string,
+): Promise<Record<string, unknown>> {
+  const response = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
+    data: { username, password },
+  });
+  if (!response.ok()) {
+    throw new Error(`登录 API 返回 ${response.status()}，账号: ${accountLabel}`);
+  }
+
+  let body = await response.json() as Record<string, unknown>;
+  if (body.mfaEnrollmentRequired === true || body.MfaEnrollmentRequired === true) {
+    throw new Error(`账号 ${accountLabel} 尚未完成 MFA 注册，请先执行 Production E2E MFA 初始化`);
+  }
+
+  if (body.mfaRequired === true || body.MfaRequired === true) {
+    const challengeToken = body.mfaChallengeToken ?? body.MfaChallengeToken;
+    if (typeof challengeToken !== 'string' || !totpSecret) {
+      throw new Error(`账号 ${accountLabel} 需要 MFA，但未提供隔离验收 TOTP 密钥`);
+    }
+
+    const mfaResponse = await page.request.post(`${BASE_URL}/api/v1/auth/mfa/verify`, {
+      data: {
+        challengeToken,
+        totpCode: generateTotpCode(totpSecret),
+      },
+    });
+    if (!mfaResponse.ok()) {
+      throw new Error(`MFA 验证 API 返回 ${mfaResponse.status()}，账号: ${accountLabel}`);
+    }
+    body = await mfaResponse.json() as Record<string, unknown>;
+  }
+
+  if (!body.userInfo && !body.UserInfo) {
+    throw new Error(`登录响应中未找到 userInfo，账号: ${accountLabel}`);
+  }
+  return body;
+}
+
+/**
+ * 带短暂重试的登录请求，覆盖 CI 冷启动和 TOTP 时间窗口边界。
+ */
+async function loginApiWithRetry(page: Page, role: string): Promise<Record<string, unknown>> {
+  const credentials = ROLE_CREDENTIALS[role];
+  return loginApiWithCredentialsWithRetry(
+    page,
+    credentials.username,
+    credentials.password,
+    role,
+    getE2ETotpSecret(role as E2ERole),
+  );
+}
+
+/**
+ * 使用指定账号执行带重试的 API 登录，覆盖冷启动和 TOTP 时间窗口边界。
+ */
+async function loginApiWithCredentialsWithRetry(
+  page: Page,
+  username: string,
+  password: string,
+  accountLabel: string,
+  totpSecret?: string,
+): Promise<Record<string, unknown>> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      return await loginApiOnceWithCredentials(
+        page,
+        username,
+        password,
+        accountLabel,
+        totpSecret,
+      );
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < 3) {
+        await page.waitForTimeout(1000 * attempt);
+      }
+    }
+  }
+  throw new Error(`API 登录失败（已重试 3 次），账号: ${accountLabel}，原因: ${lastError?.message}`);
+}
+
+/**
  * 以指定角色登录并等待仪表盘加载
  *
  * 默认走 UI 表单登录路径（稳定，与真实用户行为一致）。
@@ -168,8 +322,8 @@ export async function loginAsFast(page: Page, role: string = 'admin'): Promise<v
     }
   }, { userJson: ROLE_USER_JSON[role], tokenExpiryMs: ROLE_TOKEN_EXPIRY_MS[role] });
 
-  await page.goto(`${BASE_URL}/dashboard`);
-  await page.waitForLoadState('networkidle');
+  // SignalR 和刷新调度属于长期连接，不能用 networkidle 作为页面就绪条件。
+  await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'domcontentloaded' });
   await page.waitForURL(/dashboard/, { timeout: 30000 }).catch(() => {
     // 快速路径时序竞争时不抛错，下面兜底
   });
@@ -191,16 +345,45 @@ export async function loginViaUI(page: Page, role: string = 'admin'): Promise<vo
     throw new Error(`未知的角色: ${role}，支持的角色: ${Object.keys(ROLE_CREDENTIALS).join(', ')}`);
   }
 
-  await page.goto(`${BASE_URL}/login`);
-  await page.waitForLoadState('networkidle');
+  await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
   await page.getByPlaceholder(/用户名|username/i).fill(credentials.username);
   await page.getByPlaceholder(/密码|password/i).fill(credentials.password);
   await page.getByRole('button', { name: /登录|login/i }).click();
+
+  await completeProductionMfaIfShown(page, role);
+
   // CI 环境较慢，等待时间设为 30 秒以应对冷启动和网络延迟
   await page.waitForURL(/dashboard/, { timeout: 30000 });
-  await page.waitForLoadState('networkidle');
+  await page.waitForLoadState('domcontentloaded');
   // 等待仪表盘组件初始化完成（图表、卡片等异步数据加载）
   await page.waitForTimeout(2000);
+}
+
+/**
+ * 如果当前页面展示 MFA 验证界面，则使用隔离验收脚本提供的 TOTP 完成验证。
+ *
+ * 只在 Production E2E 中启用自动填码；普通开发测试不会依赖也不会伪造 MFA 密钥。
+ */
+export async function completeProductionMfaIfShown(page: Page, role: string): Promise<void> {
+  if (process.env.E2E_PRODUCTION !== '1') {
+    return;
+  }
+
+  const totpInput = page.locator('#totpCode');
+  // React 会在密码接口返回后才挂载 MFA 表单，不能用不等待 DOM 的 isVisible 判断。
+  // waitFor 能覆盖这段状态切换，同时在普通登录路径下按超时快速返回。
+  const mfaVisible = await totpInput
+    .waitFor({ state: 'visible', timeout: 5000 })
+    .then(() => true)
+    .catch(() => false);
+  if (mfaVisible) {
+    const totpSecret = getE2ETotpSecret(role as E2ERole);
+    if (!totpSecret) {
+      throw new Error(`角色 ${role} 的 UI 登录需要 MFA，但未提供隔离验收 TOTP 密钥`);
+    }
+    await totpInput.fill(generateTotpCode(totpSecret));
+    await page.getByRole('button', { name: /验证|verify/i }).click();
+  }
 }
 
 /**
@@ -216,37 +399,13 @@ export async function loginViaUI(page: Page, role: string = 'admin'): Promise<vo
  * @param role - 角色名称
  */
 async function loginViaAPI(page: Page, role: string): Promise<void> {
-  const credentials = ROLE_CREDENTIALS[role];
-
-  // 最多重试 3 次，应对 CI 中的瞬时网络抖动或限流
-  let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const resp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-        data: { username: credentials.username, password: credentials.password },
-      });
-      if (!resp.ok()) {
-        throw new Error(`登录 API 返回 ${resp.status()}，角色: ${role}`);
-      }
-      const body = await resp.json();
-      if (!body.userInfo && !body.UserInfo) {
-        throw new Error(`登录响应中未找到 userInfo，角色: ${role}`);
-      }
-      // 缓存 user JSON 供后续 addInitScript 注入（避免每次登录都重新解析）
-      const userInfo = body.userInfo ?? body.UserInfo;
-      ROLE_USER_JSON[role] = JSON.stringify(userInfo);
-      const expiresIn = body.expiresIn ?? body.ExpiresIn;
-      const expiresInSeconds = typeof expiresIn === 'number' && expiresIn > 0 ? expiresIn : 900;
-      ROLE_TOKEN_EXPIRY_MS[role] = Date.now() + expiresInSeconds * 1000;
-      return;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      if (attempt < 3) {
-        await page.waitForTimeout(1000 * attempt);
-      }
-    }
-  }
-  throw new Error(`API 登录失败（已重试 3 次），角色: ${role}，原因: ${lastError?.message}`);
+  const body = await loginApiWithRetry(page, role);
+  // 缓存 user JSON 供后续 addInitScript 注入（避免每次登录都重新解析）
+  const userInfo = body.userInfo ?? body.UserInfo;
+  ROLE_USER_JSON[role] = JSON.stringify(userInfo);
+  const expiresIn = body.expiresIn ?? body.ExpiresIn;
+  const expiresInSeconds = typeof expiresIn === 'number' && expiresIn > 0 ? expiresIn : 900;
+  ROLE_TOKEN_EXPIRY_MS[role] = Date.now() + expiresInSeconds * 1000;
 }
 
 /** 角色到 sessionStorage('user') JSON 的缓存（首次 loginViaAPI 后填充） */
@@ -282,34 +441,43 @@ export async function getToken(page: Page): Promise<string> {
  * @returns JWT Token 字符串
  */
 export async function getTokenForRole(page: Page, role: string): Promise<string> {
-  const credentials = ROLE_CREDENTIALS[role];
-  if (!credentials) {
+  if (!ROLE_CREDENTIALS[role]) {
     throw new Error(`未知的角色: ${role}，支持的角色: ${Object.keys(ROLE_CREDENTIALS).join(', ')}`);
   }
 
-  // 最多重试 3 次，应对 CI 中的瞬时网络抖动或限流
-  let lastError: Error | null = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const resp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-        data: { username: credentials.username, password: credentials.password },
-      });
-      if (!resp.ok()) {
-        throw new Error(`登录 API 返回 ${resp.status()}，角色: ${role}`);
-      }
-      const body = await resp.json();
-      const token = body.accessToken || body.token;
-      if (!token) {
-        throw new Error(`登录响应中未找到 token，角色: ${role}`);
-      }
-      return token;
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      // 短暂等待后重试
-      if (attempt < 3) {
-        await page.waitForTimeout(1000 * attempt);
-      }
-    }
+  const body = await loginApiWithRetry(page, role);
+  const token = body.accessToken ?? body.token;
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new Error(`登录响应中未找到 token，角色: ${role}`);
   }
-  throw new Error(`获取 Token 失败（已重试 3 次），角色: ${role}，原因: ${lastError?.message}`);
+  return token;
+}
+
+/**
+ * 使用指定账号获取认证 Token，支持隔离 Production E2E 中的 MFA 账号。
+ *
+ * @param page - Playwright Page 实例
+ * @param username - 登录用户名
+ * @param password - 登录密码
+ * @param totpSecret - 可选的 TOTP 密钥；仅在服务端要求 MFA 时使用
+ * @returns JWT Token 字符串
+ */
+export async function getTokenForCredentials(
+  page: Page,
+  username: string,
+  password: string,
+  totpSecret?: string,
+): Promise<string> {
+  const body = await loginApiWithCredentialsWithRetry(
+    page,
+    username,
+    password,
+    username,
+    totpSecret,
+  );
+  const token = body.accessToken ?? body.token;
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new Error(`登录响应中未找到 token，账号: ${username}`);
+  }
+  return token;
 }

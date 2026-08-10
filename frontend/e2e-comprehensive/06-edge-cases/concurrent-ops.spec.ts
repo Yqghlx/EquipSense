@@ -15,6 +15,7 @@ import { test, expect } from '@playwright/test';
 import {
   BASE_URL,
   login,
+  completeProductionMfaIfShown,
   captureErrors,
   getCurrentUserId,
   getToken,
@@ -76,6 +77,7 @@ test.describe('并发操作', () => {
       await passwordInput2.fill(getE2EPassword('admin'));
 
       await page2.getByRole('button', { name: /登录|login/i }).click();
+      await completeProductionMfaIfShown(page2, 'admin');
       await page2.waitForURL(/dashboard/, { timeout: 15000 });
     }
 

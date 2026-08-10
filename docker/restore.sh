@@ -21,6 +21,14 @@ SKIP_ATTACHMENTS=false
 CONFIRM=false
 TEMP_DIR=""
 TIMESCALE_RESTORE_PREPARED=false
+FILE_STORAGE_PROVIDER="Local"
+FILE_STORAGE_S3_BUCKET=""
+FILE_STORAGE_S3_REGION="us-east-1"
+FILE_STORAGE_S3_ENDPOINT=""
+FILE_STORAGE_S3_ACCESS_KEY=""
+FILE_STORAGE_S3_SECRET_KEY=""
+FILE_STORAGE_S3_KEY_PREFIX="attachments"
+S3_STORAGE_ARGS=()
 
 usage() {
   cat <<'EOF'
@@ -132,6 +140,53 @@ validate_attachment_archive() {
   done <<< "$metadata"
 }
 
+load_file_storage_config() {
+  # .env 是数据而不是脚本；只读取恢复所需的固定键，避免 source 执行任意 Shell 代码。
+  require_private_file "$ENV_FILE" "环境变量文件"
+  local value
+  value="$(read_env_value FILE_STORAGE_PROVIDER)"
+  FILE_STORAGE_PROVIDER="${value:-${FILE_STORAGE_PROVIDER:-Local}}"
+  value="$(read_env_value FILE_STORAGE_S3_BUCKET)"
+  FILE_STORAGE_S3_BUCKET="${value:-${FILE_STORAGE_S3_BUCKET:-}}"
+  value="$(read_env_value FILE_STORAGE_S3_REGION)"
+  FILE_STORAGE_S3_REGION="${value:-${FILE_STORAGE_S3_REGION:-us-east-1}}"
+  value="$(read_env_value FILE_STORAGE_S3_ENDPOINT)"
+  FILE_STORAGE_S3_ENDPOINT="${value:-${FILE_STORAGE_S3_ENDPOINT:-}}"
+  value="$(read_env_value FILE_STORAGE_S3_ACCESS_KEY)"
+  FILE_STORAGE_S3_ACCESS_KEY="${value:-${FILE_STORAGE_S3_ACCESS_KEY:-}}"
+  value="$(read_env_value FILE_STORAGE_S3_SECRET_KEY)"
+  FILE_STORAGE_S3_SECRET_KEY="${value:-${FILE_STORAGE_S3_SECRET_KEY:-}}"
+  value="$(read_env_value FILE_STORAGE_S3_KEY_PREFIX)"
+  FILE_STORAGE_S3_KEY_PREFIX="${value:-${FILE_STORAGE_S3_KEY_PREFIX:-attachments}}"
+
+  case "$FILE_STORAGE_PROVIDER" in
+    Local|local|LOCAL)
+      FILE_STORAGE_PROVIDER="Local"
+      ;;
+    S3|s3)
+      FILE_STORAGE_PROVIDER="S3"
+      [[ -n "$FILE_STORAGE_S3_BUCKET" ]] || fatal "S3 附件恢复需要 FILE_STORAGE_S3_BUCKET"
+      [[ -n "$FILE_STORAGE_S3_REGION" ]] || fatal "S3 附件恢复需要 FILE_STORAGE_S3_REGION"
+      [[ "$FILE_STORAGE_S3_BUCKET" != */* && "$FILE_STORAGE_S3_BUCKET" != *\\* && "$FILE_STORAGE_S3_BUCKET" != *[[:space:]]* ]] \
+        || fatal "FILE_STORAGE_S3_BUCKET 不能包含路径分隔符或空白字符"
+      if [[ -n "$FILE_STORAGE_S3_ENDPOINT" ]]; then
+        [[ "$FILE_STORAGE_S3_ENDPOINT" = https://* ]] \
+          || fatal "生产 FILE_STORAGE_S3_ENDPOINT 必须使用 HTTPS"
+        [[ -n "$FILE_STORAGE_S3_ACCESS_KEY" && -n "$FILE_STORAGE_S3_SECRET_KEY" ]] \
+          || fatal "配置 S3 自定义端点时必须同时提供访问凭据"
+      elif [[ -n "$FILE_STORAGE_S3_ACCESS_KEY" || -n "$FILE_STORAGE_S3_SECRET_KEY" ]]; then
+        [[ -n "$FILE_STORAGE_S3_ACCESS_KEY" && -n "$FILE_STORAGE_S3_SECRET_KEY" ]] \
+          || fatal "FILE_STORAGE_S3_ACCESS_KEY 和 FILE_STORAGE_S3_SECRET_KEY 必须同时配置"
+      fi
+      [[ "$FILE_STORAGE_S3_KEY_PREFIX" != /* && "$FILE_STORAGE_S3_KEY_PREFIX" != */ && "$FILE_STORAGE_S3_KEY_PREFIX" != *\\* && "$FILE_STORAGE_S3_KEY_PREFIX" != *//* && "$FILE_STORAGE_S3_KEY_PREFIX" != *..* ]] \
+        || fatal "FILE_STORAGE_S3_KEY_PREFIX 必须是安全的相对对象键前缀"
+      ;;
+    *)
+      fatal "FILE_STORAGE_PROVIDER 仅支持 Local 或 S3"
+      ;;
+  esac
+}
+
 validate_inputs() {
   [[ -f "$ENV_FILE" ]] || fatal "环境变量文件不存在：$ENV_FILE"
   local compose_file
@@ -167,6 +222,13 @@ validate_inputs() {
     || fatal "--health-url 必须是 http:// 或 https:// URL"
 }
 
+read_env_value() {
+  local key="$1"
+  local line
+  line="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 || true)"
+  printf '%s' "${line#*=}"
+}
+
 print_plan() {
   printf '恢复计划（%s）：\n' "$([[ "$CONFIRM" = true ]] && printf 'confirm' || printf 'dry-run')"
   printf '  环境变量：%s\n' "$ENV_FILE"
@@ -178,6 +240,8 @@ print_plan() {
   printf '  PostgreSQL 格式：%s\n' "$DB_BACKUP_FORMAT"
   if [[ "$SKIP_ATTACHMENTS" = true ]]; then
     printf '  工单附件：跳过（已显式指定 --skip-attachments）\n'
+  elif [[ "$FILE_STORAGE_PROVIDER" = S3 ]]; then
+    printf '  工单附件：%s → s3://%s/%s\n' "$ATTACHMENTS_BACKUP" "$FILE_STORAGE_S3_BUCKET" "$FILE_STORAGE_S3_KEY_PREFIX"
   else
     printf '  工单附件：%s → %s\n' "$ATTACHMENTS_BACKUP" "$ATTACHMENTS_PATH"
   fi
@@ -247,6 +311,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$DB_BACKUP" ]] || fatal "必须指定 --db-backup"
+load_file_storage_config
 validate_inputs
 print_plan
 
@@ -257,6 +322,18 @@ fi
 
 command -v docker >/dev/null 2>&1 || fatal "未找到 docker 命令"
 command -v curl >/dev/null 2>&1 || fatal "未找到 curl 命令"
+
+if [[ "$FILE_STORAGE_PROVIDER" = S3 && "$SKIP_ATTACHMENTS" = false ]]; then
+  command -v aws >/dev/null 2>&1 || fatal "S3 附件恢复需要主机安装 aws-cli"
+  if [[ -n "$FILE_STORAGE_S3_ACCESS_KEY" && -n "$FILE_STORAGE_S3_SECRET_KEY" ]]; then
+    export AWS_ACCESS_KEY_ID="$FILE_STORAGE_S3_ACCESS_KEY"
+    export AWS_SECRET_ACCESS_KEY="$FILE_STORAGE_S3_SECRET_KEY"
+  fi
+  export AWS_DEFAULT_REGION="$FILE_STORAGE_S3_REGION"
+  if [[ -n "$FILE_STORAGE_S3_ENDPOINT" ]]; then
+    S3_STORAGE_ARGS+=(--endpoint-url "$FILE_STORAGE_S3_ENDPOINT")
+  fi
+fi
 
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 for compose_file in "${COMPOSE_FILES[@]}"; do
@@ -354,11 +431,17 @@ TIMESCALE_RESTORE_PREPARED=false
 if [[ "$SKIP_ATTACHMENTS" = false ]]; then
   printf '恢复工单附件……\n'
   tar -xzf "$ATTACHMENTS_BACKUP" -C "$TEMP_DIR"
-  # 后端容器此时已停止，不能使用 exec；一次性任务容器复用同一附件卷完成清理。
-  # 覆盖固定 entrypoint，避免误启动应用并绕过实际清理命令。
-  "${COMPOSE[@]}" run --rm --no-deps --entrypoint /bin/sh backend -c \
-    "mkdir -p -- '$ATTACHMENTS_PATH' && find '$ATTACHMENTS_PATH' -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"
-  "${COMPOSE[@]}" cp "$TEMP_DIR/." "backend:$ATTACHMENTS_PATH/"
+  if [[ "$FILE_STORAGE_PROVIDER" = S3 ]]; then
+    storage_destination="s3://${FILE_STORAGE_S3_BUCKET}/${FILE_STORAGE_S3_KEY_PREFIX#/}"
+    aws s3 sync "$TEMP_DIR/" "$storage_destination" --delete --no-progress "${S3_STORAGE_ARGS[@]}"
+    printf 'S3 工单附件已恢复：s3://%s/%s\n' "$FILE_STORAGE_S3_BUCKET" "$FILE_STORAGE_S3_KEY_PREFIX"
+  else
+    # 后端容器此时已停止，不能使用 exec；一次性任务容器复用同一附件卷完成清理。
+    # 覆盖固定 entrypoint，避免误启动应用并绕过实际清理命令。
+    "${COMPOSE[@]}" run --rm --no-deps --entrypoint /bin/sh backend -c \
+      "mkdir -p -- '$ATTACHMENTS_PATH' && find '$ATTACHMENTS_PATH' -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +"
+    "${COMPOSE[@]}" cp "$TEMP_DIR/." "backend:$ATTACHMENTS_PATH/"
+  fi
 fi
 
 if [[ -n "$REDIS_BACKUP" ]]; then
@@ -376,8 +459,10 @@ printf '启动后端并执行恢复后检查……\n'
 "${COMPOSE[@]}" exec -T postgres sh -c \
   'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT 1"' \
   | grep -qx '1' || fatal "恢复后 PostgreSQL 连通性检查失败"
-"${COMPOSE[@]}" exec -T backend sh -c "test -d '$ATTACHMENTS_PATH'" \
-  || fatal "恢复后附件目录检查失败：$ATTACHMENTS_PATH"
+if [[ "$FILE_STORAGE_PROVIDER" = Local ]]; then
+  "${COMPOSE[@]}" exec -T backend sh -c "test -d '$ATTACHMENTS_PATH'" \
+    || fatal "恢复后附件目录检查失败：$ATTACHMENTS_PATH"
+fi
 curl --fail --silent --show-error --max-time 30 "$HEALTH_URL" >/dev/null \
   || fatal "恢复后健康检查失败：$HEALTH_URL"
 

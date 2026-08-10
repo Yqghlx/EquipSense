@@ -14,6 +14,15 @@ const PASSWORD_ENVIRONMENT_VARIABLES: Record<E2ERole, string> = {
   viewer: 'E2E_VIEWER_PASSWORD',
 };
 
+/** Production 隔离验收中由 smoke 脚本初始化的高权限 TOTP 密钥环境变量。 */
+const TOTP_ENVIRONMENT_VARIABLES: Partial<Record<E2ERole, string>> = {
+  admin: 'E2E_ADMIN_TOTP_SECRET',
+  lead: 'E2E_LEAD_TOTP_SECRET',
+};
+
+/** 第二租户隔离验收账户的 TOTP 密钥环境变量。 */
+const TENANT2_TOTP_ENVIRONMENT_VARIABLE = 'E2E_TENANT2_TOTP_SECRET';
+
 const DEVELOPMENT_PASSWORDS: Record<E2ERole, string> = {
   admin: 'Admin@123',
   lead: 'Lead@123',
@@ -37,6 +46,25 @@ const DEVELOPMENT_TENANT2_PASSWORD = 'Tenant2@123';
 export function getE2EPassword(role: E2ERole): string {
   const configuredPassword = process.env[PASSWORD_ENVIRONMENT_VARIABLES[role]];
   return configuredPassword || DEVELOPMENT_PASSWORDS[role];
+}
+
+/**
+ * 获取 Production 隔离验收所需的高权限 TOTP 密钥。
+ * 开发环境不回退公开密钥，避免把 MFA 测试凭据伪装成生产凭据。
+ */
+export function getE2ETotpSecret(role: E2ERole): string | undefined {
+  const environmentVariable = TOTP_ENVIRONMENT_VARIABLES[role];
+  return environmentVariable ? process.env[environmentVariable] : undefined;
+}
+
+/**
+ * 获取第二租户隔离验收账户的 TOTP 密钥。
+ *
+ * 该账户仅在隔离 Production E2E 中创建；开发环境没有公开回退值，
+ * 避免把 MFA 验收凭据伪装成普通测试配置。
+ */
+export function getE2ETenant2TotpSecret(): string | undefined {
+  return process.env[TENANT2_TOTP_ENVIRONMENT_VARIABLE];
 }
 
 /**

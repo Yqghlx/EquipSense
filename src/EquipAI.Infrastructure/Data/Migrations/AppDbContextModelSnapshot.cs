@@ -1597,9 +1597,14 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnName("display_name");
 
                     b.Property<string>("Email")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("email");
+
+                    b.Property<string>("EmailLookupHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("email_lookup_hash");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean")
@@ -1643,9 +1648,14 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnName("password_hash");
 
                     b.Property<string>("Phone")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
                         .HasColumnName("phone");
+
+                    b.Property<string>("PhoneLookupHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("phone_lookup_hash");
 
                     b.Property<string>("Role")
                         .IsRequired()
@@ -1685,6 +1695,12 @@ namespace EquipAI.Infrastructure.Data.Migrations
 
                     b.HasIndex("TenantId", "Username")
                         .IsUnique();
+
+                    b.HasIndex("EmailLookupHash")
+                        .HasDatabaseName("IX_users_email_lookup_hash");
+
+                    b.HasIndex("PhoneLookupHash")
+                        .HasDatabaseName("IX_users_phone_lookup_hash");
 
                     b.ToTable("users", (string)null);
                 });

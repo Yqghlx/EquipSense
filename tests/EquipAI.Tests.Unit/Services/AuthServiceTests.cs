@@ -41,7 +41,9 @@ public class AuthServiceTests : IAsyncDisposable
             {
                 ["Jwt:Secret"] = new string('x', 32),
                 ["Jwt:Issuer"] = "Test",
-                ["Jwt:Audience"] = "Test"
+                ["Jwt:Audience"] = "Test",
+                ["ASPNETCORE_ENVIRONMENT"] = "Testing",
+                ["Security:PiiEncryptionKey"] = Convert.ToBase64String(new byte[32])
             })
             .Build();
         _configuration = config;
@@ -75,6 +77,8 @@ public class AuthServiceTests : IAsyncDisposable
         services.AddSingleton<EquipAI.Infrastructure.Identity.ITotpService>(new StubTotpService());
         // 测试保护器使用可逆前缀模拟加密，断言不会把 TOTP 密钥明文写入实体。
         services.AddSingleton<ITotpSecretProtector, StubTotpSecretProtector>();
+        // 使用真实 PII 保护器验证认证查询不会依赖数据库中的联系方式明文。
+        services.AddSingleton<IPiiProtector>(new EquipAI.Infrastructure.Security.PiiProtector(_configuration));
         // 注册邮件服务（测试中 SendAsync 会因无 SMTP 配置进入 catch，不影响测试逻辑）
         services.Configure<EquipAI.Application.Notifications.SmtpOptions>(_ => { });
         services.AddScoped<EquipAI.Application.Notifications.SmtpEmailNotificationService>();
@@ -896,6 +900,22 @@ public class AuthServiceTests : IAsyncDisposable
         await service.RequestPasswordResetAsync("reset@test.com", "https://app/reset?token={token}");
 
         // Assert：Redis 字典应含一个 pwdreset: 前缀的键
+        _stubRedis.HasStringKeyStartingWith("pwdreset:").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RequestPasswordResetAsync_邮箱大小写和空格变化_应通过盲索引查找()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("reset-normalized-user", _tenantId, "OldPwd123", email: "reset@test.com");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        await service.RequestPasswordResetAsync("  RESET@TEST.COM  ", "https://app/reset?token={token}");
+
         _stubRedis.HasStringKeyStartingWith("pwdreset:").Should().BeTrue();
     }
 

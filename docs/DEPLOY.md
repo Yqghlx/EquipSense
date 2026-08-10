@@ -26,10 +26,14 @@ cp docker/.env.example docker/.env
 PG_PASSWORD=<强密码，至少16位>
 JWT_SECRET=<随机密钥，至少32位>
 TOTP_ENCRYPTION_KEY=<openssl rand -base64 32 生成的 AES-256 密钥>
+PII_ENCRYPTION_KEY=<openssl rand -base64 32 生成的独立 AES-256 密钥>
 AUTOMAPPER_LICENSE_KEY=<Lucky Penny Software 签发的 AutoMapper 15+ 许可证密钥>
 MQTT_USERNAME=<MQTT用户名>
 MQTT_PASSWORD=<MQTT强密码>
 GATEWAY_AUTH_KEY=<至少32位的纯ASCII网关认证密钥>
+GATEWAY_TENANT_ID=<实际租户 UUID，边缘网关生产必填>
+GATEWAY_BUFFER_PATH=/data/buffer.db
+GATEWAY_BACKEND_URL=http://backend:8080
 GATEWAY_ALLOWED_HOSTS=edgegateway
 SEED_ADMIN_PASSWORD=<管理员初始密码>
 SEED_LEAD_PASSWORD=<主管初始密码>
@@ -43,6 +47,10 @@ RABBITMQ_PASSWORD=<RabbitMQ强密码>
 RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:44bf7eb50fe1765885659e49ccfdc775f8e531964d979321aee380a071f49f94
 SEQ_ADMIN_PASSWORD=<Seq管理员密码>
 GRAFANA_PASSWORD=<Grafana管理员密码>
+# 可选：Alertmanager 外部告警接收地址（未配置时不发送外部通知）
+# ALERT_WEBHOOK_URL=https://alert-receiver.example.com/api/alertmanager
+JAEGER_SPAN_STORAGE_TYPE=badger
+JAEGER_BADGER_EPHEMERAL=false
 
 # 可选修改
 DOMAIN=your-domain.com
@@ -101,7 +109,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
 ```
 
-首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。正式部署前必须使用 `bash docker/validate-env.sh docker/.env --check-runtime-files`，不能只检查文件路径是否存在。镜像构建使用仓库根目录 `.dockerignore` 排除 `node_modules`、编译产物、测试报告、备份、证书和 `.env`，不要用 `-f` 指向其他上下文，否则可能导致构建缓慢或把敏感文件发送给 Docker daemon。
+首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 用户 PII 历史数据加密回填 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。正式部署前必须使用 `bash docker/validate-env.sh docker/.env --check-runtime-files`，不能只检查文件路径是否存在。应用启动会用 PostgreSQL advisory lock 串行保护迁移、PII 回填、种子和 TimescaleDB 初始化；PII 回填或密文校验失败会阻止服务继续启动，蓝绿发布时不需要人工暂停旧实例。镜像构建使用仓库根目录 `.dockerignore` 排除 `node_modules`、编译产物、测试报告、备份、证书和 `.env`，不要用 `-f` 指向其他上下文，否则可能导致构建缓慢或把敏感文件发送给 Docker daemon。
 
 ### 4. 验证部署
 
@@ -114,6 +122,9 @@ curl http://localhost:8080/health/startup
 
 # 检查生产就绪状态（包含 RabbitMQ 事件总线）
 curl http://localhost:8080/health/ready
+
+# 检查边缘网关健康
+curl http://localhost:8081/health
 
 # 检查前端
 curl https://localhost/health
@@ -138,15 +149,25 @@ curl http://localhost:8080/api/v1/system/info
 | `RABBITMQ_PASSWORD` | RabbitMQ 密码（至少 16 字符，禁止 guest） | - | 生产环境必填 |
 | `SEQ_ADMIN_PASSWORD` | Seq 管理员密码 | - | 生产环境必填 |
 | `GRAFANA_PASSWORD` | Grafana 管理员密码 | - | 生产环境必填 |
+| `ALERT_WEBHOOK_URL` | Alertmanager 外部告警 Webhook；未配置时降级为仅在监控面板保留 | - | 否 |
+| `JAEGER_SPAN_STORAGE_TYPE` | Jaeger trace 存储类型；单机生产默认 `badger` | `badger` | 否 |
+| `JAEGER_BADGER_EPHEMERAL` | Badger 是否临时存储；生产必须关闭 | `false` | 否 |
 | `MQTT_PORT` | MQTT 对外端口 | `8883` | 否 |
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
 | `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（至少 32 位纯 ASCII） | - | 使用边缘网关时必填 |
+| `GATEWAY_TENANT_ID` | 边缘网关所属租户 UUID；生产环境缺失或无效时网关拒绝启动 | - | 使用边缘网关时必填 |
+| `GATEWAY_BUFFER_PATH` | 边缘网关 SQLite 断网缓冲路径，必须落在持久化卷 | `/data/buffer.db` | 否 |
+| `GATEWAY_BACKEND_URL` | 边缘网关上传目标后端；蓝绿部署由脚本临时设置为目标颜色服务名 | `http://backend:8080` | 否 |
+| `EDGE_BLUEGREEN_PORT` | 蓝绿部署边缘网关健康探针宿主端口 | `18081` | 否 |
+| `FILE_STORAGE_PROVIDER` | 工单附件存储实现：`Local` / `S3` | `Local` | 否 |
 | `FILE_STORAGE_BASE_PATH` | 工单附件目录，必须与 `attachments_data` 卷挂载点一致 | `/app/uploads` | 否 |
+| `FILE_STORAGE_S3_BUCKET` 等 | S3 桶、区域、可选自定义端点、访问凭据、路径风格和对象键前缀；自定义端点生产必须 HTTPS | - | Provider=S3 时按端点类型必填 |
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码（每项至少 16 个字符，不得使用占位值或公开默认值） | - | 生产环境必填 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `TOTP_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256 TOTP 密钥，必须由外部密钥管理系统保存 | - | 生产环境必填 |
+| `PII_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256-GCM 用户邮箱/手机号密钥，必须与 TOTP 密钥独立并由外部密钥管理系统保存 | - | 生产环境必填 |
 | `AUTOMAPPER_LICENSE_KEY` | AutoMapper 15+ 供应商签发的许可证密钥，通过密钥管理系统注入 | - | 生产环境必填 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
 | `LLM_MODEL` | LLM 模型 | `qwen-plus` | 否 |
@@ -155,6 +176,7 @@ curl http://localhost:8080/api/v1/system/info
 | `VAPID__PRIVATEKEY` | Web Push 私钥 | - | 是 |
 | `DOMAIN` | 域名 | `localhost` | 否 |
 | `BEHIND_PROXY` | 是否在反向代理后 | `true` | 否 |
+| `TRUSTED_PROXY_NETWORKS` | 可信反向代理 CIDR 网段，多个网段用逗号分隔 | `172.16.0.0/12` | 使用反向代理时需按实际网络确认 |
 | `SSL_CERT_PATH` | TLS 证书路径（容器内） | `/etc/nginx/ssl/cert.pem` | 否 |
 | `SSL_KEY_PATH` | TLS 私钥路径（容器内） | `/etc/nginx/ssl/key.pem` | 否 |
 
@@ -165,11 +187,13 @@ curl http://localhost:8080/api/v1/system/info
 2. 创建 TimescaleDB 超级表和连续聚合
 3. 种子数据（角色、权限、系统管理员）
 
-工单附件写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机或 Kubernetes 部署时应改用 S3/MinIO 等共享对象存储，并将数据库备份与附件卷分别纳入备份策略。
+工单附件默认写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机、多副本或 Kubernetes 部署时应配置 `FILE_STORAGE_PROVIDER=S3` 使用共享对象存储。应用会在生产启动时校验桶、端点、凭据和安全对象键前缀；项目不会自动启动 MinIO，切换前必须完成历史附件迁移、最小权限配置和隔离恢复演练。
 
-管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符、彼此独立且不得包含占位值；所有种子用户首次登录后必须修改密码。数据库、Redis、RabbitMQ、MQTT、Seq、Grafana 和五个种子账户也必须分别使用不同的随机凭据，不能为了方便复制同一个密码；直接通过编排平台注入环境变量时，应用启动校验仍会拒绝种子账户密码复用。
+管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符、彼此独立且不得包含占位值；所有种子用户首次登录后必须修改密码。数据库、Redis、RabbitMQ、MQTT、Seq、Grafana 和五个种子账户也必须分别使用不同的随机凭据，不能为了方便复制同一个密码；TOTP、PII、JWT 和网关认证密钥也必须彼此独立，直接通过编排平台注入环境变量时，应用启动校验仍会拒绝种子账户密码复用。
 
 `TOTP_ENCRYPTION_KEY` 用于保护数据库中的 MFA 密钥，应用启动时会校验它必须解码为 32 字节；该密钥必须与数据库备份分开保存并纳入密钥管理系统的备份策略。密钥丢失后，历史 MFA 密钥无法恢复；轮换前必须先制定批量重新加密和回滚方案。
+
+`PII_ENCRYPTION_KEY` 用于保护 `users.email` 和 `users.phone`。应用层使用 AES-256-GCM 随机 nonce 加密，并用字段级盲索引支持密码重置等值查找；数据库不再保存联系方式明文。升级既有数据库时，应用在 PostgreSQL advisory lock 内执行原子回填，任何密文校验或盲索引校验失败都会阻止启动。该密钥必须和数据库备份分开保存并纳入密钥管理系统的备份策略；密钥丢失后联系方式无法解密，当前版本不支持在线密钥轮换，轮换前必须制定批量重新加密、停机窗口和回滚方案。
 
 `AUTOMAPPER_LICENSE_KEY` 用于 AutoMapper 15+ 的生产许可证验证。部署前需完成采购或适用许可证资格审核，从供应商获取真实密钥后注入；应用和部署脚本都会拒绝缺失、模板占位或过短值。密钥不得提交到仓库，可参考 [Lucky Penny Software 许可证 FAQ](https://luckypennysoftware.com/faq)。当前固定的 AutoMapper 15.1.3 已包含递归拒绝服务漏洞修复，禁止为规避许可证而降级到受影响版本；漏洞范围见 [GHSA-rvv3-g6hj-g44x](https://github.com/advisories/GHSA-rvv3-g6hj-g44x)。
 
@@ -202,15 +226,20 @@ GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。�
 镜像拉取失败发生在运行态变更前，不触发回滚。
 
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
-backend/frontend 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
-健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理；完整业务 E2E 仍在
-Development 环境执行。Smoke Compose 会清除固定容器名并使用独立 project，可与本机
-已有基础设施并行运行。
+backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
+健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理。PR 执行快速门禁；main 推送和
+版本 tag 还会在同一组 Production 镜像中执行默认 442 个业务 E2E（5 个显式跳过）。Smoke Compose
+会清除固定容器名、移除基础设施宿主端口绑定，并为应用探针分配独立端口，可与本机已有基础设施
+或并发 smoke 任务并行运行。
+全量验收在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户测试账户的 TOTP，
+再执行登录与业务流程，不会通过关闭 MFA 来绕过生产安全策略；第二租户账户只在该隔离验收中临时开启。
 
-首次重建 backend/frontend 后的任何失败都会进入统一回滚：脚本使用
-`.last-deployed-tag` 对应的本机旧镜像（`--pull never`）恢复两个无状态服务，再次验证
-后端 `/health/ready` 与前端容器 health。只有目标版本健康通过后才以临时文件加原子
-`mv` 更新版本记录。同一 tag 重复触发时只验证现有服务健康，不重复重建。
+首次重建 backend/frontend/edgegateway 后的任何失败都会进入统一回滚：脚本使用
+`.last-deployed-tag` 对应的本机旧镜像（`--pull never`）恢复三个无状态应用服务，再次验证
+后端 `/health/ready`、边缘网关 `/health` 与前端容器 health。只有目标版本健康通过后才以
+临时文件加原子 `mv` 更新版本记录。同一 tag 重复触发时只验证现有服务健康，不重复重建。
+部署脚本会从 `.env` 读取 `EDGE_PORT` 生成网关健康探针；若生产入口经过额外代理，可显式设置
+`DEPLOY_EDGE_HEALTH_URL` 覆盖默认的 `http://localhost:<EDGE_PORT>/health`。
 
 手动执行与 CI 使用同一入口：
 
@@ -265,6 +294,24 @@ SMTP_ENABLE_SSL=true
 
 > 安全约束：`GET /api/v1/settings/integrations` 只返回集成配置摘要，不返回 Secret、AppSecret、API Key、密码或 URL 查询令牌；凭证字段显示为“已配置/未配置”，URL 仅显示协议、主机和端口。更新配置时，空凭证和脱敏占位符会保留服务端已有值，避免页面刷新后误清空集成。
 
+### Prometheus/Alertmanager 外部通知
+
+如需把基础设施告警（后端不可用、错误率、资源耗尽等）发送到统一告警平台，在 `docker/.env` 设置：
+
+```env
+ALERT_WEBHOOK_URL=https://alert-receiver.example.com/api/alertmanager
+```
+
+然后重新创建 Alertmanager 容器并检查就绪状态：
+
+```bash
+bash docker/validate-env.sh docker/.env --check-runtime-files
+docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --no-deps --force-recreate alertmanager
+docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanager
+```
+
+未配置该地址时，Alertmanager 会保留告警但将外部路由降级为 `dev-null`，不会请求本机或未知默认地址。
+
 ### 设备健康度定时刷新
 
 设备健康度（health_score）默认手动刷新。如需定时自动更新，可配置定时任务调用：
@@ -286,7 +333,7 @@ cd docker
 cd ..
 ```
 
-脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。显式启用 `BACKUP_REDIS=true` 后，如果 Redis 快照或复制失败，脚本也会以非零状态结束；开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
+脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。Redis 备份会轮询 `INFO persistence`，确认后台快照完成并校验 RDB 文件头后才保存。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。显式启用 `BACKUP_REDIS=true` 后，如果 Redis 快照或复制失败，脚本也会以非零状态结束；开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
 
 ### PostgreSQL 与附件恢复
 
@@ -319,7 +366,8 @@ Redis RDB 恢复是可选的，在两条命令中都追加
 并修正 RDB 属主后再启动 Redis。如果暂不恢复附件，
 必须显式使用 `--skip-attachments`。恢复会重建目标数据库并替换
 附件卷；数据库使用单事务导入，附件替换不自动回滚，因此必须先在隔离环境演练并
-记录 RTO/RPO。
+记录 RTO/RPO。S3 模式下，`restore.sh` 会把归档同步回
+`FILE_STORAGE_S3_KEY_PREFIX` 对应的对象前缀，不会把对象存储误当成本地附件卷。
 
 ### Volume 管理
 
@@ -455,7 +503,7 @@ UPDATE tenants SET time_zone = 'Asia/Shanghai' WHERE slug = 'your-tenant-slug';
 
 ### 备份脚本依赖（v1.3.0+）
 
-`docker/backup.sh` 通过 Docker 在容器内导出 PostgreSQL，并通过 `docker cp` 归档后端的 `/app/uploads` 附件目录。
+`docker/backup.sh` 通过 Docker 在容器内导出 PostgreSQL；本地附件模式通过 `docker cp` 归档后端的 `/app/uploads`，S3 模式则从配置的对象键前缀同步后归档，避免产生空的附件备份。
 **主机不需要安装 PostgreSQL 客户端工具**，只需要 Docker 访问权限和主机 `tar`。
 
 定时备份（推荐每天凌晨 2 点）：

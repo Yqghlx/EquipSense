@@ -76,6 +76,8 @@ public sealed class ServiceCollectionExtensionsEventBusTests
                 ["EventBus:RabbitMq:Port"] = "1",
                 ["ConnectionStrings:Default"] = "Host=localhost;Database=test",
                 ["Redis:ConnectionString"] = "localhost:6379",
+                ["ASPNETCORE_ENVIRONMENT"] = "Testing",
+                ["Security:PiiEncryptionKey"] = Convert.ToBase64String(new byte[32]),
             })
             .Build();
 }

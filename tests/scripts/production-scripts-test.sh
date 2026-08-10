@@ -32,8 +32,10 @@ test_validate_env_accepts_complete_config() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -72,6 +74,43 @@ test_validate_env_accepts_complete_config() {
   assert_contains "$output" ".env 文件权限不安全"
 }
 
+test_validate_env_rejects_missing_pii_encryption_key() {
+  local env_file="$TEST_ROOT/missing-pii-key.env"
+  sed '/^PII_ENCRYPTION_KEY=/d' "$TEST_ROOT/valid.env" > "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "缺少 PII 加密密钥时生产环境校验不应通过"
+  assert_contains "$output" "PII_ENCRYPTION_KEY"
+  [[ "$output" != *"YWJjZGVm"* ]] || fail "校验输出不得泄露 PII 密钥值"
+}
+
+test_validate_env_rejects_invalid_rate_limiting_config() {
+  local env_file="$TEST_ROOT/invalid-rate-limiting.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' \
+    'RATE_LIMITING_AUTH_PERMIT_LIMIT=0' \
+    'RATE_LIMITING_WINDOW=not-a-timespan' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非法限流参数不应通过生产环境校验"
+  assert_contains "$output" "RATE_LIMITING_AUTH_PERMIT_LIMIT 必须是大于 0 的整数"
+  assert_contains "$output" "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"
+}
+
 test_validate_env_rejects_missing_automapper_license() {
   local env_file="$TEST_ROOT/missing-automapper-license.env"
   printf '%s\n' \
@@ -82,7 +121,9 @@ test_validate_env_rejects_missing_automapper_license() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -116,8 +157,10 @@ test_validate_env_rejects_reused_production_credentials() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -152,8 +195,10 @@ test_validate_env_rejects_weak_production_config() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=short' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=short' \
     'SEED_ADMIN_PASSWORD=short' \
@@ -194,8 +239,10 @@ test_validate_env_rejects_non_production_environment() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -230,8 +277,10 @@ test_validate_env_rejects_duplicate_keys() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -266,6 +315,120 @@ test_production_env_template_uses_https_default() {
     || fail "生产环境模板不应使用 HTTP 前端地址"
 }
 
+test_production_compose_supports_isolated_tenant2_e2e_credentials() {
+  local compose_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  assert_contains "$compose_content" 'SEED_TENANT2_ACCOUNT: "${SEED_TENANT2_ACCOUNT:-false}"'
+  assert_contains "$compose_content" 'SEED_TENANT2_PASSWORD: "${SEED_TENANT2_PASSWORD:-}"'
+  assert_contains "$compose_content" 'RateLimiting__AuthPermitLimit: "${RATE_LIMITING_AUTH_PERMIT_LIMIT:-10}"'
+  assert_contains "$compose_content" 'Security__PiiEncryptionKey: "${PII_ENCRYPTION_KEY:?请在 .env 中设置 PII_ENCRYPTION_KEY}"'
+}
+
+test_production_smoke_exposes_optional_full_e2e_gate() {
+  local smoke_content
+  smoke_content="$(cat "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh")"
+  assert_contains "$smoke_content" 'SMOKE_RUN_E2E'
+  assert_contains "$smoke_content" 'playwright test e2e-comprehensive'
+  assert_contains "$smoke_content" 'runtime_env+=('
+}
+
+test_production_e2e_preserves_mfa_policy() {
+  local bootstrap_content
+  bootstrap_content="$(cat "$PROJECT_ROOT/tests/scripts/production-e2e-mfa-bootstrap.mjs")"
+  assert_contains "$bootstrap_content" '/api/v1/auth/mfa/enroll/setup'
+  assert_contains "$bootstrap_content" '/api/v1/auth/mfa/enroll/confirm'
+  assert_contains "$bootstrap_content" 'MFA_BOOTSTRAP_TENANT2_PASSWORD'
+
+  local auth_content
+  auth_content="$(cat "$PROJECT_ROOT/frontend/e2e-comprehensive/helpers/auth.ts")"
+  assert_contains "$auth_content" 'getE2ETotpSecret'
+  assert_contains "$auth_content" 'mfa/verify'
+  assert_contains "$auth_content" 'getTokenForCredentials'
+
+  local credential_content
+  credential_content="$(cat "$PROJECT_ROOT/frontend/e2e-comprehensive/helpers/credentials.ts")"
+  assert_contains "$credential_content" 'E2E_ADMIN_TOTP_SECRET'
+  assert_contains "$credential_content" 'E2E_TENANT2_TOTP_SECRET'
+}
+
+test_alertmanager_webhook_is_fail_safe_and_configurable() {
+  local compose_content config_content entrypoint_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  config_content="$(cat "$PROJECT_ROOT/docker/alertmanager.yml")"
+  entrypoint_content="$(cat "$PROJECT_ROOT/docker/alertmanager-entrypoint.sh")"
+
+  assert_contains "$compose_content" 'ALERT_WEBHOOK_URL: "${ALERT_WEBHOOK_URL:-}"'
+  assert_contains "$compose_content" 'alertmanager-entrypoint.sh'
+  assert_contains "$compose_content" '--config.file=/tmp/equipai-alertmanager.yml'
+  assert_contains "$compose_content" 'http://127.0.0.1:9093/-/ready'
+  assert_contains "$config_content" '__ALERTMANAGER_WEBHOOK_CONFIG__'
+  [[ "$config_content" != *"localhost:5001"* ]] || fail "Alertmanager 不应硬编码 localhost webhook"
+  assert_contains "$entrypoint_content" 'url_file: $webhook_file'
+  assert_contains "$entrypoint_content" 'default_receiver="dev-null"'
+  bash -n "$PROJECT_ROOT/docker/alertmanager-entrypoint.sh"
+}
+
+test_jaeger_storage_is_persistent_by_default() {
+  local compose_content env_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  env_content="$(cat "$PROJECT_ROOT/docker/.env.example")"
+
+  assert_contains "$compose_content" 'SPAN_STORAGE_TYPE: "${JAEGER_SPAN_STORAGE_TYPE:-badger}"'
+  assert_contains "$compose_content" 'BADGER_EPHEMERAL: "${JAEGER_BADGER_EPHEMERAL:-false}"'
+  assert_contains "$compose_content" 'jaeger_data:/badger'
+  assert_contains "$compose_content" 'condition: service_completed_successfully'
+  assert_contains "$compose_content" 'jaeger-init:'
+  assert_contains "$env_content" 'JAEGER_SPAN_STORAGE_TYPE=badger'
+  assert_contains "$env_content" 'JAEGER_BADGER_EPHEMERAL=false'
+  [[ "$compose_content" != *'SPAN_STORAGE_TYPE: memory'* ]] || fail "生产 Jaeger 不应默认使用内存存储"
+}
+
+test_validate_env_rejects_ephemeral_jaeger_storage_in_production() {
+  local env_file="$TEST_ROOT/ephemeral-jaeger.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' \
+    'JAEGER_SPAN_STORAGE_TYPE=memory' \
+    'JAEGER_BADGER_EPHEMERAL=true' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产环境不应接受内存或临时 Jaeger 存储"
+  assert_contains "$output" "生产环境禁止使用内存 Jaeger 存储"
+
+  local badger_env="$TEST_ROOT/ephemeral-badger.env"
+  sed 's/^JAEGER_SPAN_STORAGE_TYPE=memory$/JAEGER_SPAN_STORAGE_TYPE=badger/' "$env_file" > "$badger_env"
+  chmod 600 "$badger_env"
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$badger_env" 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "生产环境不应接受临时 Badger 存储"
+  assert_contains "$output" "生产环境 JAEGER_BADGER_EPHEMERAL 必须为 false"
+}
+
+test_validate_env_rejects_invalid_alert_webhook_url() {
+  local env_file="$TEST_ROOT/invalid-alert-webhook.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' 'ALERT_WEBHOOK_URL=ftp://alert-receiver.example.com/hook' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非法 Alertmanager webhook 地址不应通过生产环境校验"
+  assert_contains "$output" "ALERT_WEBHOOK_URL 必须使用 http:// 或 https://"
+}
+
 test_validate_runtime_files_rejects_invalid_certificates() {
   local case_dir="$TEST_ROOT/invalid-certificates"
   local env_file="$case_dir/.env"
@@ -286,8 +449,10 @@ test_validate_runtime_files_rejects_invalid_certificates() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -312,6 +477,7 @@ test_validate_runtime_files_rejects_invalid_certificates() {
     "$case_dir/prometheus.yml" \
     "$case_dir/prometheus/rules.yml" \
     "$case_dir/alertmanager.yml" \
+    "$case_dir/alertmanager-entrypoint.sh" \
     "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
     "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
   printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
@@ -376,8 +542,10 @@ test_validate_runtime_files_gate() {
     'RABBITMQ_PASSWORD=rabbitmq-password-long' \
     'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
     'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
     'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
     'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
     'MQTT_USERNAME=loadtest' \
     'MQTT_PASSWORD=mqtt-password-long' \
     'SEED_ADMIN_PASSWORD=admin-password-long' \
@@ -416,6 +584,7 @@ test_validate_runtime_files_gate() {
     "$case_dir/prometheus.yml" \
     "$case_dir/prometheus/rules.yml" \
     "$case_dir/alertmanager.yml" \
+    "$case_dir/alertmanager-entrypoint.sh" \
     "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
     "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
@@ -545,6 +714,59 @@ test_backup_includes_attachments() {
   [[ "$file_mode" = "600" ]] || fail "数据库备份文件应为 600 权限，实际为 $file_mode"
 }
 
+test_backup_s3_storage_includes_object_prefix() {
+  local case_dir="$TEST_ROOT/backup-s3"
+  local fake_s3_root="$case_dir/fake-s3"
+  local backup_dir="$case_dir/backups"
+  mkdir -p "$case_dir/bin" "$fake_s3_root/tenant/work-order" "$backup_dir"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' 'S3 附件备份测试文件' > "$fake_s3_root/tenant/work-order/report.txt"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password' \
+    'PG_CONTAINER=fake-postgres' \
+    'BACKUP_REDIS=false' \
+    'BACKUP_ATTACHMENTS=true' \
+    'FILE_STORAGE_PROVIDER=S3' \
+    'FILE_STORAGE_S3_BUCKET=equipsense-attachments' \
+    'FILE_STORAGE_S3_REGION=cn-shanghai' \
+    'FILE_STORAGE_S3_ENDPOINT=https://s3.example.com' \
+    'FILE_STORAGE_S3_ACCESS_KEY=access-key' \
+    'FILE_STORAGE_S3_SECRET_KEY=secret-key' \
+    'FILE_STORAGE_S3_KEY_PREFIX=attachments' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
+    '    exit 1 ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    '[[ "${1:-}" = "s3" && "${2:-}" = "sync" ]] || exit 1' \
+    'cp -R "$FAKE_S3_ROOT/." "$4/"' > "$case_dir/bin/aws"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/aws"
+
+  if ! PATH="$case_dir/bin:$PATH" FAKE_S3_ROOT="$fake_s3_root" \
+    bash "$case_dir/backup.sh" > "$case_dir/backup.log" 2>&1; then
+    cat "$case_dir/backup.log" >&2
+    fail "S3 附件存储模式应从对象前缀生成归档"
+  fi
+
+  local attachment_file
+  attachment_file="$(find "$backup_dir" -name 'attachments_*.tar.gz' -print -quit)"
+  [[ -n "$attachment_file" ]] || fail "S3 模式应生成工单附件备份"
+  tar -tzf "$attachment_file" | grep -q 'tenant/work-order/report.txt' \
+    || fail "S3 对象前缀归档中缺少租户附件"
+}
+
 test_backup_rejects_missing_remote_target() {
   local case_dir="$TEST_ROOT/backup-remote"
   local backup_dir="$case_dir/backups"
@@ -590,6 +812,7 @@ test_backup_rejects_requested_redis_failure() {
   printf '%s\n' \
     'PG_PASSWORD=test-password-long' \
     'PG_CONTAINER=fake-postgres' \
+    'REDIS_CONTAINER=fake-redis' \
     'REDIS_PASSWORD=redis-password-long' \
     'BACKUP_REDIS=true' \
     'BACKUP_ATTACHMENTS=false' \
@@ -600,7 +823,7 @@ test_backup_rejects_requested_redis_failure() {
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
     'case "${1:-}" in' \
-    '  ps) printf "fake-postgres\\n" ;;' \
+    '  ps) printf "fake-postgres\\nfake-redis\\n" ;;' \
     '  exec)' \
     '    if [[ "$*" == *"pg_dump"* ]]; then printf "CREATE TABLE backup_test;\\n"; exit 0; fi' \
     '    if [[ "$*" == *"pg_restore"* ]]; then exit 0; fi' \
@@ -619,6 +842,62 @@ test_backup_rejects_requested_redis_failure() {
 
   [[ "$result_code" -ne 0 ]] || fail "显式启用 Redis 备份但快照失败时不应返回成功"
   assert_contains "$output" "Redis BGSAVE 失败"
+}
+
+test_backup_uses_configured_redis_container_and_waits_for_snapshot() {
+  local case_dir="$TEST_ROOT/backup-redis-container"
+  local backup_dir="$case_dir/backups"
+  local docker_log="$case_dir/docker.log"
+  local redis_state="$case_dir/redis-state"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'PG_CONTAINER=fake-postgres' \
+    'REDIS_CONTAINER=fake-redis' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'BACKUP_REDIS=true' \
+    'BACKUP_ATTACHMENTS=false' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$BACKUP_DOCKER_LOG"' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\nfake-redis\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
+    '    if [[ "$*" == *"redis-cli"* && "$*" == *"LASTSAVE"* ]]; then' \
+    '      if [[ -f "$BACKUP_REDIS_STATE" ]]; then printf "101\\n"; else printf "100\\n"; fi; exit 0' \
+    '    fi' \
+    '    if [[ "$*" == *"redis-cli"* && "$*" == *"BGSAVE"* ]]; then : > "$BACKUP_REDIS_STATE"; printf "Background saving started\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"redis-cli"* && "$*" == *"INFO persistence"* ]]; then printf "# Persistence\\r\\nrdb_bgsave_in_progress:0\\r\\nrdb_last_bgsave_status:ok\\r\\n"; exit 0; fi' \
+    '    exit 1 ;;' \
+    '  cp)' \
+    '    [[ "$2" == fake-redis:/data/dump.rdb ]] || exit 1' \
+    '    printf "REDIS0009" > "$3" ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  if ! output="$(PATH="$case_dir/bin:$PATH" \
+    BACKUP_DOCKER_LOG="$docker_log" \
+    BACKUP_REDIS_STATE="$redis_state" \
+    bash "$case_dir/backup.sh" 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "配置自定义 Redis 容器后，快照备份应成功"
+  fi
+
+  local redis_file
+  redis_file="$(find "$backup_dir" -name 'redis_*.rdb' -print -quit)"
+  [[ -n "$redis_file" ]] || fail "应生成 Redis RDB 备份"
+  [[ "$(head -c 5 "$redis_file")" = "REDIS" ]] || fail "Redis 备份应包含 RDB 文件头"
+  grep -q 'fake-redis' "$docker_log" || fail "备份应使用 REDIS_CONTAINER 配置，而不是硬编码容器名"
+  grep -q 'INFO persistence' "$docker_log" || fail "备份复制前应等待 Redis 后台快照完成"
 }
 
 create_restore_fixtures() {
@@ -663,6 +942,24 @@ test_restore_dry_run_does_not_mutate_services() {
 
   assert_contains "$output" "dry-run"
   [[ ! -f "$case_dir/docker-called" ]] || fail "dry-run 不应调用 Docker 或修改服务"
+}
+
+test_restore_does_not_execute_env_file() {
+  local case_dir="$TEST_ROOT/restore-env-data"
+  mkdir -p "$case_dir/bin"
+  create_restore_fixtures "$case_dir"
+  printf '%s\n' '$(touch "$RESTORE_ENV_EXECUTED")' >> "$case_dir/.env"
+
+  local output
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_ENV_EXECUTED="$case_dir/env-executed" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments.tar.gz" 2>&1)" \
+    || fail "配置文件仅作为数据读取时，恢复 dry-run 应成功"
+
+  assert_contains "$output" "dry-run"
+  [[ ! -f "$case_dir/env-executed" ]] || fail "restore.sh 不应把 .env 当作 Shell 脚本执行"
 }
 
 test_restore_dry_run_accepts_custom_backup() {
@@ -740,6 +1037,59 @@ test_restore_confirm_cleans_attachments_without_running_backend() {
     || fail "Redis 恢复应使用 root 一次性容器修正 RDB 权限并清理旧 AOF"
   grep -q 'appendonly' "$docker_log" \
     || fail "Redis 恢复应清理旧 AOF，确保 dump.rdb 会被加载"
+}
+
+test_restore_s3_storage_syncs_back_to_object_prefix() {
+  local case_dir="$TEST_ROOT/restore-s3"
+  local docker_log="$case_dir/docker.log"
+  local fake_s3_target="$case_dir/fake-s3-target"
+  mkdir -p "$case_dir/bin" "$fake_s3_target"
+  create_restore_fixtures "$case_dir"
+  : > "$case_dir/compose.yml"
+  printf '%s\n' \
+    'FILE_STORAGE_PROVIDER=S3' \
+    'FILE_STORAGE_S3_BUCKET=equipsense-attachments' \
+    'FILE_STORAGE_S3_REGION=cn-shanghai' \
+    'FILE_STORAGE_S3_ENDPOINT=https://s3.example.com' \
+    'FILE_STORAGE_S3_ACCESS_KEY=access-key' \
+    'FILE_STORAGE_S3_SECRET_KEY=secret-key' \
+    'FILE_STORAGE_S3_KEY_PREFIX=attachments' >> "$case_dir/.env"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$RESTORE_DOCKER_LOG"' \
+    'if [[ "${1:-}" = "inspect" ]]; then printf "true\\n"; exit 0; fi' \
+    '[[ "${1:-}" = "compose" ]] || exit 1' \
+    'if [[ "$*" == *" ps -q postgres"* ]]; then printf "fake-postgres\\n"; exit 0; fi' \
+    'if [[ "$*" == *" exec -T postgres "* ]]; then cat >/dev/null; printf "1\\n"; exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    '[[ "${1:-}" = "s3" && "${2:-}" = "sync" ]] || exit 1' \
+    'cp -R "$3/." "$FAKE_S3_TARGET/"' > "$case_dir/bin/aws"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/curl"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/aws" "$case_dir/bin/curl"
+
+  local output
+  if ! output="$(PATH="$case_dir/bin:$PATH" FAKE_S3_TARGET="$fake_s3_target" RESTORE_DOCKER_LOG="$docker_log" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --compose-file "$case_dir/compose.yml" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments.tar.gz" \
+      --confirm 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "S3 附件恢复应同步回对象前缀"
+  fi
+
+  assert_contains "$output" "S3 工单附件已恢复"
+  [[ -f "$fake_s3_target/report.txt" ]] || fail "S3 恢复未写入对象存储目标"
+  ! grep -q 'run --rm --no-deps --entrypoint /bin/sh backend' "$docker_log" \
+    || fail "S3 模式不应清理本地附件卷"
 }
 
 test_restore_confirm_uses_custom_format_and_timescale_lifecycle() {
@@ -941,11 +1291,14 @@ create_deploy_runtime_doubles() {
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
     'printf "%s\\n" "$*" >> "$DEPLOY_CURL_LOG"' \
+    'counter_file="$DEPLOY_CURL_COUNTER"' \
+    'codes="${DEPLOY_CURL_CODES:-200}"' \
+    'if [[ "$*" == *"8081/health"* ]]; then counter_file="$DEPLOY_EDGE_CURL_COUNTER"; codes="${DEPLOY_EDGE_CURL_CODES:-200}"; fi' \
     'counter=0' \
-    'if [[ -f "$DEPLOY_CURL_COUNTER" ]]; then counter="$(cat "$DEPLOY_CURL_COUNTER")"; fi' \
+    'if [[ -f "$counter_file" ]]; then counter="$(cat "$counter_file")"; fi' \
     'counter=$((counter + 1))' \
-    'printf "%s\\n" "$counter" > "$DEPLOY_CURL_COUNTER"' \
-    'code="$(printf "%s" "${DEPLOY_CURL_CODES:-200}" | cut -d, -f"$counter")"' \
+    'printf "%s\\n" "$counter" > "$counter_file"' \
+    'code="$(printf "%s" "$codes" | cut -d, -f"$counter")"' \
     '[[ -n "$code" ]] || code="000"' \
     'printf "%s" "$code"' > "$case_dir/bin/curl"
   chmod +x "$case_dir/validate-env.sh" "$case_dir/bin/docker" "$case_dir/bin/curl"
@@ -959,6 +1312,7 @@ run_deploy_fixture() {
     DEPLOY_DOCKER_LOG="$case_dir/docker.log" \
     DEPLOY_INSPECT_COUNTER="$case_dir/inspect-counter" \
     DEPLOY_CURL_COUNTER="$case_dir/curl-counter" \
+    DEPLOY_EDGE_CURL_COUNTER="$case_dir/edge-curl-counter" \
     DEPLOY_CURL_LOG="$case_dir/curl.log" \
     DEPLOY_MAX_ATTEMPTS=1 \
     DEPLOY_INITIAL_DELAY_SECONDS=0 \
@@ -1029,6 +1383,22 @@ test_deploy_success_updates_version_atomically() {
     || fail "目标版本健康时不应回滚"
 }
 
+test_deploy_uses_edge_port_from_env_for_health_check() {
+  local case_dir="$TEST_ROOT/deploy-custom-edge-port"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' 'EDGE_PORT=18081' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  if ! DEPLOY_CURL_CODES=200 run_deploy_fixture "$case_dir" 2.0.0 >/dev/null 2>&1; then
+    fail "自定义边缘端口配置正确时部署应成功"
+  fi
+
+  grep -q 'localhost:18081/health' "$case_dir/curl.log" \
+    || fail "部署健康检查必须读取 .env 中的 EDGE_PORT"
+}
+
 test_deploy_final_status_display_failure_does_not_reverse_success() {
   local case_dir="$TEST_ROOT/deploy-final-status-warning"
   create_deploy_fixtures "$case_dir"
@@ -1090,6 +1460,26 @@ test_deploy_frontend_health_failure_also_rolls_back() {
     || fail "前端健康失败后也必须回滚 backend/frontend"
   [[ "$(cat "$case_dir/inspect-counter")" = "2" ]] \
     || fail "目标和回滚版本都必须验证前端容器健康"
+}
+
+test_deploy_edgegateway_health_failure_also_rolls_back() {
+  local case_dir="$TEST_ROOT/deploy-edgegateway-health-rollback"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=200,200 DEPLOY_EDGE_CURL_CODES=503,200 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "边缘网关不健康时部署必须失败并回滚"
+  assert_contains "$output" "回滚验证通过"
+  grep -q '^1.0.0|.* up .*--pull never.*backend frontend edgegateway' "$case_dir/docker.log" \
+    || fail "边缘网关健康失败后也必须回滚三个应用服务"
 }
 
 test_deploy_same_healthy_tag_is_idempotent() {
@@ -1219,6 +1609,50 @@ test_docker_edgegateway_build_is_reproducible() {
   assert_contains "$dockerfile_content" "--no-restore"
 }
 
+test_edgegateway_production_runtime_contract() {
+  local compose_content options_content program_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  options_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/GatewayOptions.cs")"
+  program_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Program.cs")"
+
+  assert_contains "$compose_content" 'DOTNET_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"'
+  assert_contains "$compose_content" 'Gateway__BufferPath: "${GATEWAY_BUFFER_PATH:-/data/buffer.db}"'
+  assert_contains "$compose_content" 'GATEWAY_TENANT_ID'
+  assert_contains "$compose_content" 'edgegateway_data:/data'
+  assert_contains "$options_content" 'public string BufferPath'
+  assert_contains "$program_content" 'GatewayConfigurationValidator.Validate'
+  assert_contains "$program_content" 'Environment.ExitCode = 1'
+}
+
+test_edgegateway_release_and_deploy_contract() {
+  local production_compose
+  production_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.prod.yml")"
+  assert_contains "$production_compose" 'edgegateway:'
+  assert_contains "$production_compose" 'ghcr.io/yqghlx/equipsense/edgegateway:${TAG:?请设置 TAG 环境变量（如 1.2.0）}'
+  assert_contains "$production_compose" 'edgegateway'
+  assert_contains "$production_compose" 'build: !reset null'
+  assert_contains "$production_compose" 'pull_policy: always'
+
+  local ci_content docker_block release_block
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  docker_block="$(sed -n '/^  docker:/,/^  production-smoke:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$docker_block" 'id: meta-edgegateway'
+  assert_contains "$docker_block" 'file: docker/Dockerfile.edgegateway'
+  assert_contains "$docker_block" 'edgegateway:sha-${{ steps.sha.outputs.short }}'
+  assert_contains "$release_block" 'id: meta-edgegateway'
+  assert_contains "$release_block" 'file: docker/Dockerfile.edgegateway'
+  assert_contains "$release_block" 'edgegateway:${{ steps.meta-edgegateway.outputs.version }}'
+  assert_contains "$ci_content" 'Trivy 扫描边缘网关镜像'
+
+  local deploy_script
+  deploy_script="$(cat "$PROJECT_ROOT/docker/deploy-production.sh")"
+  assert_contains "$deploy_script" 'DEPLOY_EDGE_HEALTH_URL'
+  assert_contains "$deploy_script" 'pull backend frontend edgegateway'
+  assert_contains "$deploy_script" 'backend frontend edgegateway'
+  assert_contains "$deploy_script" 'ps backend frontend edgegateway'
+}
+
 test_production_runtime_smoke_gate_is_wired() {
   [[ -x "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh" ]] \
     || fail "Production runtime smoke 脚本必须存在且可执行"
@@ -1228,31 +1662,64 @@ test_production_runtime_smoke_gate_is_wired() {
   local smoke_compose
   smoke_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.smoke.yml")"
   assert_contains "$smoke_compose" "build: !reset null"
-  for service in postgres redis mosquitto rabbitmq backend frontend; do
+  for service in postgres redis mosquitto rabbitmq backend edgegateway frontend; do
     assert_contains "$smoke_compose" "${service}:"
     assert_contains "$smoke_compose" "container_name: !reset null"
   done
   assert_contains "$smoke_compose" "SMOKE_BACKEND_IMAGE"
   assert_contains "$smoke_compose" "SMOKE_FRONTEND_IMAGE"
+  assert_contains "$smoke_compose" "SMOKE_EDGEGATEWAY_IMAGE"
+  assert_contains "$smoke_compose" "ports: !reset []"
 
   local smoke_script
   smoke_script="$(cat "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh")"
   assert_contains "$smoke_script" "SEED_VIEWER_PASSWORD"
   assert_contains "$smoke_script" "/api/v1/auth/login"
   assert_contains "$smoke_script" "/api/v1/auth/me"
+  assert_contains "$smoke_script" "SMOKE_EDGEGATEWAY_IMAGE"
+  assert_contains "$smoke_script" "SMOKE_PORT_BASE"
+  assert_contains "$smoke_script" "SMOKE_PG_PORT"
+  assert_contains "$smoke_script" "lsof"
+  assert_contains "$smoke_script" "/data/buffer.db"
+  assert_contains "$smoke_script" "/api/v1/gateways"
   assert_contains "$smoke_script" "jq -r"
+  assert_contains "$smoke_script" "SMOKE_RUN_E2E"
+  assert_contains "$smoke_script" "playwright test e2e-comprehensive"
 
   local smoke_block
   smoke_block="$(sed -n '/^  production-smoke:/,/^  release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$smoke_block" "needs: [backend, frontend]"
   assert_contains "$smoke_block" "production-runtime-smoke.sh"
   assert_contains "$smoke_block" "docker build"
+  assert_contains "$smoke_block" "npm ci"
+  assert_contains "$smoke_block" "SMOKE_RUN_E2E"
 }
 
 test_rabbitmq_healthcheck_uses_service_account() {
   local rabbitmq_block
   rabbitmq_block="$(sed -n '/^  rabbitmq:/,/^  backend:/p' "$PROJECT_ROOT/docker/docker-compose.yml")"
   assert_contains "$rabbitmq_block" "    user: rabbitmq"
+}
+
+test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip() {
+  local program_content compose_content
+  local authentication_line rate_limiter_line forwarded_line
+  program_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs")"
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+
+  assert_contains "$program_content" "AddTrustedForwardedHeaders"
+  assert_contains "$program_content" "app.UseForwardedHeaders()"
+  assert_contains "$compose_content" "TRUSTED_PROXY_NETWORKS"
+
+  authentication_line="$(grep -n 'app.UseAuthentication();' "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs" | cut -d: -f1)"
+  rate_limiter_line="$(grep -n 'app.UseRateLimiter();' "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs" | cut -d: -f1)"
+  forwarded_line="$(grep -n 'app.UseForwardedHeaders();' "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs" | cut -d: -f1)"
+  [[ -n "$authentication_line" && -n "$rate_limiter_line" && -n "$forwarded_line" ]] \
+    || fail "后端必须注册转发头、认证和限流中间件"
+  (( forwarded_line < authentication_line )) \
+    || fail "真实客户端 IP 必须在认证和限流之前还原"
+  (( authentication_line < rate_limiter_line )) \
+    || fail "JWT 认证必须在全局限流之前执行，才能按 tenant_id 分区"
 }
 
 test_deploy_has_fail_closed_preflight() {
@@ -1302,6 +1769,21 @@ test_bluegreen_has_fail_closed_preflight() {
   login_line="$(printf '%s\n' "$deploy_script" | grep -n 'docker login ghcr.io' | head -n1 | cut -d: -f1)"
   [[ -n "$preflight_line" && -n "$login_line" && "$preflight_line" -lt "$login_line" ]] \
     || fail "蓝绿部署必须在 GHCR 登录和拉取镜像之前完成配置校验"
+}
+
+test_bluegreen_keeps_edgegateway_on_target_backend() {
+  local deploy_script compose_content base_compose
+  deploy_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.bluegreen.yml")"
+  base_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+
+  assert_contains "$deploy_script" 'pull backend-$TARGET_COLOR frontend-$TARGET_COLOR edgegateway'
+  assert_contains "$deploy_script" 'GATEWAY_BACKEND_URL'
+  assert_contains "$deploy_script" 'BLUEGREEN_EDGE_HEALTH_URL'
+  assert_contains "$deploy_script" 'edgegateway'
+  assert_contains "$compose_content" 'EDGE_BLUEGREEN_PORT'
+  assert_contains "$compose_content" 'default'
+  assert_contains "$base_compose" 'GATEWAY_BACKEND_URL'
 }
 
 test_bluegreen_colors_do_not_inherit_public_entry_ports() {
@@ -1359,25 +1841,38 @@ test_development_internal_ports_bind_loopback_by_default() {
 case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
+    test_validate_env_rejects_missing_pii_encryption_key
+    test_validate_env_rejects_invalid_rate_limiting_config
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
     test_production_env_template_uses_https_default
+    test_production_compose_supports_isolated_tenant2_e2e_credentials
+    test_production_smoke_exposes_optional_full_e2e_gate
+    test_production_e2e_preserves_mfa_policy
+    test_alertmanager_webhook_is_fail_safe_and_configurable
+    test_jaeger_storage_is_persistent_by_default
+    test_validate_env_rejects_ephemeral_jaeger_storage_in_production
+    test_validate_env_rejects_invalid_alert_webhook_url
     test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
     ;;
   backup)
     test_backup_includes_attachments
+    test_backup_s3_storage_includes_object_prefix
     test_backup_rejects_missing_remote_target
     test_backup_rejects_requested_redis_failure
+    test_backup_uses_configured_redis_container_and_waits_for_snapshot
     ;;
   restore)
     test_restore_dry_run_does_not_mutate_services
+    test_restore_does_not_execute_env_file
     test_restore_dry_run_accepts_custom_backup
     test_restore_confirm_cleans_attachments_without_running_backend
+    test_restore_s3_storage_syncs_back_to_object_prefix
     test_restore_confirm_uses_custom_format_and_timescale_lifecycle
     test_restore_failure_exits_timescale_restore_mode
     test_restore_rejects_corrupted_archive
@@ -1387,9 +1882,11 @@ case "${1:-all}" in
   deploy)
     test_deploy_preflight_failure_does_not_mutate_services
     test_deploy_success_updates_version_atomically
+    test_deploy_uses_edge_port_from_env_for_health_check
     test_deploy_final_status_display_failure_does_not_reverse_success
     test_deploy_health_failure_rolls_back_and_verifies_health
     test_deploy_frontend_health_failure_also_rolls_back
+    test_deploy_edgegateway_health_failure_also_rolls_back
     test_deploy_same_healthy_tag_is_idempotent
     test_deploy_compose_failure_rolls_back
     test_deploy_without_history_never_rolls_back_to_unknown_tag
@@ -1402,28 +1899,44 @@ case "${1:-all}" in
     test_docker_backend_build_is_reproducible
     test_frontend_runtime_installs_certificate_check_dependency
     test_docker_edgegateway_build_is_reproducible
+    test_edgegateway_production_runtime_contract
+    test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
     test_rabbitmq_healthcheck_uses_service_account
+    test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
     ;;
   all)
     test_validate_env_accepts_complete_config
+    test_validate_env_rejects_missing_pii_encryption_key
+    test_validate_env_rejects_invalid_rate_limiting_config
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
     test_production_env_template_uses_https_default
+    test_production_compose_supports_isolated_tenant2_e2e_credentials
+    test_production_smoke_exposes_optional_full_e2e_gate
+    test_production_e2e_preserves_mfa_policy
+    test_alertmanager_webhook_is_fail_safe_and_configurable
+    test_jaeger_storage_is_persistent_by_default
+    test_validate_env_rejects_ephemeral_jaeger_storage_in_production
+    test_validate_env_rejects_invalid_alert_webhook_url
     test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
     test_backup_includes_attachments
+    test_backup_s3_storage_includes_object_prefix
     test_backup_rejects_missing_remote_target
     test_backup_rejects_requested_redis_failure
+    test_backup_uses_configured_redis_container_and_waits_for_snapshot
     test_restore_dry_run_does_not_mutate_services
+    test_restore_does_not_execute_env_file
     test_restore_dry_run_accepts_custom_backup
     test_restore_confirm_cleans_attachments_without_running_backend
+    test_restore_s3_storage_syncs_back_to_object_prefix
     test_restore_confirm_uses_custom_format_and_timescale_lifecycle
     test_restore_failure_exits_timescale_restore_mode
     test_restore_rejects_corrupted_archive
@@ -1431,9 +1944,11 @@ case "${1:-all}" in
     test_restore_rejects_corrupted_redis_backup
     test_deploy_preflight_failure_does_not_mutate_services
     test_deploy_success_updates_version_atomically
+    test_deploy_uses_edge_port_from_env_for_health_check
     test_deploy_final_status_display_failure_does_not_reverse_success
     test_deploy_health_failure_rolls_back_and_verifies_health
     test_deploy_frontend_health_failure_also_rolls_back
+    test_deploy_edgegateway_health_failure_also_rolls_back
     test_deploy_same_healthy_tag_is_idempotent
     test_deploy_compose_failure_rolls_back
     test_deploy_without_history_never_rolls_back_to_unknown_tag
@@ -1444,12 +1959,16 @@ case "${1:-all}" in
     test_docker_backend_build_is_reproducible
     test_frontend_runtime_installs_certificate_check_dependency
     test_docker_edgegateway_build_is_reproducible
+    test_edgegateway_production_runtime_contract
+    test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
     test_rabbitmq_healthcheck_uses_service_account
+    test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
     test_bluegreen_router_does_not_cross_color_dependency
     test_bluegreen_has_fail_closed_preflight
+    test_bluegreen_keeps_edgegateway_on_target_backend
     test_bluegreen_colors_do_not_inherit_public_entry_ports
     test_production_internal_ports_bind_loopback_by_default
     test_development_internal_ports_bind_loopback_by_default

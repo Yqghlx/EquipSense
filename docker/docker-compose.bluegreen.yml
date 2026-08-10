@@ -1,20 +1,23 @@
 # 蓝绿部署覆盖文件（Blue-Green Deployment）
 #
 # 工作原理：用 Docker Compose profiles 同时运行 backend/frontend 的两份实例（blue/green），
-# 各自监听独立端口。Nginx 路由层（router 服务）通过可热重载的 upstream 配置指向活跃颜色。
+# 各自监听独立端口。边缘网关保持单实例，但在切换前先指向已通过健康门禁的目标后端。
+# Nginx 路由层（router 服务）通过可热重载的 upstream 配置指向活跃颜色。
 # 部署流程（由 scripts/deploy-bluegreen.sh 编排）：
 #   1. 确定当前活跃颜色（读 .active-color 文件，默认 blue）
 #   2. 在非活跃颜色上拉取新镜像 + 启动（旧颜色仍服务流量）
 #   3. 健康门禁：轮询非活跃颜色的 /health
-#   4. 切换：更新 router upstream include → nginx reload（原子切换，<1s 中断）
-#   5. 优雅停止旧颜色（drain 连接后停止）
-#   6. 记录新活跃颜色
+#   4. 更新边缘网关镜像和后端目标，验证网关 /health
+#   5. 切换：更新 router upstream include → nginx reload（原子切换，<1s 中断）
+#   6. 优雅停止旧颜色（drain 连接后停止）
+#   7. 记录新活跃颜色
 #
 # 与 docker-compose.yml + docker-compose.prod.yml 叠加使用：
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.bluegreen.yml \
 #     --profile blue --profile green up -d
 #
 # 端口分配：backend blue 8081 / green 8082；frontend blue 3001 / green 3002；
+# edgegateway 使用 18081（可由 EDGE_BLUEGREEN_PORT 覆盖）；
 # router 占用 80/443（对外入口）。
 
 services:
@@ -30,6 +33,7 @@ services:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8081:8080"
     # 覆盖基础服务端口，避免继承宿主 8080；router 负责对外反代。
     networks:
+      - default
       - bluegreen
 
   backend-green:
@@ -41,6 +45,7 @@ services:
     ports: !override
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8082:8080"
     networks:
+      - default
       - bluegreen
 
   # ── 前端蓝绿实例 ──────────────────────────────────────────────────
@@ -55,6 +60,7 @@ services:
     environment:
       BACKEND_URL: "http://backend-blue:8080"
     networks:
+      - default
       - bluegreen
 
   frontend-green:
@@ -68,6 +74,21 @@ services:
     environment:
       BACKEND_URL: "http://backend-green:8080"
     networks:
+      - default
+      - bluegreen
+
+  # ── 边缘网关（单实例，随目标后端原子更新） ────────────────────────
+  # 移除基础服务对 backend 的 depends_on，避免蓝绿 profile 启动旧的 backend 服务；
+  # 编排脚本会先完成目标后端健康门禁，再重建此服务。
+  edgegateway:
+    container_name: equipai-edgegateway
+    ports: !override
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${EDGE_BLUEGREEN_PORT:-18081}:8081"
+    environment:
+      Gateway__BackendUrl: "${GATEWAY_BACKEND_URL:-http://backend:8080}"
+    depends_on: !override []
+    networks: !override
+      - default
       - bluegreen
 
   # ── 蓝绿路由层（Nginx，原子切换入口） ────────────────────────────

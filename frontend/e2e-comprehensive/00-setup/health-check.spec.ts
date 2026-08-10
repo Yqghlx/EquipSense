@@ -46,8 +46,13 @@ test.describe('00-环境健康检查', () => {
   test('3. Swagger 文档可访问', async ({ request }) => {
     // 访问 Swagger 文档页面，验证 API 文档服务可用
     const response = await request.get(`${BACKEND_URL}/swagger/index.html`);
-    // Swagger 可能返回 200 或 301 重定向，均视为可访问
-    expect(response.status()).toBeLessThan(400);
+    if (process.env.E2E_PRODUCTION === '1') {
+      // Production 有意关闭 Swagger，避免公开暴露接口结构；用 404 验证安全策略生效。
+      expect(response.status()).toBe(404);
+    } else {
+      // 开发/测试环境 Swagger 可能返回 200 或 301 重定向，均视为可访问。
+      expect(response.status()).toBeLessThan(400);
+    }
   });
 
   test('4. Mosquitto MQTT 端口 1883 连通', async ({ request }) => {

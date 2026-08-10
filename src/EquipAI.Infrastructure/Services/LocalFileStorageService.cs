@@ -7,7 +7,7 @@ namespace EquipAI.Infrastructure.Services;
 /// <summary>
 /// 本地文件系统存储实现
 /// 文件保存到 {BasePath}/{tenantId}/{category}/{uniqueFileName}
-/// 后续可替换为 S3/MinIO 实现
+/// 适用于单机或共享持久卷部署；跨主机部署可通过配置切换到 S3FileStorageService。
 /// </summary>
 public class LocalFileStorageService : IFileStorageService
 {

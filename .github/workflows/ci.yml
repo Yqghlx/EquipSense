@@ -269,6 +269,15 @@ jobs:
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      - name: 提取镜像标签（边缘网关）
+        id: meta-edgegateway
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -287,6 +296,14 @@ jobs:
           file: docker/Dockerfile.frontend
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
+
+      - name: 构建并推送边缘网关镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.edgegateway
+          push: true
+          tags: ${{ steps.meta-edgegateway.outputs.tags }}
 
       # ========================================================
       # 安全扫描：Trivy 扫描镜像已知漏洞（CVE）— HIGH/CRITICAL 阻断
@@ -309,10 +326,19 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
+      - name: Trivy 扫描边缘网关镜像
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway:sha-${{ steps.sha.outputs.short }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
   # ============================================================================
   # Production 容器运行时 smoke（PR、main 和版本 tag 均执行）
-  # 使用当前提交实际构建的镜像 + Production 配置，验证迁移、健康探针、TLS 和 Nginx 代理。
-  # 完整业务 E2E 仍由下方 e2e job 在 Development 环境覆盖。
+  # 使用当前提交实际构建的镜像 + Production 配置，验证迁移、健康探针、边缘网关、TLS 和 Nginx 代理。
+  # main/tag 额外在同一隔离容器生命周期内执行完整业务 E2E；PR 保留快速 smoke，避免重复消耗浏览器资源。
   # ============================================================================
   production-smoke:
     name: Production 容器运行时 Smoke
@@ -330,13 +356,37 @@ jobs:
       - name: 构建 smoke 前端镜像
         run: docker build --file docker/Dockerfile.frontend --tag equipsense/frontend:ci-${GITHUB_SHA} .
 
+      - name: 构建 smoke 边缘网关镜像
+        run: docker build --file docker/Dockerfile.edgegateway --tag equipsense/edgegateway:ci-${GITHUB_SHA} .
+
+      - name: 安装生产镜像 E2E 依赖（main/tag）
+        if: github.event_name != 'pull_request'
+        working-directory: frontend
+        run: npm ci
+
+      - name: 安装生产镜像 E2E 浏览器（main/tag）
+        if: github.event_name != 'pull_request'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
       - name: 运行 Production 容器 smoke
         env:
           SMOKE_BACKEND_IMAGE: equipsense/backend:ci-${{ github.sha }}
           SMOKE_FRONTEND_IMAGE: equipsense/frontend:ci-${{ github.sha }}
+          SMOKE_EDGEGATEWAY_IMAGE: equipsense/edgegateway:ci-${{ github.sha }}
+          SMOKE_RUN_E2E: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
           # 有正式测试许可证时注入；未注入时仅验证配置路径和容器启动契约，不代表许可证有效性。
           SMOKE_AUTOMAPPER_LICENSE_KEY: ${{ secrets.AUTOMAPPER_LICENSE_KEY }}
         run: bash tests/scripts/production-runtime-smoke.sh
+
+      - name: 上传 Production 镜像 E2E 报告
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-playwright-report
+          path: frontend/e2e-comprehensive/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
 
   # ============================================================================
   # 版本发布（仅在打 vX.Y.Z tag 时触发）
@@ -385,6 +435,17 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
+      - name: 提取镜像标签（边缘网关）
+        id: meta-edgegateway
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -403,6 +464,14 @@ jobs:
           file: docker/Dockerfile.frontend
           push: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
+
+      - name: 构建并推送边缘网关镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.edgegateway
+          push: true
+          tags: ${{ steps.meta-edgegateway.outputs.tags }}
 
       # 发布版本也跑 Trivy 扫描，避免发布已知漏洞镜像
       - name: Trivy 扫描后端镜像
@@ -423,6 +492,15 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
+      - name: Trivy 扫描边缘网关镜像
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway:${{ steps.meta-edgegateway.outputs.version }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+
       # 生成 GitHub Release（自动从 tag 名提取版本号，CHANGELOG.md 作为正文）
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
@@ -434,7 +512,7 @@ jobs:
   # ============================================================================
   # CD 自动部署（仅在打 vX.Y.Z tag 且配置了部署密钥时触发）
   # 镜像发布（release job）成功后，SSH 到生产服务器拉取新镜像并重启
-  # 采用双健康门禁：重启后验证 backend readiness 与 frontend health，失败则回滚并复验
+  # 采用三重健康门禁：重启后验证 backend readiness、edgegateway health 与 frontend health，失败则回滚并复验
   #
   # 必需 Secrets（在仓库 Settings → Secrets 配置）：
   #   DEPLOY_SSH_KEY    — 生产服务器 SSH 私钥（建议独立部署用户，仅授权 docker 命令）
@@ -464,7 +542,7 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       # SSH 到生产服务器后调用仓库内经过行为测试的部署脚本。
-      # 脚本负责预检、镜像拉取、滚动重启、双健康门禁及失败回滚验证。
+      # 脚本负责预检、镜像拉取、滚动重启、三重健康门禁及失败回滚验证。
       - name: SSH 部署（拉取镜像 + 重启 + 健康检查 + 失败回滚）
         uses: appleboy/ssh-action@v1
         with:

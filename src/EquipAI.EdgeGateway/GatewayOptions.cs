@@ -73,6 +73,11 @@ public class GatewayOptions
     public int BufferSize { get; set; } = 10000;
 
     /// <summary>
+    /// SQLite 断网缓冲数据库路径。生产 Compose 应将其指向 /data 持久化卷。
+    /// </summary>
+    public string BufferPath { get; set; } = "data/buffer.db";
+
+    /// <summary>
     /// 网关认证密钥（与后端 GATEWAY_AUTH_KEY 对应）。
     /// </summary>
     public string AuthKey { get; set; } = string.Empty;

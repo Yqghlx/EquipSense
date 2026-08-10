@@ -293,21 +293,22 @@ public class DashboardAccuracyIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// 跨时区关键场景：UTC 17:00 发生的告警在 Asia/Shanghai（UTC+8）时区下属于"次日"
-    /// 该告警应该被分到趋势图的"未来某天"（实际上是趋势窗口外的明天）
+    /// 跨时区关键场景：UTC 17:00 的告警在 Asia/Shanghai（UTC+8）应按本地日期分组
     ///
-    /// Why this matters：工业客户在 UTC+8 时区，凌晨 01:00 的告警如果按 UTC 分组会算到"昨天"，
-    /// 导致维护主管早上看 Dashboard 以为昨晚没出问题，实际可能漏掉关键告警。
+    /// Why this matters：工业客户在 UTC+8 时区，UTC 17:00 的告警属于本地次日 01:00；
+    /// 如果按 UTC 日期分组，维护主管看到的日报日期会偏移一天。
     /// </summary>
     [Fact]
-    public async Task GetStatsAsync_UTC17点告警在上海时区应归到次日()
+    public async Task GetStatsAsync_UTC17点告警按上海本地日期分组()
     {
         SetCurrentTenant(_tenantAId);
         var deviceId = Guid.NewGuid();
 
-        // 构造 UTC 今天 17:00 — 这个时间在上海时区是次日 01:00
-        var utcNow = DateTime.UtcNow;
-        var todayUtc17 = new DateTime(utcNow.Year, utcNow.Month, utcNow.Day, 17, 0, 0, DateTimeKind.Utc);
+        // 使用前一个 UTC 日的 17:00，保证样本始终落在最近 7 天内且不会成为未来时间。
+        var tz = TimeZoneInfo.FindSystemTimeZoneById("Asia/Shanghai");
+        var utcDate = DateTime.UtcNow.Date.AddDays(-1);
+        var eventUtc = new DateTime(utcDate.Year, utcDate.Month, utcDate.Day, 17, 0, 0, DateTimeKind.Utc);
+        var expectedLocalDate = TimeZoneInfo.ConvertTimeFromUtc(eventUtc, tz).Date;
 
         _db.Alerts.Add(new Alert
         {
@@ -318,15 +319,17 @@ public class DashboardAccuracyIntegrationTests : IDisposable
             Value = 100,
             Threshold = 80,
             Status = AlertStatus.Active,
-            OccurredAt = todayUtc17,
+            OccurredAt = eventUtc,
             AlertCode = $"ALT-XD-{Guid.NewGuid():N}".Substring(0, 20),
         });
         await _db.SaveChangesAsync();
 
         var stats = await _service.GetStatsAsync(_tenantAId);
 
-        // UTC 17:00 在上海时区是次日 01:00，超出趋势窗口的"今天"
-        stats.AlertTrend[6].Count.Should().Be(0, "UTC 17:00 在上海时区是次日 01:00，应算到明天，不出现在 7 天趋势中");
+        stats.AlertTrend.Single(t => t.Date == expectedLocalDate.ToString("yyyy-MM-dd")).Count
+            .Should().Be(1, "UTC 17:00 应按上海本地次日 01:00 所属日期分组");
+        stats.AlertTrend.Single(t => t.Date == eventUtc.ToString("yyyy-MM-dd")).Count
+            .Should().Be(0, "告警不应按 UTC 日期分组");
     }
 
     // =========================================================================

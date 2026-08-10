@@ -52,8 +52,10 @@ else
     "RABBITMQ_PASSWORD"
     "JWT_SECRET"
     "TOTP_ENCRYPTION_KEY"
+    "PII_ENCRYPTION_KEY"
     "AUTOMAPPER_LICENSE_KEY"
     "GATEWAY_AUTH_KEY"
+    "GATEWAY_TENANT_ID"
     "MQTT_USERNAME"
     "MQTT_PASSWORD"
     "SEED_ADMIN_PASSWORD"
@@ -103,9 +105,27 @@ else
     error "JWT_SECRET 长度不足 32 个字符"
   fi
 
+  # 限流参数由 Compose 传入应用配置；在重启服务前先校验，避免错误值把发布失败推迟到运行态。
+  for key in RATE_LIMITING_PERMIT_LIMIT RATE_LIMITING_AUTH_PERMIT_LIMIT RATE_LIMITING_TENANT_PERMIT_LIMIT; do
+    value="$(read_env_value "$key")"
+    if [ -n "$value" ] && ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+      error "$key 必须是大于 0 的整数"
+    fi
+  done
+
+  rate_limiting_window="$(read_env_value RATE_LIMITING_WINDOW)"
+  if [ -n "$rate_limiting_window" ] && ! [[ "$rate_limiting_window" =~ ^[0-9]{2}:[0-9]{2}:[0-9]{2}$ ]]; then
+    error "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"
+  fi
+
   totp_encryption_key="$(read_env_value TOTP_ENCRYPTION_KEY)"
   if [ -n "$totp_encryption_key" ] && [[ "$totp_encryption_key" != *"请修改"* ]] && ! [[ "$totp_encryption_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
     error "TOTP_ENCRYPTION_KEY 必须是 Base64 编码的 32 字节密钥"
+  fi
+
+  pii_encryption_key="$(read_env_value PII_ENCRYPTION_KEY)"
+  if [ -n "$pii_encryption_key" ] && [[ "$pii_encryption_key" != *"请修改"* ]] && ! [[ "$pii_encryption_key" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+    error "PII_ENCRYPTION_KEY 必须是 Base64 编码的 32 字节密钥"
   fi
 
   automapper_license_key="$(read_env_value AUTOMAPPER_LICENSE_KEY)"
@@ -124,6 +144,15 @@ else
     if printf '%s' "$gateway_auth_key" | LC_ALL=C grep -q '[^ -~]'; then
       error "GATEWAY_AUTH_KEY 必须只包含 ASCII 字符"
     fi
+  fi
+
+  gateway_tenant_id="$(read_env_value GATEWAY_TENANT_ID)"
+  if [ -n "$gateway_tenant_id" ] \
+    && [[ "$gateway_tenant_id" != *"请修改"* ]] \
+    && [[ "$gateway_tenant_id" != *"PLEASE_CHANGE"* ]] \
+    && [[ "$gateway_tenant_id" != *"CHANGE_ME"* ]] \
+    && ! [[ "$gateway_tenant_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+    error "GATEWAY_TENANT_ID 必须是有效的 UUID"
   fi
 
   rabbitmq_password="$(read_env_value RABBITMQ_PASSWORD)"
@@ -178,12 +207,14 @@ else
     "SEED_VIEWER_PASSWORD"
     "JWT_SECRET"
     "TOTP_ENCRYPTION_KEY"
+    "PII_ENCRYPTION_KEY"
     "GATEWAY_AUTH_KEY"
     "LLM_API_KEY"
     "SMTP_PASSWORD"
     "VAPID__PRIVATEKEY"
     "EVALUATION_INGESTION_API_KEY"
     "S3_SECRET_ACCESS_KEY"
+    "FILE_STORAGE_S3_SECRET_KEY"
   )
   seen_credential_keys=()
   seen_credential_values=()
@@ -206,6 +237,92 @@ else
   if [ -n "$frontend_url" ] && [[ "$frontend_url" != https://* ]]; then
     error "FRONTEND_URL 必须使用 HTTPS"
   fi
+
+  # Alertmanager 外部通知是可选能力，但一旦配置必须使用 HTTPS/HTTP URL，
+  # 避免启动后把告警投递到错误地址或因模板破坏导致通知服务失效。
+  alert_webhook_url="$(read_env_value ALERT_WEBHOOK_URL)"
+  if [ -n "$alert_webhook_url" ]; then
+    case "$alert_webhook_url" in
+      http://*|https://*)
+        ;;
+      *)
+        error "ALERT_WEBHOOK_URL 必须使用 http:// 或 https://"
+        ;;
+    esac
+    if [[ "$alert_webhook_url" == *$'\n'* ]] || [[ "$alert_webhook_url" == *$'\r'* ]]; then
+      error "ALERT_WEBHOOK_URL 含有不安全字符"
+    fi
+  fi
+
+  jaeger_span_storage_type="$(read_env_value JAEGER_SPAN_STORAGE_TYPE)"
+  if [ -n "$jaeger_span_storage_type" ] && ! [[ "$jaeger_span_storage_type" =~ ^(badger|memory|opensearch|elasticsearch|cassandra|grpc|blackhole)$ ]]; then
+    error "JAEGER_SPAN_STORAGE_TYPE 不是支持的 Jaeger 存储类型"
+  fi
+  if [ "${aspnet_environment:-Production}" = "Production" ] && [ "$jaeger_span_storage_type" = "memory" ]; then
+    error "生产环境禁止使用内存 Jaeger 存储，请改用 badger 或外部存储"
+  fi
+  jaeger_badger_ephemeral="$(read_env_value JAEGER_BADGER_EPHEMERAL)"
+  if [ -n "$jaeger_badger_ephemeral" ] && ! [[ "$jaeger_badger_ephemeral" =~ ^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|0|1)$ ]]; then
+    error "JAEGER_BADGER_EPHEMERAL 必须是 true 或 false"
+  fi
+  if [ "${aspnet_environment:-Production}" = "Production" ] \
+    && [ "$jaeger_span_storage_type" = "badger" ] \
+    && [[ "$jaeger_badger_ephemeral" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
+    error "生产环境 JAEGER_BADGER_EPHEMERAL 必须为 false"
+  fi
+
+  # 附件存储默认是本地卷；启用 S3 时必须在 Compose 注入完整且安全的对象存储配置。
+  # 自定义端点不能使用 HTTP，避免附件凭据和工单文件在网络中明文传输。
+  file_storage_provider="$(read_env_value FILE_STORAGE_PROVIDER)"
+  file_storage_provider="$(printf '%s' "${file_storage_provider:-Local}" | tr '[:lower:]' '[:upper:]')"
+  case "$file_storage_provider" in
+    LOCAL)
+      ;;
+    S3)
+      file_storage_bucket="$(read_env_value FILE_STORAGE_S3_BUCKET)"
+      file_storage_region="$(read_env_value FILE_STORAGE_S3_REGION)"
+      file_storage_endpoint="$(read_env_value FILE_STORAGE_S3_ENDPOINT)"
+      file_storage_access_key="$(read_env_value FILE_STORAGE_S3_ACCESS_KEY)"
+      file_storage_secret_key="$(read_env_value FILE_STORAGE_S3_SECRET_KEY)"
+      file_storage_prefix="$(read_env_value FILE_STORAGE_S3_KEY_PREFIX)"
+
+      if [ -z "$file_storage_bucket" ]; then
+        error "FILE_STORAGE_PROVIDER=S3 时必须配置 FILE_STORAGE_S3_BUCKET"
+      elif [[ "$file_storage_bucket" == */* || "$file_storage_bucket" == *\\* || "$file_storage_bucket" =~ [[:space:]] ]]; then
+        error "FILE_STORAGE_S3_BUCKET 不能包含路径分隔符或空白字符"
+      fi
+      if [ -z "$file_storage_region" ]; then
+        error "FILE_STORAGE_PROVIDER=S3 时必须配置 FILE_STORAGE_S3_REGION"
+      fi
+      if [ -n "$file_storage_endpoint" ]; then
+        case "$file_storage_endpoint" in
+          https://*)
+            ;;
+          http://*)
+            error "生产 FILE_STORAGE_S3_ENDPOINT 必须使用 HTTPS"
+            ;;
+          *)
+            error "FILE_STORAGE_S3_ENDPOINT 必须使用 http:// 或 https://"
+            ;;
+        esac
+        if is_placeholder_credential "$file_storage_access_key" || is_placeholder_credential "$file_storage_secret_key"; then
+          error "配置 FILE_STORAGE_S3_ENDPOINT 时必须配置有效的 FILE_STORAGE_S3_ACCESS_KEY 和 FILE_STORAGE_S3_SECRET_KEY"
+        fi
+      elif [ -n "$file_storage_access_key" ] || [ -n "$file_storage_secret_key" ]; then
+        if [ -z "$file_storage_access_key" ] || [ -z "$file_storage_secret_key" ]; then
+          error "FILE_STORAGE_S3_ACCESS_KEY 和 FILE_STORAGE_S3_SECRET_KEY 必须同时配置"
+        fi
+      fi
+      if [ -n "$file_storage_prefix" ]; then
+        if [[ "$file_storage_prefix" == /* || "$file_storage_prefix" == */* ]] || [[ "$file_storage_prefix" == *\\* || "$file_storage_prefix" == *//* || "$file_storage_prefix" == . || "$file_storage_prefix" == .. || "$file_storage_prefix" == */../* ]]; then
+          error "FILE_STORAGE_S3_KEY_PREFIX 必须是安全的相对对象键前缀"
+        fi
+      fi
+      ;;
+    *)
+      error "FILE_STORAGE_PROVIDER 仅支持 Local 或 S3"
+      ;;
+  esac
 
   s3_sync="$(read_env_value S3_SYNC)"
   if [[ "$s3_sync" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
@@ -249,6 +366,7 @@ else
       "prometheus.yml"
       "prometheus/rules.yml"
       "alertmanager.yml"
+      "alertmanager-entrypoint.sh"
       "grafana/provisioning/datasources/prometheus.yml"
       "grafana/provisioning/dashboards/dashboard.yml"
     )

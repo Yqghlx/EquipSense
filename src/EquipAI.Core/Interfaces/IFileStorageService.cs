@@ -1,8 +1,8 @@
 namespace EquipAI.Core.Interfaces;
 
 /// <summary>
-/// 文件存储服务接口 — 抽象文件上传/下载/删除操作
-/// 当前实现为本地文件系统，后续可切换到 S3/MinIO
+/// 文件存储服务接口 — 抽象文件上传/下载/删除操作。
+/// 默认实现为本地文件系统，也支持通过配置切换到 S3 兼容对象存储。
 /// </summary>
 public interface IFileStorageService
 {
