@@ -19,6 +19,13 @@ git clone <仓库地址> && cd EquipSense
 cp docker/.env.example docker/.env
 ```
 
+为减少手工遗漏，可先运行本地凭据初始化工具。它只生成数据库、缓存、消息队列、MQTT、种子账户、JWT、MFA、PII、网关和监控所需的随机值；不会生成许可证、真实租户 UUID、生产域名或任何证书。命令在这些人工配置尚未完成时返回非零是预期行为，生成的密钥仍会安全保留在权限为 `600` 的 `docker/.env` 中，随后应纳入密钥管理系统并完成备份恢复策略：
+
+```bash
+cd docker
+./bootstrap-production-secrets.sh
+```
+
 编辑 `docker/.env`，填写以下必需配置：
 
 ```env
@@ -62,8 +69,8 @@ DOMAIN=your-domain.com
 
 ```bash
 cd docker
-./setup.sh   # 首次运行会创建 .env 并因占位凭据返回非零，这是预期行为
-nano .env    # 填写所有必填凭据
+./setup.sh   # 占位凭据或证书未就绪时返回非零，这是预期行为
+nano .env    # 填写许可证、真实租户、域名和其它部署专属配置
 ./setup.sh   # 生产环境不会自动生成自签名证书；配置通过后会创建/校验 MQTT 密码文件
 cd ..
 ```
@@ -71,6 +78,8 @@ cd ..
 开发/测试只启动基础设施时使用 `docker-compose.dev.yml`；如需测试完整 Compose 的 TLS 挂载链路，可按“TLS 证书配置”中的自签名方案单独运行 `generate-cert.sh` 和 `generate-mqtt-cert.sh`，但不得将其用于生产环境。
 
 `setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，避免仅打印 warning 后误报配置成功。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+
+`bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；它通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
 
 > 注意：Docker Compose 默认只从当前工作目录加载 `.env`。本项目配置文件位于 `docker/.env`，因此从仓库根目录执行 Compose 命令时必须带 `--env-file docker/.env`；本手册的生产命令已统一显式指定该参数。
 

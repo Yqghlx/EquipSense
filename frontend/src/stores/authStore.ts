@@ -15,6 +15,7 @@
 import { create } from 'zustand';
 import type { UserInfo } from '../types';
 import { clearTokenExpiry } from '../lib/tokenExpiry';
+import { queryClient } from '../lib/queryClient';
 
 interface AuthState {
   /** 当前登录用户（不含 token，token 在 HttpOnly Cookie 里） */
@@ -61,16 +62,23 @@ function loadFromStorageSync(): {
   return { user: null, isAuthenticated: false, isSessionReady: false };
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   ...loadFromStorageSync(),
 
   setAuth: (user) => {
+    const currentUser = get().user;
+    if (currentUser && (currentUser.id !== user.id || currentUser.tenantId !== user.tenantId)) {
+      // 同一 SPA 切换身份时，query key 不能替代缓存清理；先清除旧租户/用户数据再写入新会话。
+      queryClient.clear();
+    }
     sessionStorage.setItem('user', JSON.stringify(user));
     set({ user, isAuthenticated: true, isSessionReady: true });
   },
 
   logout: () => {
     sessionStorage.removeItem('user');
+    // 退出时同步清空内存查询缓存，避免下一位用户在 staleTime 内看到旧会话数据。
+    queryClient.clear();
     // 清除主动刷新用的过期时间戳：登出后不再调度刷新，且避免残留值在异常路径下误导下次会话
     clearTokenExpiry();
     set({ user: null, isAuthenticated: false, isSessionReady: true });
@@ -82,12 +90,18 @@ export const useAuthStore = create<AuthState>((set) => ({
     if (userStr) {
       try {
         const user = JSON.parse(userStr) as UserInfo;
+        const currentUser = get().user;
+        if (currentUser && (currentUser.id !== user.id || currentUser.tenantId !== user.tenantId)) {
+          queryClient.clear();
+        }
         set({ user, isAuthenticated: true });
       } catch {
         sessionStorage.removeItem('user');
+        if (get().user) queryClient.clear();
         set({ user: null, isAuthenticated: false });
       }
     } else {
+      if (get().user) queryClient.clear();
       set({ user: null, isAuthenticated: false });
     }
   },

@@ -97,6 +97,9 @@ S1 (总览图) + S2 (术语表) + S3 (执行摘要) + S4 (时序图)
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-11 v3.39 | 收口 PWA 会话边界：认证 API 保持 `NetworkOnly`；自定义 `injectManifest` Service Worker 实际处理租户/用户归属的 Background Sync，并在同步前校验 `/auth/me`；页面会话恢复前清理旧 `api-cache`，登出/切换用户同步清空 TanStack Query 缓存，旧会话同步通过 `AbortController` 中止；补充 Hook、Service Worker 与生产脚本回归测试。 |
+| 2026-08-11 v3.38 | 修复 IndexedDB 离线队列跨会话/跨租户同步风险：条目绑定 `tenantId:userId`，所有读取、删除、重试和同步按归属键隔离；v1 无归属条目在数据库升级时安全清理；新增 Hook 与生产脚本回归测试。 |
+| 2026-08-11 v3.37 | 修复 PWA Service Worker 将认证 API 放入共享 `api-cache` 的多租户数据泄露风险；`/api/v1/` 改为 `NetworkOnly`，保留静态资源缓存和 IndexedDB 离线操作队列，并新增生产脚本契约测试。 |
 | 2026-08-11 v3.36 | 所有 Refresh Token 签发/轮换路径（正常登录、MFA 登录、注册自动登录、刷新）统一使用用户级分布式会话锁；锁不可用时 fail-closed，新增登录锁回归测试；后端单元测试增至 1298 个。 |
 | 2026-08-11 v3.35 | 刷新端点支持带 JSON Content-Type 的空请求体，Cookie-only 会话续期集成回归通过；后端集成测试增至 163 个，真实 RabbitMQ 场景 163/163 通过。 |
 | 2026-08-11 v3.34 | 刷新令牌流程加入用户级分布式锁，并在锁内重新读取令牌状态；锁不可用时拒绝继续轮换，新增认证并发一致性回归测试；后端单元测试增至 1296 个，真实 RabbitMQ 集成测试 162/162 通过。 |

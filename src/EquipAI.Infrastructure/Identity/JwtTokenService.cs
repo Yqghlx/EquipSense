@@ -63,11 +63,13 @@ public class JwtTokenService
 
     /// <summary>
     /// 为指定用户生成 JWT 访问令牌
-    /// 包含 Claims：sub（用户ID）、tenant_id、role、username、token_version、jti
+    /// 包含 Claims：sub（用户ID）、tenant_id、role、username、token_version、jti；
+    /// 认证会话还会写入 sid，用于登出时只吊销当前设备会话。
     /// </summary>
     /// <param name="user">目标用户实体</param>
+    /// <param name="sessionId">认证会话 ID；内部调用传入，兼容旧调用方时可为空</param>
     /// <returns>签发后的 JWT 字符串</returns>
-    public string GenerateAccessToken(User user)
+    public string GenerateAccessToken(User user, string? sessionId = null)
     {
         var secret = _configuration[JwtSettingsKeys.Secret]
             ?? throw new InvalidOperationException("JWT 密钥未配置，请在 appsettings 中设置 Jwt:Secret");
@@ -86,6 +88,11 @@ public class JwtTokenService
             new("token_version", user.TokenVersion.ToString()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            claims.Add(new Claim("sid", sessionId));
+        }
 
         var issuer = _configuration[JwtSettingsKeys.Issuer] ?? "EquipAI";
         var audience = _configuration[JwtSettingsKeys.Audience] ?? "EquipAI";

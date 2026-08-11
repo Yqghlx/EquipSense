@@ -862,13 +862,12 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
+          // 当前生产实现不缓存认证 API，避免 HttpOnly Cookie 场景下跨会话串读。
           {
-            urlPattern: /^https:\/\/.*\/api\/v1\/.*/i,
-            handler: 'NetworkFirst',
+            urlPattern: /\/api\/v1\//i,
+            handler: 'NetworkOnly',
             options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 5 },
-              cacheableResponse: { statuses: [0, 200] },
+              fetchOptions: { credentials: 'include' as RequestCredentials },
             },
           },
         ],

@@ -2025,7 +2025,10 @@ api.interceptors.response.use(
 
 ### 13.8 PWA
 
-离线缓存 + 推送通知 + 添加到主屏幕 + 拍照上传 + 离线工单操作队列化（上线后自动同步）。
+静态资源离线缓存 + 推送通知 + 添加到主屏幕 + 拍照上传 + 离线工单操作队列化（上线后自动同步）。
+Service Worker 使用 `injectManifest`，由 `frontend/src/sw.ts` 同时管理 App Shell、认证 API 和 Background Sync：认证 API 使用 NetworkOnly，避免 Cache Storage 在 HttpOnly Cookie 场景下跨用户或跨租户复用响应；激活时及页面恢复会话前清理历史 `api-cache`。
+离线操作条目必须绑定 `tenantId:userId`，查询、删除、重试和同步均按当前会话隔离；Background Sync 执行前通过 `/auth/me` 校验 Cookie 归属，页面会话切换通过 AbortController 中止旧同步。
+登出或切换用户时清空 TanStack Query 缓存，避免 staleTime 内显示上一会话的服务端数据；无法归属的旧版本条目升级时安全清理。
 
 ---
 

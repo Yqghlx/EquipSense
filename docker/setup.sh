@@ -11,6 +11,7 @@
 #
 # 使用方式：
 #   cd docker && ./setup.sh
+#   cd docker && ./bootstrap-production-secrets.sh  # 仅补齐本地可随机生成的凭据
 #
 # 前置条件：
 #   - 已安装 Docker 和 Docker Compose
@@ -146,6 +147,7 @@ fi
 
 if ! bash "${SCRIPT_DIR}/validate-env.sh" "${ENV_FILE}"; then
     error "环境变量校验未通过，请编辑 ${ENV_FILE} 后重新运行 setup.sh"
+    warn "如仅缺少本地随机凭据，可先运行 ${SCRIPT_DIR}/bootstrap-production-secrets.sh；许可证、租户 UUID、域名和证书仍需人工配置"
     exit 1
 fi
 
@@ -252,6 +254,7 @@ REQUIRED_FILES=(
     "docker-compose.yml|Docker Compose 主配置"
     "docker-compose.dev.yml|Docker Compose 开发环境配置"
     "validate-env.sh|环境变量校验器"
+    "bootstrap-production-secrets.sh|生产本地凭据初始化工具"
     "mosquitto.conf|Mosquitto 开发环境配置"
     "mosquitto.prod.conf|Mosquitto 生产环境配置"
     "mqtt-certs/ca.crt|MQTT CA 证书"
@@ -291,6 +294,7 @@ EXECUTABLE_SCRIPTS=(
     "generate-cert.sh"
     "generate-mqtt-cert.sh"
     "setup-mosquitto.sh"
+    "bootstrap-production-secrets.sh"
     "setup.sh"
     "entrypoint.sh"
     "backup.sh"

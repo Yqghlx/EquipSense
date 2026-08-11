@@ -165,7 +165,16 @@ test.describe('01-登录功能', () => {
     ).catch(() => null);
     await page.goto(`${BASE_URL}/devices`, { waitUntil: 'domcontentloaded' });
     const refreshResponse = await refreshResponsePromise;
-    expect(refreshResponse?.ok()).toBeTruthy();
+    // 刷新失败时必须保留 HTTP 状态和有限响应体，否则并发会话、Cookie
+    // 作用域或后端 Redis 状态异常都会被压缩成难以定位的布尔断言失败。
+    const refreshStatus = refreshResponse?.status() ?? '未捕获';
+    const refreshBody = refreshResponse
+      ? (await refreshResponse.text()).slice(0, 1000)
+      : '未捕获刷新响应';
+    expect(
+      refreshResponse?.ok(),
+      `刷新请求失败：HTTP ${refreshStatus}，响应：${refreshBody}`,
+    ).toBeTruthy();
 
     // 刷新成功后 Cookie 会被后端重新写入，/auth/me 应恢复为 200，且前端仍在业务页。
     await expect(page).toHaveURL(/devices/);

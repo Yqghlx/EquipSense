@@ -905,6 +905,8 @@ export type OfflineOperationType =
 export interface PendingOperation {
   /** 操作唯一标识（UUID） */
   id: string;
+  /** 队列归属键（tenantId:userId），用于防止不同会话互相同步离线操作 */
+  ownerKey: string;
   /** 操作类型 */
   type: OfflineOperationType;
   /** 请求 URL */

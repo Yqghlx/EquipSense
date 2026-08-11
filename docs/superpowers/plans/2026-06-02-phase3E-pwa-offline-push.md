@@ -4,7 +4,7 @@
 
 **Goal:** 为 EquipSense 添加完整的 PWA 离线能力和 Web Push 推送通知。离线场景下支持工单执行报告、审批操作和设备备注的编辑队列，网络恢复后自动同步；推送通知在浏览器未打开时也能触达用户。
 
-**Architecture:** 前端通过 vite-plugin-pwa + Workbox 实现 App Shell 预缓存和 API Stale-While-Revalidate 策略；IndexedDB (idb) 存储离线操作队列，Background Sync API 触发网络恢复同步；后端新增 PushSubscription 实体和 Web Push 服务（VAPID），与现有 SignalRNotificationService 集成。
+**Architecture:** 前端通过 vite-plugin-pwa + Workbox 的 `injectManifest` 模式实现 App Shell 预缓存；认证 API 使用 NetworkOnly，`frontend/src/sw.ts` 负责导航回退、旧 API 缓存清理和归属校验的 Background Sync；IndexedDB (idb) 存储离线操作队列，网络恢复时由页面或 Background Sync 触发同步；后端新增 PushSubscription 实体和 Web Push 服务（VAPID），与现有 SignalRNotificationService 集成。
 
 **Tech Stack:** vite-plugin-pwa (Workbox)、idb (IndexedDB)、Web Push API、Web Push (C# NuGet)、.NET 8、EF Core 8、PostgreSQL、React 19 + TanStack Query + shadcn/ui
 
@@ -53,7 +53,9 @@ src/EquipAI.WebAPI/
 
 ### Task 1: vite-plugin-pwa 配置增强 + Service Worker + 离线回退
 
-**目标:** 完善现有 vite-plugin-pwa 配置，添加 App Shell 预缓存、API Stale-While-Revalidate 策略、静态资源 Cache-First、离线回退页面和 A2HS 提示增强。
+**目标:** 完善现有 vite-plugin-pwa 配置，添加 App Shell 预缓存、认证 API NetworkOnly、静态资源 Cache-First、离线回退页面和 A2HS 提示增强。
+
+> 当前实现说明（2026-08-11）：Service Worker 使用 `strategies: 'injectManifest'`，入口为 `frontend/src/sw.ts`。本计划下方早期的 `workbox.runtimeCaching` 示例仅作历史设计参考，不代表可直接复制的最终配置。
 
 **Files:**
 - Modify: `frontend/vite.config.ts`
@@ -160,15 +162,12 @@ VitePWA({
     navigateFallback: '/offline.html',
     navigateFallbackDenylist: [/^\/api/, /^\/hubs/],
     runtimeCaching: [
-      // API 数据: Stale-While-Revalidate（优先缓存，后台更新）
+      // 认证 API 不缓存：Cache Storage 的键不包含 HttpOnly Cookie，避免跨用户/租户串读。
       {
-        urlPattern: /^https?:\/\/.*\/api\/v1\/.*/i,
-        handler: 'StaleWhileRevalidate',
+        // Workbox 正则匹配完整 URL，不能使用 ^/api 锚定路径。
+        urlPattern: /\/api\/v1\//i,
+        handler: 'NetworkOnly',
         options: {
-          cacheName: 'api-cache',
-          expiration: { maxEntries: 200, maxAgeSeconds: 60 * 10 },
-          cacheableResponse: { statuses: [0, 200] },
-          // 带上认证头
           fetchOptions: { credentials: 'include' as RequestCredentials },
         },
       },
@@ -430,6 +429,8 @@ git commit -m "feat(pwa): vite-plugin-pwa 配置增强 + 离线回退页面 + �
 ### Task 2: 离线操作队列 (IndexedDB + Background Sync)
 
 **目标:** 实现基于 IndexedDB 的离线操作队列，支持工单完成、审批和设备备注的离线存储，网络恢复后通过 Background Sync API 自动同步，并处理冲突检测。
+
+> 生产安全修订（2026-08-11）：本计划早期示例保留了 v1 的无归属队列接口，不能直接作为当前实现依据。现行代码使用 IndexedDB v2；每条操作绑定 `tenantId:userId`，所有查询、删除、重试和同步都要求归属键，升级时清理无法安全归属的 v1 条目。认证 API 仍保持 `NetworkOnly`，只缓存静态资源。自定义 `src/sw.ts` 监听 Background Sync，先通过 `/auth/me` 校验 Cookie 归属；页面 Hook 在会话变化时通过 AbortController 中止旧同步。
 
 **Files:**
 - Create: `frontend/src/lib/offline.ts`

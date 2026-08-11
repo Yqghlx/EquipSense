@@ -27,6 +27,7 @@ vi.mock('../../../hooks/useOfflineQueue', () => ({
 /** 构造模拟的 PendingOperation 数据 */
 const mockPendingOp: PendingOperation = {
   id: 'op-001',
+  ownerKey: 'tenant-001:user-001',
   type: 'work-order-complete',
   url: '/api/v1/workorders/wo-001/complete',
   method: 'POST',

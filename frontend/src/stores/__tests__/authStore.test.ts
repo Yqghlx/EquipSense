@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { useAuthStore } from '../authStore';
 import type { UserInfo } from '../../types';
+import { queryClient } from '../../lib/queryClient';
 
 /**
  * authStore 测试（v1.3.0 HttpOnly Cookie 迁移后）
@@ -14,6 +15,7 @@ import type { UserInfo } from '../../types';
 /** 模拟的 sessionStorage（jsdom 已提供，但每个测试前需清空） */
 beforeEach(() => {
   sessionStorage.clear();
+  queryCacheClearSpy.mockClear();
   // 重置 store 到初始状态
   useAuthStore.setState({
     user: null,
@@ -34,6 +36,12 @@ const mockUser: UserInfo = {
   mustChangePassword: false,
   mfaEnabled: false,
 };
+
+const queryCacheClearSpy = vi.spyOn(queryClient, 'clear');
+
+afterAll(() => {
+  queryCacheClearSpy.mockRestore();
+});
 
 describe('authStore', () => {
   describe('初始状态', () => {
@@ -105,6 +113,38 @@ describe('authStore', () => {
       useAuthStore.getState().logout();
 
       expect(sessionStorage.getItem('token_expires_at_ms')).toBeNull();
+    });
+
+    it('调用 logout 后应清空 React Query 缓存，防止下一用户看到上一用户数据', () => {
+      useAuthStore.getState().setAuth(mockUser);
+
+      useAuthStore.getState().logout();
+
+      expect(queryCacheClearSpy).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('setAuth（会话身份变化）', () => {
+    it('切换到不同用户或租户时应清空旧 React Query 缓存', () => {
+      useAuthStore.getState().setAuth(mockUser);
+
+      useAuthStore.getState().setAuth({
+        ...mockUser,
+        id: 'user-002',
+        tenantId: 'tenant-002',
+        username: 'operator',
+      });
+
+      expect(queryCacheClearSpy).toHaveBeenCalledOnce();
+    });
+
+    it('同一用户刷新会话时不应清空 React Query 缓存', () => {
+      useAuthStore.getState().setAuth(mockUser);
+      queryCacheClearSpy.mockClear();
+
+      useAuthStore.getState().setAuth({ ...mockUser, displayName: '更新后的名称' });
+
+      expect(queryCacheClearSpy).not.toHaveBeenCalled();
     });
   });
 

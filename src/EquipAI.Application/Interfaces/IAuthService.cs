@@ -23,10 +23,11 @@ public interface IAuthService
     Task<AuthResponse> RefreshTokenAsync(string refreshToken);
 
     /// <summary>
-    /// 用户登出，使当前 Token 失效
+    /// 用户登出；传入会话 ID 时只吊销当前设备，否则全局吊销
     /// </summary>
     /// <param name="userId">用户 ID</param>
-    Task LogoutAsync(Guid userId);
+    /// <param name="sessionId">当前认证会话 ID；旧客户端未提供时执行全局吊销</param>
+    Task LogoutAsync(Guid userId, string? sessionId = null);
 
     /// <summary>
     /// 修改密码

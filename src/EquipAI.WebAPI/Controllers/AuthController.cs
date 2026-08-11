@@ -134,7 +134,8 @@ public class AuthController : ControllerBase
 
         if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var userId))
         {
-            await _authService.LogoutAsync(userId);
+            var sessionId = User.FindFirst("sid")?.Value;
+            await _authService.LogoutAsync(userId, sessionId);
         }
 
         // 清除认证 Cookie（无论登出是否成功都清除，避免残留）

@@ -142,6 +142,16 @@ Production 镜像中执行默认 442 个业务 E2E；当前代码保留 3 个条
 SMOKE_RUN_E2E=true bash tests/scripts/production-runtime-smoke.sh
 ```
 
+定位 Production E2E 的并发或单个用例问题时，可以复用同一套隔离容器并缩小执行范围；
+参数通过数组传递，不会经过 shell 二次解释：
+
+```bash
+SMOKE_RUN_E2E=true \
+SMOKE_E2E_WORKERS=1 \
+SMOKE_E2E_GREP='Access Token 过期自动刷新' \
+bash tests/scripts/production-runtime-smoke.sh
+```
+
 Smoke 使用临时随机凭据及临时证书，不替代正式许可证、正式域名证书、现场协议、容量基线和
 真实生产数据恢复演练；版本发布 job 必须先通过该启动门禁及 Production 全量 E2E。
 

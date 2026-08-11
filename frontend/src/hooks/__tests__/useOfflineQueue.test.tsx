@@ -5,8 +5,24 @@ import type { ReactNode } from 'react';
 import { useOfflineQueue } from '../useOfflineQueue';
 import type { PendingOperation, SyncResult } from '../../types';
 
+const { mockAuthState, mockUseAuthStore } = vi.hoisted(() => {
+  const state = {
+    user: {
+      id: 'user-001',
+      tenantId: 'tenant-001',
+    } as { id: string; tenantId: string } | null,
+  };
+  const store = Object.assign(
+    (selector: (currentState: typeof state) => unknown) => selector(state),
+    { getState: () => state },
+  );
+  return { mockAuthState: state, mockUseAuthStore: store };
+});
+
 // Mock 离线队列模块
 vi.mock('../../lib/offline', () => ({
+  getOfflineOwnerKey: (user: { id?: string; tenantId?: string } | null) =>
+    user?.tenantId && user.id ? `${user.tenantId}:${user.id}` : null,
   offlineQueue: {
     count: vi.fn().mockResolvedValue(0),
     add: vi.fn().mockResolvedValue(undefined),
@@ -22,12 +38,16 @@ vi.mock('../useOfflineStatus', () => ({
   useOfflineStatus: vi.fn(() => ({ isOnline: true, isOffline: false })),
 }));
 
+// Mock 认证状态，验证离线队列始终绑定到当前用户和租户。
+vi.mock('../../stores/authStore', () => ({ useAuthStore: mockUseAuthStore }));
+
 // 需要在 mock 之后导入，以获取被 mock 的版本
 import { offlineQueue } from '../../lib/offline';
 import { useOfflineStatus } from '../useOfflineStatus';
 
 const mockedQueue = vi.mocked(offlineQueue);
 const mockedOfflineStatus = vi.mocked(useOfflineStatus);
+const currentOwnerKey = 'tenant-001:user-001';
 
 /** 创建 QueryClient 包装器，用于 hook 测试 */
 const createWrapper = () => {
@@ -42,6 +62,7 @@ const createWrapper = () => {
 /** 待处理操作模拟数据 */
 const mockOperation: PendingOperation = {
   id: 'op-001',
+  ownerKey: currentOwnerKey,
   type: 'work-order-complete',
   url: '/work-orders/wo-001',
   method: 'PUT',
@@ -53,6 +74,7 @@ const mockOperation: PendingOperation = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAuthState.user = { id: 'user-001', tenantId: 'tenant-001' };
   // 重置网络状态 mock 为在线
   mockedOfflineStatus.mockReturnValue({ isOnline: true, isOffline: false, lastChangedAt: Date.now() });
 });
@@ -69,7 +91,7 @@ describe('useOfflineQueue — 初始状态', () => {
     });
 
     await waitFor(() => expect(result.current.pendingCount).toBe(3));
-    expect(mockedQueue.count).toHaveBeenCalled();
+    expect(mockedQueue.count).toHaveBeenCalledWith(currentOwnerKey);
   });
 
   it('初始同步状态应为 false', async () => {
@@ -117,13 +139,17 @@ describe('useOfflineQueue — enqueue', () => {
     });
 
     expect(mockedQueue.add).toHaveBeenCalledWith({
+      ownerKey: currentOwnerKey,
       type: 'work-order-complete',
       url: '/work-orders/wo-001',
       method: 'PUT',
       body: JSON.stringify({ status: 'Completed' }),
     });
     // 在线时应触发 sync，而不是 registerBackgroundSync
-    expect(mockedQueue.sync).toHaveBeenCalled();
+    expect(mockedQueue.sync).toHaveBeenCalledWith(
+      currentOwnerKey,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(mockedQueue.registerBackgroundSync).not.toHaveBeenCalled();
   });
 
@@ -143,13 +169,14 @@ describe('useOfflineQueue — enqueue', () => {
     });
 
     expect(mockedQueue.add).toHaveBeenCalledWith({
+      ownerKey: currentOwnerKey,
       type: 'work-order-complete',
       url: '/work-orders',
       method: 'POST',
       body: JSON.stringify({ title: '新建工单' }),
     });
     // 离线时应调用 registerBackgroundSync，而不是 sync
-    expect(mockedQueue.registerBackgroundSync).toHaveBeenCalled();
+    expect(mockedQueue.registerBackgroundSync).toHaveBeenCalledWith(currentOwnerKey);
     expect(mockedQueue.sync).not.toHaveBeenCalled();
   });
 });
@@ -179,6 +206,10 @@ describe('useOfflineQueue — syncNow', () => {
     expect(returned).toEqual(syncResult);
     expect(result.current.lastSyncResult).toEqual(syncResult);
     expect(result.current.isSyncing).toBe(false);
+    expect(mockedQueue.sync).toHaveBeenCalledWith(
+      currentOwnerKey,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('同步期间 isSyncing 应为 true', async () => {
@@ -230,6 +261,44 @@ describe('useOfflineQueue — syncNow', () => {
 
     // finally 块确保 isSyncing 恢复
     expect(result.current.isSyncing).toBe(false);
+  });
+
+  it('会话切换时应中止旧同步并丢弃旧会话结果', async () => {
+    let resolveSync: (value: SyncResult) => void;
+    const syncPromise = new Promise<SyncResult>((resolve) => {
+      resolveSync = resolve;
+    });
+    mockedQueue.sync.mockReturnValueOnce(syncPromise);
+
+    const { result, rerender } = renderHook(() => useOfflineQueue(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      void result.current.syncNow();
+    });
+
+    await waitFor(() => {
+      expect(mockedQueue.sync).toHaveBeenCalledWith(
+        currentOwnerKey,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+    expect(result.current.isSyncing).toBe(true);
+    const oldSessionSignal = (mockedQueue.sync.mock.calls[0][1] as { signal: AbortSignal }).signal;
+
+    mockAuthState.user = { id: 'user-002', tenantId: 'tenant-002' };
+    rerender();
+
+    expect(oldSessionSignal.aborted).toBe(true);
+
+    await act(async () => {
+      resolveSync!({ succeeded: ['op-001'], conflicts: [], failed: [] });
+    });
+
+    // 旧会话的结果不能更新当前用户的查询结果。
+    expect(result.current.lastSyncResult).toBeNull();
+    await waitFor(() => expect(result.current.isSyncing).toBe(false));
   });
 
   it('有成功同步项时应刷新缓存', async () => {
@@ -308,7 +377,7 @@ describe('useOfflineQueue — getPending', () => {
     });
 
     expect(pending).toEqual([mockOperation]);
-    expect(mockedQueue.getAll).toHaveBeenCalled();
+    expect(mockedQueue.getAll).toHaveBeenCalledWith(currentOwnerKey);
   });
 
   it('无待处理操作时应返回空数组', async () => {
@@ -343,9 +412,9 @@ describe('useOfflineQueue — removePending', () => {
       await result.current.removePending('op-001');
     });
 
-    expect(mockedQueue.remove).toHaveBeenCalledWith('op-001');
+    expect(mockedQueue.remove).toHaveBeenCalledWith('op-001', currentOwnerKey);
     // remove 之后会调用 refreshCount
-    expect(mockedQueue.count).toHaveBeenCalled();
+    expect(mockedQueue.count).toHaveBeenCalledWith(currentOwnerKey);
   });
 });
 
@@ -372,5 +441,59 @@ describe('useOfflineQueue — refreshCount', () => {
     });
 
     expect(result.current.pendingCount).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 会话边界
+// ---------------------------------------------------------------------------
+describe('useOfflineQueue — 会话边界', () => {
+  it('旧会话的异步计数完成后不得覆盖新会话数量', async () => {
+    let resolveOldCount: (count: number) => void;
+    const oldCount = new Promise<number>((resolve) => {
+      resolveOldCount = resolve;
+    });
+    mockedQueue.count.mockReset();
+    mockedQueue.count
+      .mockImplementationOnce(() => oldCount)
+      .mockResolvedValue(7);
+
+    const { result, rerender } = renderHook(() => useOfflineQueue(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(mockedQueue.count).toHaveBeenCalledWith(currentOwnerKey));
+    mockAuthState.user = { id: 'user-002', tenantId: 'tenant-002' };
+    rerender();
+
+    await waitFor(() => expect(result.current.pendingCount).toBe(7));
+    await act(async () => {
+      resolveOldCount!(99);
+    });
+
+    expect(result.current.pendingCount).toBe(7);
+  });
+
+  it('未认证时不应读取、写入或同步任何离线操作', async () => {
+    mockAuthState.user = null;
+
+    const { result } = renderHook(() => useOfflineQueue(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.pendingCount).toBe(0));
+
+    await act(async () => {
+      await result.current.syncNow();
+    });
+
+    await expect(
+      result.current.enqueue('work-order-complete', '/work-orders/wo-001', 'PUT', {}),
+    ).rejects.toThrow('需要有效登录会话');
+
+    expect(mockedQueue.count).not.toHaveBeenCalled();
+    expect(mockedQueue.getAll).not.toHaveBeenCalled();
+    expect(mockedQueue.sync).not.toHaveBeenCalled();
+    expect(mockedQueue.add).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { queryClient } from './lib/queryClient';
 import { AuthLayout } from './components/layout/AuthLayout';
 import { AppLayout } from './components/layout/AppLayout';
@@ -9,11 +9,11 @@ import { NotificationToast } from './components/layout/NotificationToast';
 import { InstallPrompt } from './components/layout/InstallPrompt';
 import { OfflineIndicator } from './components/layout/OfflineIndicator';
 import { RootErrorBoundary } from './components/layout/RootErrorBoundary';
-import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 import useTokenRefresh from './hooks/useTokenRefresh';
 import { restoreSessionFromCookie } from './lib/authSession';
 import { persistTokenExpiry } from './lib/tokenExpiry';
+import { clearLegacyApiCache } from './lib/serviceWorkerCache';
 
 // 认证页面 — 首屏需要，直接导入
 import LoginPage from './pages/LoginPage';
@@ -57,10 +57,12 @@ function PageFallback() {
 }
 
 /** 首屏认证状态恢复中的回退界面，避免 AuthGuard 在 Cookie 尚未探活前误跳登录页。 */
-function SessionRestoreFallback() {
+function SessionRestoreFallback({ error = false }: { error?: boolean }) {
   return (
     <div className="flex min-h-screen items-center justify-center" role="status" aria-live="polite">
-      <div className="text-muted-foreground">正在恢复登录状态...</div>
+      <div className="text-muted-foreground">
+        {error ? '安全初始化失败，请刷新页面重试。' : '正在恢复登录状态...'}
+      </div>
     </div>
   );
 }
@@ -78,19 +80,34 @@ function AppRoutes() {
   const finishSessionRestore = useAuthStore((s) => s.finishSessionRestore);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const isSessionReady = useAuthStore((s) => s.isSessionReady);
+  const [sessionRestoreError, setSessionRestoreError] = useState(false);
 
-  /** 页面加载时优先恢复 sessionStorage，再探活 HttpOnly Cookie，支持新标签页和浏览器重启。 */
+  /**
+   * 页面加载时先清理旧认证 API 缓存，再恢复 sessionStorage/HttpOnly Cookie 会话。
+   *
+   * 旧 Service Worker 可能仍控制当前页面；在会话探活前等待 Cache Storage 清理，
+   * 确保旧版本缓存不会抢先返回上一位用户的数据。清理失败时停在安全初始化页。
+   */
   useEffect(() => {
-    loadFromStorage();
-
-    // 当前标签页已有用户信息时无需发起额外请求；新标签页则通过 Cookie 恢复。
-    if (useAuthStore.getState().isAuthenticated) {
-      finishSessionRestore();
-      return;
-    }
-
     let cancelled = false;
-    void restoreSessionFromCookie().then((session) => {
+    const restoreSession = async () => {
+      const cacheCleanupSucceeded = await clearLegacyApiCache();
+      if (cancelled) return;
+
+      if (!cacheCleanupSucceeded) {
+        setSessionRestoreError(true);
+        return;
+      }
+
+      loadFromStorage();
+
+      // 当前标签页已有用户信息时无需发起额外请求；新标签页则通过 Cookie 恢复。
+      if (useAuthStore.getState().isAuthenticated) {
+        finishSessionRestore();
+        return;
+      }
+
+      const session = await restoreSessionFromCookie();
       if (cancelled) return;
       if (session) {
         setAuth(session.user);
@@ -99,7 +116,9 @@ function AppRoutes() {
         }
       }
       finishSessionRestore();
-    });
+    };
+
+    void restoreSession();
 
     return () => {
       cancelled = true;
@@ -108,6 +127,10 @@ function AppRoutes() {
 
   /** Access Token 过期前 5 分钟自动刷新，避免用户操作中途 401 */
   useTokenRefresh();
+
+  if (sessionRestoreError) {
+    return <SessionRestoreFallback error />;
+  }
 
   if (!isSessionReady) {
     return <SessionRestoreFallback />;

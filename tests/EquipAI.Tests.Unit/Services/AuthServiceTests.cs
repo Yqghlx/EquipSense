@@ -271,6 +271,41 @@ public class AuthServiceTests : IAsyncDisposable
         result.UserInfo.Username.Should().Be("loginuser");
     }
 
+    /// <summary>
+    /// 同一用户可以同时在多个浏览器或设备登录；新会话不应把旧会话的刷新令牌误判为重放。
+    /// </summary>
+    [Fact]
+    public async Task LoginAsync_同一用户的多个会话_刷新令牌应彼此独立()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        const string password = "password123";
+        var user = CreateTestUser("multi-session-user", _tenantId, password);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var firstSession = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = password,
+        });
+        var secondSession = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = password,
+        });
+
+        var firstRefresh = await service.RefreshTokenAsync(firstSession.RefreshToken);
+        var secondRefresh = await service.RefreshTokenAsync(secondSession.RefreshToken);
+
+        firstRefresh.AccessToken.Should().NotBeNullOrWhiteSpace();
+        secondRefresh.AccessToken.Should().NotBeNullOrWhiteSpace();
+        firstRefresh.RefreshToken.Should().NotBe(secondSession.RefreshToken);
+        secondRefresh.RefreshToken.Should().NotBe(firstSession.RefreshToken);
+    }
+
     [Fact]
     public async Task LoginAsync_错误密码_应抛出UnauthorizedAccessException()
     {

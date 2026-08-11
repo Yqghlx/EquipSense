@@ -871,6 +871,7 @@ test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation() {
   local case_dir="$TEST_ROOT/bootstrap-production-secrets-duplicate"
   mkdir -p "$case_dir"
   cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
   cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
   printf '%s\n' 'PG_PASSWORD=second-value-that-must-not-be-used' >> "$case_dir/.env"
   chmod 600 "$case_dir/.env"
@@ -2474,6 +2475,10 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "/api/v1/gateways"
   assert_contains "$smoke_script" "jq -r"
   assert_contains "$smoke_script" "SMOKE_RUN_E2E"
+  assert_contains "$smoke_script" "SMOKE_E2E_WORKERS"
+  assert_contains "$smoke_script" "SMOKE_E2E_GREP"
+  assert_contains "$smoke_script" "--workers"
+  assert_contains "$smoke_script" "--grep"
   assert_contains "$smoke_script" 'MFA_BOOTSTRAP_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY"'
   assert_contains "$smoke_script" 'X-API-Key: $AUTH_MACHINE_API_KEY'
   assert_contains "$smoke_script" "smoke-ca"
@@ -2676,6 +2681,73 @@ test_production_internal_ports_bind_loopback_by_default() {
   assert_contains "$compose_content" '${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000'
 }
 
+test_frontend_service_worker_does_not_cache_authenticated_api() {
+  local vite_config
+  vite_config="$(cat "$PROJECT_ROOT/frontend/vite.config.ts")"
+  assert_contains "$vite_config" "strategies: 'injectManifest'"
+
+  local service_worker
+  service_worker="$(cat "$PROJECT_ROOT/frontend/src/sw.ts")"
+  assert_contains "$service_worker" "/\\/api\\/v1\\//i"
+  assert_contains "$service_worker" "new NetworkOnly"
+  [[ "$service_worker" != *"cacheName: 'api-cache'"* ]] || fail "认证 API 不得写入共享 api-cache"
+  [[ "$service_worker" != *"urlPattern: /^https?:\\/\\/.*\\/api\\/v1\\/.*"* ]] \
+    || fail "认证 API 不得使用宽泛的 StaleWhileRevalidate 路由"
+}
+
+test_frontend_offline_queue_is_session_scoped() {
+  local offline_module
+  offline_module="$(cat "$PROJECT_ROOT/frontend/src/lib/offline.ts")"
+  assert_contains "$offline_module" 'const DB_VERSION = 2'
+  assert_contains "$offline_module" "'by-owner': string"
+  assert_contains "$offline_module" "getAllFromIndex('pending-operations', 'by-owner', ownerKey)"
+  assert_contains "$offline_module" "countFromIndex('pending-operations', 'by-owner', ownerKey)"
+  assert_contains "$offline_module" 'async sync(ownerKey: string, options'
+  assert_contains "$offline_module" 'if (!ownerKey) return []'
+  [[ "$offline_module" != *'async getAll(): Promise<PendingOperation[]>'* ]] \
+    || fail "离线队列不得提供无归属的全局读取接口"
+
+  local offline_hook
+  offline_hook="$(cat "$PROJECT_ROOT/frontend/src/hooks/useOfflineQueue.ts")"
+  assert_contains "$offline_hook" 'getOfflineOwnerKey'
+  assert_contains "$offline_hook" 'offlineQueue.add({'
+  assert_contains "$offline_hook" 'ownerKey,'
+  assert_contains "$offline_hook" 'offlineQueue.sync(ownerKey,'
+  assert_contains "$offline_hook" 'offlineQueue.getAll(ownerKey)'
+}
+
+test_frontend_service_worker_handles_owner_scoped_background_sync() {
+  local vite_config
+  vite_config="$(cat "$PROJECT_ROOT/frontend/vite.config.ts")"
+  assert_contains "$vite_config" "strategies: 'injectManifest'"
+  assert_contains "$vite_config" "srcDir: 'src'"
+  assert_contains "$vite_config" "filename: 'sw.ts'"
+
+  local service_worker
+  service_worker="$(cat "$PROJECT_ROOT/frontend/src/sw.ts")"
+  assert_contains "$service_worker" "addEventListener('sync'"
+  assert_contains "$service_worker" 'offlineQueue.sync(ownerKey,'
+  assert_contains "$service_worker" 'LEGACY_API_CACHE_NAME'
+  assert_contains "$service_worker" "new NetworkOnly"
+}
+
+test_frontend_auth_session_clears_sensitive_state() {
+  local auth_store
+  auth_store="$(cat "$PROJECT_ROOT/frontend/src/stores/authStore.ts")"
+  assert_contains "$auth_store" 'queryClient.clear()'
+
+  local offline_hook
+  offline_hook="$(cat "$PROJECT_ROOT/frontend/src/hooks/useOfflineQueue.ts")"
+  assert_contains "$offline_hook" 'new AbortController()'
+  assert_contains "$offline_hook" 'controller.abort()'
+  assert_contains "$offline_hook" 'getOfflineOwnerKey(useAuthStore.getState().user) === ownerKey'
+
+  local app_source
+  app_source="$(cat "$PROJECT_ROOT/frontend/src/App.tsx")"
+  assert_contains "$app_source" 'const cacheCleanupSucceeded = await clearLegacyApiCache()'
+  assert_contains "$app_source" 'if (!cacheCleanupSucceeded)'
+}
+
 test_development_internal_ports_bind_loopback_by_default() {
   local compose_content
   compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.dev.yml")"
@@ -2778,6 +2850,10 @@ case "${1:-all}" in
     test_bluegreen_backend_health_check_has_timeout
     test_bluegreen_validates_target_tag
     test_bluegreen_state_files_are_atomic
+    test_frontend_service_worker_does_not_cache_authenticated_api
+    test_frontend_offline_queue_is_session_scoped
+    test_frontend_service_worker_handles_owner_scoped_background_sync
+    test_frontend_auth_session_clears_sensitive_state
     ;;
   all)
     test_validate_env_accepts_complete_config
@@ -2867,6 +2943,10 @@ case "${1:-all}" in
     test_bluegreen_keeps_edgegateway_on_target_backend
     test_bluegreen_colors_do_not_inherit_public_entry_ports
     test_production_internal_ports_bind_loopback_by_default
+    test_frontend_service_worker_does_not_cache_authenticated_api
+    test_frontend_offline_queue_is_session_scoped
+    test_frontend_service_worker_handles_owner_scoped_background_sync
+    test_frontend_auth_session_clears_sensitive_state
     test_development_internal_ports_bind_loopback_by_default
     ;;
   *)

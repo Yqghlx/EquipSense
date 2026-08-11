@@ -38,6 +38,27 @@ case "$SMOKE_RUN_E2E" in
     ;;
 esac
 
+# 生产 E2E 默认执行完整套件；调试时允许通过数组参数安全地缩小范围，
+# 不使用 eval，避免测试筛选表达式被 shell 二次解释。
+SMOKE_E2E_WORKERS="${SMOKE_E2E_WORKERS:-}"
+SMOKE_E2E_GREP="${SMOKE_E2E_GREP:-}"
+if [[ -n "$SMOKE_E2E_WORKERS" ]]; then
+  [[ "$SMOKE_E2E_WORKERS" =~ ^[1-9][0-9]*$ ]] \
+    || fatal "SMOKE_E2E_WORKERS 必须是正整数"
+  (( SMOKE_E2E_WORKERS <= 128 )) \
+    || fatal "SMOKE_E2E_WORKERS 不能超过 128"
+fi
+if [[ "$SMOKE_RUN_E2E" != true && ( -n "$SMOKE_E2E_WORKERS" || -n "$SMOKE_E2E_GREP" ) ]]; then
+  fatal "SMOKE_E2E_WORKERS/SMOKE_E2E_GREP 仅能与 SMOKE_RUN_E2E=true 一起使用"
+fi
+SMOKE_E2E_ARGS=()
+if [[ -n "$SMOKE_E2E_WORKERS" ]]; then
+  SMOKE_E2E_ARGS+=(--workers "$SMOKE_E2E_WORKERS")
+fi
+if [[ -n "$SMOKE_E2E_GREP" ]]; then
+  SMOKE_E2E_ARGS+=(--grep "$SMOKE_E2E_GREP")
+fi
+
 # 端口参数也属于外部输入；在校验阶段失败时同样清理已创建的临时目录。
 trap 'rm -rf -- "$SMOKE_ROOT"' EXIT
 
@@ -463,7 +484,7 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
     E2E_OPERATOR_PASSWORD="$SEED_OPERATOR_PASSWORD" \
     E2E_VIEWER_PASSWORD="$SEED_VIEWER_PASSWORD" \
     E2E_TENANT2_PASSWORD="$SEED_TENANT2_PASSWORD" \
-    npx --no-install playwright test e2e-comprehensive --reporter=list
+    npx --no-install playwright test e2e-comprehensive --reporter=list "${SMOKE_E2E_ARGS[@]}"
   ) || fatal "Production 镜像完整业务 E2E 失败"
   printf 'Production 镜像完整业务 E2E 通过。\n'
 fi
