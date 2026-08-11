@@ -38,12 +38,13 @@ public class OeeService
     /// <summary>
     /// 计算租户整体 OEE
     /// </summary>
-    /// <param name="tenantId">租户 ID（EF 全局过滤器已自动附加 WHERE TenantId = @tenantId）</param>
+    /// <param name="tenantId">目标租户 ID，作为 OEE 计算的显式数据边界</param>
     public virtual async Task<OeeResult> CalculateAsync(Guid tenantId, CancellationToken ct = default)
     {
         // 维度一：Availability — 瞬时在线设备占比（简化版，不是工业可用率）
-        // 注意：依赖 EF Core 全局查询过滤器自动加 WHERE TenantId = @current
-        var devices = await _db.Devices
+        // 显式 tenantId 与全局过滤器共同构成纵深隔离，支持后台或跨租户管理上下文复用。
+        var devices = await _db.UnfilteredSet<Core.Entities.Device>()
+            .Where(d => d.TenantId == tenantId)
             .Select(d => new { d.Status })
             .ToListAsync(ct);
         var totalDevices = devices.Count;
@@ -57,11 +58,13 @@ public class OeeService
         // 活跃告警定义 = Active（已触发未确认）+ Acknowledged（已确认未解决），与 DashboardStatsService 一致。
         //   修复历史：
         //     · v1.3.0：原代码用 IgnoreQueryFilters() 绕过租户过滤器，租户 A 的 Quality 被租户 B 污染 —
-        //       多租户安全漏洞；现使用默认过滤器严格限制在当前租户内。
+        //       多租户安全漏洞；现按显式 tenantId 查询，并保留全局过滤器作为请求上下文的第二道防线。
         //     · 本次：原代码只查 Active 漏算 Acknowledged，运维「确认」一条 Critical 告警后 Quality 立即虚高
         //       （误以为故障已解决，实际设备仍带病运行）——与 DashboardStatsService 活跃告警定义不对称。补齐 Active||Acknowledged。
-        var devicesWithCriticalAlert = await _db.Alerts
-            .Where(a => (a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged) && a.Severity == AlertSeverity.Critical)
+        var devicesWithCriticalAlert = await _db.UnfilteredSet<Core.Entities.Alert>()
+            .Where(a => a.TenantId == tenantId
+                     && (a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged)
+                     && a.Severity == AlertSeverity.Critical)
             .Select(a => a.DeviceId)
             .Distinct()
             .CountAsync(ct);
@@ -111,6 +114,7 @@ public class OeeService
         {
             // 取租户内所有 air_flow 遥测的最近 N 条均值
             var recentFlows = await _db.DeviceTelemetry
+                .IgnoreQueryFilters()
                 .Where(t => t.TenantId == tenantId && t.Metric == "air_flow" && t.Value != null)
                 .OrderByDescending(t => t.Time)
                 .Take(PerformanceSampleSize)

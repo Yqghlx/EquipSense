@@ -90,6 +90,30 @@ public class OeeServiceTests : IDisposable
         result.Quality.Should().Be(100.0, "他方告警不能影响本租户 Quality");
     }
 
+    [Fact]
+    public async Task CalculateAsync_应按显式租户参数筛选设备而不是只依赖当前上下文()
+    {
+        _db.Devices.AddRange(
+            new Device
+            {
+                Name = "当前上下文设备", Type = "compressor", DeviceCode = "DEV-CURRENT",
+                TenantId = _tenantId, Status = DeviceStatus.Offline,
+            },
+            new Device
+            {
+                Name = "目标租户设备", Type = "compressor", DeviceCode = "DEV-OTHER-EXPLICIT",
+                TenantId = _otherTenantId, Status = DeviceStatus.Online,
+            });
+        await _db.SaveChangesAsync();
+
+        var service = new OeeService(_db, LoggerFactory.Create(_ => { }).CreateLogger<OeeService>());
+        var result = await service.CalculateAsync(_otherTenantId, CancellationToken.None);
+
+        result.TotalDevices.Should().Be(1);
+        result.OnlineDevices.Should().Be(1);
+        result.Availability.Should().Be(100.0);
+    }
+
     // =========================================================================
     // P0 测试：Performance 无数据时不再返回 1.0
     // =========================================================================

@@ -116,6 +116,73 @@ public class LocalFileStorageServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetAsync_存储路径经过符号链接时_应拒绝访问()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"equipsense-storage-{Guid.NewGuid():N}");
+        var basePath = Path.Combine(root, "uploads");
+        var outsidePath = Path.Combine(root, "outside");
+        var tenantPath = Path.Combine(basePath, "tenant", "work-order");
+        Directory.CreateDirectory(tenantPath);
+        Directory.CreateDirectory(outsidePath);
+        await File.WriteAllTextAsync(Path.Combine(outsidePath, "secret.txt"), "secret");
+
+        try
+        {
+            try
+            {
+                File.CreateSymbolicLink(
+                    Path.Combine(tenantPath, "secret.txt"),
+                    Path.Combine(outsidePath, "secret.txt"));
+            }
+            catch (Exception exception) when (
+                exception is PlatformNotSupportedException
+                or UnauthorizedAccessException
+                or IOException)
+            {
+                // 某些受限 CI 文件系统不允许创建符号链接；该环境无法验证此项，不能把它误判为产品失败。
+                return;
+            }
+
+            var storage = CreateStorage(basePath);
+            var act = () => storage.GetAsync("tenant/work-order/secret.txt");
+
+            await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_多字节文件名_应按UTF8字节安全截断并成功保存()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"equipsense-storage-{Guid.NewGuid():N}");
+        var basePath = Path.Combine(root, "uploads");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var storage = CreateStorage(basePath);
+            await using var content = new MemoryStream("多字节附件"u8.ToArray());
+
+            var storagePath = await storage.SaveAsync(
+                Guid.NewGuid(),
+                "work-order",
+                $"{new string('故', 100)}.txt",
+                content,
+                "text/plain");
+
+            (await storage.ExistsAsync(storagePath)).Should().BeTrue();
+            Path.GetFileName(storagePath).Should().NotBeNullOrWhiteSpace();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static LocalFileStorageService CreateStorage(string basePath)
     {
         var configuration = new ConfigurationBuilder()

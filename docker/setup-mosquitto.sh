@@ -62,6 +62,13 @@ fi
 # 创建密码文件目录
 mkdir -p "${PASSWD_DIR}"
 
+# 密码文件包含可离线破解的认证哈希；拒绝符号链接，避免脚本或容器工具
+# 跟随未审计目标写入或覆盖其它路径。
+if [ -L "${PASSWD_FILE}" ]; then
+    echo -e "${RED}错误：拒绝写入符号链接密码文件: ${PASSWD_FILE}${NC}" >&2
+    exit 1
+fi
+
 # 检查是否已有密码文件，如果有则备份
 if [ -f "${PASSWD_FILE}" ]; then
     BACKUP_FILE="${PASSWD_FILE}.bak.$(date +%Y%m%d_%H%M%S)"

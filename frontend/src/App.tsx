@@ -14,6 +14,7 @@ import useTokenRefresh from './hooks/useTokenRefresh';
 import { restoreSessionFromCookie } from './lib/authSession';
 import { persistTokenExpiry } from './lib/tokenExpiry';
 import { clearLegacyApiCache } from './lib/serviceWorkerCache';
+import { PageFallback, RouteErrorFallback, SessionRestoreFallback } from './components/layout/AppFeedback';
 
 // 认证页面 — 首屏需要，直接导入
 import LoginPage from './pages/LoginPage';
@@ -26,6 +27,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DeviceListPage = lazy(() => import('./pages/DeviceListPage'));
 const DeviceDetailPage = lazy(() => import('./pages/DeviceDetailPage'));
 const DeviceSetupPage = lazy(() => import('./pages/DeviceSetupPage'));
+const GatewayDevicesPage = lazy(() => import('./pages/GatewayDevicesPage'));
 const GatewayMonitorPage = lazy(() => import('./pages/GatewayMonitorPage'));
 const GatewayListPage = lazy(() => import('./pages/GatewayListPage'));
 const AlertCenterPage = lazy(() => import('./pages/AlertCenterPage'));
@@ -46,26 +48,6 @@ const UsersPage = lazy(() => import('./pages/UsersPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const TenantsPage = lazy(() => import('./pages/admin/TenantsPage'));
 const TenantDetailPage = lazy(() => import('./pages/admin/TenantDetailPage'));
-
-/** 页面懒加载回退 */
-function PageFallback() {
-  return (
-    <div className="flex h-full items-center justify-center">
-      <div className="text-muted-foreground">加载中...</div>
-    </div>
-  );
-}
-
-/** 首屏认证状态恢复中的回退界面，避免 AuthGuard 在 Cookie 尚未探活前误跳登录页。 */
-function SessionRestoreFallback({ error = false }: { error?: boolean }) {
-  return (
-    <div className="flex min-h-screen items-center justify-center" role="status" aria-live="polite">
-      <div className="text-muted-foreground">
-        {error ? '安全初始化失败，请刷新页面重试。' : '正在恢复登录状态...'}
-      </div>
-    </div>
-  );
-}
 
 /**
  * 应用路由配置
@@ -155,6 +137,7 @@ function AppRoutes() {
             <Route path="/devices" element={<Suspense fallback={<PageFallback />}><DeviceListPage /></Suspense>} />
             <Route path="/devices/:id" element={<Suspense fallback={<PageFallback />}><DeviceDetailPage /></Suspense>} />
             <Route path="/device-setup" element={<Suspense fallback={<PageFallback />}><DeviceSetupPage /></Suspense>} />
+            <Route path="/gateway/devices" element={<Suspense fallback={<PageFallback />}><GatewayDevicesPage /></Suspense>} />
             <Route path="/gateways" element={<Suspense fallback={<PageFallback />}><GatewayListPage /></Suspense>} />
             <Route path="/gateways/:gatewayId" element={<Suspense fallback={<PageFallback />}><GatewayMonitorPage /></Suspense>} />
             <Route path="/gateway/monitor" element={<Navigate to="/gateways" replace />} />
@@ -184,31 +167,6 @@ function AppRoutes() {
       {/* 兜底路由 */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
-  );
-}
-
-/**
- * 路由级错误回退
- *
- * 与 RootErrorBoundary 不同，这个组件在 React Router 的 errorElement 机制下工作，
- * 只替代出错路由的 outlet，AppLayout 的侧边栏/头部仍保持可用，用户可切换其他菜单继续操作。
- * 使用 useRouteError 获取错误详情（React Router v7）。
- */
-function RouteErrorFallback() {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-      <div className="space-y-2">
-        <h2 className="text-xl font-semibold">此页面发生错误</h2>
-        <p className="text-sm text-muted-foreground">请尝试刷新页面，或从左侧菜单切换到其他功能。</p>
-      </div>
-      <button
-        type="button"
-        onClick={() => window.location.reload()}
-        className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-      >
-        重新加载
-      </button>
-    </div>
   );
 }
 

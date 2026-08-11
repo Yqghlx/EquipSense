@@ -49,7 +49,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
     <header className="flex h-14 items-center justify-between border-b border-border bg-background px-4">
       <div className="flex items-center gap-2">
         {/* 移动端 hamburger 按钮：触发 AppLayout 的 drawer */}
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={onMenuClick} aria-label="打开菜单">
+        <Button variant="ghost" size="icon" className="md:hidden" onClick={onMenuClick} aria-label={t('layout.openMenu')}>
           <Menu className="h-5 w-5" />
         </Button>
         <span className="text-sm text-muted-foreground">EquipSense</span>
@@ -84,19 +84,19 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
         </DropdownMenu>
 
         {/* 主题切换 */}
-        <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="切换主题">
+        <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label={t('layout.toggleTheme')}>
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
 
         {/* 语言切换 */}
-        <Button variant="ghost" size="icon" onClick={toggleLanguage} aria-label="切换语言">
+        <Button variant="ghost" size="icon" onClick={toggleLanguage} aria-label={t('layout.toggleLanguage')}>
           <Globe className="h-4 w-4" />
         </Button>
 
         {/* 用户菜单 */}
         <DropdownMenu>
           <DropdownMenuTrigger
-            aria-label={user?.username ?? '用户菜单'}
+            aria-label={user?.username ?? t('layout.userMenu')}
             className="inline-flex items-center justify-center rounded-md h-9 w-9 hover:bg-accent hover:text-accent-foreground"
           >
             <User className="h-4 w-4" />

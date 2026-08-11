@@ -26,6 +26,8 @@ cd docker
 ./bootstrap-production-secrets.sh
 ```
 
+如果门禁报告重复键，可显式追加 `--repair-identical-duplicates` 只归一化值完全相同的重复项；值冲突的 `JWT_SECRET`、`REDIS_PASSWORD` 等仍会拒绝自动选择，必须由部署者依据密钥管理记录人工清理。该工具不会覆盖已有有效凭据，也不会打印凭据值。
+
 编辑 `docker/.env`，填写以下必需配置：
 
 ```env
@@ -77,11 +79,13 @@ cd ..
 
 开发/测试只启动基础设施时使用 `docker-compose.dev.yml`；如需测试完整 Compose 的 TLS 挂载链路，可按“TLS 证书配置”中的自签名方案单独运行 `generate-cert.sh` 和 `generate-mqtt-cert.sh`，但不得将其用于生产环境。
 
-`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，避免仅打印 warning 后误报配置成功。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝符号链接形式的 `.env`、TLS 私钥和 Mosquitto 密码文件，避免仅打印 warning 后误报配置成功或把认证文件写入非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+
+直接启动生产 Compose 时统一使用 `docker/compose-production.sh`：它会在 `up`、`start`、`restart`、`build`、`pull`、`create`、`run` 和 `scale` 前执行同一套生产门禁，校验失败时不会调用 Docker，避免只启动部分服务。`ps`、`logs`、`exec`、`stop` 和 `down` 等观察或故障处置命令仍可在门禁失败时使用。CI/CD 的正式镜像发布继续使用 `deploy-production.sh`，不要用本地构建入口替代滚动发布脚本。
 
 `bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；它通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
 
-> 注意：Docker Compose 默认只从当前工作目录加载 `.env`。本项目配置文件位于 `docker/.env`，因此从仓库根目录执行 Compose 命令时必须带 `--env-file docker/.env`；本手册的生产命令已统一显式指定该参数。
+> 注意：生产 Compose 操作请从仓库根目录使用 `docker/compose-production.sh`。该入口会自动加载 `docker/.env`；恢复脚本等需要自行接收环境文件的工具仍必须显式传入 `--env-file docker/.env`。
 
 生产 Compose 的基础设施镜像使用 digest 固定版本；升级镜像时应先更新 digest、完成全量验证，再进行部署。RabbitMQ 通过 `RABBITMQ_IMAGE` 显式注入，生产环境应使用带 digest 的镜像引用。
 
@@ -105,6 +109,7 @@ sudo certbot certonly --standalone -d your-domain.com
 # 复制到 Docker 目录
 cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/cert.pem
 cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/key.pem
+chmod 600 docker/ssl/key.pem
 ```
 
 #### 方案 B：自签名证书（仅测试）
@@ -119,7 +124,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 ### 3. 启动服务
 
 ```bash
-docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
+docker/compose-production.sh up -d
 ```
 
 首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 用户 PII 历史数据加密回填 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。正式部署前必须使用 `bash docker/validate-env.sh docker/.env --check-runtime-files`，不能只检查文件路径是否存在。应用启动会用 PostgreSQL advisory lock 串行保护迁移、PII 回填、种子和 TimescaleDB 初始化；PII 回填或密文校验失败会阻止服务继续启动，蓝绿发布时不需要人工暂停旧实例。镜像构建使用仓库根目录 `.dockerignore` 排除 `node_modules`、编译产物、测试报告、备份、证书和 `.env`，不要用 `-f` 指向其他上下文，否则可能导致构建缓慢或把敏感文件发送给 Docker daemon。
@@ -128,7 +133,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml up -d
 
 ```bash
 # 检查所有服务状态
-docker compose --env-file docker/.env -f docker/docker-compose.yml ps
+docker/compose-production.sh ps
 
 # 检查后端健康
 curl http://localhost:8080/health/startup
@@ -175,7 +180,7 @@ curl http://localhost:8080/api/v1/system/info
 | `GATEWAY_BACKEND_URL` | 边缘网关上传目标后端；蓝绿部署由脚本临时设置为目标颜色服务名 | `http://backend:8080` | 否 |
 | `EDGE_BLUEGREEN_PORT` | 蓝绿部署边缘网关健康探针宿主端口 | `18081` | 否 |
 | `FILE_STORAGE_PROVIDER` | 工单附件存储实现：`Local` / `S3` | `Local` | 否 |
-| `FILE_STORAGE_BASE_PATH` | 工单附件目录，必须与 `attachments_data` 卷挂载点一致 | `/app/uploads` | 否 |
+| `FILE_STORAGE_BASE_PATH` | 工单附件目录，必须与 `attachments_data` 卷挂载点一致；Production 必须使用非根目录绝对路径 | `/app/uploads` | 否 |
 | `FILE_STORAGE_S3_BUCKET` 等 | S3 桶、区域、可选自定义端点、访问凭据、路径风格和对象键前缀；自定义端点生产必须 HTTPS | - | Provider=S3 时按端点类型必填 |
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码（每项至少 16 个字符，不得使用占位值或公开默认值） | - | 生产环境必填 |
@@ -242,7 +247,7 @@ GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。�
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
 backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
 健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理。PR 执行快速门禁；main 推送和
-版本 tag 还会在同一组 Production 镜像中执行默认 442 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 440 通过、2 跳过、0 失败。Smoke Compose
+版本 tag 还会在同一组 Production 镜像中执行默认 433 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 431 通过、2 跳过、0 失败。Smoke Compose
 会清除固定容器名、移除基础设施宿主端口绑定，并为应用探针分配独立端口，可与本机已有基础设施
 或并发 smoke 任务并行运行。
 全量验收在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户测试账户的 TOTP，
@@ -320,8 +325,8 @@ ALERT_WEBHOOK_URL=https://alert-receiver.example.com/api/alertmanager
 
 ```bash
 bash docker/validate-env.sh docker/.env --check-runtime-files
-docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --no-deps --force-recreate alertmanager
-docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanager
+docker/compose-production.sh up -d --no-deps --force-recreate alertmanager
+docker/compose-production.sh ps alertmanager
 ```
 
 未配置该地址时，Alertmanager 会保留告警但将外部路由降级为 `dev-null`，不会请求本机或未知默认地址。
@@ -397,14 +402,14 @@ docker volume ls | grep equipai
 
 ```bash
 # 查看所有服务日志
-docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f
+docker/compose-production.sh logs -f
 
 # 查看特定服务日志
-docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f backend
-docker compose --env-file docker/.env -f docker/docker-compose.yml logs -f frontend
+docker/compose-production.sh logs -f backend
+docker/compose-production.sh logs -f frontend
 
 # 最近 100 行
-docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail 100 backend
+docker/compose-production.sh logs --tail 100 backend
 ```
 
 ## 升级步骤
@@ -414,14 +419,14 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail 1
 git pull origin main
 
 # 2. 备份数据库
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+docker/compose-production.sh exec postgres \
   pg_dump -U postgres equipai > pre_upgrade_backup.sql
 
 # 3. 重新构建并启动（自动迁移）
-docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --build
+docker/compose-production.sh up -d --build
 
 # 4. 验证
-docker compose --env-file docker/.env -f docker/docker-compose.yml ps
+docker/compose-production.sh ps
 curl http://localhost:8080/health/ready
 ```
 
@@ -458,7 +463,7 @@ sudo certbot renew
 # 更新 Docker 中的证书
 cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/cert.pem
 cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/key.pem
-docker compose --env-file docker/.env -f docker/docker-compose.yml restart frontend
+docker/compose-production.sh restart frontend
 ```
 
 ---

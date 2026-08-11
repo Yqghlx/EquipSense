@@ -13,6 +13,9 @@ namespace EquipAI.Application.Analysis;
 /// </summary>
 public class DeviceComparisonService
 {
+    /// <summary>允许对比的最大时间窗口，避免请求触发无界遥测扫描。</summary>
+    public const int MaxComparisonHours = 24 * 365;
+
     private readonly AppDbContext _db;
     private readonly ILogger<DeviceComparisonService> _logger;
 
@@ -31,6 +34,16 @@ public class DeviceComparisonService
     public async Task<DeviceComparisonResult> CompareAsync(
         Guid tenantId, string deviceType, string metric, int hours = 24, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(deviceType) || deviceType.Length > 50)
+            throw new ArgumentException("设备类型不能为空且长度不能超过 50 个字符", nameof(deviceType));
+        if (string.IsNullOrWhiteSpace(metric) || metric.Length > 100)
+            throw new ArgumentException("指标名称不能为空且长度不能超过 100 个字符", nameof(metric));
+        if (hours is < 1 or > MaxComparisonHours)
+            throw new ArgumentOutOfRangeException(
+                nameof(hours), hours, $"时间窗口必须在 1 到 {MaxComparisonHours} 小时之间");
+
+        deviceType = deviceType.Trim();
+        metric = metric.Trim();
         var since = DateTime.UtcNow.AddHours(-hours);
 
         // 查询该类型所有设备最近 N 小时的遥测数据
@@ -50,30 +63,42 @@ public class DeviceComparisonService
             };
         }
 
-        var deviceMetrics = new List<DeviceMetricSummary>();
-
-        foreach (var device in deviceIds)
-        {
-            var telemetry = await _db.DeviceTelemetry
-                .Where(t => t.DeviceId == device.Id && t.Metric == metric && t.Time >= since && t.Value != null)
-                .Select(t => t.Value!.Value)
-                .ToListAsync(ct);
-
-            if (telemetry.Count == 0)
-                continue;
-
-            deviceMetrics.Add(new DeviceMetricSummary
+        // 一次性拉取当前租户、目标指标和时间窗口内的遥测，再在内存中按设备聚合。
+        // 设备数量由租户规模决定，逐设备查询会产生 N+1 往返并放大数据库连接池压力。
+        var deviceLookup = deviceIds.ToDictionary(d => d.Id);
+        var telemetry = await _db.DeviceTelemetry
+            .Where(t => t.TenantId == tenantId
+                        && deviceLookup.Keys.Contains(t.DeviceId)
+                        && t.Metric == metric
+                        && t.Time >= since
+                        && t.Value != null)
+            .Select(t => new
             {
-                DeviceId = device.Id,
-                DeviceCode = device.DeviceCode,
-                DeviceName = device.Name ?? device.DeviceCode,
-                AverageValue = Math.Round(telemetry.Average(), 2),
-                MinValue = Math.Round(telemetry.Min(), 2),
-                MaxValue = Math.Round(telemetry.Max(), 2),
-                LatestValue = Math.Round(telemetry[^1], 2),
-                DataPointCount = telemetry.Count,
-            });
-        }
+                t.DeviceId,
+                t.Time,
+                Value = t.Value!.Value,
+            })
+            .ToListAsync(ct);
+
+        var deviceMetrics = telemetry
+            .GroupBy(t => t.DeviceId)
+            .Select(group =>
+            {
+                var device = deviceLookup[group.Key];
+                var latest = group.MaxBy(t => t.Time)!;
+                return new DeviceMetricSummary
+                {
+                    DeviceId = device.Id,
+                    DeviceCode = device.DeviceCode,
+                    DeviceName = device.Name ?? device.DeviceCode,
+                    AverageValue = Math.Round(group.Average(t => t.Value), 2),
+                    MinValue = Math.Round(group.Min(t => t.Value), 2),
+                    MaxValue = Math.Round(group.Max(t => t.Value), 2),
+                    LatestValue = Math.Round(latest.Value, 2),
+                    DataPointCount = group.Count(),
+                };
+            })
+            .ToList();
 
         if (deviceMetrics.Count < 2)
         {

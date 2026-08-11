@@ -36,10 +36,18 @@ public class DeviceComparisonController : ControllerBase
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(deviceType) || string.IsNullOrWhiteSpace(metric))
-            return BadRequest(new { message = "deviceType 和 metric 不能为空" });
+            return BadRequest(new { code = 400, message = "deviceType 和 metric 不能为空" });
+        if (deviceType.Length > 50 || metric.Length > 100)
+            return BadRequest(new { code = 400, message = "deviceType 长度不能超过 50，metric 长度不能超过 100" });
+        if (hours is < 1 or > DeviceComparisonService.MaxComparisonHours)
+            return BadRequest(new
+            {
+                code = 400,
+                message = $"hours 必须在 1 到 {DeviceComparisonService.MaxComparisonHours} 之间"
+            });
 
         var result = await _comparisonService.CompareAsync(
-            _tenantContext.TenantId, deviceType, metric, hours, ct);
+            _tenantContext.TenantId, deviceType.Trim(), metric.Trim(), hours, ct);
         return Ok(result);
     }
 }

@@ -64,25 +64,19 @@ public class TelemetryQueryService
     {
         _logger.LogInformation("查询设备 {DeviceId} 的最新遥测数据", deviceId);
 
-        // 先获取每个指标的最新时间点
-        var latestTimes = await _dbContext.DeviceTelemetry
+        // 在数据库内按指标排序并取首条，避免先查最新时间、再按指标逐条查值的 N+1 往返。
+        // 设备指标数量来自现场配置，必须让查询次数保持为常数，否则详情页会放大数据库连接池压力。
+        return await _dbContext.DeviceTelemetry
             .Where(t => t.DeviceId == deviceId)
             .GroupBy(t => t.Metric)
-            .Select(g => new { Metric = g.Key, LatestTime = g.Max(t => t.Time) })
-            .ToListAsync();
-
-        var result = new Dictionary<string, double>();
-        foreach (var item in latestTimes)
-        {
-            var value = await _dbContext.DeviceTelemetry
-                .Where(t => t.DeviceId == deviceId
-                         && t.Metric == item.Metric
-                         && t.Time == item.LatestTime)
-                .Select(t => t.Value ?? 0)
-                .FirstOrDefaultAsync();
-            result[item.Metric] = value;
-        }
-
-        return result;
+            .Select(g => g
+                .OrderByDescending(t => t.Time)
+                .Select(t => new
+                {
+                    Metric = t.Metric,
+                    Value = t.Value ?? 0,
+                })
+                .First())
+            .ToDictionaryAsync(t => t.Metric, t => t.Value);
     }
 }

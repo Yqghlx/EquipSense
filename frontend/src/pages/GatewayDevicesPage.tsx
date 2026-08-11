@@ -106,7 +106,7 @@ export default function GatewayDevicesPage() {
       { protocol, connectionConfig },
       {
         onSuccess: (result) => setTestResult(result),
-        onError: () => setTestResult({ success: false, message: '连接测试请求失败' }),
+        onError: () => setTestResult({ success: false, message: t('gatewayDevices.testFailed') }),
       },
     );
   };
@@ -116,23 +116,21 @@ export default function GatewayDevicesPage() {
       {/* 标题栏 */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">网关设备管理</h1>
-          <p className="text-sm text-muted-foreground">
-            管理边缘网关下的采集设备配置，支持 OPC UA、Modbus TCP/RTU 协议
-          </p>
+          <h1 className="text-2xl font-bold">{t('gatewayDevices.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('gatewayDevices.description')}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="mr-1 h-4 w-4" />
-            刷新
+            {t('gatewayDevices.refresh')}
           </Button>
           <Button variant="outline" size="sm" onClick={() => navigate('/gateway/monitor')}>
             <Network className="mr-1 h-4 w-4" />
-            监控面板
+            {t('gatewayDevices.monitor')}
           </Button>
           <Button size="sm" onClick={() => navigate('/device-setup')}>
             <Plus className="mr-1 h-4 w-4" />
-            新建设备
+            {t('gatewayDevices.create')}
           </Button>
         </div>
       </div>
@@ -140,10 +138,8 @@ export default function GatewayDevicesPage() {
       {/* 设备列表 */}
       <Card>
         <CardHeader>
-          <CardTitle>设备列表</CardTitle>
-          <CardDescription>
-            当前已配置 {devices?.length ?? 0} 个网关设备
-          </CardDescription>
+          <CardTitle>{t('gatewayDevices.listTitle')}</CardTitle>
+          <CardDescription>{t('gatewayDevices.configuredCount', { count: devices?.length ?? 0 })}</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -153,23 +149,23 @@ export default function GatewayDevicesPage() {
           ) : !devices?.length ? (
             <div className="text-center py-8">
               <Network className="mx-auto h-12 w-12 text-muted-foreground/40" />
-              <p className="mt-2 text-sm text-muted-foreground">暂无网关设备配置</p>
+              <p className="mt-2 text-sm text-muted-foreground">{t('gatewayDevices.empty')}</p>
               <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate('/device-setup')}>
                 <Plus className="mr-1 h-4 w-4" />
-                添加第一个设备
+                {t('gatewayDevices.addFirst')}
               </Button>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>设备名称</TableHead>
-                  <TableHead>协议</TableHead>
-                  <TableHead>采集间隔</TableHead>
-                  <TableHead>数据点数</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>创建时间</TableHead>
-                  <TableHead className="text-right">操作</TableHead>
+                  <TableHead>{t('gatewayDevices.deviceName')}</TableHead>
+                  <TableHead>{t('gatewayDevices.protocol')}</TableHead>
+                  <TableHead>{t('gatewayDevices.pollInterval')}</TableHead>
+                  <TableHead>{t('gatewayDevices.dataPointCount')}</TableHead>
+                  <TableHead>{t('gatewayDevices.status')}</TableHead>
+                  <TableHead>{t('gatewayDevices.createdAt')}</TableHead>
+                  <TableHead className="text-right">{t('gatewayDevices.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -204,7 +200,7 @@ export default function GatewayDevicesPage() {
                             onCheckedChange={() => toggleEnabled(device.id, device.enabled)}
                           />
                           <span className="text-xs text-muted-foreground">
-                            {device.enabled ? '已启用' : '已停用'}
+                            {device.enabled ? t('gatewayDevices.enabled') : t('gatewayDevices.disabled')}
                           </span>
                         </div>
                       </TableCell>
@@ -217,7 +213,7 @@ export default function GatewayDevicesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            title={t("common.testConnection", "测试连接")}
+                            title={t('common.testConnection')}
                             onClick={() => runTestConnection(device.protocol, device.connectionConfig)}
                           >
                             <RefreshCw className="h-4 w-4" />
@@ -226,7 +222,7 @@ export default function GatewayDevicesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            title={t("common.edit", "编辑")}
+                            title={t('common.edit')}
                             onClick={() =>
                               setEditTarget({
                                 id: device.id,
@@ -243,7 +239,7 @@ export default function GatewayDevicesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-destructive hover:text-destructive"
-                            title={t("common.delete", "删除")}
+                            title={t('common.delete')}
                             onClick={() => setDeleteTarget(device.id)}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -264,11 +260,11 @@ export default function GatewayDevicesPage() {
         <Card className={testResult.success ? 'border-green-500/30' : 'border-red-500/30'}>
           <CardContent className="flex items-center gap-2 py-3">
             <Badge variant={testResult.success ? 'default' : 'destructive'}>
-              {testResult.success ? '连接成功' : '连接失败'}
+              {testResult.success ? t('gatewayDevices.testSuccess') : t('gatewayDevices.testError')}
             </Badge>
             <span className="text-sm">{testResult.message}</span>
             <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setTestResult(null)}>
-              关闭
+              {t('gatewayDevices.dismissResult')}
             </Button>
           </CardContent>
         </Card>
@@ -278,16 +274,16 @@ export default function GatewayDevicesPage() {
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认删除</DialogTitle>
+            <DialogTitle>{t('gatewayDevices.deleteTitle')}</DialogTitle>
             <DialogDescription>
-              确定要删除该网关设备配置吗？删除后边缘网关将停止采集该设备数据，此操作不可恢复。
+              {t('gatewayDevices.deleteDescription')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>取消</Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>{t('common.cancel')}</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleteMutation.isPending}>
               {deleteMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              删除
+              {t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -297,20 +293,20 @@ export default function GatewayDevicesPage() {
       <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>编辑网关设备</DialogTitle>
-            <DialogDescription>修改设备配置信息，保存后边缘网关将在下次配置拉取时生效</DialogDescription>
+            <DialogTitle>{t('gatewayDevices.editTitle')}</DialogTitle>
+            <DialogDescription>{t('gatewayDevices.editDescription')}</DialogDescription>
           </DialogHeader>
           {editTarget && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>设备名称</Label>
+                <Label>{t('gatewayDevices.deviceName')}</Label>
                 <Input
                   value={editTarget.deviceName}
                   onChange={(e) => setEditTarget({ ...editTarget, deviceName: e.target.value })}
                 />
               </div>
               <div className="space-y-2">
-                <Label>采集间隔（毫秒）</Label>
+                <Label>{t('gatewayDevices.pollIntervalLabel')}</Label>
                 <Input
                   type="number"
                   value={editTarget.pollIntervalMs}
@@ -318,7 +314,7 @@ export default function GatewayDevicesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>连接配置（JSON）</Label>
+                <Label>{t('gatewayDevices.connectionConfig')}</Label>
                 <Textarea
                   className="font-mono text-xs"
                   rows={4}
@@ -327,7 +323,7 @@ export default function GatewayDevicesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>数据点映射（JSON）</Label>
+                <Label>{t('gatewayDevices.dataPoints')}</Label>
                 <Textarea
                   className="font-mono text-xs"
                   rows={4}
@@ -338,10 +334,10 @@ export default function GatewayDevicesPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditTarget(null)}>取消</Button>
+            <Button variant="outline" onClick={() => setEditTarget(null)}>{t('common.cancel')}</Button>
             <Button onClick={saveEdit} disabled={updateMutation.isPending}>
               {updateMutation.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              保存
+              {t('common.save')}
             </Button>
           </DialogFooter>
         </DialogContent>

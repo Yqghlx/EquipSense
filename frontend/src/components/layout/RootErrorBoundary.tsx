@@ -1,4 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { withTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { AlertTriangle, RotateCw, Home } from 'lucide-react';
 
 /**
@@ -18,9 +20,10 @@ interface State {
 
 interface Props {
   children: ReactNode;
+  t: TFunction;
 }
 
-export class RootErrorBoundary extends Component<Props, State> {
+class RootErrorBoundaryBase extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -66,12 +69,12 @@ export class RootErrorBoundary extends Component<Props, State> {
         </div>
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold">
-            {isChunkLoadError ? '页面加载失败' : '页面发生错误'}
+            {isChunkLoadError ? this.props.t('layout.rootChunkErrorTitle') : this.props.t('layout.rootErrorTitle')}
           </h1>
           <p className="max-w-md text-sm text-muted-foreground">
             {isChunkLoadError
-              ? '可能是应用已发布新版本或网络不稳。请尝试重新加载。'
-              : '应用遇到了意外错误。您可以返回首页继续操作，或重新加载页面。'}
+              ? this.props.t('layout.rootChunkErrorDescription')
+              : this.props.t('layout.rootErrorDescription')}
           </p>
         </div>
         <div className="flex gap-3">
@@ -81,7 +84,7 @@ export class RootErrorBoundary extends Component<Props, State> {
             className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             <RotateCw className="h-4 w-4" />
-            重新加载
+            {this.props.t('app.reload')}
           </button>
           <button
             type="button"
@@ -89,7 +92,7 @@ export class RootErrorBoundary extends Component<Props, State> {
             className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent"
           >
             <Home className="h-4 w-4" />
-            返回首页
+            {this.props.t('layout.goHome')}
           </button>
         </div>
         {import.meta.env.DEV && this.state.error && (
@@ -101,3 +104,6 @@ export class RootErrorBoundary extends Component<Props, State> {
     );
   }
 }
+
+/** 为 class 错误边界注入翻译上下文，同时保留 React 错误捕获能力。 */
+export const RootErrorBoundary = withTranslation()(RootErrorBoundaryBase);

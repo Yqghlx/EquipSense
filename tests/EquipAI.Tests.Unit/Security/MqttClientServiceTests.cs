@@ -8,6 +8,7 @@ using MQTTnet;
 using MQTTnet.Client;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.Text;
+using System.Diagnostics;
 
 namespace EquipAI.Tests.Unit.Security;
 
@@ -139,6 +140,37 @@ public sealed class MqttClientServiceTests
                 It.IsAny<MqttClientSubscribeOptions>(),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task 停机时断线重连退避必须立即取消()
+    {
+        var mqttClient = new Mock<IMqttClient>();
+        mqttClient.SetupGet(client => client.IsConnected).Returns(false);
+
+        var service = new MqttClientService(
+            Options.Create(new MqttOptions
+            {
+                Host = "mqtt.example.com",
+                Port = 8883,
+                ReconnectDelaySeconds = 1,
+                UseTls = true,
+            }),
+            NullLogger<MqttClientService>.Instance,
+            () => mqttClient.Object);
+
+        await service.ConnectAsync();
+
+        // 让重连循环进入退避等待；旧实现会完整等待 1 秒后才检查停机标志。
+        var reconnectTask = service.HandleDisconnectedAsync(null!);
+        await Task.Delay(50);
+
+        var stopwatch = Stopwatch.StartNew();
+        await service.DisconnectAsync();
+        await reconnectTask.WaitAsync(TimeSpan.FromMilliseconds(500));
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(500),
+            "应用收到 SIGTERM 后不能被 MQTT 退避等待阻塞");
     }
 
     [Fact]

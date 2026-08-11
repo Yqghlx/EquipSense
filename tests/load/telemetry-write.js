@@ -13,9 +13,9 @@
  *     • sleep(5) → sleep(2)，让请求密度更接近真实工业现场
  *
  * 运行方式：
- *   k6 run -e DEVICES=100 tests/load/telemetry-write.js
- *   k6 run -e DEVICES=500 tests/load/telemetry-write.js
- *   k6 run -e DEVICES=1000 tests/load/telemetry-write.js
+ *   k6 run -e DEVICES=100 -e DURATION=60s tests/load/telemetry-write.js
+ *   k6 run -e DEVICES=500 -e DURATION=5m tests/load/telemetry-write.js
+ *   k6 run -e DEVICES=1000 -e DURATION=10m tests/load/telemetry-write.js
  */
 import http from 'k6/http';
 import { check, sleep } from 'k6';
@@ -23,6 +23,9 @@ import { config, relaxedThresholds, getToken, authHeaders } from './config.js';
 
 /** 设备数量 — 默认 100，作为 VU 数 */
 const deviceCount = parseInt(__ENV.DEVICES || '100');
+
+/** 压测时长 — CI 可缩短为轻量写路径回归，手工容量测试按场景传入更长时长 */
+const duration = __ENV.DURATION || '60s';
 
 /** 模拟的指标池，每次上报随机挑 3 个写入 metrics 字典 */
 const metricPool = ['temperature', 'pressure', 'vibration', 'humidity', 'rpm', 'current', 'voltage'];
@@ -32,7 +35,7 @@ export const options = {
     telemetry_write: {
       executor: 'constant-vus',
       vus: Math.min(deviceCount, 200),
-      duration: '60s',
+      duration: duration,
     },
   },
   thresholds: relaxedThresholds,

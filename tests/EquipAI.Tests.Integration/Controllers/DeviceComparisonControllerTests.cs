@@ -61,4 +61,18 @@ public class DeviceComparisonControllerTests
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
             "deviceType 和 metric 均必填，缺失应返回 400");
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(8761)]
+    public async Task CompareDevices_InvalidHours_Returns400(int hours)
+    {
+        var client = await GetAuthenticatedClientAsync();
+
+        var response = await client.GetAsync(
+            $"/api/v1/device-comparison?deviceType=电机&metric=temperature&hours={hours}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "设备对比时间窗口必须限制在 1 年以内，避免无界查询");
+    }
 }

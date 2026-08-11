@@ -1,9 +1,11 @@
+using System.Data.Common;
 using EquipAI.Application.Telemetry;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -27,6 +29,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
     private ServiceProvider _sp = null!;
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly Guid _deviceId = Guid.NewGuid();
+    private readonly SelectCommandCounter _selectCommandCounter = new();
 
     public async Task InitializeAsync()
     {
@@ -36,7 +39,9 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         var services = new ServiceCollection();
         services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
         // 只读上下文（被测服务注入）：共享同一 SQLite 连接，保证能读到主库的种子数据
-        services.AddDbContext<AppReadDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppReadDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_selectCommandCounter));
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
         services.AddLogging();
         _sp = services.BuildServiceProvider();
@@ -233,6 +238,70 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         var result = await service.GetLatestAsync(_deviceId);
 
         result.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 最新值查询必须在单次数据库读取中完成，避免设备指标数量增加时产生 N+1 查询。
+    /// 这是设备详情页的高频路径；旧实现会先查最新时间，再为每个指标单独查值。
+    /// </summary>
+    [Fact]
+    public async Task GetLatestAsync_应在单次数据库查询内返回所有指标()
+    {
+        var db = GetDb();
+        var time = DateTime.UtcNow.AddMinutes(-1);
+        await InsertTelemetryAsync(db, _deviceId, "temperature", time, 28.0);
+        await InsertTelemetryAsync(db, _deviceId, "pressure", time, 1.2);
+        await InsertTelemetryAsync(db, _deviceId, "vibration", time, 0.4);
+
+        _selectCommandCounter.Reset();
+        var service = CreateService(GetReadDb());
+        var result = await service.GetLatestAsync(_deviceId);
+
+        result.Should().BeEquivalentTo(new Dictionary<string, double>
+        {
+            ["temperature"] = 28.0,
+            ["pressure"] = 1.2,
+            ["vibration"] = 0.4,
+        });
+        _selectCommandCounter.Count.Should().Be(1,
+            "最新遥测应由一次集合查询返回，不能随指标数量增加数据库往返次数");
+    }
+
+    /// <summary>统计只读上下文执行的 SELECT 命令次数，用于锁定高频查询的往返次数。</summary>
+    private sealed class SelectCommandCounter : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Reset() => Interlocked.Exchange(ref _count, 0);
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CountSelect(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CountSelect(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void CountSelect(DbCommand command)
+        {
+            if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
     }
 
     private class TestTenantContext : ITenantContext

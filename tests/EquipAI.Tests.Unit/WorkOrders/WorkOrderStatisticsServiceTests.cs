@@ -106,6 +106,30 @@ public class WorkOrderStatisticsServiceTests : IAsyncDisposable
         stats.ByPriority["Low"].Should().Be(2);
     }
 
+    /// <summary>
+    /// 工单统计必须按显式租户参数查询，不能只依赖当前 DbContext 的全局过滤器。
+    /// </summary>
+    [Fact]
+    public async Task GetStatisticsAsync_应按显式租户参数筛选而不是只依赖当前上下文()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var otherTenantId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+
+        db.WorkOrders.AddRange(
+            CreateWorkOrder(WorkOrderStatus.InProgress, WorkOrderType.Corrective,
+                WorkOrderPriority.High, now.AddDays(-1), tenantId: _tenantId),
+            CreateWorkOrder(WorkOrderStatus.Closed, WorkOrderType.Preventive,
+                WorkOrderPriority.Low, now.AddDays(-1), tenantId: otherTenantId));
+        await db.SaveChangesAsync();
+
+        var stats = await service.GetStatisticsAsync(otherTenantId, periodDays: 7);
+
+        stats.Total.Should().Be(1);
+        stats.ByStatus.Should().ContainSingle(item => item.Key == "Closed" && item.Value == 1);
+    }
+
     // =========================================================================
     // 时间窗口过滤 — periodDays 边界
     // =========================================================================

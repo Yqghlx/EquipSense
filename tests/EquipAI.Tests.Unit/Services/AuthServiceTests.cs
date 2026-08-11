@@ -857,6 +857,43 @@ public class AuthServiceTests : IAsyncDisposable
         tokenAfter.Should().BeNull();
     }
 
+    /// <summary>
+    /// 当前设备登出只清理当前会话，其他设备仍可继续刷新令牌。
+    /// </summary>
+    [Fact]
+    public async Task LogoutAsync_指定会话_不应影响其他设备会话()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        const string password = "password123";
+        var user = CreateTestUser("session-logout-user", _tenantId, password);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var firstSession = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = password,
+        });
+        var secondSession = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = password,
+        });
+        var firstPrincipal = _jwtService.GetPrincipalFromToken(firstSession.AccessToken);
+        var firstSessionId = firstPrincipal?.FindFirst("sid")?.Value;
+        firstSessionId.Should().NotBeNullOrWhiteSpace();
+
+        await service.LogoutAsync(user.Id, firstSessionId);
+
+        await service.Invoking(s => s.RefreshTokenAsync(firstSession.RefreshToken))
+            .Should().ThrowAsync<UnauthorizedAccessException>();
+        var secondRefresh = await service.RefreshTokenAsync(secondSession.RefreshToken);
+        secondRefresh.AccessToken.Should().NotBeNullOrWhiteSpace();
+    }
+
     // ==================== ChangePasswordAsync ====================
 
     [Fact]
@@ -1352,6 +1389,21 @@ public class AuthServiceTests : IAsyncDisposable
         private readonly Dictionary<Guid, string> _store = new();
 
         /// <summary>
+        /// 内存字典，存储用户会话到当前刷新令牌的映射。
+        /// </summary>
+        private readonly Dictionary<(Guid UserId, string SessionId), string> _sessionStore = new();
+
+        /// <summary>
+        /// 内存字典，模拟用户级刷新令牌代数。
+        /// </summary>
+        private readonly Dictionary<Guid, string> _generationStore = new();
+
+        /// <summary>
+        /// 记录最近一次为用户签发的刷新令牌，兼容旧测试的单令牌断言辅助方法。
+        /// </summary>
+        private readonly Dictionary<Guid, string> _latestTokenStore = new();
+
+        /// <summary>
         /// 内存字典，存储通用字符串键值（密码重置 token 等）
         /// </summary>
         private readonly Dictionary<string, string> _stringStore = new();
@@ -1393,16 +1445,34 @@ public class AuthServiceTests : IAsyncDisposable
         }
 
         public override Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
+            => SetRefreshTokenAsync(userId, RedisService.LegacySessionId, refreshToken, expiry);
+
+        public override Task SetRefreshTokenAsync(
+            Guid userId,
+            string sessionId,
+            string refreshToken,
+            TimeSpan expiry)
         {
-            // 将旧 token 反向索引转为"已轮换"墓碑（模拟真实 RedisService 重放检测行为）
-            if (_store.TryGetValue(userId, out var oldToken))
+            if (!_generationStore.TryGetValue(userId, out var generation))
             {
-                _stringStore[$"refresh_token:{oldToken}"] = $"revoked:{userId}";
+                generation = Guid.NewGuid().ToString("N");
+                _generationStore[userId] = generation;
             }
-            _store[userId] = refreshToken;
-            // 同时写入 _stringStore，供 AuthService 正向索引一致性检查（GetStringAsync）读取
-            _stringStore[$"refresh:{userId}"] = refreshToken;
-            _stringStore[$"refresh_token:{refreshToken}"] = userId.ToString();
+
+            var sessionKey = (userId, sessionId);
+            if (_sessionStore.TryGetValue(sessionKey, out var oldToken))
+            {
+                _stringStore[$"refresh_token:{oldToken}"] = $"revoked|{userId}|{sessionId}|{generation}";
+            }
+            _sessionStore[sessionKey] = refreshToken;
+            _latestTokenStore[userId] = refreshToken;
+            _stringStore[$"refresh_session:{userId}:{sessionId}"] = $"{refreshToken}|{generation}";
+            _stringStore[$"refresh_token:{refreshToken}"] = $"{userId}|{sessionId}|{generation}";
+            if (sessionId == RedisService.LegacySessionId)
+            {
+                _store[userId] = refreshToken;
+                _stringStore[$"refresh:{userId}"] = refreshToken;
+            }
             return Task.CompletedTask;
         }
 
@@ -1416,32 +1486,86 @@ public class AuthServiceTests : IAsyncDisposable
             {
                 var uid = raw["revoked:".Length..];
                 return Task.FromResult(Guid.TryParse(uid, out var userId)
-                    ? RefreshTokenEntry.Reused(userId)
+                    ? RefreshTokenEntry.Reused(userId, RedisService.LegacySessionId)
                     : RefreshTokenEntry.Unknown());
             }
+
+            var fields = raw.Split('|', StringSplitOptions.None);
+            if (fields.Length == 4 && fields[0] == "revoked"
+                && Guid.TryParse(fields[1], out var reusedUserId))
+            {
+                return Task.FromResult(RefreshTokenEntry.Reused(reusedUserId, fields[2]));
+            }
+
+            if (fields.Length == 3 && Guid.TryParse(fields[0], out var validUserId)
+                && !string.IsNullOrWhiteSpace(fields[1]))
+            {
+                return Task.FromResult(RefreshTokenEntry.Valid(validUserId, fields[1]));
+            }
+
             return Task.FromResult(Guid.TryParse(raw, out var id)
-                ? RefreshTokenEntry.Valid(id)
+                ? RefreshTokenEntry.Valid(id, RedisService.LegacySessionId)
                 : RefreshTokenEntry.Unknown());
         }
 
-        public override Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
+        public override async Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
         {
-            if (_stringStore.TryGetValue($"refresh_token:{refreshToken}", out var userIdStr)
-                && Guid.TryParse(userIdStr, out var userId))
+            var state = await GetRefreshTokenStateAsync(refreshToken);
+            return state.Status == RefreshTokenStatus.Valid ? state.UserId : null;
+        }
+
+        public override Task<string?> GetRefreshTokenForSessionAsync(Guid userId, string sessionId)
+        {
+            if (_sessionStore.TryGetValue((userId, sessionId), out var token)
+                && _stringStore.TryGetValue($"refresh_session:{userId}:{sessionId}", out var raw))
             {
-                return Task.FromResult<Guid?>(userId);
+                var generation = raw.Split('|', StringSplitOptions.None);
+                if (generation.Length == 2
+                    && _generationStore.TryGetValue(userId, out var currentGeneration)
+                    && generation[1] == currentGeneration)
+                {
+                    return Task.FromResult<string?>(token);
+                }
             }
-            return Task.FromResult<Guid?>(null);
+
+            if (sessionId == RedisService.LegacySessionId && _store.TryGetValue(userId, out var legacyToken))
+            {
+                return Task.FromResult<string?>(legacyToken);
+            }
+
+            return Task.FromResult<string?>(null);
+        }
+
+        public override Task RemoveRefreshTokenSessionAsync(Guid userId, string sessionId)
+        {
+            if (_sessionStore.Remove((userId, sessionId), out var token))
+            {
+                _stringStore.Remove($"refresh_token:{token}");
+            }
+            _stringStore.Remove($"refresh_session:{userId}:{sessionId}");
+            if (sessionId == RedisService.LegacySessionId)
+            {
+                _store.Remove(userId);
+                _stringStore.Remove($"refresh:{userId}");
+            }
+            if (_latestTokenStore.TryGetValue(userId, out var latestToken)
+                && string.Equals(latestToken, token, StringComparison.Ordinal))
+            {
+                _latestTokenStore.Remove(userId);
+            }
+            return Task.CompletedTask;
         }
 
         public override Task RemoveRefreshTokenAsync(Guid userId)
         {
-            if (_store.TryGetValue(userId, out var token))
+            foreach (var session in _sessionStore.Keys.Where(key => key.UserId == userId).ToList())
             {
-                _stringStore.Remove($"refresh_token:{token}");
+                RemoveRefreshTokenSessionAsync(session.UserId, session.SessionId).GetAwaiter().GetResult();
             }
             _store.Remove(userId);
             _stringStore.Remove($"refresh:{userId}");
+            _generationStore.Remove(userId);
+            _latestTokenStore.Remove(userId);
             return Task.CompletedTask;
         }
 
@@ -1451,8 +1575,9 @@ public class AuthServiceTests : IAsyncDisposable
         /// </summary>
         public string? GetStoredRefreshToken(Guid userId)
         {
-            _store.TryGetValue(userId, out var token);
-            return token;
+            _store.TryGetValue(userId, out var legacyToken);
+            return legacyToken
+                ?? (_latestTokenStore.TryGetValue(userId, out var latestToken) ? latestToken : null);
         }
 
         public override Task SetStringAsync(string key, string value, TimeSpan expiry)

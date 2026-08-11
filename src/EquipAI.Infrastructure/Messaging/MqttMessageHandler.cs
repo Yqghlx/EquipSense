@@ -1,5 +1,8 @@
+using System.Globalization;
 using System.Text.Json;
+using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Validation;
 using EquipAI.Infrastructure.Metrics;
 using Microsoft.Extensions.Logging;
 
@@ -11,20 +14,48 @@ namespace EquipAI.Infrastructure.Messaging;
 /// </summary>
 public class MqttMessageHandler
 {
+    /// <summary>将校验通过的遥测指标加入异步批量写入队列。</summary>
     private readonly ITelemetryService _telemetryService;
+
+    /// <summary>记录无效 MQTT 消息和处理异常的日志记录器。</summary>
     private readonly ILogger<MqttMessageHandler> _logger;
 
+    /// <summary>
+    /// 初始化 MQTT 消息处理器。
+    /// </summary>
+    /// <param name="telemetryService">遥测批量写入服务。</param>
+    /// <param name="logger">消息处理日志记录器。</param>
     public MqttMessageHandler(ITelemetryService telemetryService, ILogger<MqttMessageHandler> logger)
     {
         _telemetryService = telemetryService;
         _logger = logger;
     }
 
+    /// <summary>
+    /// 解析并校验一条 MQTT 遥测消息，然后按指标拆分入队。
+    /// </summary>
+    /// <param name="topic">MQTT 主题，格式为 factory/{tenantId}/telemetry/{deviceId}。</param>
+    /// <param name="payload">UTF-8 JSON 消息体。</param>
     public async Task HandleAsync(string topic, byte[] payload)
     {
         try
         {
             BusinessMetrics.MqttMessagesReceived.Inc();
+
+            if (payload is null || payload.Length == 0)
+            {
+                _logger.LogWarning("忽略空 MQTT 消息: {Topic}", topic);
+                return;
+            }
+
+            // 先按字节数拒绝，再反序列化，避免恶意消息在 JSON 解析阶段占用过多内存。
+            if (payload.Length > TelemetryInputValidator.MaxPayloadBytes)
+            {
+                _logger.LogWarning(
+                    "忽略超大 MQTT 消息: {Topic}, Bytes={Bytes}, Limit={Limit}",
+                    topic, payload.Length, TelemetryInputValidator.MaxPayloadBytes);
+                return;
+            }
 
             var parts = topic.Split('/');
             if (parts.Length != 4 || parts[0] != "factory" || parts[2] != "telemetry")
@@ -53,29 +84,88 @@ public class MqttMessageHandler
                 return;
             }
 
-            var timestamp = timestampEl.ValueKind == JsonValueKind.String
-                ? DateTime.Parse(timestampEl.GetString()!, null, System.Globalization.DateTimeStyles.AdjustToUniversal)
-                : DateTime.UtcNow;
-
-            var quality = json.TryGetProperty("quality", out var qEl) ? qEl.GetString() ?? "good" : "good";
-
-            if (metricsEl.ValueKind == JsonValueKind.Object)
+            if (timestampEl.ValueKind != JsonValueKind.String
+                || !DateTime.TryParse(
+                    timestampEl.GetString(),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                    out var timestamp)
+                || TelemetryInputValidator.ValidateTimestamp(timestamp) is not null)
             {
-                foreach (var metric in metricsEl.EnumerateObject())
-                {
-                    if (metric.Value.ValueKind == JsonValueKind.Number)
-                    {
-                        await _telemetryService.EnqueueAsync(
-                            tenantId, deviceId,
-                            metric.Name, metric.Value.GetDouble(),
-                            timestamp, quality, "mqtt");
-
-                        BusinessMetrics.TelemetryReceived
-                            .WithLabels(tenantId.ToString(), deviceId.ToString())
-                            .Inc();
-                    }
-                }
+                _logger.LogWarning("忽略时间戳无效的 MQTT 消息: {Topic}", topic);
+                return;
             }
+
+            timestamp = timestamp.ToSafeUtc();
+
+            var quality = "good";
+            if (json.TryGetProperty("quality", out var qEl))
+            {
+                if (qEl.ValueKind != JsonValueKind.String)
+                {
+                    _logger.LogWarning("忽略质量字段类型无效的 MQTT 消息: {Topic}", topic);
+                    return;
+                }
+
+                quality = qEl.GetString() ?? string.Empty;
+            }
+
+            if (TelemetryInputValidator.ValidateQuality(quality) is not null)
+            {
+                _logger.LogWarning("忽略质量字段无效的 MQTT 消息: {Topic}", topic);
+                return;
+            }
+
+            quality = quality.Trim();
+
+            if (metricsEl.ValueKind != JsonValueKind.Object)
+            {
+                _logger.LogWarning("忽略指标字段类型无效的 MQTT 消息: {Topic}", topic);
+                return;
+            }
+
+            var metricCount = metricsEl.EnumerateObject().Count();
+            if (metricCount == 0 || metricCount > TelemetryInputValidator.MaxMetricCount)
+            {
+                _logger.LogWarning(
+                    "忽略指标数量无效的 MQTT 消息: {Topic}, Count={Count}, Limit={Limit}",
+                    topic, metricCount, TelemetryInputValidator.MaxMetricCount);
+                return;
+            }
+
+            var acceptedCount = 0;
+            foreach (var metric in metricsEl.EnumerateObject())
+            {
+                if (metric.Value.ValueKind != JsonValueKind.Number
+                    || !metric.Value.TryGetDouble(out var value))
+                {
+                    _logger.LogWarning("忽略非数字遥测指标: {Topic}, Metric={Metric}", topic, metric.Name);
+                    continue;
+                }
+
+                if (TelemetryInputValidator.ValidateMetric(metric.Name, value) is not null)
+                {
+                    _logger.LogWarning("忽略非法遥测指标: {Topic}, Metric={Metric}", topic, metric.Name);
+                    continue;
+                }
+
+                await _telemetryService.EnqueueAsync(
+                    tenantId, deviceId,
+                    metric.Name, value,
+                    timestamp, quality, "mqtt");
+
+                BusinessMetrics.TelemetryReceived
+                    .WithLabels(tenantId.ToString(), deviceId.ToString())
+                    .Inc();
+                acceptedCount++;
+            }
+
+            if (acceptedCount == 0)
+                _logger.LogWarning("MQTT 消息没有可接受的数字指标: {Topic}", topic);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "忽略无法解析的 MQTT JSON 消息: {Topic}", topic);
         }
         catch (Exception ex)
         {

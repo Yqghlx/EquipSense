@@ -14,11 +14,11 @@ import { useRealtimeStore, type RealtimeConnectionState } from '../../stores/rea
  * 与 OfflineIndicator（监听 navigator.onLine）互补：
  *   浏览器在线 ≠ SignalR 连接正常（服务器重启、代理超时都会让 WebSocket 断而浏览器在线）。
  */
-const STATUS_CONFIG: Record<RealtimeConnectionState, { color: string; pulse: boolean; tooltipKey: string; fallback: string }> = {
-  connected: { color: 'bg-green-500', pulse: false, tooltipKey: 'realtime.connected', fallback: '实时连接正常' },
-  connecting: { color: 'bg-blue-500', pulse: true, tooltipKey: 'realtime.connecting', fallback: '正在建立实时连接' },
-  reconnecting: { color: 'bg-yellow-500', pulse: true, tooltipKey: 'realtime.reconnecting', fallback: '实时连接断开，正在重连…' },
-  disconnected: { color: 'bg-gray-400', pulse: false, tooltipKey: 'realtime.disconnected', fallback: '实时连接已断开，请检查网络' },
+const STATUS_CONFIG: Record<RealtimeConnectionState, { color: string; pulse: boolean; tooltipKey: string }> = {
+  connected: { color: 'bg-green-500', pulse: false, tooltipKey: 'realtime.connected' },
+  connecting: { color: 'bg-blue-500', pulse: true, tooltipKey: 'realtime.connecting' },
+  reconnecting: { color: 'bg-yellow-500', pulse: true, tooltipKey: 'realtime.reconnecting' },
+  disconnected: { color: 'bg-gray-400', pulse: false, tooltipKey: 'realtime.disconnected' },
 };
 
 export function RealtimeIndicator() {
@@ -29,9 +29,9 @@ export function RealtimeIndicator() {
   return (
     <div
       className="flex items-center gap-1.5"
-      title={t(cfg.tooltipKey, cfg.fallback)}
+      title={t(cfg.tooltipKey)}
       role="status"
-      aria-label={t(cfg.tooltipKey, cfg.fallback)}
+      aria-label={t(cfg.tooltipKey)}
     >
       <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${cfg.color}`}>
         {cfg.pulse && (

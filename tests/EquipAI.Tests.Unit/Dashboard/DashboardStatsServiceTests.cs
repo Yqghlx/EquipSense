@@ -77,6 +77,40 @@ public class DashboardStatsServiceTests : IDisposable
         result.Availability.Should().Be(60.0);
     }
 
+    /// <summary>
+    /// Dashboard 查询必须使用显式租户参数，而不能只依赖当前 DbContext 的全局过滤器。
+    /// 系统管理员跨租户查看或后台复用服务时，首页统计必须对应请求目标租户。
+    /// </summary>
+    [Fact]
+    public async Task GetStatsAsync_应按显式租户参数筛选而不是只依赖当前上下文()
+    {
+        var otherTenantId = Guid.NewGuid();
+        _db.Devices.AddRange(
+            new Device
+            {
+                TenantId = _tenantId,
+                Name = "当前上下文设备",
+                Type = "泵",
+                DeviceCode = "CURRENT-001",
+                Status = DeviceStatus.Offline,
+            },
+            new Device
+            {
+                TenantId = otherTenantId,
+                Name = "目标租户设备",
+                Type = "泵",
+                DeviceCode = "OTHER-001",
+                Status = DeviceStatus.Online,
+            });
+        await _db.SaveChangesAsync();
+
+        var result = await _service.GetStatsAsync(otherTenantId, CancellationToken.None);
+
+        result.TotalDevices.Should().Be(1);
+        result.OnlineDevices.Should().Be(1);
+        result.Availability.Should().Be(100.0);
+    }
+
     // =========================================================================
     // 告警统计
     // =========================================================================

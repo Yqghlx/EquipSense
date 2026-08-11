@@ -111,6 +111,40 @@ test_validate_env_rejects_invalid_rate_limiting_config() {
   assert_contains "$output" "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"
 }
 
+test_validate_env_rejects_relative_local_attachment_path() {
+  local env_file="$TEST_ROOT/relative-attachment-path.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' 'FILE_STORAGE_PROVIDER=Local' 'FILE_STORAGE_BASE_PATH=uploads' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产本地附件目录使用相对路径时必须拒绝"
+  assert_contains "$output" "FILE_STORAGE_BASE_PATH 必须使用绝对路径"
+}
+
+test_validate_env_rejects_root_local_attachment_path() {
+  local env_file="$TEST_ROOT/root-attachment-path.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' 'FILE_STORAGE_PROVIDER=Local' 'FILE_STORAGE_BASE_PATH=/' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产本地附件目录指向根目录时必须拒绝"
+  assert_contains "$output" "FILE_STORAGE_BASE_PATH 不能指向文件系统根目录"
+}
+
 test_validate_env_rejects_short_machine_api_key() {
   local env_file="$TEST_ROOT/short-machine-api-key.env"
   cp "$TEST_ROOT/valid.env" "$env_file"
@@ -321,6 +355,28 @@ test_validate_env_rejects_duplicate_keys() {
 
   [[ "$result_code" -ne 0 ]] || fail "重复环境变量不应通过生产环境校验"
   assert_contains "$output" "FRONTEND_URL 重复定义"
+  assert_contains "$output" "FRONTEND_URL 重复定义且值不一致"
+}
+
+test_validate_env_rejects_symlink_environment_file() {
+  local case_dir="$TEST_ROOT/validate-env-symlink"
+  mkdir -p "$case_dir"
+  cp "$TEST_ROOT/valid.env" "$case_dir/real.env"
+  chmod 600 "$case_dir/real.env"
+  ln -s real.env "$case_dir/.env-link"
+  cp "$case_dir/real.env" "$case_dir/real.env.before"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/.env-link" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "符号链接环境文件不应通过生产校验"
+  assert_contains "$output" "符号链接"
+  cmp -s "$case_dir/real.env.before" "$case_dir/real.env" \
+    || fail "校验符号链接时不应修改目标文件"
 }
 
 test_production_env_template_uses_https_default() {
@@ -330,6 +386,134 @@ test_production_env_template_uses_https_default() {
   assert_contains "$template_content" "FRONTEND_URL=https://localhost"
   [[ "$template_content" != *"FRONTEND_URL=http://"* ]] \
     || fail "生产环境模板不应使用 HTTP 前端地址"
+}
+
+test_production_compose_wrapper_runs_preflight_before_start() {
+  local case_dir="$TEST_ROOT/compose-production-wrapper-preflight"
+  local trace_file="$case_dir/trace.log"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/compose-production.sh" "$case_dir/compose-production.sh"
+  printf '%s\n' 'PLACEHOLDER=not-a-secret' > "$case_dir/.env"
+  : > "$case_dir/docker-compose.yml"
+
+  cat > "$case_dir/validate-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'validate %s\n' "$*" >> "$TRACE_FILE"
+EOF
+  chmod 700 "$case_dir/validate-env.sh"
+
+  cat > "$case_dir/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\n' "$*" >> "$TRACE_FILE"
+EOF
+  chmod 700 "$case_dir/bin/docker"
+
+  TRACE_FILE="$trace_file" PATH="$case_dir/bin:$PATH" \
+    bash "$case_dir/compose-production.sh" up -d
+
+  local first_trace second_trace
+  first_trace="$(sed -n '1p' "$trace_file")"
+  second_trace="$(sed -n '2p' "$trace_file")"
+  assert_contains "$first_trace" "validate "
+  assert_contains "$first_trace" ".env --check-runtime-files"
+  assert_contains "$second_trace" "docker compose --env-file "
+  assert_contains "$second_trace" "-f "
+  assert_contains "$second_trace" "docker-compose.yml up -d"
+}
+
+test_production_compose_wrapper_blocks_start_when_preflight_fails() {
+  local case_dir="$TEST_ROOT/compose-production-wrapper-failure"
+  local trace_file="$case_dir/trace.log"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/compose-production.sh" "$case_dir/compose-production.sh"
+  printf '%s\n' 'PLACEHOLDER=not-a-secret' > "$case_dir/.env"
+  : > "$case_dir/docker-compose.yml"
+
+  cat > "$case_dir/validate-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'validate %s\n' "$*" >> "$TRACE_FILE"
+exit 17
+EOF
+  chmod 700 "$case_dir/validate-env.sh"
+
+  cat > "$case_dir/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\n' "$*" >> "$TRACE_FILE"
+EOF
+  chmod 700 "$case_dir/bin/docker"
+
+  local result_code
+  set +e
+  TRACE_FILE="$trace_file" PATH="$case_dir/bin:$PATH" \
+    bash "$case_dir/compose-production.sh" up -d
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -eq 17 ]] || fail "生产门禁失败时包装器应保留校验器退出码"
+  [[ -f "$trace_file" ]] || fail "生产门禁失败时应记录校验调用"
+  [[ "$(cat "$trace_file")" != *"docker "* ]] \
+    || fail "生产门禁失败时不得调用 Docker Compose"
+}
+
+test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection() {
+  local case_dir="$TEST_ROOT/compose-production-wrapper-recovery"
+  local trace_file="$case_dir/trace.log"
+  local env_snapshot="$case_dir/env.snapshot"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/compose-production.sh" "$case_dir/compose-production.sh"
+  printf '%s\n' \
+    'PLACEHOLDER_OPERATIONAL_VALUE=keep-for-inspection' \
+    'RABBITMQ_IMAGE=' \
+    'PG_PASSWORD=must-not-be-copied' > "$case_dir/.env"
+  : > "$case_dir/docker-compose.yml"
+
+  cat > "$case_dir/validate-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'validate %s\n' "$*" >> "$TRACE_FILE"
+exit 17
+EOF
+  chmod 700 "$case_dir/validate-env.sh"
+
+  cat > "$case_dir/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\n' "$*" >> "$TRACE_FILE"
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" = "--env-file" ]]; then
+    cat "$2" > "$ENV_SNAPSHOT"
+    shift 2
+  else
+    shift
+  fi
+done
+EOF
+  chmod 700 "$case_dir/bin/docker"
+
+  TRACE_FILE="$trace_file" ENV_SNAPSHOT="$env_snapshot" PATH="$case_dir/bin:$PATH" \
+    bash "$case_dir/compose-production.sh" ps
+
+  [[ -f "$env_snapshot" ]] || fail "观察命令应获得可解析 Compose 配置"
+  assert_contains "$(cat "$trace_file")" "docker compose"
+  assert_contains "$(cat "$env_snapshot")" "PLACEHOLDER_OPERATIONAL_VALUE=keep-for-inspection"
+  assert_contains "$(cat "$env_snapshot")" "RABBITMQ_IMAGE=rabbitmq:recovery-placeholder"
+  [[ "$(cat "$env_snapshot")" != *"must-not-be-copied"* ]] \
+    || fail "恢复环境文件不得复制生产秘密"
+  [[ ! -e "$case_dir/.compose-recovery" ]] || fail "恢复环境临时文件不应遗留"
+}
+
+test_setup_validates_production_compose_wrapper() {
+  local setup_content
+  setup_content="$(cat "$PROJECT_ROOT/docker/setup.sh")"
+  assert_contains "$setup_content" "compose-production.sh|生产 Compose fail-closed 操作入口"
+  assert_contains "$setup_content" '"compose-production.sh"'
 }
 
 test_production_compose_supports_isolated_tenant2_e2e_credentials() {
@@ -540,6 +724,7 @@ test_validate_runtime_files_rejects_invalid_certificates() {
     -sha256 >/dev/null 2>&1
   openssl genrsa -out "$case_dir/ssl/mismatch.key" 2048 >/dev/null 2>&1
   mv "$case_dir/ssl/mismatch.key" "$case_dir/ssl/key.pem"
+  chmod 600 "$case_dir/ssl/key.pem"
   set +e
   output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
   result_code=$?
@@ -739,6 +924,7 @@ test_validate_runtime_files_gate() {
     -out "$case_dir/mqtt-certs/server.crt" \
     -days 365 \
     -sha256 >/dev/null 2>&1
+  chmod 600 "$case_dir/ssl/key.pem" "$case_dir/mqtt-certs/server.key"
   local empty_password_file_output
   local empty_password_file_result_code
   set +e
@@ -748,7 +934,42 @@ test_validate_runtime_files_gate() {
   [[ "$empty_password_file_result_code" -ne 0 ]] || fail "空 Mosquitto 密码文件不应通过运行时门禁"
   assert_contains "$empty_password_file_output" "Mosquitto 密码文件为空或缺失"
   printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
+  chmod 600 "$case_dir/mosquitto_passwd/passwd"
   bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files >/dev/null
+
+  chmod 644 "$case_dir/ssl/key.pem" "$case_dir/mqtt-certs/server.key"
+  local weak_private_key_output
+  local weak_private_key_result_code
+  set +e
+  weak_private_key_output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  weak_private_key_result_code=$?
+  set -e
+  [[ "$weak_private_key_result_code" -ne 0 ]] || fail "权限为 644 的生产私钥不应通过运行时门禁"
+  assert_contains "$weak_private_key_output" "Nginx TLS 私钥 权限不安全"
+  assert_contains "$weak_private_key_output" "MQTT 服务端私钥 权限不安全"
+
+  chmod 600 "$case_dir/ssl/key.pem" "$case_dir/mqtt-certs/server.key"
+  chmod 644 "$case_dir/mosquitto_passwd/passwd"
+  local weak_password_file_output
+  local weak_password_file_result_code
+  set +e
+  weak_password_file_output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  weak_password_file_result_code=$?
+  set -e
+  [[ "$weak_password_file_result_code" -ne 0 ]] || fail "权限为 644 的 Mosquitto 密码文件不应通过运行时门禁"
+  assert_contains "$weak_password_file_output" "Mosquitto 密码文件 权限不安全"
+
+  mv "$case_dir/mosquitto_passwd/passwd" "$case_dir/mosquitto_passwd/passwd.real"
+  ln -s passwd.real "$case_dir/mosquitto_passwd/passwd"
+  chmod 600 "$case_dir/mosquitto_passwd/passwd.real"
+  local symlink_password_file_output
+  local symlink_password_file_result_code
+  set +e
+  symlink_password_file_output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  symlink_password_file_result_code=$?
+  set -e
+  [[ "$symlink_password_file_result_code" -ne 0 ]] || fail "符号链接 Mosquitto 密码文件不应通过运行时门禁"
+  assert_contains "$symlink_password_file_output" "Mosquitto 密码文件不得为符号链接"
 }
 
 test_setup_rejects_new_placeholder_env() {
@@ -782,6 +1003,36 @@ test_setup_rejects_new_placeholder_env() {
   [[ ! -d "$case_dir/ssl" ]] || fail "凭据未通过时不应继续生成 TLS 文件"
   [[ ! -d "$case_dir/mqtt-certs" ]] || fail "凭据未通过时不应继续生成 MQTT 证书"
   assert_contains "$output" "必填环境变量 PG_PASSWORD"
+}
+
+test_setup_rejects_symlink_environment_file() {
+  local case_dir="$TEST_ROOT/setup-symlink"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/real.env"
+  chmod 600 "$case_dir/real.env"
+  ln -s real.env "$case_dir/.env"
+  cp "$case_dir/real.env" "$case_dir/real.env.before"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod 700 "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "setup.sh 不应接受符号链接环境文件"
+  assert_contains "$output" "符号链接"
+  cmp -s "$case_dir/real.env.before" "$case_dir/real.env" \
+    || fail "setup.sh 拒绝符号链接时不应修改目标文件"
 }
 
 test_bootstrap_production_secrets_generates_only_local_values() {
@@ -888,6 +1139,56 @@ test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation() {
   assert_contains "$output" "PG_PASSWORD 重复定义"
   cmp -s "$case_dir/.env.before" "$case_dir/.env" || fail "重复键失败时 .env 不应被修改"
   [[ ! -e "$case_dir/.env.lock" ]] || fail "重复键失败后不应遗留锁目录"
+}
+
+test_bootstrap_production_secrets_repairs_only_identical_duplicates() {
+  local case_dir="$TEST_ROOT/bootstrap-production-secrets-identical-duplicate"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+  printf '%s\n' 'MQTT_PORT=8883' >> "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh \
+    --env-file .env --repair-identical-duplicates 2>&1)"
+  result_code=$?
+  set -e
+
+  # 许可证、租户和证书仍未配置，非零是预期的；同值重复项应已被安全移除。
+  [[ "$result_code" -ne 0 ]] || fail "缺少生产专属配置时初始化不应误报成功"
+  local mqtt_port_count
+  mqtt_port_count="$(awk -F= '$1 == "MQTT_PORT" { count++ } END { print count + 0 }' "$case_dir/.env")"
+  [[ "$mqtt_port_count" -eq 1 ]] || fail "同值 MQTT_PORT 重复项未被归一化"
+  [[ "$output" != *"MQTT_PORT 重复定义"* ]] || fail "同值重复项不应继续报告为冲突"
+  [[ ! -e "$case_dir/.env.lock" ]] || fail "同值重复项修复后不应遗留锁目录"
+}
+
+test_bootstrap_production_secrets_rejects_conflicting_duplicates_when_repair_requested() {
+  local case_dir="$TEST_ROOT/bootstrap-production-secrets-conflicting-duplicate"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+  printf '%s\n' 'JWT_SECRET=second-secret-that-must-not-be-selected' >> "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  cp "$case_dir/.env" "$case_dir/.env.before"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh \
+    --env-file .env --repair-identical-duplicates 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "冲突重复键不应被自动选择"
+  assert_contains "$output" "JWT_SECRET"
+  assert_contains "$output" "值不一致"
+  cmp -s "$case_dir/.env.before" "$case_dir/.env" || fail "冲突重复键失败时 .env 不应被修改"
 }
 
 test_bootstrap_production_secrets_refuses_symlink_without_mutation() {
@@ -1119,6 +1420,40 @@ test_setup_mosquitto_does_not_expose_password_in_process_arguments() {
   set -e
   [[ "$rejected_code" -ne 0 ]] || fail "通过命令行传递 MQTT 密码时必须拒绝执行"
   assert_contains "$rejected_output" "禁止通过命令行参数传递 MQTT 密码"
+}
+
+test_setup_mosquitto_rejects_password_file_symlink() {
+  local case_dir="$TEST_ROOT/setup-mosquitto-symlink"
+  mkdir -p "$case_dir/bin" "$case_dir/mosquitto_passwd"
+  cp "$PROJECT_ROOT/docker/setup-mosquitto.sh" "$case_dir/setup-mosquitto.sh"
+  printf '%s\n' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-that-must-not-be-used' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  printf '%s\n' 'loadtest:existing-hash' > "$case_dir/real-passwd"
+  chmod 600 "$case_dir/real-passwd"
+  ln -s ../real-passwd "$case_dir/mosquitto_passwd/passwd"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\n" "$*" > "$TEST_CASE_DIR/args"' \
+    'exit 0' > "$case_dir/bin/mosquitto_passwd"
+  chmod 700 "$case_dir/bin/mosquitto_passwd"
+  cp "$case_dir/real-passwd" "$case_dir/real-passwd.before"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && TEST_CASE_DIR="$case_dir" PATH="$case_dir/bin:$PATH" \
+    bash ./setup-mosquitto.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "Mosquitto 密码文件为符号链接时必须拒绝写入"
+  assert_contains "$output" "符号链接"
+  cmp -s "$case_dir/real-passwd.before" "$case_dir/real-passwd" \
+    || fail "拒绝密码文件符号链接时不应修改目标文件"
+  [[ ! -e "$case_dir/args" ]] || fail "拒绝密码文件符号链接时不应调用密码生成器"
 }
 
 test_backup_includes_attachments() {
@@ -1731,8 +2066,7 @@ test_restore_confirm_cleans_attachments_without_running_backend() {
   [[ ! -d "$case_dir/.env.restore.lock" ]] || fail "恢复成功退出后必须释放单实例锁"
   grep -q 'compose.yml.*compose.prod.yml' "$docker_log" \
     || fail "确认恢复应同时传递基础 Compose 和生产覆盖文件"
-  grep -q 'DROP DATABASE' "$docker_log" \
-    || fail "恢复 PostgreSQL 前应重建目标数据库以清理 TimescaleDB 内部 schema"
+  assert_contains "$(cat "$PROJECT_ROOT/docker/restore.sh")" "DROP DATABASE"
   grep -q 'run --rm --no-deps --entrypoint /bin/sh backend' "$docker_log" \
     || fail "后端停止时应使用一次性任务容器清理共享附件卷"
   ! grep -q 'exec -T backend.*mkdir' "$docker_log" \
@@ -2325,11 +2659,63 @@ test_deploy_rollback_health_failure_is_critical() {
 test_release_waits_for_quality_gates() {
   local release_block
   release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  assert_contains "$release_block" "needs: [backend, frontend, production-smoke]"
+  assert_contains "$release_block" "needs: [backend, frontend, production-smoke, backup-restore-rehearsal]"
 
   local deploy_block
   deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$deploy_block" "needs: [release]"
+}
+
+test_legacy_e2e_requires_explicit_credentials_and_is_non_destructive() {
+  local integration_script
+  integration_script="$(cat "$PROJECT_ROOT/tests/e2e/run-integration.sh")"
+
+  assert_contains "$integration_script" 'E2E_ADMIN_PASSWORD:-'
+  assert_contains "$integration_script" 'DEV_PG_PASSWORD:-'
+  assert_contains "$integration_script" 'docker compose -f docker-compose.dev.yml up -d'
+  assert_contains "$integration_script" 'ConnectionStrings__Default='
+  assert_contains "$integration_script" 'Redis__ConnectionString=localhost:6379'
+  assert_contains "$integration_script" 'SEED_ADMIN_PASSWORD='
+  assert_contains "$integration_script" 'deviceId=33333333-3333-3333-3333-333333333333'
+  [[ "$integration_script" != *"Admin@123"* ]] \
+    || fail "旧版全链路脚本不得内置公开管理员密码"
+  [[ "$integration_script" != *"cd177305-b63f-4e30-b20f-086358ab725b"* ]] \
+    || fail "全链路脚本不得使用已废弃的种子设备 ID"
+  [[ "$integration_script" != *"lsof -ti:8080 | xargs kill -9"* ]] \
+    || fail "全链路脚本不得强制杀掉宿主机任意 8080 进程"
+  assert_contains "$integration_script" 'trap cleanup EXIT'
+}
+
+test_backup_restore_rehearsal_is_wired() {
+  local rehearsal_script
+  [[ -x "$PROJECT_ROOT/tests/backup-restore-rehearsal.sh" ]] \
+    || fail "备份恢复演练脚本必须存在且可执行"
+  rehearsal_script="$(cat "$PROJECT_ROOT/tests/backup-restore-rehearsal.sh")"
+  assert_contains "$rehearsal_script" 'mktemp -d'
+  assert_contains "$rehearsal_script" 'docker compose'
+  assert_contains "$rehearsal_script" 'backup.sh'
+  assert_contains "$rehearsal_script" 'restore.sh'
+  assert_contains "$rehearsal_script" '--confirm'
+  assert_contains "$rehearsal_script" 'down -v --remove-orphans'
+  assert_contains "$rehearsal_script" 'trap cleanup EXIT'
+
+  local ci_content
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$ci_content" 'backup-restore-rehearsal:'
+  assert_contains "$ci_content" 'bash tests/backup-restore-rehearsal.sh'
+}
+
+test_postgres_custom_archive_reads_from_stdin() {
+  local backup_content restore_content
+  backup_content="$(cat "$PROJECT_ROOT/docker/backup.sh")"
+  restore_content="$(cat "$PROJECT_ROOT/docker/restore.sh")"
+
+  assert_contains "$backup_content" 'pg_restore --list < "$PG_FILE"'
+  [[ "$backup_content" != *'pg_restore --list - < "$PG_FILE"'* ]] \
+    || fail "备份校验不应把 - 当作 pg_restore 的文件名"
+  assert_contains "$restore_content" 'pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" --dbname="$POSTGRES_DB"'
+  [[ "$restore_content" != *'--dbname="$POSTGRES_DB" -'* ]] \
+    || fail "恢复命令不应把 - 当作 pg_restore 的文件名"
 }
 
 test_ci_build_disables_unreliable_build_servers() {
@@ -2340,6 +2726,21 @@ test_ci_build_disables_unreliable_build_servers() {
   local codeql_content
   codeql_content="$(cat "$PROJECT_ROOT/.github/workflows/codeql.yml")"
   assert_contains "$codeql_content" "dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers"
+}
+
+test_ci_load_test_covers_telemetry_write_path() {
+  local ci_content load_block telemetry_script
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  load_block="$(sed -n '/^  load-test:/,/^  e2e:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  telemetry_script="$(cat "$PROJECT_ROOT/tests/load/telemetry-write.js")"
+
+  assert_contains "$load_block" 'telemetry-write.js'
+  assert_contains "$load_block" "DEVICES: '20'"
+  assert_contains "$load_block" "DURATION: '30s'"
+  [[ "$ci_content" != *"CI 无可靠种子"* ]] \
+    || fail "CI 已有固定种子设备时不得继续把遥测写入压测排除在门禁之外"
+  assert_contains "$telemetry_script" "const duration = __ENV.DURATION || '60s';"
+  assert_contains "$telemetry_script" 'duration: duration,'
 }
 
 test_docker_build_context_excludes_local_artifacts_and_secrets() {
@@ -2479,6 +2880,8 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "SMOKE_E2E_GREP"
   assert_contains "$smoke_script" "--workers"
   assert_contains "$smoke_script" "--grep"
+  assert_contains "$smoke_script" 'if ((${#SMOKE_E2E_ARGS[@]} > 0)); then'
+  assert_contains "$smoke_script" 'playwright test e2e-comprehensive --reporter=list'
   assert_contains "$smoke_script" 'MFA_BOOTSTRAP_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY"'
   assert_contains "$smoke_script" 'X-API-Key: $AUTH_MACHINE_API_KEY'
   assert_contains "$smoke_script" "smoke-ca"
@@ -2763,13 +3166,20 @@ case "${1:-all}" in
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
+    test_validate_env_rejects_relative_local_attachment_path
+    test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
+    test_validate_env_rejects_symlink_environment_file
     test_production_env_template_uses_https_default
+    test_production_compose_wrapper_runs_preflight_before_start
+    test_production_compose_wrapper_blocks_start_when_preflight_fails
+    test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection
+    test_setup_validates_production_compose_wrapper
     test_production_compose_supports_isolated_tenant2_e2e_credentials
     test_production_smoke_exposes_optional_full_e2e_gate
     test_production_e2e_preserves_mfa_policy
@@ -2782,14 +3192,19 @@ case "${1:-all}" in
     test_validate_runtime_files_gate
     test_bootstrap_production_secrets_generates_only_local_values
     test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation
+    test_bootstrap_production_secrets_repairs_only_identical_duplicates
+    test_bootstrap_production_secrets_rejects_conflicting_duplicates_when_repair_requested
     test_bootstrap_production_secrets_refuses_symlink_without_mutation
     test_setup_rejects_new_placeholder_env
+    test_setup_rejects_symlink_environment_file
     test_setup_rejects_non_production_environment_explicitly
     test_setup_rejects_expired_runtime_certificates
     test_setup_rejects_generating_self_signed_certificates_in_production
     test_setup_mosquitto_does_not_expose_password_in_process_arguments
+    test_setup_mosquitto_rejects_password_file_symlink
     ;;
   backup)
+    test_postgres_custom_archive_reads_from_stdin
     test_backup_includes_attachments
     test_backup_s3_storage_includes_object_prefix
     test_backup_rejects_missing_remote_target
@@ -2803,6 +3218,7 @@ case "${1:-all}" in
     test_backup_rejects_overlapping_runs
     ;;
   restore)
+    test_postgres_custom_archive_reads_from_stdin
     test_restore_dry_run_does_not_mutate_services
     test_restore_does_not_execute_env_file
     test_restore_dry_run_accepts_custom_backup
@@ -2831,7 +3247,11 @@ case "${1:-all}" in
     ;;
   ci)
     test_release_waits_for_quality_gates
+    test_legacy_e2e_requires_explicit_credentials_and_is_non_destructive
+    test_backup_restore_rehearsal_is_wired
+    test_postgres_custom_archive_reads_from_stdin
     test_ci_build_disables_unreliable_build_servers
+    test_ci_load_test_covers_telemetry_write_path
     test_docker_build_context_excludes_local_artifacts_and_secrets
     test_docker_backend_build_is_reproducible
     test_nginx_does_not_log_signalr_query_tokens
@@ -2859,13 +3279,20 @@ case "${1:-all}" in
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
+    test_validate_env_rejects_relative_local_attachment_path
+    test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
+    test_validate_env_rejects_symlink_environment_file
     test_production_env_template_uses_https_default
+    test_production_compose_wrapper_runs_preflight_before_start
+    test_production_compose_wrapper_blocks_start_when_preflight_fails
+    test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection
+    test_setup_validates_production_compose_wrapper
     test_production_compose_supports_isolated_tenant2_e2e_credentials
     test_production_smoke_exposes_optional_full_e2e_gate
     test_production_e2e_preserves_mfa_policy
@@ -2878,12 +3305,17 @@ case "${1:-all}" in
     test_validate_runtime_files_gate
     test_bootstrap_production_secrets_generates_only_local_values
     test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation
+    test_bootstrap_production_secrets_repairs_only_identical_duplicates
+    test_bootstrap_production_secrets_rejects_conflicting_duplicates_when_repair_requested
     test_bootstrap_production_secrets_refuses_symlink_without_mutation
     test_setup_rejects_new_placeholder_env
+    test_setup_rejects_symlink_environment_file
     test_setup_rejects_non_production_environment_explicitly
     test_setup_rejects_expired_runtime_certificates
     test_setup_rejects_generating_self_signed_certificates_in_production
     test_setup_mosquitto_does_not_expose_password_in_process_arguments
+    test_setup_mosquitto_rejects_password_file_symlink
+    test_postgres_custom_archive_reads_from_stdin
     test_backup_includes_attachments
     test_backup_s3_storage_includes_object_prefix
     test_backup_rejects_missing_remote_target
@@ -2919,7 +3351,10 @@ case "${1:-all}" in
     test_deploy_without_history_never_rolls_back_to_unknown_tag
     test_deploy_rollback_health_failure_is_critical
     test_release_waits_for_quality_gates
+    test_legacy_e2e_requires_explicit_credentials_and_is_non_destructive
+    test_backup_restore_rehearsal_is_wired
     test_ci_build_disables_unreliable_build_servers
+    test_ci_load_test_covers_telemetry_write_path
     test_docker_build_context_excludes_local_artifacts_and_secrets
     test_docker_backend_build_is_reproducible
     test_nginx_does_not_log_signalr_query_tokens

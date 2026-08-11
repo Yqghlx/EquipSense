@@ -111,6 +111,7 @@ describe('api 响应拦截器', () => {
       const error = { response: { status: 401, data: {} }, config: { url: '/devices' } };
       await expect(triggerRejected(error)).rejects.toEqual(error);
       expect(assignedHref).toBe('/login');
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
     });
   });
 
@@ -132,7 +133,9 @@ describe('api 响应拦截器', () => {
     });
 
     it('刷新失败时应清除会话并跳转登录页，并 reject', async () => {
-      sessionStorage.setItem('user', JSON.stringify({ username: 'admin' }));
+      const user = { username: 'admin', role: 'SystemAdmin' };
+      sessionStorage.setItem('user', JSON.stringify(user));
+      useAuthStore.setState({ user: user as never, isAuthenticated: true });
       hoisted.axiosPost = vi.fn().mockRejectedValue(new Error('refresh expired'));
 
       let assignedHref = '';
@@ -151,6 +154,8 @@ describe('api 响应拦截器', () => {
       const error = { response: { status: 401, data: {} }, config: { url: '/devices' } };
       await expect(triggerRejected(error)).rejects.toThrow('refresh expired');
       expect(assignedHref).toBe('/login');
+      expect(useAuthStore.getState().user).toBeNull();
+      expect(useAuthStore.getState().isAuthenticated).toBe(false);
     });
 
     it('刷新成功但无 userInfo 时不应更新 authStore', async () => {

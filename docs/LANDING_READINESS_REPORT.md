@@ -3,7 +3,7 @@
 > 基线生成时间：2026-06-14
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-11）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证包含事务 Outbox/Inbox、自动建单事务回滚、1298 个后端单元测试、163 个后端集成测试（163 个全部通过，真实 RabbitMQ 场景通过 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 显式启用）、前端 355 个单元测试、真实 PostgreSQL/RabbitMQ 迁移核验、关键流程干净浏览器冒烟、后端/前端/边缘网关生产构建，以及当前提交三镜像的隔离 Production runtime smoke（440 个 E2E 通过、2 个条件跳过、0 失败）。当前 `docker/.env` 有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
+> **当前状态说明（2026-08-12）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证包含事务 Outbox/Inbox、自动建单事务回滚、1339 个后端单元测试、默认集成测试 160 通过/6 跳过，以及显式启用 RabbitMQ 后 166/166 通过、0 跳过、0 失败，前端 387 个单元测试、真实 PostgreSQL/RabbitMQ 迁移核验、关键流程干净浏览器冒烟、后端/前端/边缘网关生产构建、备份恢复真实实演，以及当前提交三镜像的隔离 Production runtime smoke（431 个 E2E 通过、2 个条件跳过、0 失败）。本轮同时修复网关设备管理入口、四步接入向导验收、工单 UI 假绿断言，完成网关管理、网关设备、网关监控、通知中心、待审批页面和应用壳层反馈的中英文覆盖与回归测试；新增 `docker/compose-production.sh`：启动类操作 fail-closed，配置不完整时 `ps/logs/exec/stop/down` 使用不含生产秘密的恢复环境仍可诊断和处置；运行时门禁同时拒绝 644 私钥、Mosquitto 密码文件和相关敏感文件符号链接，避免部分容器上线后无法收集状态、误写认证目标或泄露认证材料。当前 `docker/.env` 有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
 
 ## 一、项目规模
 
@@ -12,9 +12,9 @@
 | 后端代码行（Core+Application+Infrastructure+WebAPI） | 51,534 行 |
 | 后端 API 端点 | 135 个（25 个 Controller） |
 | 前端页面 | 27 个 |
-| 单元测试 | 1298 个（后端）+ 355 个（前端） |
-| 集成测试 | 163 个用例（33 个文件） |
-| E2E 测试 | 442 个用例（Playwright） |
+| 单元测试 | 1339 个（后端）+ 387 个（前端） |
+| 集成测试 | 166 个用例（33 个文件） |
+| E2E 测试 | 433 个用例（Playwright） |
 | 压力测试 | 11 个脚本（k6） |
 
 ## 二、功能完备性核验（对照行业产品）
@@ -66,7 +66,7 @@
 |------|------|------|
 | 容器化 | ✅ | docker-compose.yml（12 个长期运行服务 + Jaeger 卷初始化服务）+ 后端/前端/边缘网关多阶段 Dockerfile |
 | 反向代理 | ✅ | Nginx（TLS 终止、静态资源、API/WebSocket 代理） |
-| 配置管理 | ✅（代码）/ ⚠️（当前环境） | `.env.example` 覆盖 PG/Redis/MQTT/JWT/MFA/PII/AutoMapper/LLM/SMTP/VAPID/TLS/监控；当前 `.env` 尚有 27 项未通过门禁 |
+| 配置管理 | ✅（代码）/ ⚠️（当前环境） | `.env.example` 覆盖 PG/Redis/MQTT/JWT/MFA/PII/AutoMapper/LLM/SMTP/VAPID/TLS/监控；`compose-production.sh` 已接入启动前门禁；当前 `.env` 尚有 27 项未通过门禁 |
 | 数据持久化 | ✅ | TimescaleDB 7天压缩 + 90天保留 + 连续聚合；工单附件使用 `attachments_data` 命名卷并纳入备份 |
 | 迁移自动化 | ✅ | 启动自动 MigrateAsync + 种子初始化；迁移元数据可发现性有单测，MFA 迁移已在真实 PostgreSQL 验证 |
 | 健康检查 | ✅ | 三级探针（startup/liveness/ready），含 PG+Redis+MQTT+LLM |
@@ -127,13 +127,13 @@
 |------|------|
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
 | 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
-| 后端单元测试 | ✅ 1298/1298 通过 |
-| 后端集成测试 | ✅ 163 通过、0 跳过、0 失败（共 163 个；真实 RabbitMQ broker 场景需显式设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true`） |
+| 后端单元测试 | ✅ 1339/1339 通过 |
+| 后端集成测试 | ✅ 默认 160 通过、6 条件跳过；显式设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 后 166/166 通过、0 跳过、0 失败 |
 | 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
-| 前端单元测试 | ✅ 355/355 通过 |
-| E2E 测试 | ✅ 开发栈与隔离 Production 镜像均执行默认 442 个场景：440 通过、2 跳过、0 失败（含五个角色与第二租户生产凭据覆盖契约）；main/tag 已接入 Production 全量门禁 |
-| i18n 完整性 | ✅ 753 个键在中英文资源中完全对齐 |
+| 前端单元测试 | ✅ 387/387 通过 |
+| E2E 测试 | ✅ 开发栈与隔离 Production 镜像均执行默认 433 个场景：431 通过、2 跳过、0 失败（含五个角色与第二租户生产凭据覆盖契约）；main/tag 已接入 Production 全量门禁 |
+| i18n 完整性 | ✅ 865 个键在中英文资源中完全对齐 |
 | 生产构建 | ✅ PWA SW 产出 + precache 124 entries + 边缘网关镜像可复现构建 |
 | 生产配置 | ✅ appsettings.Production.json |
 | 依赖审计 | ✅ NuGet 全解决方案无已知漏洞；npm 全量审计 0 漏洞；审计服务失败会阻断 |
@@ -144,6 +144,7 @@
 部署到生产环境前，逐项确认：
 
 - [ ] `bash docker/validate-env.sh docker/.env --check-runtime-files` 以 0 退出；当前环境仍报告 27 个问题（24 个配置问题 + 3 个证书问题，包含重复键和非 Production 环境）
+- [x] 生产 Compose 直接启动入口已 fail-closed：`docker/compose-production.sh up/start/restart/build/pull` 在门禁失败时不会调用 Docker；`ps/logs/exec/stop/down` 使用无秘密恢复环境仍可用于故障处置
 - [ ] `docker/.env` 已创建，PG/Redis/RabbitMQ/MQTT/Seq/Grafana 与五个种子账户密码均为独立强随机值；校验器不得报告凭据复用
 - [ ] `JWT_SECRET` ≥ 32 字符（`openssl rand -base64 48`）
 - [ ] `TOTP_ENCRYPTION_KEY` 已由密钥管理系统保存并注入
@@ -156,6 +157,7 @@
 - [ ] TLS 证书已挂载（`SSL_CERT_PATH` / `SSL_KEY_PATH`）
 - [ ] `GRAFANA_PASSWORD` 已修改
 - [ ] 已按部署形态完成附件备份：单机纳入 `attachments_data` 卷，跨主机/多副本启用 S3 兼容存储并完成对象前缀恢复演练
+- [x] 仓库级隔离恢复实演已通过：`bash tests/backup-restore-rehearsal.sh` 真实执行 `backup.sh` 与 `restore.sh --confirm`，并接入 CI；这不替代生产存储、Redis、密钥和容量条件下的正式演练
 - [ ] 已在隔离数据库和临时附件卷使用 `docker/restore.sh --confirm` 完成恢复演练，并记录 RTO/RPO
 - [ ] 钉钉/飞书集成在租户 Settings 配置（如需机器人推送）
 - [ ] 首次启动验证：`/health` 返回 Healthy，使用 `SEED_ADMIN_PASSWORD` 配置的管理员初始密码登录后立即改密（不再使用公开默认密码）

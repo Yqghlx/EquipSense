@@ -1,3 +1,4 @@
+using System.Text;
 using EquipAI.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -55,7 +56,9 @@ public class LocalFileStorageService : IFileStorageService
         // 构建存储目录：{basePath}/{tenantId}/{category}/
         var directory = Path.GetFullPath(Path.Combine(_basePath, tenantId.ToString(), safeCategory));
         EnsureInsideBasePath(directory);
+        EnsureNoSymbolicLinks(directory);
         Directory.CreateDirectory(directory);
+        EnsureNoSymbolicLinks(directory);
 
         // 生成唯一文件名避免冲突：{原始名_不含扩展名}_{短GUID}.{扩展名}
         var extension = Path.GetExtension(safeFileName);
@@ -64,6 +67,7 @@ public class LocalFileStorageService : IFileStorageService
 
         var fullPath = Path.GetFullPath(Path.Combine(directory, uniqueName));
         EnsureInsideBasePath(fullPath);
+        EnsureNoSymbolicLinks(fullPath);
         var relativePath = Path.Combine(tenantId.ToString(), safeCategory, uniqueName)
             .Replace('\\', '/');
 
@@ -71,6 +75,7 @@ public class LocalFileStorageService : IFileStorageService
         // 直接写正式文件时，网络流中断会留下带完整扩展名的半成品，可能被后续下载或扫描流程误认为有效附件。
         var temporaryPath = Path.Combine(directory, $".{uniqueName}.uploading");
         EnsureInsideBasePath(temporaryPath);
+        EnsureNoSymbolicLinks(temporaryPath);
         long bytesWritten = 0;
         try
         {
@@ -127,7 +132,7 @@ public class LocalFileStorageService : IFileStorageService
         return relativePath;
     }
 
-    public async Task<(Stream Stream, string ContentType, string FileName)> GetAsync(string storagePath)
+    public Task<(Stream Stream, string ContentType, string FileName)> GetAsync(string storagePath)
     {
         var fullPath = ResolveStoragePath(storagePath);
 
@@ -138,9 +143,17 @@ public class LocalFileStorageService : IFileStorageService
 
         var fileName = Path.GetFileName(fullPath);
         var contentType = GetContentType(fileName);
-        var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read);
+        // 允许多个请求并发读取同一个附件，并允许清理任务在下载期间删除旧文件。
+        // Windows 宿主机默认 FileShare.None 会让第二个下载或删除请求无谓失败。
+        var stream = new FileStream(
+            fullPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 64 * 1024,
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
 
-        return await Task.FromResult((stream as Stream, contentType, fileName));
+        return Task.FromResult<(Stream, string, string)>((stream, contentType, fileName));
     }
 
     public Task DeleteAsync(string storagePath)
@@ -226,7 +239,23 @@ public class LocalFileStorageService : IFileStorageService
         if (string.IsNullOrWhiteSpace(sanitized) || sanitized is "." or "..")
             sanitized = "file";
 
-        return sanitized.Length <= 100 ? sanitized : sanitized[..100];
+        // Linux 文件系统通常把单个路径段限制为 255 字节，而不是 255 个字符；
+        // 预留 GUID 和扩展名空间后按 UTF-8 字节截断，避免中文或 emoji 文件名上传失败。
+        const int maxUtf8Bytes = 160;
+        var builder = new StringBuilder(Math.Min(sanitized.Length, 100));
+        var bytes = 0;
+        foreach (var rune in sanitized.EnumerateRunes())
+        {
+            var runeText = rune.ToString();
+            var runeBytes = Encoding.UTF8.GetByteCount(runeText);
+            if (bytes + runeBytes > maxUtf8Bytes)
+                break;
+
+            builder.Append(runeText);
+            bytes += runeBytes;
+        }
+
+        return builder.Length == 0 ? "file" : builder.ToString();
     }
 
     /// <summary>
@@ -239,7 +268,40 @@ public class LocalFileStorageService : IFileStorageService
 
         var fullPath = Path.GetFullPath(Path.Combine(_basePath, storagePath));
         EnsureInsideBasePath(fullPath);
+        EnsureNoSymbolicLinks(fullPath);
         return fullPath;
+    }
+
+    /// <summary>
+    /// 拒绝附件根目录下的符号链接和其他重解析点，避免合法的相对路径被引导到租户目录之外。
+    /// 该检查同时覆盖已存在的目录、文件和断开的符号链接；断链也必须失败关闭。
+    /// </summary>
+    private void EnsureNoSymbolicLinks(string fullPath)
+    {
+        var relativePath = Path.GetRelativePath(_basePath, fullPath);
+        if (relativePath == ".")
+            return;
+
+        var currentPath = _basePath;
+        var segments = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var segment in segments)
+        {
+            currentPath = Path.Combine(currentPath, segment);
+            var directoryInfo = new DirectoryInfo(currentPath);
+            var fileInfo = new FileInfo(currentPath);
+
+            // LinkTarget 对断开的链接仍能返回目标；Attributes 则补充覆盖 Windows 重解析点。
+            if (directoryInfo.LinkTarget is not null
+                || fileInfo.LinkTarget is not null
+                || (directoryInfo.Exists && directoryInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                || (fileInfo.Exists && fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)))
+            {
+                throw new UnauthorizedAccessException("附件存储路径不允许包含符号链接或重解析点");
+            }
+        }
     }
 
     /// <summary>

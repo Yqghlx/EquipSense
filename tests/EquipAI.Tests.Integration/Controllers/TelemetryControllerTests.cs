@@ -100,6 +100,26 @@ public class TelemetryControllerTests
     }
 
     /// <summary>
+    /// 验证：JSON 明确传入 metrics=null 时应返回 400，而不是在控制器枚举字典时触发 500
+    /// </summary>
+    [Fact]
+    public async Task UploadTelemetry_WithNullMetrics_Returns400()
+    {
+        var client = await GetAuthenticatedClientAsync();
+        var deviceId = await CreateTestDeviceAsync(client);
+
+        var request = new TelemetryUploadRequest
+        {
+            DeviceId = deviceId.ToString(),
+            Metrics = null!,
+        };
+
+        var response = await client.PostAsJsonAsync("/api/v1/telemetry", request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
     /// 验证：GET /api/v1/telemetry/{deviceId} 查询设备遥测数据返回 200
     /// 未指定 metric 时返回所有指标的最新值
     /// </summary>

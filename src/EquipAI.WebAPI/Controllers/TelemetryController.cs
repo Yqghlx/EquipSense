@@ -3,6 +3,7 @@ using EquipAI.Application.Telemetry;
 using EquipAI.Application.Telemetry.DTOs;
 using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
+using EquipAI.Core.Validation;
 using EquipAI.Infrastructure.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -40,22 +41,36 @@ public class TelemetryController : ControllerBase
     /// </summary>
     [HttpPost]
     [RequirePermission("device:read")]
+    [RequestSizeLimit(TelemetryInputValidator.MaxPayloadBytes)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> UploadTelemetry([FromBody] TelemetryUploadRequest request)
+    public async Task<IActionResult> UploadTelemetry([FromBody] TelemetryUploadRequest? request)
     {
+        var validationError = ValidateUploadRequest(request);
+        if (validationError is not null)
+            return BadRequest(new { code = 400, message = validationError });
+
+        // ValidateUploadRequest 已经保证 request 非空；这里保留显式判空，
+        // 让未来修改校验逻辑时仍不会把异常输入带入业务流程。
+        if (request is null)
+            return BadRequest(new { code = 400, message = "遥测请求体不能为空" });
+
+        var deviceIdentifier = request.DeviceId.Trim();
+        var quality = request.Quality.Trim();
+        var timestamp = request.Timestamp.ToSafeUtc();
+
         Guid deviceId;
-        if (Guid.TryParse(request.DeviceId, out var uuid))
+        if (Guid.TryParse(deviceIdentifier, out var uuid))
         {
             deviceId = uuid;
         }
         else
         {
             // 设备编码解析下沉到 Application 层（IDeviceService），避免 Controller 直接依赖 AppDbContext
-            var resolvedId = await _deviceService.GetDeviceIdByCodeAsync(request.DeviceId);
+            var resolvedId = await _deviceService.GetDeviceIdByCodeAsync(deviceIdentifier);
             if (resolvedId is null)
             {
-                return BadRequest(new { code = 400, message = $"设备编码 '{request.DeviceId}' 不存在" });
+                return BadRequest(new { code = 400, message = $"设备编码 '{deviceIdentifier}' 不存在" });
             }
             deviceId = resolvedId.Value;
         }
@@ -65,10 +80,29 @@ public class TelemetryController : ControllerBase
             await _telemetryService.EnqueueAsync(
                 _tenantContext.TenantId, deviceId,
                 metric, value,
-                request.Timestamp, request.Quality, "http");
+                timestamp, quality, "http");
         }
 
         return Accepted(new { message = "遥测数据已接收", count = request.Metrics.Count });
+    }
+
+    /// <summary>
+    /// 校验 HTTP 遥测上报的边界。
+    ///
+    /// 设备网关可能因为网络重试、固件缺陷或配置错误发送损坏数据；在入队前拒绝，
+    /// 能避免异常数据进入异步管线后才以数据库错误、告警噪音或队列堆积的形式暴露。
+    /// 时间戳不限制历史跨度，因为边缘网关支持断网缓存后补传，业务上允许迟到数据。
+    /// </summary>
+    private static string? ValidateUploadRequest(TelemetryUploadRequest? request)
+    {
+        if (request is null)
+            return "遥测请求体不能为空";
+
+        return TelemetryInputValidator.ValidateUpload(
+            request.DeviceId,
+            request.Metrics,
+            request.Timestamp,
+            request.Quality);
     }
 
     /// <summary>

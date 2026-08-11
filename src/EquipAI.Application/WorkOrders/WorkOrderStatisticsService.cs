@@ -24,7 +24,7 @@ public class WorkOrderStatisticsService
     /// <summary>
     /// 获取工单统计数据
     /// </summary>
-    /// <param name="tenantId">租户 ID（全局过滤器自动注入）</param>
+    /// <param name="tenantId">目标租户 ID，作为统计查询的显式数据边界</param>
     /// <param name="periodDays">统计周期天数（7/30/90）</param>
     public async Task<WorkOrderStatistics> GetStatisticsAsync(Guid tenantId, int periodDays, CancellationToken ct = default)
     {
@@ -44,8 +44,8 @@ public class WorkOrderStatisticsService
         var startDate = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
 
         // 查询时间范围内的工单原始数据
-        var workOrders = await _db.WorkOrders
-            .Where(w => w.CreatedAt >= startDate)
+        var workOrders = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
+            .Where(w => w.TenantId == tenantId && w.CreatedAt >= startDate)
             .Select(w => new
             {
                 w.Status,

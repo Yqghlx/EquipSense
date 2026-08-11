@@ -24,6 +24,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 TEMP_FILE=""
 LOCK_DIR=""
+REPAIR_IDENTICAL_DUPLICATES=false
 GENERATED_VALUE=""
 GENERATED_COUNT=0
 USED_VALUES=()
@@ -46,6 +47,8 @@ usage() {
 说明：
   只生成本机随机凭据，不覆盖已有有效值；供应商许可证、真实租户 UUID、
   生产域名和 TLS/MQTT 证书必须由部署方另行配置。
+  可选的 --repair-identical-duplicates 只会归一化值完全相同的重复键；
+  发现冲突值时仍会拒绝修改环境文件。
 EOF
 }
 
@@ -73,6 +76,10 @@ while [ "$#" -gt 0 ]; do
       ENV_FILE="$2"
       shift 2
       ;;
+    --repair-identical-duplicates)
+      REPAIR_IDENTICAL_DUPLICATES=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -98,16 +105,44 @@ fi
 [ -f "${SCRIPT_DIR}/validate-env.sh" ] || fail "缺少同目录环境变量校验器：${SCRIPT_DIR}/validate-env.sh"
 command -v openssl >/dev/null 2>&1 || fail "未找到 openssl，无法生成安全随机凭据"
 
-# Compose 对重复键采用最后一项；继续编辑会让部署结果依赖文件顺序，因此必须先拒绝。
-DUPLICATE_KEYS="$(awk -F= '
-  /^[A-Za-z_][A-Za-z0-9_]*=/ { counts[$1]++ }
-  END { for (key in counts) if (counts[key] > 1) print key }
+# Compose 对重复键采用最后一项；继续编辑会让部署结果依赖文件顺序。
+# 默认仍然全部拒绝；只有显式开启修复时，才允许删除值完全相同的重复行。
+# awk 只输出键名和“是否冲突”，绝不输出环境变量值。
+DUPLICATE_KEY_DETAILS="$(awk -F= '
+  /^[A-Za-z_][A-Za-z0-9_]*=/ {
+    key = $1
+    value = substr($0, index($0, "=") + 1)
+    counts[key]++
+    token = key SUBSEP value
+    if (!(token in seen)) {
+      seen[token] = 1
+      unique_values[key]++
+    }
+  }
+  END {
+    for (key in counts) {
+      if (counts[key] > 1) {
+        printf "%s\t%s\n", key, (unique_values[key] > 1 ? "conflict" : "identical")
+      }
+    }
+  }
 ' "$ENV_FILE")"
-if [ -n "$DUPLICATE_KEYS" ]; then
-  while IFS= read -r duplicate_key; do
-    [ -n "$duplicate_key" ] && error "${duplicate_key} 重复定义，未修改环境文件"
-  done <<< "$DUPLICATE_KEYS"
-  exit 1
+if [ -n "$DUPLICATE_KEY_DETAILS" ]; then
+  has_conflicting_duplicate=false
+  while IFS=$'\t' read -r duplicate_key duplicate_state; do
+    [ -n "$duplicate_key" ] || continue
+    if [ "$duplicate_state" = "conflict" ]; then
+      error "${duplicate_key} 重复定义且值不一致，无法自动修复（未修改环境文件）"
+      has_conflicting_duplicate=true
+    elif [ "$REPAIR_IDENTICAL_DUPLICATES" != true ]; then
+      error "${duplicate_key} 重复定义，未修改环境文件"
+    fi
+  done <<< "$DUPLICATE_KEY_DETAILS"
+
+  if [ "$has_conflicting_duplicate" = true ] || [ "$REPAIR_IDENTICAL_DUPLICATES" != true ]; then
+    exit 1
+  fi
+  warn "已启用同值重复键归一化，仅保留每个键的首次定义"
 fi
 
 # 目录锁用 mkdir 的原子性避免 macOS/Linux 都依赖可选的 flock 命令。
@@ -268,6 +303,11 @@ while IFS= read -r env_line || [ -n "$env_line" ]; do
   if [[ "$env_line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
     env_key="${BASH_REMATCH[1]}"
     env_value="${BASH_REMATCH[2]}"
+    if [ "$REPAIR_IDENTICAL_DUPLICATES" = true ] \
+      && [ "${#SEEN_KEYS[@]}" -gt 0 ] \
+      && key_was_seen "$env_key"; then
+      continue
+    fi
     SEEN_KEYS+=("$env_key")
     if should_generate_value "$env_key" "$env_value"; then
       generate_for_key "$env_key"

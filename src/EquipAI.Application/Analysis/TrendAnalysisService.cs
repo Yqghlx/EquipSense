@@ -39,10 +39,123 @@ public class TrendAnalysisService
         var since = DateTime.UtcNow.AddDays(-7);
         var rawData = await _db.DeviceTelemetry
             .Where(t => t.DeviceId == deviceId && t.Metric == metric && t.Time >= since && t.Value != null)
-            .OrderBy(t => t.Time)
-            .Select(t => new { t.Time, t.Value })
+            .Select(t => new TrendSample(t.Time, t.Value!.Value))
             .ToListAsync(ct);
 
+        // 样本不足时无需再查询阈值；这条路径常见于新接入设备，避免无意义的第二次数据库往返。
+        if (rawData.Count < 10)
+        {
+            _logger.LogDebug("趋势分析样本不足: Device={DeviceId}, Metric={Metric}, Count={Count}", deviceId, metric, rawData.Count);
+            return null;
+        }
+
+        var threshold = await GetAlertThresholdAsync(deviceId, metric, ct);
+
+        return BuildTrendAnalysis(deviceId, metric, rawData, threshold);
+    }
+
+    /// <summary>
+    /// 批量分析租户内所有设备的趋势预警
+    /// </summary>
+    public async Task<List<TrendAnalysisResult>> AnalyzeAllTrendsAsync(Guid tenantId, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+
+        // 找出最近有遥测数据的设备+指标组合
+        var since = now.AddDays(-1);
+        var activeMetrics = await _db.DeviceTelemetry
+            .Where(t => t.TenantId == tenantId && t.Time >= since && t.Value != null)
+            .Select(t => new { t.DeviceId, t.Metric })
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (activeMetrics.Count == 0)
+        {
+            _logger.LogInformation("趋势分析完成: 共分析 0 个指标，发现 0 个预警");
+            return [];
+        }
+
+        // 批量读取所有活动指标的 7 天数据，避免 AnalyzeTrendAsync 按设备+指标重复访问数据库。
+        var trendSince = now.AddDays(-7);
+        var activePairsQuery = _db.DeviceTelemetry
+            .Where(t => t.TenantId == tenantId && t.Time >= since && t.Value != null)
+            .Select(t => new { t.DeviceId, t.Metric })
+            .Distinct();
+        var rawData = await (
+            from telemetry in _db.DeviceTelemetry
+            join pair in activePairsQuery
+                on new { telemetry.DeviceId, telemetry.Metric }
+                equals new { pair.DeviceId, pair.Metric }
+            where telemetry.TenantId == tenantId
+                  && telemetry.Time >= trendSince
+                  && telemetry.Value != null
+            select new
+            {
+                telemetry.DeviceId,
+                telemetry.Metric,
+                telemetry.Time,
+                Value = telemetry.Value!.Value,
+            })
+            .ToListAsync(ct);
+
+        // 一次性读取活动设备的阈值，内存中按严重级别选择与单指标分析相同的最高优先级规则。
+        var activeDeviceIds = activeMetrics.Select(m => m.DeviceId).Distinct().ToList();
+        var activeMetricNames = activeMetrics.Select(m => m.Metric).Distinct().ToList();
+        var thresholdRows = await _db.AlertRules
+            .Where(r => r.TenantId == tenantId
+                        && r.DeviceId.HasValue
+                        && activeDeviceIds.Contains(r.DeviceId.Value)
+                        && activeMetricNames.Contains(r.Metric)
+                        && r.Enabled
+                        && r.Threshold != null)
+            .Select(r => new
+            {
+                DeviceId = r.DeviceId!.Value,
+                r.Metric,
+                r.Threshold,
+                r.Severity,
+            })
+            .ToListAsync(ct);
+        var thresholds = thresholdRows
+            .GroupBy(r => (r.DeviceId, r.Metric))
+            .ToDictionary(
+                g => g.Key,
+                g => (double?)g.OrderByDescending(r => r.Severity).First().Threshold!.Value);
+
+        var samplesByPair = rawData
+            .GroupBy(t => (t.DeviceId, t.Metric))
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<TrendSample>)g
+                    .Select(t => new TrendSample(t.Time, t.Value))
+                    .ToList());
+        var results = new List<TrendAnalysisResult>();
+        foreach (var metric in activeMetrics)
+        {
+            if (!samplesByPair.TryGetValue((metric.DeviceId, metric.Metric), out var samples))
+                continue;
+
+            thresholds.TryGetValue((metric.DeviceId, metric.Metric), out var threshold);
+            var analysis = BuildTrendAnalysis(metric.DeviceId, metric.Metric, samples, threshold);
+            if (analysis is not null)
+                results.Add(analysis);
+        }
+
+        // 只返回有预警的（将在 7 天内超阈值的）
+        var warnings = results.Where(r => r.WillExceedThreshold).ToList();
+        _logger.LogInformation("趋势分析完成: 共分析 {Total} 个指标，发现 {Warnings} 个预警", results.Count, warnings.Count);
+        return warnings;
+    }
+
+    /// <summary>
+    /// 使用已加载的遥测样本计算趋势，供单指标和批量分析共用，确保两条路径的业务语义一致。
+    /// </summary>
+    private TrendAnalysisResult? BuildTrendAnalysis(
+        Guid deviceId,
+        string metric,
+        IReadOnlyCollection<TrendSample> rawData,
+        double? threshold)
+    {
         if (rawData.Count < 10)
         {
             _logger.LogDebug("趋势分析样本不足: Device={DeviceId}, Metric={Metric}, Count={Count}", deviceId, metric, rawData.Count);
@@ -52,7 +165,7 @@ public class TrendAnalysisService
         // 按小时聚合（取每小时均值），减少噪声
         var hourlyData = rawData
             .GroupBy(d => new DateTime(d.Time.Year, d.Time.Month, d.Time.Day, d.Time.Hour, 0, 0))
-            .Select(g => new TrendPoint(g.Key, g.Average(d => d.Value!.Value)))
+            .Select(g => new TrendPoint(g.Key, g.Average(d => d.Value)))
             .OrderBy(p => p.Timestamp)
             .ToList();
 
@@ -65,9 +178,6 @@ public class TrendAnalysisService
         var avgValue = hourlyData.Average(p => p.Value);
         var minValue = hourlyData.Min(p => p.Value);
         var maxValue = hourlyData.Max(p => p.Value);
-
-        // 查找该设备该指标的告警阈值
-        var threshold = await GetAlertThresholdAsync(deviceId, metric, ct);
 
         // 预测超阈值时间（如果斜率 > 0 且有阈值）
         var daysToThreshold = (double?)null;
@@ -109,33 +219,6 @@ public class TrendAnalysisService
             DataPoints = hourlyData.Count,
             AnalyzedAt = DateTime.UtcNow,
         };
-    }
-
-    /// <summary>
-    /// 批量分析租户内所有设备的趋势预警
-    /// </summary>
-    public async Task<List<TrendAnalysisResult>> AnalyzeAllTrendsAsync(Guid tenantId, CancellationToken ct = default)
-    {
-        // 找出最近有遥测数据的设备+指标组合
-        var since = DateTime.UtcNow.AddDays(-1);
-        var activeMetrics = await _db.DeviceTelemetry
-            .Where(t => t.TenantId == tenantId && t.Time >= since && t.Value != null)
-            .Select(t => new { t.DeviceId, t.Metric })
-            .Distinct()
-            .ToListAsync(ct);
-
-        var results = new List<TrendAnalysisResult>();
-        foreach (var m in activeMetrics)
-        {
-            var analysis = await AnalyzeTrendAsync(m.DeviceId, m.Metric, ct);
-            if (analysis is not null)
-                results.Add(analysis);
-        }
-
-        // 只返回有预警的（将在 7 天内超阈值的）
-        var warnings = results.Where(r => r.WillExceedThreshold).ToList();
-        _logger.LogInformation("趋势分析完成: 共分析 {Total} 个指标，发现 {Warnings} 个预警", results.Count, warnings.Count);
-        return warnings;
     }
 
     /// <summary>
@@ -182,6 +265,9 @@ public class TrendAnalysisService
 
         return (slope, intercept);
     }
+
+    /// <summary>线性回归使用的单条遥测样本。</summary>
+    private record TrendSample(DateTime Time, double Value);
 
     private record TrendPoint(DateTime Timestamp, double Value);
 }

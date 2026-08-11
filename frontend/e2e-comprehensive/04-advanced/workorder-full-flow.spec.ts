@@ -31,6 +31,7 @@ import {
 test.describe('04-工单完整生命周期', () => {
   test('1. 创建工单进入待处理状态 — 通过 UI 创建工单', async ({ page }) => {
     const errors = captureErrors(page);
+    const title = `E2E-LIFECYCLE-待处理-${Date.now()}`;
 
     // 登录并导航到工单列表
     await login(page);
@@ -39,32 +40,31 @@ test.describe('04-工单完整生命周期', () => {
 
     // 点击新建按钮
     const createBtn = page.getByRole('button', { name: /新建|创建|create|add/i }).first();
-    if (await createBtn.isVisible().catch(() => false)) {
-      await createBtn.click();
-      await page.waitForTimeout(1000);
+    await expect(createBtn).toBeVisible({ timeout: 5000 });
+    await createBtn.click();
 
-      // 填写工单创建表单
-      const dialog = page.getByRole('dialog');
-      if (await dialog.isVisible().catch(() => false)) {
-        // 填写标题
-        const titleInput = dialog.locator('input').first();
-        if (await titleInput.isVisible().catch(() => false)) {
-          await titleInput.fill('E2E-LIFECYCLE-待处理测试');
-        }
+    // 表单有标题、类型、优先级和设备四个必填字段；只填写标题会触发表单校验，
+    // 旧用例因此始终没有真正创建工单，却仍然以 warning 方式通过。
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible({ timeout: 3000 });
+    await dialog.locator('input').first().fill(title);
 
-        // 点击确认/保存
-        await dialog.getByRole('button', { name: /保存|确认|创建|submit/i }).click();
-        await page.waitForTimeout(2000);
-
-        // 验证创建成功（页面应显示新工单或成功提示）
-        const successIndicator = page.getByText(
-          /创建成功|success|E2E-LIFECYCLE-待处理/i,
-        );
-        await expect(successIndicator.first()).toBeVisible({ timeout: 5000 }).catch(() => {
-          console.warn('[工单] 未检测到创建成功提示');
-        });
-      }
+    const comboboxes = dialog.getByRole('combobox');
+    await expect(comboboxes).toHaveCount(3);
+    for (let index = 0; index < 3; index += 1) {
+      await comboboxes.nth(index).click();
+      const option = page.getByRole('option').first();
+      await expect(option).toBeVisible({ timeout: 2000 });
+      await option.click();
     }
+
+    const submitButton = dialog.getByRole('button', { name: /保存|save|submit/i });
+    await expect(submitButton).toBeEnabled();
+    await submitButton.click();
+
+    // 成功提交会关闭弹窗并刷新列表；这两个结果必须真实出现，不能用 warning 降级。
+    await expect(dialog).toBeHidden({ timeout: 5000 });
+    await expect(page.getByText(title, { exact: true })).toBeVisible({ timeout: 10000 });
 
     expect(errors).toEqual([]);
   });

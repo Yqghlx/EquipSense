@@ -75,6 +75,11 @@ public class DeviceHealthRecalculationHostedService : LockedTimerService
             {
                 totalUpdated += await healthService.UpdateAllHealthScoresAsync(tenantId, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 宿主正在关闭时立即传播取消，避免继续遍历后续租户并延长停机时间。
+                throw;
+            }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "租户 {TenantId} 的设备健康度重算失败", tenantId);

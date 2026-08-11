@@ -3,7 +3,7 @@
  *
  * 覆盖知识库中待审批规则的完整审批流程：
  * - 页面加载和列表展示
- * - AI 规则出现和详情面板
+ * - AI 规则出现和候选规则详情展示
  * - 审批通过（按钮 + 出现在知识库）
  * - 审批拒绝（按钮 + 不出现在知识库）
  * - 编辑待审批规则
@@ -106,7 +106,7 @@ test.describe('04-知识库规则审批', () => {
     expect(errors).toEqual([]);
   });
 
-  test('4. 待审批规则详情面板 — 点击规则打开详情面板', async ({ page }) => {
+  test('4. 待审批规则详情展示 — 卡片显示规则内容', async ({ page }) => {
     const errors = captureErrors(page);
 
     // 创建待审批规则
@@ -118,26 +118,13 @@ test.describe('04-知识库规则审批', () => {
     // 导航到待审批 Tab
     await gotoPendingRulesTab(page);
 
-    // 查找并点击刚创建的规则
-    const ruleItem = page.getByText(/E2E-详情-测试/i);
-    if (await ruleItem.first().isVisible({ timeout: 7000 }).catch(() => false)) {
-      await ruleItem.first().click();
-      await page.waitForTimeout(2000);
-
-      // 验证详情面板打开
-      const detailPanel = page.locator(
-        '[data-state="open"], [role="dialog"], [class*="sheet"], [class*="drawer"], [class*="detail"]',
-      );
-      await expect(detailPanel.last()).toBeVisible({ timeout: 7000 }).catch(() => {
-        console.warn('[知识库] 点击规则后未检测到详情面板');
-      });
-
-      // 验证详情面板中有规则内容
-      if (await detailPanel.last().isVisible().catch(() => false)) {
-        const panelText = await detailPanel.last().textContent();
-        expect(panelText!.length).toBeGreaterThan(10);
-      }
-    }
+    // 当前页面以卡片直接展示候选规则详情；必须验证真实内容，而不是点击后找不到面板仍然通过。
+    const ruleCard = page.locator('[data-slot="card"]')
+      .filter({ hasText: 'E2E-详情-测试' })
+      .first();
+    await expect(ruleCard).toBeVisible({ timeout: 7000 });
+    await expect(ruleCard).toContainText('E2E-详情-测试');
+    await expect(ruleCard).toContainText('建议降低设备运行负荷');
 
     expect(errors).toEqual([]);
   });

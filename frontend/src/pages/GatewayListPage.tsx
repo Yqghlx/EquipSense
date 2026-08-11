@@ -32,9 +32,17 @@ export default function GatewayListPage() {
           <h1 className="text-2xl font-bold">{t('gateway.listTitle')}</h1>
           <p className="text-sm text-muted-foreground">{t('gateway.listDescription')}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()}>
-          刷新
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate('/gateway/devices')}>
+            {t('gateway.deviceConfig')}
+          </Button>
+          <Button size="sm" onClick={() => navigate('/device-setup')}>
+            {t('gateway.createDevice')}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            {t('gateway.refresh')}
+          </Button>
+        </div>
       </div>
 
       {!gateways?.length ? (
@@ -102,11 +110,15 @@ export default function GatewayListPage() {
 
 /** 网关状态徽标 */
 function GatewayStatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const config: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
-    online: { label: '在线', variant: 'default' },
-    offline: { label: '离线', variant: 'secondary' },
-    disabled: { label: '已禁用', variant: 'destructive' },
+    online: { label: t('gateway.statusOnline'), variant: 'default' },
+    offline: { label: t('gateway.statusOffline'), variant: 'secondary' },
+    disabled: { label: t('gateway.statusDisabled'), variant: 'destructive' },
   };
-  const { label, variant } = config[status] ?? { label: status, variant: 'secondary' as const };
+  const { label, variant } = config[status] ?? {
+    label: t('common.status'),
+    variant: 'secondary' as const,
+  };
   return <Badge variant={variant}>{label}</Badge>;
 }

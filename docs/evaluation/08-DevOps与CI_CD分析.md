@@ -21,7 +21,7 @@ Stage 4 [Production smoke] Stage 5 [镜像发布/扫描]   Stage 6 [发布与部
 
 Stage 7 [K6 回归]          Stage 8 [E2E]
   main/PR 读路径门禁        main/PR Playwright
-  P95/P99/错误率阈值        442 用例，失败重试 1 次
+  P95/P99/错误率阈值        433 用例，失败重试 1 次
 ```
 
 ---
@@ -45,8 +45,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 1298 xUnit 测试 |
-| Integration test | ~120s | 163 xUnit（含真实 RabbitMQ 场景） |
+| Unit test | ~30s | 1339 xUnit 测试 |
+| Integration test | ~120s | 166 xUnit（含真实 RabbitMQ 场景） |
 | NuGet vuln | ~20s | 已纳入阻断门禁 |
 | **合计** | **~5min** | |
 
@@ -60,7 +60,7 @@ workflow_dispatch: true  # 手动触发
 | tsc --noEmit | ~30s | strict: true, 0 error |
 | check:i18n | ~5s | key 完整性 |
 | ESLint | ~30s | `--max-warnings 1` |
-| vitest | ~30s | 355 测试 |
+| vitest | ~30s | 387 测试 |
 | vite build | ~60s | 分包构建 |
 | **合计** | **~3.5min** | |
 
@@ -106,7 +106,7 @@ services:
   redis: redis:7-alpine
 ```
 
-### E2E 目录结构（当前 442 用例，3 个条件跳过点；本次 Production smoke 实际跳过 2 个）
+### E2E 目录结构（当前 433 用例，3 个条件跳过点；本次 Production smoke 实际跳过 2 个）
 
 ```
 00-setup/        (2)  — 健康检查 + 种子数据
@@ -142,7 +142,7 @@ timeout: 60s
 | api-load.js | 综合负载 |
 | k6/config.js | 共享配置 |
 
-**当前状态**：已集成到 CI 的 `load-test` job；main/PR 执行读路径回归，P95/P99 与错误率阈值由脚本阻断。写路径与完整链路压测仍保留为本地/手动场景。
+**当前状态**：已集成到 CI 的 `load-test` job；main/PR 执行读路径回归和固定种子设备的轻量遥测写路径回归，P95/P99 与错误率阈值由脚本阻断。高吞吐写入与完整链路容量压测仍按生产预算保留为本地/手动场景。
 
 ---
 
@@ -152,10 +152,10 @@ timeout: 60s
 |------|------|------|
 | 构建速度 | ⭐⭐⭐⭐☆ | 质量门禁与运行时 smoke 分离，层缓存利用充分 |
 | 测试门禁 | ⭐⭐⭐⭐⭐ | 7 道门禁 (TS/ESLint/i18n/Vitest/Vite/xUnit/Integration) |
-| E2E 覆盖 | ⭐⭐⭐⭐⭐ | 442 用例/8 场景/含安全测试；开发栈与隔离 Production 镜像均为 440 通过、2 跳过、0 失败；main/tag 已接入全量门禁 |
+| E2E 覆盖 | ⭐⭐⭐⭐⭐ | 433 用例/8 场景/含安全测试；开发栈与隔离 Production 镜像均为 431 通过、2 跳过、0 失败；main/tag 已接入全量门禁 |
 | Docker 构建 | ⭐⭐⭐⭐⭐ | 多阶段 + 层缓存 + GHCR + 三镜像版本标签 |
 | 安全扫描 | ⭐⭐⭐⭐⭐ | Gitleaks + NuGet/npm + 三镜像 Trivy，HIGH/CRITICAL 阻断 |
-| 压测集成 | ⭐⭐⭐⭐☆ | K6 读路径已进入 main/PR 门禁，写路径保留手动 |
+| 压测集成 | ⭐⭐⭐⭐☆ | K6 读路径与 20 VU × 30s 遥测写路径已进入 main/PR 门禁，高吞吐容量压测保留手动 |
 | CD 部署 | ⭐⭐⭐⭐☆ | tag 发布后可 SSH 自动部署，三重健康门禁与旧镜像回滚 |
 | 版本管理 | ⭐⭐⭐⭐⭐ | semver + sha 追溯，支持精确回滚 |
 
@@ -165,7 +165,7 @@ timeout: 60s
 
 | # | 缺失项 | 建议 |
 |---|--------|------|
-| 1 | 真实生产环境验收 | Production smoke 已覆盖启动/迁移/探针/代理，main/tag 还会在 Production 镜像执行完整 442 用例；剩余工作是正式凭据、证书、容量和现场协议验收 |
+| 1 | 真实生产环境验收 | Production smoke 已覆盖启动/迁移/探针/代理，main/tag 还会在 Production 镜像执行完整 433 用例；剩余工作是正式凭据、证书、容量和现场协议验收 |
 | 2 | 数据库迁移发布治理 | 当前应用启动已用 PostgreSQL advisory lock 串行迁移；仍建议在独立发布流水线执行迁移并完成审批/回滚演练 |
 | 3 | 跨主机附件存储 | 当前命名卷 + 备份补偿已覆盖单机；跨主机仍需 S3/MinIO 和恢复演练 |
 | 4 | 供应商运行时凭据 | 当前工作区 `.env` 仍有 27 项生产门禁问题，必须由密钥管理系统注入真实凭据和证书后再发布 |

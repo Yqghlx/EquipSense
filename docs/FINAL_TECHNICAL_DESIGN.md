@@ -762,7 +762,8 @@ Mosquitto 配置用户名/密码认证 + ACL：
 
 ```
 MQTTnet 订阅 factory/+/telemetry/+
-    → 反序列化 + Schema 校验（必填字段检查）
+    → 解析前消息体上限校验（≤256 KiB）
+    → 反序列化 + Schema 校验（时间戳、质量、指标数量/名称/有限数值）
     → 去重（Redis SET 设备+时间戳，1分钟 TTL）
     → 租户验证（tenant_id 是否存在且活跃）
     → 设备验证（device_id 是否注册）
@@ -778,9 +779,17 @@ MQTTnet 订阅 factory/+/telemetry/+
 ```
 POST /api/v1/telemetry
     → JWT 认证 + 租户隔离
-    → 同样的校验/去重/标准化流程
+    → 请求体上限（≤256 KiB）+ 统一 Core 遥测边界校验
+    → 同样的去重/标准化流程
     → 写入 TimescaleDB
 ```
+
+**遥测接入边界：**
+
+- 单条消息最多包含 100 个指标，指标名最多 100 个字符，拒绝首尾空白和控制字符。
+- 指标值必须是有限数字（拒绝 `NaN` 和正/负无穷），质量标记非空且最多 20 个字符。
+- 设备编码/设备 ID 最多 50 个字符；时间戳必须有效，但不限制历史跨度，以支持边缘网关断网缓存后的补传。
+- HTTP 与 MQTT 共用 `EquipAI.Core.Validation.TelemetryInputValidator`，防止某个接入通道绕过数据库和异步队列边界。
 
 ### 5.3 批量导入
 

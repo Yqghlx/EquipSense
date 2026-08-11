@@ -104,22 +104,33 @@ test.describe('API 错误响应处理', () => {
       });
     });
 
-    // 触发一次页面导航（需要 API 请求）
-    await page.reload();
-    await page.waitForTimeout(5000);
+    try {
+      // 触发一次页面导航（需要 API 请求）。
+      await page.reload();
 
-    // 验证：要么 user 被清除并跳转登录页，要么显示登录过期提示
-    const currentUrl = page.url();
-    const redirectedToLogin = /login/.test(currentUrl);
-
-    const { user: userAfter } = await getAuthState(page);
-    const authCleared = userAfter === null;
-
-    // 至少满足一个条件：跳转登录页或登录态被清除
-    expect(redirectedToLogin || authCleared).toBeTruthy();
-
-    // 取消路由拦截
-    await page.unroute('**/api/v1/**');
+      // 不能使用固定 sleep：完整 E2E 并发运行时，懒加载和首屏请求可能超过 5 秒，
+      // 但认证拦截器最终仍会正确清理会话。等待业务结果而不是等待一个猜测时长。
+      await expect.poll(
+        async () => {
+          if (/login/.test(page.url())) return true;
+          try {
+            const { user } = await getAuthState(page);
+            return user === null;
+          } catch {
+            // 页面正在跳转时执行上下文可能短暂销毁，下一轮继续观察即可。
+            return false;
+          }
+        },
+        {
+          timeout: 15000,
+          intervals: [100, 250, 500, 1000],
+          message: '401 后应清理浏览器会话并跳转登录页',
+        },
+      ).toBeTruthy();
+    } finally {
+      // 取消路由拦截，避免失败诊断或后续复用页面时留下全量 401 模拟。
+      await page.unroute('**/api/v1/**');
+    }
 
     expect(errors).toEqual([]);
   });

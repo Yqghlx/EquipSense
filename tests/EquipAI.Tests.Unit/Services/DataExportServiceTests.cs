@@ -124,6 +124,93 @@ public class DataExportServiceTests
     }
 
     /// <summary>
+    /// 导出服务必须使用显式传入的租户 ID，而不能只依赖当前 DbContext 的全局过滤器。
+    /// 这样即使服务在系统管理员跨租户上下文、后台任务或请求上下文切换后复用，也不会导出错误租户的数据。
+    /// </summary>
+    [Fact]
+    public async Task ExportAlertsAsync_应按显式租户参数筛选而不是依赖当前上下文()
+    {
+        var otherTenantId = Guid.NewGuid();
+        _db.Alerts.Add(MakeAlert(message: "当前上下文租户告警"));
+        _db.Alerts.Add(new Alert
+        {
+            TenantId = otherTenantId,
+            AlertCode = "ALT-OTHER-001",
+            DeviceId = Guid.NewGuid(),
+            Severity = AlertSeverity.High,
+            Status = AlertStatus.Active,
+            Metric = "temperature",
+            Value = 80m,
+            Message = "目标租户告警",
+            OccurredAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = Encoding.UTF8.GetString(await _sut.ExportAlertsAsync(otherTenantId));
+
+        csv.Should().Contain("ALT-OTHER-001");
+        csv.Should().NotContain("ALT-TEST-001", "导出不能因为 DbContext 当前租户过滤器而返回错误租户数据");
+    }
+
+    [Fact]
+    public async Task ExportDevicesAsync_应按显式租户参数筛选()
+    {
+        var otherTenantId = Guid.NewGuid();
+        _db.Devices.Add(new Device
+        {
+            TenantId = _tenantId,
+            DeviceCode = "DEV-CURRENT-001",
+            Name = "当前上下文设备",
+            Type = "泵",
+        });
+        _db.Devices.Add(new Device
+        {
+            TenantId = otherTenantId,
+            DeviceCode = "DEV-OTHER-001",
+            Name = "目标租户设备",
+            Type = "泵",
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = Encoding.UTF8.GetString(await _sut.ExportDevicesAsync(otherTenantId));
+
+        csv.Should().Contain("DEV-OTHER-001");
+        csv.Should().NotContain("DEV-CURRENT-001");
+    }
+
+    [Fact]
+    public async Task ExportWorkOrdersAsync_应按显式租户参数筛选()
+    {
+        var otherTenantId = Guid.NewGuid();
+        _db.WorkOrders.Add(new WorkOrder
+        {
+            TenantId = _tenantId,
+            WorkOrderCode = "WO-CURRENT-001",
+            Title = "当前上下文工单",
+            Type = WorkOrderType.Corrective,
+            Status = WorkOrderStatus.PendingDispatch,
+            Priority = WorkOrderPriority.Medium,
+            DeviceId = Guid.NewGuid(),
+        });
+        _db.WorkOrders.Add(new WorkOrder
+        {
+            TenantId = otherTenantId,
+            WorkOrderCode = "WO-OTHER-001",
+            Title = "目标租户工单",
+            Type = WorkOrderType.Corrective,
+            Status = WorkOrderStatus.PendingDispatch,
+            Priority = WorkOrderPriority.Medium,
+            DeviceId = Guid.NewGuid(),
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = Encoding.UTF8.GetString(await _sut.ExportWorkOrdersAsync(otherTenantId));
+
+        csv.Should().Contain("WO-OTHER-001");
+        csv.Should().NotContain("WO-CURRENT-001");
+    }
+
+    /// <summary>
     /// 工单按状态过滤导出——必须用关系型提供程序（SQLite）验证。
     /// 工单状态/优先级枚举以 int 存储（无 HasConversion），导出代码用 w.Status.ToString() == status 在查询内比较，
     /// SQL 端得到的是数值字符串 "0" 而非枚举名 "PendingDispatch"，故在真实 PG/SQLite 上要么抛翻译异常、要么静默返回空。

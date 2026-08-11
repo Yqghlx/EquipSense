@@ -83,8 +83,9 @@ relaxedThresholds = {
 
 **回归判定**：k6 阈值不满足 → 退出码非零 → CI 红 → 阻止合并。
 
-CI 压测范围（轻量，`api-read.js` 20VU × 30s）是 SLO 的**采样验证**，
-全量验证（200VU）见 `PERF_BASELINE.md` 本地/手动执行。
+CI 压测范围（轻量，`api-read.js` 和 `telemetry-write.js` 均为 20VU × 30s）是 SLO 的**采样验证**；
+写路径使用 DataSeeder 固定设备验证设备编码解析、请求校验、异步队列和批量落库。
+全量容量验证（读路径 200VU、写路径按设备预算）见 `PERF_BASELINE.md` 本地/手动执行。
 
 ---
 

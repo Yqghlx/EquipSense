@@ -394,7 +394,8 @@ public class AuthService : IAuthService
             var reusedUserId = state.UserId.Value;
             _logger.LogWarning(
                 "检测到刷新令牌重用（用户 {UserId}，会话 {SessionId}）：曾有效的令牌被再次提交，可能已泄露，已吊销当前会话",
-                reusedUserId);
+                reusedUserId,
+                sessionId);
             await _auditLogService.LogAsync(reusedUserId, "AuthRefreshTokenReused", "User", reusedUserId.ToString(),
                 "刷新令牌重用检测命中：曾有效的令牌被再次提交，已吊销当前会话以防令牌失窃", default);
             await _redisService.RemoveRefreshTokenSessionAsync(reusedUserId, sessionId);

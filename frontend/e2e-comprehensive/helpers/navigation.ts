@@ -92,45 +92,42 @@ export async function gotoWorkOrderDetail(page: Page, woId: string): Promise<voi
 }
 
 /**
- * 跳转到设备设置向导的指定步骤
+ * 跳转到网关设备接入向导的指定步骤
  *
- * 需要先走完前置步骤才能到达目标步骤。
- * 目前支持步骤 1（基本信息）、步骤 2（参数配置）、步骤 3（确认提交）。
+ * 需要先走完前置步骤才能到达目标步骤。当前向导共四步：
+ * 1. 选择协议；2. 连接配置；3. 数据点；4. 确认保存。
  *
  * @param page - Playwright Page 实例
- * @param step - 目标步骤编号（1-3）
+ * @param step - 目标步骤编号（1-4）
  */
 export async function gotoSetupStep(page: Page, step: number): Promise<void> {
-  // 先导航到设备创建/设置页面入口
-  await navigateViaSidebar(page, /设备|device/i);
+  if (!Number.isInteger(step) || step < 1 || step > 4) {
+    throw new Error(`设备接入向导步骤必须是 1-4，收到：${step}`);
+  }
 
-  // 点击"新增设备"或"添加设备"按钮进入设置向导
-  await page.getByRole('button', { name: /新增|添加|create|add/i }).first().click();
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(1000);
+  await page.goto(`${BASE_URL}/device-setup`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: /设备接入向导|device setup wizard/i })
+    .waitFor({ state: 'visible', timeout: 10000 });
 
-  // 根据目标步骤，依次填写前置步骤并前进
-  for (let currentStep = 1; currentStep < step; currentStep++) {
-    if (currentStep === 1) {
-      // 步骤 1：填写基本信息（设备编码、名称、类型）
-      const suffix = Date.now().toString(36);
-      const codeInput = page.getByLabel(/设备编码|device.*code/i);
-      if (await codeInput.isVisible()) {
-        await codeInput.fill(`E2E-SETUP-${suffix}`);
-      }
-      const nameInput = page.getByLabel(/设备名称|device.*name/i);
-      if (await nameInput.isVisible()) {
-        await nameInput.fill(`E2E设置向导测试设备`);
-      }
-    }
+  if (step >= 2) {
+    const protocolCard = page.locator('[data-slot="card"]').filter({ hasText: 'Modbus TCP' }).first();
+    await protocolCard.click();
+    await page.getByRole('button', { name: /下一步|下一页|next/i }).click();
+    await page.locator('#modbus-host').waitFor({ state: 'visible', timeout: 5000 });
+  }
 
-    if (currentStep === 2) {
-      // 步骤 2：参数配置阶段无需特殊填写，使用默认值即可
-    }
+  if (step >= 3) {
+    await page.getByRole('button', { name: /下一步|下一页|next/i }).click();
+    await page.locator('#gatewayDeviceName').waitFor({ state: 'visible', timeout: 5000 });
+  }
 
-    // 点击"下一步"按钮
-    await page.getByRole('button', { name: /下一步|next/i }).click();
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(800);
+  if (step >= 4) {
+    // 数据点步骤存在必填校验，先填入隔离测试用的最小有效配置。
+    await page.locator('#gatewayDeviceName').fill(`E2E-SETUP-${Date.now().toString(36)}`);
+    await page.getByPlaceholder('40001').fill('40001');
+    await page.getByPlaceholder('temperature').fill('temperature');
+    await page.getByRole('button', { name: /下一步|下一页|next/i }).click();
+    await page.getByText(/请确认以下配置信息无误|review the configuration below/i)
+      .waitFor({ state: 'visible', timeout: 5000 });
   }
 }

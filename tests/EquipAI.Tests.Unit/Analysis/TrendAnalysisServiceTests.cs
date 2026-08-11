@@ -1,3 +1,4 @@
+using System.Data.Common;
 using EquipAI.Application.Analysis;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -6,6 +7,7 @@ using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -35,6 +37,7 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
     private readonly Guid _tenantId = Guid.NewGuid();
+    private readonly SelectCommandCounter _selectCommandCounter = new();
 
     public async Task InitializeAsync()
     {
@@ -43,7 +46,9 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_selectCommandCounter));
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
         services.AddLogging();
         _sp = services.BuildServiceProvider();
@@ -382,10 +387,50 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
         // 设备3：上升但无阈值 → 不预警（无法预测）
         await SeedTelemetryAsync(db, noThresholdDevice, _tenantId, "temp", 12, 50.0, 1.0);
 
+        _selectCommandCounter.Reset();
         var results = await service.AnalyzeAllTrendsAsync(_tenantId);
 
         results.Should().ContainSingle("只有 warnDevice 满足'7 天内将超阈值'");
         results[0].DeviceId.Should().Be(warnDevice);
+        _selectCommandCounter.Count.Should().Be(3,
+            "批量趋势分析应一次查询活动指标、一次查询遥测、一次查询阈值，不能按指标重复访问数据库");
+    }
+
+    /// <summary>统计趋势批量分析执行的 SELECT 次数，防止 N+1 查询回归。</summary>
+    private sealed class SelectCommandCounter : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Reset() => Interlocked.Exchange(ref _count, 0);
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CountSelect(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CountSelect(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void CountSelect(DbCommand command)
+        {
+            if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
     }
 
     // =========================================================================

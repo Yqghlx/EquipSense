@@ -18,13 +18,33 @@ vi.mock('react-router-dom', async () => {
 // Mock react-i18next
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: Record<string, unknown>) => {
       const map: Record<string, string> = {
-        'common.loading': '加载中...',
-        'common.cancel': '取消',
-        'common.actions': '操作',
+        'common.loading': 'Loading...',
+        'common.cancel': 'Cancel',
+        'common.actions': 'Actions',
+        'pendingApprovals.title': 'Pending approvals',
+        'pendingApprovals.taskTitle': 'My pending approval tasks',
+        'pendingApprovals.count': '{{count}} pending approvals',
+        'pendingApprovals.emptyTitle': 'No pending approval tasks',
+        'pendingApprovals.emptyDescription': 'All approval tasks have been processed',
+        'pendingApprovals.workOrderId': 'Work order ID',
+        'pendingApprovals.stepLabel': 'Approval step',
+        'pendingApprovals.step': 'Level {{step}}',
+        'pendingApprovals.expectedRole': 'Expected role',
+        'pendingApprovals.status': 'Status',
+        'pendingApprovals.pending': 'Pending approval',
+        'pendingApprovals.approve': 'Approve',
+        'pendingApprovals.reject': 'Reject',
+        'pendingApprovals.viewDetails': 'View work order details',
+        'pendingApprovals.rejectTitle': 'Reject approval',
+        'pendingApprovals.rejectDescription': 'Reject level {{step}} approval (work order {{id}}...)',
+        'pendingApprovals.rejectReason': 'Rejection reason (optional)',
+        'pendingApprovals.rejectPlaceholder': 'Enter a rejection reason...',
+        'pendingApprovals.confirmReject': 'Confirm rejection',
+        'pendingApprovals.roles.maintenance_lead': 'Maintenance lead',
       };
-      return map[key] ?? key;
+      return (map[key] ?? key).replace(/\{\{(\w+)\}\}/g, (_, name) => String(options?.[name] ?? `{{${name}}}`));
     },
   }),
 }));
@@ -72,8 +92,8 @@ describe('PendingApprovalsPage', () => {
     } as unknown as ReturnType<typeof useApprovals.useRejectApproval>);
 
     render(<PendingApprovalsPage />, { wrapper: createWrapper() });
-    // CardDescription 和 CardContent 中都有"加载中..."，使用 getAllByText
-    expect(screen.getAllByText('加载中...').length).toBeGreaterThanOrEqual(1);
+    // CardDescription 和 CardContent 中都有 Loading...，使用 getAllByText
+    expect(screen.getAllByText('Loading...').length).toBeGreaterThanOrEqual(1);
   });
 
   it('无待审批时应显示空状态', () => {
@@ -93,7 +113,7 @@ describe('PendingApprovalsPage', () => {
     } as unknown as ReturnType<typeof useApprovals.useRejectApproval>);
 
     render(<PendingApprovalsPage />, { wrapper: createWrapper() });
-    expect(screen.getByText('暂无待审批任务')).toBeInTheDocument();
+    expect(screen.getByText('No pending approval tasks')).toBeInTheDocument();
   });
 
   it('有待审批时应显示列表', () => {
@@ -115,9 +135,8 @@ describe('PendingApprovalsPage', () => {
     render(<PendingApprovalsPage />, { wrapper: createWrapper() });
 
     expect(screen.getByText(/wo-00123/)).toBeInTheDocument();
-    expect(screen.getByText('维修主管')).toBeInTheDocument();
-    // "待审批"出现多次（h1 标题 + 表格行 Badge），使用 getAllByText
-    expect(screen.getAllByText('待审批').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Maintenance lead')).toBeInTheDocument();
+    expect(screen.getByText('Pending approval')).toBeInTheDocument();
   });
 
   it('点击工单 ID 应跳转到工单详情页', async () => {
@@ -164,12 +183,12 @@ describe('PendingApprovalsPage', () => {
 
     render(<PendingApprovalsPage />, { wrapper: createWrapper() });
 
-    // 有两个"驳回"按钮（行内和外部），取第一个
-    const rejectButtons = screen.getAllByText('驳回');
+    // 有两个 Reject 文本（行内和对话框按钮），取第一个
+    const rejectButtons = screen.getAllByText('Reject');
     await user.click(rejectButtons[0]);
 
     // 驳回对话框应出现
-    expect(screen.getByText('驳回审批')).toBeInTheDocument();
-    expect(screen.getByText('确认驳回')).toBeInTheDocument();
+    expect(screen.getByText('Reject approval')).toBeInTheDocument();
+    expect(screen.getByText('Confirm rejection')).toBeInTheDocument();
   });
 });

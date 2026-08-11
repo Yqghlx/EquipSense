@@ -2,7 +2,7 @@
 
 > 本文档面向运维人员，覆盖日常告警处理、故障排查、容量扩容、备份恢复等运维场景。
 > 部署相关请参考 [DEPLOY.md](./DEPLOY.md)，架构设计请参考 [FINAL_TECHNICAL_DESIGN.md](./FINAL_TECHNICAL_DESIGN.md)。
-> 生产 Compose 配置位于 `docker/.env`；从仓库根目录执行本手册中的生产 Compose 命令时，必须使用 `--env-file docker/.env`。
+> 生产 Compose 配置位于 `docker/.env`；从仓库根目录执行本手册中的生产 Compose 命令统一使用 `docker/compose-production.sh`，它会自动加载该文件并在启动/重启前执行生产门禁。
 
 ---
 
@@ -26,10 +26,10 @@
 
 ```bash
 # 1. 检查容器状态
-docker compose --env-file docker/.env -f docker/docker-compose.yml ps backend
+docker/compose-production.sh ps backend
 
 # 2. 如果 Exited，查看退出原因
-docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=100 backend
+docker/compose-production.sh logs --tail=100 backend
 
 # 3. 常见原因排查：
 #    - 数据库连接失败 → 检查 PostgreSQL 容器 + 密码
@@ -40,7 +40,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=1
 bash docker/validate-env.sh docker/.env --check-runtime-files
 
 # 4. 重启
-docker compose --env-file docker/.env -f docker/docker-compose.yml restart backend
+docker/compose-production.sh restart backend
 
 # 5. 验证恢复
 curl http://localhost:8080/health
@@ -52,7 +52,7 @@ curl http://localhost:8080/health
 # 边缘网关部署在工厂现场，可能网络抖动
 # 1. 确认是否预期维护（联系现场工程师）
 # 2. 检查网关心跳：
-docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=50 edgegateway | grep -i heartbeat
+docker/compose-production.sh logs --tail=50 edgegateway | grep -i heartbeat
 # 3. 如长时间未恢复（>30 分钟），远程指导现场重启
 ```
 
@@ -61,11 +61,11 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml logs --tail=5
 ```bash
 # P95 > 2s 说明规则匹配或 DB 查询有性能问题
 # 1. 检查告警规则数量（>1000 条规则会拖慢评估）
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+docker/compose-production.sh exec postgres \
   sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT count(*) FROM alert_rules WHERE enabled = true;\""
 
 # 2. 检查 PostgreSQL 慢查询
-docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+docker/compose-production.sh exec postgres \
   sh -c "psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"SELECT * FROM pg_stat_activity WHERE state = 'active' AND now()-query_start > interval '5 seconds';\""
 
 # 3. 检查后端内存（可能 GC 压力大）
@@ -88,8 +88,8 @@ docker stats equipai-backend --no-stream
 
 ```bash
 bash docker/validate-env.sh docker/.env --check-runtime-files
-docker compose --env-file docker/.env -f docker/docker-compose.yml up -d --no-deps --force-recreate alertmanager
-docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanager
+docker/compose-production.sh up -d --no-deps --force-recreate alertmanager
+docker/compose-production.sh ps alertmanager
 ```
 
 `alertmanager` 应显示 `healthy`。未配置 Webhook 时，外部通知会明确降级为 `dev-null`，告警仍可在 Alertmanager/Grafana 中查询。
@@ -106,7 +106,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanag
 1. 浏览器控制台 → 确认 API 请求是否发出
 2. curl 测试后端 → curl -X POST http://localhost:8080/api/v1/auth/login ...
 3. 后端健康检查 → curl http://localhost:8080/health
-4. 数据库连通性 → `docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`
+4. 数据库连通性 → `docker/compose-production.sh exec -T postgres sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'`
 5. 管理员账号 → `admin`；密码只从部署时的 `SEED_ADMIN_PASSWORD` 或密钥管理系统获取，
    本手册不记录默认密码。生产环境首次登录后仍必须立即修改密码。
 ```
@@ -130,11 +130,11 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanag
 症状：设备数据异常但告警中心无新告警
 排查：
 1. 确认遥测数据入库
-   docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+   docker/compose-production.sh exec postgres \
      sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
        -c "SELECT * FROM device_telemetry ORDER BY time DESC LIMIT 5;"'
 2. 确认告警规则存在且启用
-   docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+   docker/compose-production.sh exec postgres \
      sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
        -c "SELECT name, metric, operator, threshold, enabled FROM alert_rules WHERE enabled=true;"'
 3. 确认规则 DeviceType 与设备 Type 匹配（空压机规则只匹配 Type='空压机' 的设备）
@@ -150,7 +150,7 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanag
 1. 确认 LLM API Key 是否配置（未配置则降级到 L2 规则匹配）
    grep "LLM" /tmp/backend.log | grep -i "降级\|degrade"
 2. 确认知识规则存在（L2 需要 knowledge_rules 表有匹配规则）
-   docker compose --env-file docker/.env -f docker/docker-compose.yml exec postgres \
+   docker/compose-production.sh exec postgres \
      sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
        -c "SELECT name, device_type FROM knowledge_rules WHERE enabled=true;"'
 3. 检查 AlertTriggeredEvent 是否发布
@@ -164,13 +164,13 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml ps alertmanag
 症状：设备停止上报数据
 排查：
 1. Mosquitto 容器状态
-   docker compose --env-file docker/.env -f docker/docker-compose.yml ps mosquitto
+   docker/compose-production.sh ps mosquitto
 2. MQTT 订阅测试
    # 从密钥管理器临时注入，勿把真实值写入脚本或提交到仓库
    read -r -p "MQTT 用户名: " MQTT_USERNAME
    read -r -s -p "MQTT 密码: " MQTT_PASSWORD
    export MQTT_USERNAME MQTT_PASSWORD
-   docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T mosquitto \
+   docker/compose-production.sh exec -T mosquitto \
      mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/config/certs/ca.crt \
      -u "$MQTT_USERNAME" -P "$MQTT_PASSWORD" -t "factory/#" -C 1 -v
 3. 边缘网关连接状态
@@ -290,7 +290,23 @@ fi
 附件替换不自动回滚，需保留原备份并按故障剧本处理。恢复完成后必须核对脚本输出的
 PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health` 检查结果，并记录实际 RTO/RPO。
 
-### 4.3 RTO/RPO 目标
+### 4.3 隔离恢复实演
+
+提交代码或变更备份/恢复脚本后，先运行仓库内的真实 Docker 演练。脚本会创建随机命名的
+临时 PostgreSQL、附件卷和 Nginx 健康端点，写入基线数据，执行 `backup.sh`，故意修改数据，
+再使用 `restore.sh --confirm` 恢复并校验数据库、附件和健康检查；退出时会销毁临时容器、网络
+和数据卷。它不会读取或修改 `docker/.env`，也不会触碰正在运行的生产容器。
+
+```bash
+cd /path/to/EquipSense
+bash tests/backup-restore-rehearsal.sh
+```
+
+该演练已接入 CI，但它只证明备份/恢复代码闭环可用。正式上线前仍需在与生产相同的 Compose
+覆盖、附件存储方式、Redis 备份策略和密钥管理条件下重复演练，并记录实际 RTO/RPO；演练日志
+不得包含数据库密码、MFA 密钥或恢复码。
+
+### 4.4 RTO/RPO 目标
 
 | 场景 | RPO（数据丢失） | RTO（恢复时间） |
 |------|----------------|----------------|
@@ -306,7 +322,7 @@ PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health`
 
 ### 每日检查（5 分钟）
 
-- [ ] `docker compose --env-file docker/.env -f docker/docker-compose.yml ps` 所有服务 Up
+- [ ] `docker/compose-production.sh ps` 所有服务 Up
 - [ ] `curl http://localhost:8080/health` 返回 healthy
 - [ ] Grafana 仪表盘无异常指标（CPU/内存/错误率）
 - [ ] AlertManager 无未处理的 critical 告警
@@ -340,22 +356,22 @@ PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health`
 
 ### 6.2 全系统不可用
 
-1. `docker compose --env-file docker/.env -f docker/docker-compose.yml down && docker compose --env-file docker/.env -f docker/docker-compose.yml up -d` 全量重启
+1. `docker/compose-production.sh down && docker/compose-production.sh up -d` 全量重启
 2. 如仍不可用 → 检查 `.env` 配置（密码/密钥是否正确）
-3. 联系开发团队：提供 `/tmp/backend.log` + `docker compose --env-file docker/.env -f docker/docker-compose.yml logs` 输出
+3. 联系开发团队：提供 `/tmp/backend.log` + `docker/compose-production.sh logs` 输出
 
 ### 6.3 安全事件（疑似入侵）
 
-1. 立即 `docker compose --env-file docker/.env -f docker/docker-compose.yml stop backend` 隔离系统
+1. 立即 `docker/compose-production.sh stop backend` 隔离系统
 2. 导出审计日志：
    ```bash
-   docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+   docker/compose-production.sh exec -T postgres \
      sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
        -c "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 1000;"' > security_audit.csv
    ```
 3. 检查异常登录：
    ```bash
-   docker compose --env-file docker/.env -f docker/docker-compose.yml exec -T postgres \
+   docker/compose-production.sh exec -T postgres \
      sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
        -c "SELECT * FROM audit_logs WHERE action = '\''LoginFailed'\'' \
          AND created_at > now() - interval '\''24 hours'\'';"'
@@ -365,7 +381,7 @@ PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health`
 
 ### 6.4 RabbitMQ 不可用或版本升级
 
-1. 先检查 `docker compose --env-file docker/.env -f docker/docker-compose.yml ps rabbitmq`、`rabbitmq-diagnostics -q check_running` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
+1. 先检查 `docker/compose-production.sh ps rabbitmq`、`rabbitmq-diagnostics -q check_running` 和后端 `/health/ready`；liveness 正常但 readiness 失败属于预期隔离。
 2. 验证 v2 policy：`rabbitmqctl list_policies -p /`，并用 `rabbitmqctl list_queues -p / name durable arguments policy` 检查 `equipai.v2.*` 队列。
 3. 既有 3.13 数据卷需要保留时，先完整备份，排空旧 `equipai.events.*` 主/retry 队列，再按官方支持路径升级到 4.2、启用稳定 feature flags，最后升级到 4.3.4。
 4. v2 切换后保留旧 dead 队列供人工核对；应用和脚本不得自动删除旧队列或 `rabbitmq_data` 卷。

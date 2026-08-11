@@ -178,14 +178,29 @@ internal class FakeRedisService : RedisService
     }
 
     public override Task SetRefreshTokenAsync(Guid userId, string refreshToken, TimeSpan expiry)
+        => SetRefreshTokenAsync(userId, RedisService.LegacySessionId, refreshToken, expiry);
+
+    public override Task SetRefreshTokenAsync(
+        Guid userId,
+        string sessionId,
+        string refreshToken,
+        TimeSpan expiry)
     {
-        // 将旧 token 反向索引转为"已轮换"墓碑（模拟真实 RedisService 重放检测行为）
-        if (_store.TryGetValue($"refresh:{userId}", out var oldToken))
+        var generation = _store.GetOrAdd(
+            $"refresh_generation:{userId}",
+            _ => Guid.NewGuid().ToString("N"));
+        var sessionKey = $"refresh_session:{userId}:{sessionId}";
+        if (_store.TryGetValue(sessionKey, out var oldRecord))
         {
-            _store[$"refresh_token:{oldToken}"] = $"revoked:{userId}";
+            var oldToken = oldRecord.Split('|', StringSplitOptions.None)[0];
+            _store[$"refresh_token:{oldToken}"] = $"revoked|{userId}|{sessionId}|{generation}";
         }
-        _store[$"refresh:{userId}"] = refreshToken;
-        _store[$"refresh_token:{refreshToken}"] = userId.ToString();
+        _store[sessionKey] = $"{refreshToken}|{generation}";
+        _store[$"refresh_token:{refreshToken}"] = $"{userId}|{sessionId}|{generation}";
+        if (sessionId == RedisService.LegacySessionId)
+        {
+            _store[$"refresh:{userId}"] = refreshToken;
+        }
         return Task.CompletedTask;
     }
 
@@ -199,31 +214,87 @@ internal class FakeRedisService : RedisService
         {
             var uid = raw["revoked:".Length..];
             return Task.FromResult(Guid.TryParse(uid, out var userId)
-                ? RefreshTokenEntry.Reused(userId)
+                ? RefreshTokenEntry.Reused(userId, RedisService.LegacySessionId)
                 : RefreshTokenEntry.Unknown());
         }
+
+        var fields = raw.Split('|', StringSplitOptions.None);
+        if (fields.Length == 4 && fields[0] == "revoked"
+            && Guid.TryParse(fields[1], out var reusedUserId))
+        {
+            return Task.FromResult(RefreshTokenEntry.Reused(reusedUserId, fields[2]));
+        }
+
+        if (fields.Length == 3 && Guid.TryParse(fields[0], out var validUserId)
+            && !string.IsNullOrWhiteSpace(fields[1])
+            && _store.TryGetValue($"refresh_generation:{validUserId}", out var currentGeneration)
+            && currentGeneration == fields[2])
+        {
+            return Task.FromResult(RefreshTokenEntry.Valid(validUserId, fields[1]));
+        }
+
         return Task.FromResult(Guid.TryParse(raw, out var id)
-            ? RefreshTokenEntry.Valid(id)
+            ? RefreshTokenEntry.Valid(id, RedisService.LegacySessionId)
             : RefreshTokenEntry.Unknown());
     }
 
-    public override Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
+    public override async Task<Guid?> GetUserIdByRefreshTokenAsync(string refreshToken)
     {
-        if (_store.TryGetValue($"refresh_token:{refreshToken}", out var userIdStr)
-            && Guid.TryParse(userIdStr, out var userId))
+        var state = await GetRefreshTokenStateAsync(refreshToken);
+        return state.Status == RefreshTokenStatus.Valid ? state.UserId : null;
+    }
+
+    public override Task<string?> GetRefreshTokenForSessionAsync(Guid userId, string sessionId)
+    {
+        var sessionKey = $"refresh_session:{userId}:{sessionId}";
+        if (_store.TryGetValue(sessionKey, out var raw))
         {
-            return Task.FromResult<Guid?>(userId);
+            var fields = raw.Split('|', StringSplitOptions.None);
+            if (fields.Length == 2
+                && _store.TryGetValue($"refresh_generation:{userId}", out var generation)
+                && fields[1] == generation)
+            {
+                return Task.FromResult<string?>(fields[0]);
+            }
         }
-        return Task.FromResult<Guid?>(null);
+
+        if (sessionId == RedisService.LegacySessionId
+            && _store.TryGetValue($"refresh:{userId}", out var legacyToken))
+        {
+            return Task.FromResult<string?>(legacyToken);
+        }
+
+        return Task.FromResult<string?>(null);
+    }
+
+    public override Task RemoveRefreshTokenSessionAsync(Guid userId, string sessionId)
+    {
+        var sessionKey = $"refresh_session:{userId}:{sessionId}";
+        if (_store.TryRemove(sessionKey, out var raw))
+        {
+            var token = raw.Split('|', StringSplitOptions.None)[0];
+            _store.TryRemove($"refresh_token:{token}", out _);
+        }
+        if (sessionId == RedisService.LegacySessionId)
+        {
+            _store.TryRemove($"refresh:{userId}", out _);
+        }
+        return Task.CompletedTask;
     }
 
     public override Task RemoveRefreshTokenAsync(Guid userId)
     {
-        if (_store.TryGetValue($"refresh:{userId}", out var token))
+        var sessionPrefix = $"refresh_session:{userId}:";
+        foreach (var key in _store.Keys.Where(key => key.StartsWith(sessionPrefix, StringComparison.Ordinal)).ToList())
         {
-            _store.TryRemove($"refresh_token:{token}", out _);
+            if (_store.TryRemove(key, out var raw))
+            {
+                var token = raw.Split('|', StringSplitOptions.None)[0];
+                _store.TryRemove($"refresh_token:{token}", out _);
+            }
         }
         _store.TryRemove($"refresh:{userId}", out _);
+        _store.TryRemove($"refresh_generation:{userId}", out _);
         return Task.CompletedTask;
     }
 

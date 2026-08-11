@@ -40,11 +40,11 @@ const statusStyles: Record<string, string> = {
   offline: 'bg-red-500/10 text-red-600 border-red-500/30',
 };
 
-/** 状态中文标签 */
-const statusLabels: Record<string, string> = {
-  healthy: '运行中',
-  unreachable: '不可达',
-  offline: '离线',
+/** 状态翻译键 */
+const statusLabelKeys: Record<string, string> = {
+  healthy: 'gatewayMonitor.statusHealthy',
+  unreachable: 'gatewayMonitor.statusUnreachable',
+  offline: 'gatewayMonitor.statusOffline',
 };
 
 /** 指标卡片 */
@@ -76,14 +76,17 @@ function MetricCard({
 }
 
 /** 格式化运行时间 */
-function formatUptime(seconds?: number): string {
-  if (!seconds) return '--';
+function formatUptime(
+  seconds: number | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (!seconds) return t('gatewayMonitor.uptimeUnknown');
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
-  if (d > 0) return `${d}天 ${h}时 ${m}分`;
-  if (h > 0) return `${h}时 ${m}分`;
-  return `${m}分`;
+  if (d > 0) return t('gatewayMonitor.uptimeDays', { days: d, hours: h, minutes: m });
+  if (h > 0) return t('gatewayMonitor.uptimeHours', { hours: h, minutes: m });
+  return t('gatewayMonitor.uptimeMinutes', { minutes: m });
 }
 
 export default function GatewayMonitorPage() {
@@ -106,20 +109,22 @@ export default function GatewayMonitorPage() {
             <Button variant="ghost" size="sm" onClick={() => navigate('/gateways')}>
               ←
             </Button>
-            <h1 className="text-2xl font-bold">网关监控</h1>
+            <h1 className="text-2xl font-bold">{t('gatewayMonitor.title')}</h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            {gatewayId ? `网关：${gatewayId}` : '实时监控边缘网关运行状态和采集指标'}
+            {gatewayId
+              ? t('gatewayMonitor.gatewayLabel', { id: gatewayId })
+              : t('gatewayMonitor.description')}
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="mr-1 h-4 w-4" />
-            刷新
+            {t('gatewayMonitor.refresh')}
           </Button>
           <Button variant="outline" size="sm" onClick={() => navigate('/devices')}>
             <Network className="mr-1 h-4 w-4" />
-            设备管理
+            {t('gatewayMonitor.deviceManagement')}
           </Button>
         </div>
       </div>
@@ -143,9 +148,9 @@ export default function GatewayMonitorPage() {
                       <WifiOff className="h-5 w-5 text-red-500" />
                     )}
                     <div>
-                      <p className="text-xs text-muted-foreground">网关状态</p>
+                      <p className="text-xs text-muted-foreground">{t('gatewayMonitor.status')}</p>
                       <Badge variant="outline" className={statusStyles[status?.status ?? 'offline']}>
-                        {statusLabels[status?.status ?? 'offline']}
+                        {t(statusLabelKeys[status?.status ?? 'offline'] ?? 'gatewayMonitor.statusOffline')}
                       </Badge>
                     </div>
                   </div>
@@ -159,27 +164,29 @@ export default function GatewayMonitorPage() {
             {/* 运行时长 */}
             <MetricCard
               icon={<Clock className="h-5 w-5 text-blue-500" />}
-              label={t("gatewayMonitor.uptime", "运行时长")}
-              value={formatUptime(status?.uptimeSeconds)}
-              sub={status?.startedAt ? `启动于 ${new Date(status.startedAt).toLocaleString()}` : undefined}
+              label={t('gatewayMonitor.uptime')}
+              value={formatUptime(status?.uptimeSeconds, t)}
+              sub={status?.startedAt
+                ? t('gatewayMonitor.startedAt', { time: new Date(status.startedAt).toLocaleString() })
+                : undefined}
               color="bg-blue-500/10"
             />
 
             {/* 采集次数 */}
             <MetricCard
               icon={<Activity className="h-5 w-5 text-purple-500" />}
-              label={t("gatewayMonitor.collectCount", "采集次数")}
+              label={t('gatewayMonitor.collectCount')}
               value={metrics?.collections?.toLocaleString() ?? '--'}
-              sub={metrics ? `错误 ${metrics.errors}` : undefined}
+              sub={metrics ? t('gatewayMonitor.errors', { count: metrics.errors }) : undefined}
               color="bg-purple-500/10"
             />
 
             {/* 缓冲队列 */}
             <MetricCard
               icon={<Database className="h-5 w-5 text-orange-500" />}
-              label={t("gatewayMonitor.bufferQueue", "缓冲队列")}
+              label={t('gatewayMonitor.bufferQueue')}
               value={metrics?.bufferQueueDepth?.toLocaleString() ?? '--'}
-              sub={metrics ? `重传 ${metrics.replays}` : undefined}
+              sub={metrics ? t('gatewayMonitor.replays', { count: metrics.replays }) : undefined}
               color="bg-orange-500/10"
             />
           </div>
@@ -188,26 +195,26 @@ export default function GatewayMonitorPage() {
           {isHealthy && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">连接信息</CardTitle>
+                <CardTitle className="text-base">{t('gatewayMonitor.connectionInfo')}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-3">
                   <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">后端 API</p>
+                    <p className="text-xs text-muted-foreground">{t('gatewayMonitor.backendApi')}</p>
                     <div className="flex items-center gap-1">
                       <Wifi className="h-3 w-3 text-green-500" />
                       <span className="text-sm font-mono">{status?.backendUrl ?? '--'}</span>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">MQTT Broker</p>
+                    <p className="text-xs text-muted-foreground">{t('gatewayMonitor.mqttBroker')}</p>
                     <div className="flex items-center gap-1">
                       <Wifi className="h-3 w-3 text-green-500" />
                       <span className="text-sm font-mono">{status?.mqttBroker ?? '--'}</span>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground">安全模式</p>
+                    <p className="text-xs text-muted-foreground">{t('gatewayMonitor.securityMode')}</p>
                     <Badge variant="outline">{status?.securityMode ?? 'None'}</Badge>
                   </div>
                 </div>
@@ -219,31 +226,31 @@ export default function GatewayMonitorPage() {
           {metrics && (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">上传统计</CardTitle>
+                <CardTitle className="text-base">{t('gatewayMonitor.uploadStats')}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-4">
                   <MetricCard
                     icon={<ArrowUpCircle className="h-5 w-5 text-green-500" />}
-                    label={t("gatewayMonitor.uploadSuccess", "上传成功")}
+                    label={t('gatewayMonitor.uploadSuccess')}
                     value={metrics.uploads.toLocaleString()}
                     color="bg-green-500/10"
                   />
                   <MetricCard
                     icon={<ArrowDownCircle className="h-5 w-5 text-red-500" />}
-                    label={t("gatewayMonitor.uploadFailed", "上传失败")}
+                    label={t('gatewayMonitor.uploadFailed')}
                     value={metrics.uploadFailures.toLocaleString()}
                     color="bg-red-500/10"
                   />
                   <MetricCard
                     icon={<RefreshCw className="h-5 w-5 text-yellow-500" />}
-                    label={t("gatewayMonitor.offlineRetry", "断网重传")}
+                    label={t('gatewayMonitor.offlineRetry')}
                     value={metrics.replays.toLocaleString()}
                     color="bg-yellow-500/10"
                   />
                   <MetricCard
                     icon={<AlertTriangle className="h-5 w-5 text-orange-500" />}
-                    label={t("gatewayMonitor.errorRate", "错误率")}
+                    label={t('gatewayMonitor.errorRate')}
                     value={
                       metrics.collections > 0
                         ? ((metrics.errors / metrics.collections) * 100).toFixed(2) + '%'
@@ -262,9 +269,11 @@ export default function GatewayMonitorPage() {
               <CardContent className="flex flex-col items-center gap-4 py-8">
                 <WifiOff className="h-12 w-12 text-yellow-500/60" />
                 <div className="text-center">
-                  <p className="font-medium">网关{status?.status === 'unreachable' ? '不可达' : '离线'}</p>
+                  <p className="font-medium">
+                    {t(statusLabelKeys[status?.status ?? 'offline'] ?? 'gatewayMonitor.statusOffline')}
+                  </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {status?.message ?? '请确认边缘网关已启动并可访问'}
+                    {status?.message ?? t('gatewayMonitor.offlineMessage')}
                   </p>
                 </div>
               </CardContent>
@@ -274,20 +283,20 @@ export default function GatewayMonitorPage() {
           {/* 设备配置列表 */}
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">已配置设备</CardTitle>
-              <CardDescription>网关下共 {devices?.length ?? 0} 个采集设备</CardDescription>
+              <CardTitle className="text-base">{t('gatewayMonitor.configuredDevices')}</CardTitle>
+              <CardDescription>{t('gatewayMonitor.deviceCount', { count: devices?.length ?? 0 })}</CardDescription>
             </CardHeader>
             <CardContent>
               {!devices?.length ? (
-                <p className="text-center py-4 text-sm text-muted-foreground">暂无设备配置</p>
+                <p className="text-center py-4 text-sm text-muted-foreground">{t('gatewayMonitor.noDevices')}</p>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>设备名称</TableHead>
-                      <TableHead>协议</TableHead>
-                      <TableHead>采集间隔</TableHead>
-                      <TableHead>状态</TableHead>
+                      <TableHead>{t('gatewayMonitor.deviceName')}</TableHead>
+                      <TableHead>{t('gatewayMonitor.protocol')}</TableHead>
+                      <TableHead>{t('gatewayMonitor.pollInterval')}</TableHead>
+                      <TableHead>{t('gatewayMonitor.status')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -300,7 +309,7 @@ export default function GatewayMonitorPage() {
                         <TableCell>{d.pollIntervalMs}ms</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={d.enabled ? 'bg-green-500/10 text-green-600' : 'bg-gray-500/10 text-gray-500'}>
-                            {d.enabled ? '启用' : '停用'}
+                            {d.enabled ? t('gatewayMonitor.enabled') : t('gatewayMonitor.disabled')}
                           </Badge>
                         </TableCell>
                       </TableRow>

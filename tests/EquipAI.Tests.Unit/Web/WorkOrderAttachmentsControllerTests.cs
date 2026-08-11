@@ -105,6 +105,127 @@ public class WorkOrderAttachmentsControllerTests
             .Should().Be(0, "物理文件删除失败也不应恢复已经提交的数据库删除");
     }
 
+    [Fact]
+    public async Task UploadAttachment_文件名包含路径和控制字符时_只保存安全的用户可见名称()
+    {
+        var tenantId = Guid.NewGuid();
+        var workOrderId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = tenantId,
+            WorkOrderCode = "WO-TEST-002",
+            Title = "附件文件名测试",
+            Type = WorkOrderType.Corrective,
+            Status = WorkOrderStatus.PendingDispatch,
+            Priority = WorkOrderPriority.Medium,
+            DeviceId = Guid.NewGuid(),
+        });
+        await db.SaveChangesAsync();
+
+        var storage = new RecordingFileStorage();
+        var tenantContext = new FixedTenantContext(tenantId);
+        var service = new WorkOrderAttachmentService(
+            db,
+            tenantContext,
+            NullLogger<WorkOrderAttachmentService>.Instance);
+        var controller = new WorkOrderAttachmentsController(
+            service,
+            storage,
+            tenantContext,
+            NullLogger<WorkOrderAttachmentsController>.Instance);
+        using var content = new MemoryStream("attachment"u8.ToArray());
+        var file = new FormFile(content, 0, content.Length, "file", "C:\\temp\\故障报告\r\n.txt")
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = "text/plain",
+        };
+
+        var result = await controller.UploadAttachment(workOrderId, file);
+
+        result.Result.Should().BeOfType<CreatedAtActionResult>();
+        storage.SavedFileName.Should().Be("故障报告__.txt");
+        (await db.WorkOrderAttachments.IgnoreQueryFilters().SingleAsync()).FileName
+            .Should().Be("故障报告__.txt");
+    }
+
+    [Fact]
+    public async Task DownloadAttachment_物理文件存在时_保留原始文件名并启用可定位流的断点续传()
+    {
+        var tenantId = Guid.NewGuid();
+        var workOrderId = Guid.NewGuid();
+        var attachmentId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        db.WorkOrderAttachments.Add(new WorkOrderAttachment
+        {
+            Id = attachmentId,
+            TenantId = tenantId,
+            WorkOrderId = workOrderId,
+            FileName = "故障报告.pdf",
+            ContentType = "application/pdf",
+            FileSize = 10,
+            StoragePath = "tenant/work-order/generated.pdf",
+            UploadedBy = Guid.NewGuid(),
+        });
+        await db.SaveChangesAsync();
+
+        var tenantContext = new FixedTenantContext(tenantId);
+        var service = new WorkOrderAttachmentService(
+            db,
+            tenantContext,
+            NullLogger<WorkOrderAttachmentService>.Instance);
+        var controller = new WorkOrderAttachmentsController(
+            service,
+            new DownloadableFileStorage(),
+            tenantContext,
+            NullLogger<WorkOrderAttachmentsController>.Instance);
+
+        var result = await controller.DownloadAttachment(workOrderId, attachmentId);
+
+        var fileResult = result.Should().BeOfType<FileStreamResult>().Subject;
+        fileResult.FileDownloadName.Should().Be("故障报告.pdf");
+        fileResult.ContentType.Should().Be("application/pdf");
+        fileResult.EnableRangeProcessing.Should().BeTrue();
+        await fileResult.FileStream.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DownloadAttachment_物理文件缺失时_返回404而不是500()
+    {
+        var tenantId = Guid.NewGuid();
+        var workOrderId = Guid.NewGuid();
+        var attachmentId = Guid.NewGuid();
+        await using var db = CreateDb(tenantId);
+        db.WorkOrderAttachments.Add(new WorkOrderAttachment
+        {
+            Id = attachmentId,
+            TenantId = tenantId,
+            WorkOrderId = workOrderId,
+            FileName = "故障报告.pdf",
+            ContentType = "application/pdf",
+            FileSize = 10,
+            StoragePath = "tenant/work-order/missing.pdf",
+            UploadedBy = Guid.NewGuid(),
+        });
+        await db.SaveChangesAsync();
+
+        var tenantContext = new FixedTenantContext(tenantId);
+        var service = new WorkOrderAttachmentService(
+            db,
+            tenantContext,
+            NullLogger<WorkOrderAttachmentService>.Instance);
+        var controller = new WorkOrderAttachmentsController(
+            service,
+            new MissingFileStorage(),
+            tenantContext,
+            NullLogger<WorkOrderAttachmentsController>.Instance);
+
+        var result = await controller.DownloadAttachment(workOrderId, attachmentId);
+
+        result.Should().BeOfType<NotFoundObjectResult>();
+    }
+
     /// <summary>
     /// 创建使用独立内存库的数据库上下文。
     /// </summary>
@@ -172,5 +293,60 @@ public class WorkOrderAttachmentsControllerTests
         }
 
         public Task<bool> ExistsAsync(string storagePath) => Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// 记录控制器传给物理存储的安全文件名。
+    /// </summary>
+    private sealed class RecordingFileStorage : IFileStorageService
+    {
+        public string? SavedFileName { get; private set; }
+
+        public Task<string> SaveAsync(Guid tenantId, string category, string fileName, Stream stream, string contentType)
+        {
+            SavedFileName = fileName;
+            return Task.FromResult("tenant/work-order/generated.txt");
+        }
+
+        public Task<(Stream Stream, string ContentType, string FileName)> GetAsync(string storagePath)
+            => throw new NotSupportedException();
+
+        public Task DeleteAsync(string storagePath) => Task.CompletedTask;
+
+        public Task<bool> ExistsAsync(string storagePath) => Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// 返回可定位内存流，验证下载响应的用户可见文件名和断点续传设置。
+    /// </summary>
+    private sealed class DownloadableFileStorage : IFileStorageService
+    {
+        public Task<string> SaveAsync(Guid tenantId, string category, string fileName, Stream stream, string contentType)
+            => throw new NotSupportedException();
+
+        public Task<(Stream Stream, string ContentType, string FileName)> GetAsync(string storagePath)
+            => Task.FromResult<(Stream, string, string)>(
+                (new MemoryStream("pdf"u8.ToArray()), "application/pdf", "generated.pdf"));
+
+        public Task DeleteAsync(string storagePath) => Task.CompletedTask;
+
+        public Task<bool> ExistsAsync(string storagePath) => Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// 模拟数据库仍有元数据但物理对象已经丢失的场景。
+    /// </summary>
+    private sealed class MissingFileStorage : IFileStorageService
+    {
+        public Task<string> SaveAsync(Guid tenantId, string category, string fileName, Stream stream, string contentType)
+            => throw new NotSupportedException();
+
+        public Task<(Stream Stream, string ContentType, string FileName)> GetAsync(string storagePath)
+            => Task.FromException<(Stream, string, string)>(
+                new FileNotFoundException("模拟附件缺失", storagePath));
+
+        public Task DeleteAsync(string storagePath) => Task.CompletedTask;
+
+        public Task<bool> ExistsAsync(string storagePath) => Task.FromResult(false);
     }
 }

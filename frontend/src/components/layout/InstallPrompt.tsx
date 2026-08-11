@@ -1,4 +1,5 @@
 import { usePWAInstall } from '../../hooks/usePWA';
+import { useTranslation } from 'react-i18next';
 import { Download } from 'lucide-react';
 import { Button } from '../ui/button';
 
@@ -9,6 +10,7 @@ import { Button } from '../ui/button';
  * 用户点击"安装"按钮后触发浏览器原生安装流程。
  */
 export function InstallPrompt() {
+  const { t } = useTranslation();
   const { isInstallable, install } = usePWAInstall();
 
   if (!isInstallable) return null;
@@ -16,9 +18,9 @@ export function InstallPrompt() {
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border bg-background p-3 shadow-lg">
       <Download className="h-5 w-5 text-primary" />
-      <span className="text-sm">安装 EquipSense 到桌面，获得更好体验</span>
+      <span className="text-sm">{t('layout.installPrompt')}</span>
       <Button size="sm" onClick={install}>
-        安装
+        {t('layout.install')}
       </Button>
     </div>
   );

@@ -58,6 +58,8 @@ public class WorkOrderAttachmentsController : ControllerBase
         if (!await _service.WorkOrderExistsAsync(workOrderId, ct))
             return NotFound(new { code = 404, message = "工单不存在" });
 
+        var safeFileName = NormalizeAttachmentFileName(file.FileName);
+        var contentType = NormalizeContentType(file.ContentType);
         string? storagePath = null;
         try
         {
@@ -65,14 +67,14 @@ public class WorkOrderAttachmentsController : ControllerBase
             storagePath = await _fileStorage.SaveAsync(
                 _tenantContext.TenantId,
                 workOrderId.ToString(),
-                file.FileName,
+                safeFileName,
                 stream,
-                file.ContentType);
+                contentType);
 
             var dto = await _service.CreateAsync(
                 workOrderId,
-                file.FileName,
-                file.ContentType,
+                safeFileName,
+                contentType,
                 file.Length,
                 storagePath,
                 ct);
@@ -103,7 +105,7 @@ public class WorkOrderAttachmentsController : ControllerBase
                 exception,
                 "附件上传未完成：WorkOrderId={WorkOrderId}, FileName={FileName}",
                 workOrderId,
-                file.FileName);
+                safeFileName);
             throw;
         }
     }
@@ -119,8 +121,26 @@ public class WorkOrderAttachmentsController : ControllerBase
         if (attachment == null)
             return NotFound(new { code = 404, message = "附件不存在" });
 
-        var (stream, contentType, fileName) = await _fileStorage.GetAsync(attachment.StoragePath);
-        return File(stream, contentType, fileName);
+        try
+        {
+            var (stream, contentType, _) = await _fileStorage.GetAsync(attachment.StoragePath);
+            var result = File(
+                stream,
+                NormalizeContentType(contentType),
+                NormalizeAttachmentFileName(attachment.FileName));
+            // 本地文件流支持定位时启用断点续传；S3 响应流不可定位时由框架按普通流发送。
+            result.EnableRangeProcessing = stream.CanSeek;
+            return result;
+        }
+        catch (FileNotFoundException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "附件元数据存在但物理文件缺失：WorkOrderId={WorkOrderId}, AttachmentId={AttachmentId}",
+                workOrderId,
+                attachmentId);
+            return NotFound(new { code = 404, message = "附件文件不存在" });
+        }
     }
 
     /// <summary>
@@ -154,5 +174,51 @@ public class WorkOrderAttachmentsController : ControllerBase
         }
 
         return NoContent();
+    }
+
+    /// <summary>
+    /// 规范化用户可见的附件文件名，防止路径片段、控制字符和响应头注入进入数据库及下载响应。
+    /// </summary>
+    private static string NormalizeAttachmentFileName(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return "attachment";
+
+        var normalized = fileName.Replace('\\', '/');
+        var safeName = Path.GetFileName(normalized);
+        if (string.IsNullOrWhiteSpace(safeName) || safeName is "." or "..")
+            return "attachment";
+
+        safeName = string.Concat(safeName.Select(character =>
+            char.IsControl(character)
+                || character is '"' or '<' or '>' or '|' or '?' or '*' or ':'
+                ? '_'
+                : character));
+        safeName = safeName.Trim().TrimEnd('.', ' ');
+        if (string.IsNullOrWhiteSpace(safeName))
+            return "attachment";
+
+        const int maxFileNameLength = 255;
+        if (safeName.Length <= maxFileNameLength)
+            return safeName;
+
+        var extension = Path.GetExtension(safeName);
+        var stem = Path.GetFileNameWithoutExtension(safeName);
+        var maxStemLength = Math.Max(1, maxFileNameLength - extension.Length);
+        return stem[..Math.Min(stem.Length, maxStemLength)] + extension;
+    }
+
+    /// <summary>
+    /// 过滤 MIME 类型中的控制字符，防止异常输入污染下载响应头。
+    /// </summary>
+    private static string NormalizeContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType)
+            || contentType.Any(char.IsControl))
+        {
+            return "application/octet-stream";
+        }
+
+        return contentType.Trim();
     }
 }

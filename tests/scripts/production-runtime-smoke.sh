@@ -470,21 +470,27 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
   printf '运行 Production 镜像完整业务 E2E……\n'
   (
     cd "$PROJECT_ROOT/frontend"
-    PLAYWRIGHT_BASE_URL="https://127.0.0.1:$FRONTEND_PORT" \
-    PLAYWRIGHT_API_BASE_URL="http://127.0.0.1:$BACKEND_PORT" \
-    PLAYWRIGHT_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" \
-    E2E_PRODUCTION=1 \
-    E2E_FAST_LOGIN=1 \
-    E2E_ADMIN_PASSWORD="$SEED_ADMIN_PASSWORD" \
-    E2E_LEAD_PASSWORD="$SEED_LEAD_PASSWORD" \
-    E2E_ADMIN_TOTP_SECRET="$e2e_admin_totp_secret" \
-    E2E_LEAD_TOTP_SECRET="$e2e_lead_totp_secret" \
-    E2E_TENANT2_TOTP_SECRET="$e2e_tenant2_totp_secret" \
-    E2E_TECH_PASSWORD="$SEED_TECH_PASSWORD" \
-    E2E_OPERATOR_PASSWORD="$SEED_OPERATOR_PASSWORD" \
-    E2E_VIEWER_PASSWORD="$SEED_VIEWER_PASSWORD" \
-    E2E_TENANT2_PASSWORD="$SEED_TENANT2_PASSWORD" \
-    npx --no-install playwright test e2e-comprehensive --reporter=list "${SMOKE_E2E_ARGS[@]}"
+    e2e_environment=(
+      "PLAYWRIGHT_BASE_URL=https://127.0.0.1:$FRONTEND_PORT"
+      "PLAYWRIGHT_API_BASE_URL=http://127.0.0.1:$BACKEND_PORT"
+      "PLAYWRIGHT_MACHINE_API_KEY=$AUTH_MACHINE_API_KEY"
+      "E2E_PRODUCTION=1"
+      "E2E_FAST_LOGIN=1"
+      "E2E_ADMIN_PASSWORD=$SEED_ADMIN_PASSWORD"
+      "E2E_LEAD_PASSWORD=$SEED_LEAD_PASSWORD"
+      "E2E_ADMIN_TOTP_SECRET=$e2e_admin_totp_secret"
+      "E2E_LEAD_TOTP_SECRET=$e2e_lead_totp_secret"
+      "E2E_TENANT2_TOTP_SECRET=$e2e_tenant2_totp_secret"
+      "E2E_TECH_PASSWORD=$SEED_TECH_PASSWORD"
+      "E2E_OPERATOR_PASSWORD=$SEED_OPERATOR_PASSWORD"
+      "E2E_VIEWER_PASSWORD=$SEED_VIEWER_PASSWORD"
+      "E2E_TENANT2_PASSWORD=$SEED_TENANT2_PASSWORD"
+    )
+    if ((${#SMOKE_E2E_ARGS[@]} > 0)); then
+      env "${e2e_environment[@]}" npx --no-install playwright test e2e-comprehensive --reporter=list "${SMOKE_E2E_ARGS[@]}"
+    else
+      env "${e2e_environment[@]}" npx --no-install playwright test e2e-comprehensive --reporter=list
+    fi
   ) || fatal "Production 镜像完整业务 E2E 失败"
   printf 'Production 镜像完整业务 E2E 通过。\n'
 fi

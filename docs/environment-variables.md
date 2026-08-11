@@ -143,7 +143,7 @@ Docker 生产环境默认使用本地文件系统和 `attachments_data` 命名�
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
 | `FILE_STORAGE_PROVIDER` | 附件存储实现：`Local` / `S3`；未知值会阻止后端启动 | `Local` | 否 |
-| `FileStorage__BasePath` / `FILE_STORAGE_BASE_PATH` | 工单附件物理存储目录；Docker 中必须与卷挂载点一致 | `/app/uploads` | 否 |
+| `FileStorage__BasePath` / `FILE_STORAGE_BASE_PATH` | 工单附件物理存储目录；Docker 中必须与卷挂载点一致，Production 必须使用非根目录绝对路径 | `/app/uploads` | 否 |
 | `FILE_STORAGE_S3_BUCKET` | S3 对象存储桶名称 | — | Provider=S3 时必填 |
 | `FILE_STORAGE_S3_REGION` | S3 签名区域 | `us-east-1` | Provider=S3 时建议显式配置 |
 | `FILE_STORAGE_S3_ENDPOINT` | 自定义 S3 兼容端点；为空时使用 AWS 标准端点 | — | 使用 MinIO/OSS 网关时必填 |

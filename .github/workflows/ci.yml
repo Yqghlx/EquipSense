@@ -163,6 +163,20 @@ jobs:
         run: dotnet list EquipAI.sln package --vulnerable --include-transitive
 
   # ============================================================================
+  # 备份恢复实演 — 在隔离临时项目中验证数据库和工单附件能够真实恢复
+  # ============================================================================
+  backup-restore-rehearsal:
+    name: 备份恢复实演
+    runs-on: ubuntu-latest
+    needs: secret-scan
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 执行隔离备份恢复实演
+        run: bash tests/backup-restore-rehearsal.sh
+
+  # ============================================================================
   # 前端构建 + 测试
   # ============================================================================
   frontend:
@@ -397,8 +411,8 @@ jobs:
     name: 版本发布（semver 标签）
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    # 即使 tag 推送绕过了 main 分支，也必须先通过完整后端/前端质量门禁。
-    needs: [backend, frontend, production-smoke]
+    # 即使 tag 推送绕过了 main 分支，也必须先通过完整后端/前端/恢复质量门禁。
+    needs: [backend, frontend, production-smoke, backup-restore-rehearsal]
     permissions:
       contents: read
       packages: write
@@ -566,11 +580,9 @@ jobs:
 
   # ============================================================================
   # K6 性能回归测试（main 分支 + PR）
-  # 启动后端 + PG/Redis，用 k6 跑 api-read.js（读路径冒烟）
-  # 阈值内建在脚本里：P95 < 500ms、错误率 < 1%
-  # 超过阈值 k6 退出码非零 → CI 红，防止读路径性能退化被合并
-  # 注：写路径压测（telemetry-write.js）依赖预置设备数据，CI 无可靠种子，
-  #     保留本地/手动跑（见 tests/load/PERF_BASELINE.md）
+  # 启动后端 + PG/Redis，覆盖读路径和固定种子设备的轻量遥测写路径。
+  # 阈值内建在脚本里，超过阈值 k6 退出码非零 → CI 红，防止性能退化被合并。
+  # 这里是稳定的回归门禁，不等同于生产容量基线；完整容量测试仍按预算手工执行。
   # ============================================================================
   load-test:
     name: K6 性能回归
@@ -670,12 +682,24 @@ jobs:
         # 第二次跑用于留档，不阻断（首次已验证阈值）
         continue-on-error: true
 
+      # 写路径压测：20 VU × 30s，使用 DataSeeder 固定的 AC-001 设备，覆盖
+      # 设备编码解析、请求校验、异步遥测队列和数据库批量写入链路。
+      - name: K6 遥测写入压测（写路径回归）
+        working-directory: tests/load
+        env:
+          BASE_URL: http://localhost:8080
+          DEVICES: '20'
+          DURATION: '30s'
+        run: k6 run --quiet -e AUTH_USER=admin -e AUTH_PASS="$LOADTEST_PASSWORD" -e DEVICES="$DEVICES" -e DURATION="$DURATION" --out json=telemetry-write-results.json telemetry-write.js
+
       - name: 上传 K6 性能报告
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: k6-performance-report
-          path: tests/load/api-read-results.json
+          path: |
+            tests/load/api-read-results.json
+            tests/load/telemetry-write-results.json
           retention-days: 14
           if-no-files-found: ignore
 

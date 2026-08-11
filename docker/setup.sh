@@ -107,7 +107,10 @@ read_env_value() {
     printf '%s' "${line#*=}"
 }
 
-if [ -f "${ENV_FILE}" ]; then
+if [ -L "${ENV_FILE}" ]; then
+    error "拒绝使用符号链接环境文件: ${ENV_FILE}"
+    exit 1
+elif [ -f "${ENV_FILE}" ]; then
     success ".env 文件已存在: ${ENV_FILE}"
 else
     if [ -f "${ENV_EXAMPLE}" ]; then
@@ -253,6 +256,7 @@ REQUIRED_FILES=(
     ".env.example|.env 模板文件"
     "docker-compose.yml|Docker Compose 主配置"
     "docker-compose.dev.yml|Docker Compose 开发环境配置"
+    "compose-production.sh|生产 Compose fail-closed 操作入口"
     "validate-env.sh|环境变量校验器"
     "bootstrap-production-secrets.sh|生产本地凭据初始化工具"
     "mosquitto.conf|Mosquitto 开发环境配置"
@@ -295,6 +299,7 @@ EXECUTABLE_SCRIPTS=(
     "generate-mqtt-cert.sh"
     "setup-mosquitto.sh"
     "bootstrap-production-secrets.sh"
+    "compose-production.sh"
     "setup.sh"
     "entrypoint.sh"
     "backup.sh"
@@ -318,8 +323,8 @@ for SCRIPT_NAME in "${EXECUTABLE_SCRIPTS[@]}"; do
 done
 
 # 环境变量通过后，证书和运行时 bind mount 文件才刚刚生成或确认存在；
-# 在报告“配置验证全部通过”前必须再次执行完整运行时门禁，避免已有过期、
-# 主机名不匹配或证书私钥不匹配的文件仅被 warning 后继续部署。
+# 在报告“配置验证全部通过”前必须再次执行完整运行时门禁，拒绝过期、
+# 主机名不匹配、权限不安全或证书私钥不匹配的文件继续部署。
 if ! bash "${SCRIPT_DIR}/validate-env.sh" "${ENV_FILE}" --check-runtime-files; then
     error "运行时文件或 TLS/MQTT 证书校验未通过，请修复后重新运行 setup.sh"
     exit 1
@@ -340,7 +345,7 @@ if [ ${ERRORS} -eq 0 ]; then
     echo "    cd \"${SCRIPT_DIR}\" && DEV_PG_PASSWORD='<本地开发密码>' docker compose --env-file .env -f docker-compose.dev.yml up -d"
     echo ""
     echo "  生产环境（全套服务）："
-    echo "    cd \"${SCRIPT_DIR}\" && docker compose --env-file .env -f docker-compose.yml up -d"
+    echo "    cd \"${SCRIPT_DIR}\" && ./compose-production.sh up -d"
     echo ""
     echo -e "${YELLOW}注意事项：${NC}"
     echo "  1. 首次启动前请确认 .env 文件中的密码和密钥已修改"

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using EquipAI.Application.Analysis;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -6,6 +7,7 @@ using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -33,6 +35,7 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
     private readonly Guid _tenantId = Guid.NewGuid();
+    private readonly SelectCommandCounter _selectCommandCounter = new();
 
     public async Task InitializeAsync()
     {
@@ -40,7 +43,9 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_selectCommandCounter));
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(_tenantId));
         services.AddLogging();
         _sp = services.BuildServiceProvider();
@@ -169,6 +174,20 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
         result.Devices.Should().BeEmpty("1 台设备无法做横向对比");
         result.Message.Should().Be("同类设备不足 2 台，无法对比");
         result.GroupMean.Should().Be(0, "未计算统计量");
+    }
+
+    /// <summary>服务层也必须拒绝无效时间窗口，防止绕过 HTTP 控制器后触发无界扫描。</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(8761)]
+    public async Task CompareAsync_无效时间窗口_应拒绝(int hours)
+    {
+        var service = CreateService(GetDb());
+
+        var act = () => service.CompareAsync(_tenantId, "air_compressor", "temperature", hours);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }
 
     /// <summary>
@@ -386,6 +405,78 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
         var zScores = result.Devices.Select(d => Math.Abs(d.ZScore)).ToList();
         zScores.Should().BeInDescendingOrder("偏离程度大的应排在前面");
         result.Devices[0].DeviceId.Should().Be(severe, "严重偏离的设备应排首位");
+    }
+
+    /// <summary>
+    /// 对比查询应批量读取窗口内遥测，且最新值必须按时间而非数据库返回顺序确定。
+    /// 旧实现每台设备单独查询一次，并直接取结果最后一行，设备数量增加会造成 N+1 查询且可能展示旧值。
+    /// </summary>
+    [Fact]
+    public async Task CompareAsync_应批量读取遥测并按时间返回最新值()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var now = DateTime.UtcNow;
+        var expectedLatest = new Dictionary<string, double>();
+
+        for (var index = 1; index <= 3; index++)
+        {
+            var code = $"AC-{index:000}";
+            var id = await SeedDeviceAsync(db, _tenantId, code, "air_compressor", $"{index}#");
+            expectedLatest[code] = 70.0 + index;
+
+            // 先插入较新的值，再插入旧值，专门验证不能用 ToList 后的最后一行冒充最新值。
+            await InsertTelemetryAsync(db, _tenantId, id, "temperature", now.AddMinutes(-1), 70.0 + index);
+            await InsertTelemetryAsync(db, _tenantId, id, "temperature", now.AddMinutes(-10), 10.0 + index);
+        }
+
+        _selectCommandCounter.Reset();
+        var result = await service.CompareAsync(_tenantId, "air_compressor", "temperature");
+
+        result.Devices.Should().HaveCount(3);
+        result.Devices.Should().AllSatisfy(device =>
+        {
+            device.LatestValue.Should().BeApproximately(expectedLatest[device.DeviceCode], 0.01);
+        });
+        _selectCommandCounter.Count.Should().Be(2,
+            "设备列表和窗口遥测应各执行一次查询，不能按设备逐个查询");
+    }
+
+    /// <summary>统计测试上下文执行的 SELECT 命令次数，防止批量分析退化为 N+1 查询。</summary>
+    private sealed class SelectCommandCounter : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Reset() => Interlocked.Exchange(ref _count, 0);
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CountSelect(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CountSelect(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void CountSelect(DbCommand command)
+        {
+            if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
     }
 
     // =========================================================================

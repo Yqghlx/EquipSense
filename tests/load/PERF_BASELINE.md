@@ -30,7 +30,7 @@
 
 ### 3. 遥测写入压测（`telemetry-write.js`）
 
-通过 HTTP API 模拟 100 个设备并发写入遥测数据（5 指标 / 设备）。
+通过 HTTP API 模拟 100 个设备并发写入遥测数据（5 指标 / 设备）。CI 另有 20 VU × 30s 的轻量写路径回归，使用 DataSeeder 固定的 `AC-001` 设备，验证接入校验、设备编码解析、异步队列和批量落库链路。
 
 | 并发数 | 写入速率 | P50 | P95 | 错误率 | 状态 |
 |--------|----------|-----|-----|--------|------|
@@ -58,7 +58,7 @@ export AUTH_PASS='<与后端 SEED_ADMIN_PASSWORD 相同的测试密码>'
 export AUTH_MACHINE_API_KEY='<生产机器客户端 API Key（如需）>'
 k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/api-read.js
 k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/mqtt-publish.js
-k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/telemetry-write.js
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" -e DEVICES=100 -e DURATION=60s tests/load/telemetry-write.js
 
 # 高压测试（200 VU）
 k6 run -e VUS=200 -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/api-read.js

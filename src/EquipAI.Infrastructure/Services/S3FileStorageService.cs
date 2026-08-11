@@ -1,3 +1,4 @@
+using System.Text;
 using System.Net;
 using Amazon.S3;
 using Amazon.S3.Model;
@@ -234,7 +235,22 @@ public sealed class S3FileStorageService : IFileStorageService
         if (string.IsNullOrWhiteSpace(sanitized) || sanitized is "." or "..")
             sanitized = "file";
 
-        return sanitized.Length <= 100 ? sanitized : sanitized[..100];
+        // 与本地文件系统保持相同的物理文件名上限；下载名称仍从附件元数据中保留原始名称。
+        const int maxUtf8Bytes = 160;
+        var builder = new StringBuilder(Math.Min(sanitized.Length, 100));
+        var bytes = 0;
+        foreach (var rune in sanitized.EnumerateRunes())
+        {
+            var runeText = rune.ToString();
+            var runeBytes = Encoding.UTF8.GetByteCount(runeText);
+            if (bytes + runeBytes > maxUtf8Bytes)
+                break;
+
+            builder.Append(runeText);
+            bytes += runeBytes;
+        }
+
+        return builder.Length == 0 ? "file" : builder.ToString();
     }
 
     /// <summary>

@@ -119,6 +119,34 @@ public sealed class FileStorageConfigurationTests
         act.Should().Throw<InvalidOperationException>().WithMessage("*KeyPrefix*");
     }
 
+    [Fact]
+    public void Validate_生产本地存储缺少绝对路径_拒绝启动()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["FileStorage:Provider"] = "Local",
+            ["FileStorage:BasePath"] = "uploads",
+        });
+
+        var act = () => FileStorageConfiguration.Validate(configuration, "Production");
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*绝对路径*");
+    }
+
+    [Fact]
+    public void Validate_生产本地存储使用持久化绝对路径_通过()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["FileStorage:Provider"] = "Local",
+            ["FileStorage:BasePath"] = "/var/lib/equipsense/uploads",
+        });
+
+        var act = () => FileStorageConfiguration.Validate(configuration, "Production");
+
+        act.Should().NotThrow();
+    }
+
     private static IConfiguration BuildConfiguration(
         IReadOnlyDictionary<string, string?>? values = null)
     {

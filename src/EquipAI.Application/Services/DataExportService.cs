@@ -33,7 +33,10 @@ public class DataExportService
         Guid? deviceId = null,
         CancellationToken ct = default)
     {
-        var query = _db.Alerts.AsQueryable();
+        // 使用显式租户条件而非仅依赖请求级全局过滤器：导出服务也可能在后台任务、
+        // 系统管理员跨租户上下文或请求上下文切换后复用，tenantId 必须成为最终数据边界。
+        var query = _db.UnfilteredSet<Core.Entities.Alert>()
+            .Where(a => a.TenantId == tenantId);
 
         if (deviceId.HasValue)
             query = query.Where(a => a.DeviceId == deviceId.Value);
@@ -240,7 +243,9 @@ public class DataExportService
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<DeviceStatus>(status, ignoreCase: true, out var parsed))
             statusEnum = parsed;
 
-        var query = _db.Devices.AsQueryable();
+        // 与告警导出保持一致，显式绑定租户参数，避免导出错误租户的数据。
+        var query = _db.UnfilteredSet<Core.Entities.Device>()
+            .Where(d => d.TenantId == tenantId);
         if (statusEnum.HasValue)
             query = query.Where(d => d.Status == statusEnum.Value);
         if (!string.IsNullOrWhiteSpace(type))
@@ -312,7 +317,9 @@ public class DataExportService
         Guid? deviceId = null,
         CancellationToken ct = default)
     {
-        var query = _db.WorkOrders.AsQueryable();
+        // 与告警、设备导出保持一致，显式绑定租户参数，不能把安全边界交给调用上下文的隐式状态。
+        var query = _db.UnfilteredSet<Core.Entities.WorkOrder>()
+            .Where(w => w.TenantId == tenantId);
 
         // status/priority 字符串先在客户端解析为枚举，再在查询内做枚举比较（可翻译为 SQL 整数比较）。
         // 不可用 w.Status.ToString() == status：枚举以 int 存储（无 HasConversion），

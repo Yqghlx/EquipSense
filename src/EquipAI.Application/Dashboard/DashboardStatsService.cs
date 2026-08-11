@@ -15,8 +15,8 @@ namespace EquipAI.Application.Dashboard;
 /// 2. 趋势数据按租户本地时区当天分组（v1.4 #245 修复，使用 Tenant.TimeZone + TimeZoneResolver）。
 ///    查询窗口起点 = 租户时区"今天 0:00"转 UTC；分组键 = 遥测时间转租户时区后的 .Date。
 ///    跨时区用户看到的"今天"与本地一致（旧实现按 UTC 分组会让 UTC+8 用户在 UTC 0-8 点错位一天）。
-/// 3. 所有查询依赖 EF Core 全局查询过滤器自动附加 WHERE TenantId = @current，
-///    所以 tenantId 参数虽未显式传入 LINQ，但过滤器保证租户隔离。
+/// 3. 所有业务查询都显式附加 TenantId = @tenantId；全局查询过滤器仍作为请求上下文的第二道防线，
+///    这样系统管理员跨租户查看或后台复用服务时不会因为 DbContext 当前租户而返回错误统计。
 /// </summary>
 public class DashboardStatsService
 {
@@ -35,7 +35,7 @@ public class DashboardStatsService
     /// 注意：EF Core DbContext 不是线程安全的，不能并行执行多个查询。
     /// 此处改为顺序执行，每次查询间隔极短（微秒级网络往返已足够快）。
     /// </summary>
-    /// <param name="tenantId">租户 ID（实际过滤由 EF 全局查询过滤器完成，保留参数为可读性 + 未来支持跨租户查询）</param>
+    /// <param name="tenantId">目标租户 ID，作为统计查询的显式数据边界</param>
     public async Task<DashboardStats> GetStatsAsync(Guid tenantId, CancellationToken ct = default)
     {
         // 一次 DB 查询拿到租户时区，趋势聚合按本地日期分组（v1.4 修复跨时区错位）
@@ -75,8 +75,10 @@ public class DashboardStatsService
     /// </summary>
     private async Task<(int Total, int Online)> GetDeviceStatsAsync(Guid tenantId, CancellationToken ct)
     {
-        var total = await _db.Devices.CountAsync(ct);
-        var online = await _db.Devices.CountAsync(d => d.Status == DeviceStatus.Online, ct);
+        var devices = _db.UnfilteredSet<Core.Entities.Device>()
+            .Where(d => d.TenantId == tenantId);
+        var total = await devices.CountAsync(ct);
+        var online = await devices.CountAsync(d => d.Status == DeviceStatus.Online, ct);
         return (total, online);
     }
 
@@ -91,8 +93,9 @@ public class DashboardStatsService
     private async Task<(int ActiveCount, Dictionary<string, int> BySeverity)> GetAlertStatsAsync(Guid tenantId, CancellationToken ct)
     {
         // 先查询原始数据再在内存中分组，避免 EF Core 翻译枚举 ToString() 失败
-        var alerts = await _db.Alerts
-            .Where(a => a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged)
+        var alerts = await _db.UnfilteredSet<Core.Entities.Alert>()
+            .Where(a => a.TenantId == tenantId
+                     && (a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged))
             .Select(a => new { a.Severity })
             .ToListAsync(ct);
 
@@ -110,7 +113,8 @@ public class DashboardStatsService
     private async Task<(int PendingCount, Dictionary<string, int> ByStatus)> GetWorkOrderStatsAsync(Guid tenantId, CancellationToken ct)
     {
         // 先查询原始数据再在内存中分组，兼容 InMemory 数据库和避免枚举翻译问题
-        var workOrders = await _db.WorkOrders
+        var workOrders = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
+            .Where(w => w.TenantId == tenantId)
             .Select(w => new { w.Status })
             .ToListAsync(ct);
 
@@ -137,8 +141,8 @@ public class DashboardStatsService
         var startLocal = todayLocal.AddDays(-6);
         var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
 
-        var alerts = await _db.Alerts
-            .Where(a => a.OccurredAt >= startUtc)
+        var alerts = await _db.UnfilteredSet<Core.Entities.Alert>()
+            .Where(a => a.TenantId == tenantId && a.OccurredAt >= startUtc)
             .Select(a => new { a.OccurredAt })
             .ToListAsync(ct);
 
@@ -160,8 +164,8 @@ public class DashboardStatsService
         var startLocal = todayLocal.AddDays(-6);
         var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
 
-        var workOrders = await _db.WorkOrders
-            .Where(w => w.CreatedAt >= startUtc)
+        var workOrders = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
+            .Where(w => w.TenantId == tenantId && w.CreatedAt >= startUtc)
             .Select(w => new { w.CreatedAt })
             .ToListAsync(ct);
 

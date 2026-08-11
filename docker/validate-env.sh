@@ -25,14 +25,18 @@ read_env_value() {
 }
 
 get_file_mode() {
-  if stat -c '%a' "$ENV_FILE" >/dev/null 2>&1; then
-    stat -c '%a' "$ENV_FILE"
+  local path="${1:-$ENV_FILE}"
+  if stat -c '%a' "$path" >/dev/null 2>&1; then
+    stat -c '%a' "$path"
   else
-    stat -f '%Lp' "$ENV_FILE"
+    stat -f '%Lp' "$path"
   fi
 }
 
-if [ ! -f "$ENV_FILE" ]; then
+if [ -L "$ENV_FILE" ]; then
+  error "环境变量文件不得为符号链接：$ENV_FILE"
+  exit 1
+elif [ ! -f "$ENV_FILE" ]; then
   error "环境变量文件不存在：$ENV_FILE"
 else
   # 生产凭据文件禁止被同组或其他用户读取；setup.sh 会在首次创建后自动设置为 600。
@@ -82,16 +86,35 @@ else
   done
 
   # Compose 对重复键采用最后一项，容易让旧配置静默覆盖新凭据或域名。
-  # 只报告变量名，不输出任何值，避免校验日志泄露敏感信息。
-  duplicate_env_keys="$(awk -F= '
-    /^[A-Za-z_][A-Za-z0-9_]*=/ { counts[$1]++ }
-    END { for (key in counts) if (counts[key] > 1) print key }
+  # 只报告变量名和是否冲突，不输出任何值，避免校验日志泄露敏感信息。
+  duplicate_env_key_details="$(awk -F= '
+    /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      key = $1
+      value = substr($0, index($0, "=") + 1)
+      counts[key]++
+      token = key SUBSEP value
+      if (!(token in seen)) {
+        seen[token] = 1
+        unique_values[key]++
+      }
+    }
+    END {
+      for (key in counts) {
+        if (counts[key] > 1) {
+          printf "%s\t%s\n", key, (unique_values[key] > 1 ? "conflict" : "identical")
+        }
+      }
+    }
   ' "$ENV_FILE")"
-  while IFS= read -r env_key; do
+  while IFS=$'\t' read -r env_key duplicate_state; do
     if [ -n "$env_key" ]; then
-      error "$env_key 重复定义"
+      if [ "$duplicate_state" = "conflict" ]; then
+        error "$env_key 重复定义且值不一致"
+      else
+        error "$env_key 重复定义（值相同）"
+      fi
     fi
-  done <<< "$duplicate_env_keys"
+  done <<< "$duplicate_env_key_details"
 
   # Compose 会采用重复键的最后一项；如果旧配置尾部残留 Development，
   # 生产专用的 MFA、许可证和安全策略可能被绕过，因此显式拒绝非 Production。
@@ -291,6 +314,15 @@ else
   file_storage_provider="$(printf '%s' "${file_storage_provider:-Local}" | tr '[:lower:]' '[:upper:]')"
   case "$file_storage_provider" in
     LOCAL)
+      file_storage_base_path="$(read_env_value FILE_STORAGE_BASE_PATH)"
+      # Compose 未配置时会使用 /app/uploads 默认卷路径；一旦显式覆盖，
+      # 生产必须仍然指向非根目录绝对路径，避免容器把附件写进临时工作目录。
+      file_storage_base_path="${file_storage_base_path:-/app/uploads}"
+      if [[ "$file_storage_base_path" != /* ]]; then
+        error "生产 FILE_STORAGE_BASE_PATH 必须使用绝对路径"
+      elif [ -z "${file_storage_base_path//\//}" ]; then
+        error "生产 FILE_STORAGE_BASE_PATH 不能指向文件系统根目录"
+      fi
       ;;
     S3)
       file_storage_bucket="$(read_env_value FILE_STORAGE_S3_BUCKET)"
@@ -433,10 +465,23 @@ else
       check_runtime_private_key() {
         local path="$1"
         local description="$2"
+        local file_mode
         if [ ! -s "$path" ]; then
           error "$description 为空或缺失"
           return 1
         fi
+        if ! file_mode="$(get_file_mode "$path")"; then
+          error "$description 无法读取文件权限"
+          return 1
+        fi
+        case "$file_mode" in
+          400|600)
+            ;;
+          *)
+            error "$description 权限不安全（当前 ${file_mode}），请设置为 600"
+            return 1
+            ;;
+        esac
         if ! openssl pkey -in "$path" -noout >/dev/null 2>&1; then
           error "$description 不是有效的私钥"
           return 1
@@ -571,11 +616,26 @@ else
 
       mqtt_username="$(read_env_value MQTT_USERNAME)"
       mqtt_password_file="$SCRIPT_DIR/mosquitto_passwd/passwd"
-      if [ ! -s "$mqtt_password_file" ]; then
+      if [ -L "$mqtt_password_file" ]; then
+        error "Mosquitto 密码文件不得为符号链接"
+      elif [ ! -s "$mqtt_password_file" ]; then
         error "Mosquitto 密码文件为空或缺失"
-      elif [ -n "$mqtt_username" ] \
-        && ! awk -F: -v expected="$mqtt_username" '$1 == expected { found = 1 } END { exit found ? 0 : 1 }' "$mqtt_password_file"; then
-        error "Mosquitto 密码文件未配置 .env 中的 MQTT_USERNAME"
+      else
+        if ! mqtt_password_file_mode="$(get_file_mode "$mqtt_password_file")"; then
+          error "Mosquitto 密码文件 无法读取文件权限"
+        else
+          case "$mqtt_password_file_mode" in
+            400|600)
+              ;;
+            *)
+              error "Mosquitto 密码文件 权限不安全（当前 ${mqtt_password_file_mode}），请设置为 600"
+              ;;
+          esac
+        fi
+        if [ -n "$mqtt_username" ] \
+          && ! awk -F: -v expected="$mqtt_username" '$1 == expected { found = 1 } END { exit found ? 0 : 1 }' "$mqtt_password_file"; then
+          error "Mosquitto 密码文件未配置 .env 中的 MQTT_USERNAME"
+        fi
       fi
     fi
   fi

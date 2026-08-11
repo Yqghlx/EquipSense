@@ -11,13 +11,13 @@
 | 认证流程 | `01-auth/` | 32 | 登录 / 注册 / 会话 / 强制改密 |
 | CRUD | `02-crud/` | 191 | 17 个资源的完整增删改查 |
 | 实时推送 | `03-realtime/` | 34 | SignalR / MQTT 告警推送 |
-| 高级场景 | `04-advanced/` | 60 | 通知 / 导出 / 知识库 / AI 分析 |
+| 高级场景 | `04-advanced/` | 51 | 通知 / 导出 / 知识库 / AI 分析 / 网关接入 |
 | 错误处理 | `05-error-handling/` | 46 | HTTP 4xx/5xx 前端处理 |
 | 权限扩展 | `05-auth/` | 19 | RBAC 跨租户隔离 / 缺失页面降级 |
 | 边界场景 | `06-edge-cases/` | 50 | 并发 / 空状态 / 极值 |
 | 手动审计 | `99-manual-audit/` | 76 | 冒烟测试，**不在默认运行范围**（需显式指定路径） |
-| **默认运行合计** | | **442** | 排除手动审计 |
-| 全量合计 | | **518** | 含手动审计 |
+| **默认运行合计** | | **433** | 排除手动审计 |
+| 全量合计 | | **509** | 含手动审计 |
 
 ## 为什么不「精简到 270」
 
@@ -132,7 +132,7 @@ E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
 镜像和 Production 配置启动 PostgreSQL、Redis、Mosquitto、RabbitMQ、backend、frontend，
 验证迁移/种子、观察者账户真实登录与 `/auth/me` 受保护接口、startup/liveness/ready 探针、HTTPS、Nginx `/health` 和 `/api/` 反向代理。
 PR 默认执行上述快速门禁；main 推送和版本 tag 额外设置 `SMOKE_RUN_E2E=true`，在同一组
-Production 镜像中执行默认 442 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 440 通过、2 跳过、0 失败，确保发布镜像本身通过完整用户流程验收。
+Production 镜像中执行默认 433 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 431 通过、2 跳过、0 失败，确保发布镜像本身通过完整用户流程验收。
 完整验收会在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户隔离测试账户的 TOTP，
 再由 Playwright 完成登录验证；不会关闭生产 MFA 策略。第二租户账户仅由 `SMOKE_RUN_E2E=true` 临时创建。
 
@@ -141,6 +141,21 @@ Production 镜像中执行默认 442 个业务 E2E；当前代码保留 3 个条
 ```bash
 SMOKE_RUN_E2E=true bash tests/scripts/production-runtime-smoke.sh
 ```
+
+### 本地协议链路验收（Simulator → EdgeGateway → 后端）
+
+需要验证 Modbus TCP 模拟设备、边缘网关采集和 MQTT 入云链路时，使用本地开发依赖
+集成脚本。脚本不会终止宿主机已有进程，但会使用本机的 8080、8081、5432、6379、1883
+和 5020 端口；管理员密码与 PostgreSQL 密码必须显式传入：
+
+```bash
+E2E_ADMIN_PASSWORD='<本地管理员密码>' \
+DEV_PG_PASSWORD='<本地 PostgreSQL 密码>' \
+bash tests/e2e/run-integration.sh
+```
+
+脚本只在 `Development` 环境运行，并把临时日志写入 `/tmp/equipsense-e2e`；不要把正式生产
+凭据或生产数据库用于该验收。
 
 定位 Production E2E 的并发或单个用例问题时，可以复用同一套隔离容器并缩小执行范围；
 参数通过数组传递，不会经过 shell 二次解释：
@@ -209,7 +224,7 @@ verifyAuthCookie(page): Promise<APIResponse>
 ```bash
 cd frontend
 
-# 默认运行（442 个测试，排除手动审计）
+# 默认运行（433 个测试，排除手动审计）
 npx playwright test e2e-comprehensive
 
 # 启用快速登录路径

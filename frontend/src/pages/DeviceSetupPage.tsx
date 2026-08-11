@@ -610,7 +610,7 @@ export default function DeviceSetupPage() {
       <div className="flex justify-between mt-6">
         <Button variant="outline" onClick={goBack} disabled={step === 'protocol'}>
           <ArrowLeft className="mr-2 h-4 w-4" />
-          {t('common.previous')}
+          {t('gatewayWizard.previous')}
         </Button>
 
         {step === 'review' ? (
@@ -620,7 +620,7 @@ export default function DeviceSetupPage() {
           </Button>
         ) : (
           <Button onClick={goNext} disabled={!canProceed()}>
-            {t('common.next')}
+            {t('gatewayWizard.next')}
             <ArrowRight className="ml-2 h-4 w-4" />
           </Button>
         )}

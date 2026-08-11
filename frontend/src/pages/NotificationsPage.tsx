@@ -62,7 +62,7 @@ export default function NotificationsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">通知中心</h1>
+        <h1 className="text-2xl font-bold">{t('notifications.title')}</h1>
         <Button
           size="sm"
           variant="outline"
@@ -70,26 +70,26 @@ export default function NotificationsPage() {
           disabled={markAllRead.isPending}
         >
           <CheckCheck className="mr-1 h-4 w-4" />
-          全部已读
+          {t('notifications.markAllRead')}
         </Button>
       </div>
 
       {/* 筛选标签 */}
       <div className="flex gap-2">
         {([
-          { value: 'all', label: '全部' },
-          { value: 'unread', label: '未读' },
-          { value: 'alert', label: '告警' },
-          { value: 'workorder', label: '工单' },
-          { value: 'system', label: '系统' },
-        ] as { value: FilterType; label: string }[]).map(({ value, label }) => (
+          { value: 'all', key: 'notifications.filterAll' },
+          { value: 'unread', key: 'notifications.filterUnread' },
+          { value: 'alert', key: 'notifications.filterAlert' },
+          { value: 'workorder', key: 'notifications.filterWorkorder' },
+          { value: 'system', key: 'notifications.filterSystem' },
+        ] as { value: FilterType; key: string }[]).map(({ value, key }) => (
           <Button
             key={value}
             size="sm"
             variant={filter === value ? 'default' : 'outline'}
             onClick={() => { setFilter(value); setPage(1); }}
           >
-            {label}
+            {t(key)}
           </Button>
         ))}
       </div>
@@ -101,18 +101,18 @@ export default function NotificationsPage() {
           ) : filteredItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <Inbox className="mb-3 h-12 w-12" />
-              <p className="text-lg font-medium">暂无通知</p>
+              <p className="text-lg font-medium">{t('notifications.emptyTitle')}</p>
               <p className="text-sm">
-                {filter === 'unread' ? '所有通知都已读' : '还没有收到任何通知'}
+                {filter === 'unread' ? t('notifications.emptyUnread') : t('notifications.emptyAll')}
               </p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12">类型</TableHead>
-                  <TableHead>标题</TableHead>
-                  <TableHead>内容</TableHead>
+                  <TableHead className="w-12">{t('notifications.type')}</TableHead>
+                  <TableHead>{t('notifications.subject')}</TableHead>
+                  <TableHead>{t('notifications.content')}</TableHead>
                   <TableHead>{t('common.time')}</TableHead>
                   <TableHead className="text-right">{t('common.actions')}</TableHead>
                 </TableRow>
@@ -156,7 +156,7 @@ export default function NotificationsPage() {
                               variant="ghost"
                               className="h-8 w-8"
                               onClick={() => markRead.mutate(item.id)}
-                              title="标记已读"
+                              title={t('notifications.markRead')}
                             >
                               <Check className="h-4 w-4" />
                             </Button>
@@ -167,7 +167,7 @@ export default function NotificationsPage() {
                               variant="ghost"
                               className="h-8 w-8"
                               onClick={() => navigate(item.link!)}
-                              title="查看详情"
+                              title={t('notifications.viewDetails')}
                             >
                               <ExternalLink className="h-4 w-4" />
                             </Button>

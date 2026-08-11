@@ -196,18 +196,15 @@ test.describe('03-告警触发', () => {
     await gotoAlertCenter(page);
     await page.waitForTimeout(3000);
 
-    // 等待告警出现并点击
-    const alertRow = page.locator('table tbody tr, [role="row"], tr');
-    if (await alertRow.first().isVisible({ timeout: 10000 }).catch(() => false)) {
-      await alertRow.first().click();
-      await page.waitForTimeout(2000);
+    // 等待告警出现并点击。该流程的核心结果是打开详情抽屉，不能把找不到告警或抽屉降级为 warning，
+    // 否则告警详情不可用时 E2E 仍会显示通过，发布门禁无法保护真实用户流程。
+    const alertRow = page.locator('table tbody tr').first();
+    await expect(alertRow).toBeVisible({ timeout: 10000 });
+    await alertRow.click();
+    await page.waitForTimeout(2000);
 
-      // 验证侧滑面板打开
-      const detailPanel = page.locator('[data-state="open"], [role="dialog"]');
-      await expect(detailPanel.last()).toBeVisible({ timeout: 5000 }).catch(() => {
-        console.warn('[告警] 点击告警行后未检测到侧滑面板');
-      });
-    }
+    // Base UI 的 SheetContent 使用稳定的 data-slot 标记；比依赖实现细节的 data-state 更可靠。
+    await expect(page.locator('[data-slot="sheet-content"]')).toBeVisible({ timeout: 5000 });
 
     // 清理
     const token = await getToken(page);

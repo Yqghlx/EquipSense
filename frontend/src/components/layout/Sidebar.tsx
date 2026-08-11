@@ -29,6 +29,7 @@ const baseNavItems = [
   { path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { path: '/devices', icon: Wrench, labelKey: 'nav.devices' },
   { path: '/gateways', icon: Network, labelKey: 'nav.gateway' },
+  { path: '/gateway/devices', icon: Network, labelKey: 'nav.gatewayDevices' },
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },
   { path: '/alert-rules', icon: Bell, labelKey: 'nav.alertRules' },
   { path: '/work-orders', icon: ClipboardList, labelKey: 'nav.workOrders' },
@@ -129,7 +130,7 @@ export function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean;
           )}
         >
           <Bell className="h-4 w-4 shrink-0" />
-          {!collapsed && <span>通知</span>}
+          {!collapsed && <span>{t('layout.notifications')}</span>}
           {unreadCount != null && unreadCount > 0 && (
             <span className={cn(
               'flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-medium text-white',

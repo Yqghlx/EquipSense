@@ -181,7 +181,9 @@ else
   ' sh "$PG_USER" "$PG_DB" > "$PG_FILE"; then
 
     # 完整性校验必须在数据库容器内执行，避免生产主机还需要安装 pg_restore。
-    if docker exec -i "$PG_CONTAINER" pg_restore --list - < "$PG_FILE" >/dev/null 2>&1; then
+    # pg_restore 在未提供归档文件名时从标准输入读取；显式传入 `-` 会被当作真实文件名，
+    # 在官方 PostgreSQL 镜像中会直接报“could not open input file -”，导致有效备份被误判为损坏。
+    if docker exec -i "$PG_CONTAINER" pg_restore --list < "$PG_FILE" >/dev/null 2>&1; then
       chmod 600 "$PG_FILE"
       SIZE=$(du -h "$PG_FILE" | cut -f1)
       echo "  ✓ PostgreSQL 备份成功: $PG_FILE ($SIZE)"

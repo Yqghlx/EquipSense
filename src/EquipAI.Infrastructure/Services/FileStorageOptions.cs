@@ -115,7 +115,10 @@ public static class FileStorageConfiguration
     {
         var provider = ResolveProvider(configuration);
         if (provider == FileStorageProvider.Local)
+        {
+            ValidateLocalStorage(configuration, environmentName);
             return;
+        }
 
         var section = configuration.GetSection($"{FileStorageOptions.SectionName}:S3");
         var bucketName = section["BucketName"]?.Trim();
@@ -198,4 +201,46 @@ public static class FileStorageConfiguration
 
     private static bool IsProduction(string environmentName) =>
         string.Equals(environmentName, "Production", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 校验本地附件根目录。生产环境必须显式使用绝对路径，确保应用写入预期的持久化卷。
+    /// 开发环境保留相对路径能力，方便本地调试和单元测试。
+    /// </summary>
+    private static void ValidateLocalStorage(IConfiguration configuration, string environmentName)
+    {
+        if (!IsProduction(environmentName))
+            return;
+
+        var rawBasePath = configuration[$"{FileStorageOptions.SectionName}:BasePath"]?.Trim();
+        if (string.IsNullOrWhiteSpace(rawBasePath))
+            throw new InvalidOperationException(
+                "生产环境 FileStorage:BasePath 必须配置为持久化卷的绝对路径");
+
+        string fullBasePath;
+        try
+        {
+            fullBasePath = Path.GetFullPath(rawBasePath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new InvalidOperationException(
+                "生产环境 FileStorage:BasePath 不是有效路径",
+                exception);
+        }
+
+        if (!Path.IsPathRooted(rawBasePath))
+            throw new InvalidOperationException(
+                "生产环境 FileStorage:BasePath 必须使用绝对路径，并指向附件持久化卷");
+
+        var rootPath = Path.GetPathRoot(fullBasePath);
+        if (!string.IsNullOrWhiteSpace(rootPath)
+            && string.Equals(
+                fullBasePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "生产环境 FileStorage:BasePath 不能指向文件系统根目录");
+        }
+    }
 }

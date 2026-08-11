@@ -65,6 +65,15 @@ public class MqttClientService
     /// </summary>
     private int _mqttConnected;
 
+    /// <summary>
+    /// 重连退避的取消源。
+    /// MQTT 断线回调不接收宿主停机令牌，必须由 DisconnectAsync 或宿主令牌回调主动取消，
+    /// 否则退避上限 5 分钟会阻塞应用优雅停机。
+    /// </summary>
+    private readonly CancellationTokenSource _reconnectCancellation = new();
+
+    private CancellationTokenRegistration _hostCancellationRegistration;
+
     public event Func<string, string, byte[], Task>? OnMessageReceived;
 
     /// <summary>
@@ -101,6 +110,15 @@ public class MqttClientService
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
+        // 保存宿主生命周期：初始连接成功后，断线回调仍需感知宿主取消。
+        if (cancellationToken.CanBeCanceled)
+        {
+            _hostCancellationRegistration.Dispose();
+            _hostCancellationRegistration = cancellationToken.Register(
+                static state => ((MqttClientService)state!).StopReconnect(),
+                this);
+        }
+
         Volatile.Write(ref _mqttConnected, 0);
         _client = _clientFactory();
 
@@ -188,7 +206,7 @@ public class MqttClientService
     public async Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
         // 停机保护：先置标志位，防止 Disconnect 事件回调触发重连
-        Volatile.Write(ref _isStopping, 1);
+        StopReconnect();
         Volatile.Write(ref _mqttConnected, 0);
         BusinessMetrics.MqttConnected.Set(0);
 
@@ -197,6 +215,15 @@ public class MqttClientService
             await _client.DisconnectAsync(cancellationToken: cancellationToken);
             _logger.LogInformation("MQTT 已断开连接（优雅停机）");
         }
+    }
+
+    /// <summary>
+    /// 设置停机标志并取消当前重连退避。
+    /// </summary>
+    private void StopReconnect()
+    {
+        Volatile.Write(ref _isStopping, 1);
+        _reconnectCancellation.Cancel();
     }
 
     private async Task HandleMessageAsync(MqttApplicationMessageReceivedEventArgs e)
@@ -274,7 +301,14 @@ public class MqttClientService
                 var delaySeconds = Math.Min(
                     _options.ReconnectDelaySeconds * Math.Pow(2, attempt - 1),
                     300);
-                await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), _reconnectCancellation.Token);
+                }
+                catch (OperationCanceledException) when (_reconnectCancellation.IsCancellationRequested)
+                {
+                    return;
+                }
 
                 // Delay 期间可能已收到停机信号，再次检查
                 if (Volatile.Read(ref _isStopping) != 0) return;
@@ -289,15 +323,19 @@ public class MqttClientService
                             try { await _client.DisconnectAsync(); } catch { /* 忽略清理失败 */ }
                         }
 
-                        await _client.ConnectAsync(_clientOptions);
+                        await _client.ConnectAsync(_clientOptions, _reconnectCancellation.Token);
                         // CleanStart=true 时重连会创建新会话；只恢复 TCP 连接而不恢复订阅会让
                         // 服务进入“连接正常但遥测永远收不到”的静默故障状态。
-                        await SubscribeAsync(_client, CancellationToken.None);
+                        await SubscribeAsync(_client, _reconnectCancellation.Token);
                         Volatile.Write(ref _mqttConnected, 1);
                         BusinessMetrics.MqttConnected.Set(1);
                         _logger.LogInformation("MQTT 第 {Attempt} 次重连成功", attempt);
                         return;  // 成功则退出循环
                     }
+                }
+                catch (OperationCanceledException) when (_reconnectCancellation.IsCancellationRequested)
+                {
+                    return;
                 }
                 catch (Exception ex)
                 {

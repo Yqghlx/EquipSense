@@ -417,14 +417,14 @@ printf '恢复 PostgreSQL（重建目标数据库，清理 TimescaleDB 内部元
   fi
   psql -v ON_ERROR_STOP=1 -qAt -U "$POSTGRES_USER" -d postgres \
     -v target_db="$POSTGRES_DB" \
-    -v target_user="$POSTGRES_USER" <<'"'"'SQL'"'"' >/dev/null
+    -v target_user="$POSTGRES_USER"
+' <<'SQL' >/dev/null
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
 WHERE datname = :'target_db' AND pid <> pg_backend_pid();
 DROP DATABASE IF EXISTS :"target_db";
   CREATE DATABASE :"target_db" OWNER :"target_user";
 SQL
-'
 
 printf '准备 TimescaleDB 恢复模式……\n'
 "${COMPOSE[@]}" exec -T postgres sh -c '
@@ -438,7 +438,7 @@ TIMESCALE_RESTORE_PREPARED=true
 if [[ "$DB_BACKUP_FORMAT" = custom ]]; then
   printf '恢复 PostgreSQL custom 备份（pg_restore，禁止并行）……\n'
   "${COMPOSE[@]}" exec -T postgres sh -c \
-    'pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" --dbname="$POSTGRES_DB" -' \
+    'pg_restore --exit-on-error --no-owner --no-privileges -U "$POSTGRES_USER" --dbname="$POSTGRES_DB"' \
     < "$DB_BACKUP"
 else
   printf '恢复 PostgreSQL 历史纯文本 gzip 备份……\n'

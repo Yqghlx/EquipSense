@@ -20,13 +20,13 @@ import {
   useRejectApproval,
 } from '../hooks/useApprovals';
 
-/** 角色对应的中文标签映射 */
-const roleLabels: Record<string, string> = {
-  system_admin: '系统管理员',
-  maintenance_lead: '维修主管',
-  technician: '技术员',
-  operator: '操作员',
-  viewer: '查看者',
+/** 角色对应的翻译键映射 */
+const roleLabelKeys: Record<string, string> = {
+  system_admin: 'pendingApprovals.roles.system_admin',
+  maintenance_lead: 'pendingApprovals.roles.maintenance_lead',
+  technician: 'pendingApprovals.roles.technician',
+  operator: 'pendingApprovals.roles.operator',
+  viewer: 'pendingApprovals.roles.viewer',
 };
 
 /**
@@ -61,14 +61,14 @@ export default function PendingApprovalsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">待审批</h1>
+      <h1 className="text-2xl font-bold">{t('pendingApprovals.title')}</h1>
 
       <Card>
         <CardHeader>
-          <CardTitle>我的待审批任务</CardTitle>
+          <CardTitle>{t('pendingApprovals.taskTitle')}</CardTitle>
           <CardDescription>
             {approvals
-              ? `共 ${approvals.length} 条待审批`
+              ? t('pendingApprovals.count', { count: approvals.length })
               : t('common.loading')}
           </CardDescription>
         </CardHeader>
@@ -78,17 +78,17 @@ export default function PendingApprovalsPage() {
           ) : !approvals || approvals.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
               <Inbox className="mb-3 h-12 w-12" />
-              <p className="text-lg font-medium">暂无待审批任务</p>
-              <p className="text-sm">所有审批任务都已处理完毕</p>
+              <p className="text-lg font-medium">{t('pendingApprovals.emptyTitle')}</p>
+              <p className="text-sm">{t('pendingApprovals.emptyDescription')}</p>
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>工单 ID</TableHead>
-                  <TableHead>审批步骤</TableHead>
-                  <TableHead>期望角色</TableHead>
-                  <TableHead>状态</TableHead>
+                  <TableHead>{t('pendingApprovals.workOrderId')}</TableHead>
+                  <TableHead>{t('pendingApprovals.stepLabel')}</TableHead>
+                  <TableHead>{t('pendingApprovals.expectedRole')}</TableHead>
+                  <TableHead>{t('pendingApprovals.status')}</TableHead>
                   <TableHead className="text-right">{t('common.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -103,14 +103,16 @@ export default function PendingApprovalsPage() {
                         {approval.workOrderId.slice(0, 8)}...
                       </button>
                     </TableCell>
-                    <TableCell>第 {approval.stepOrder} 级</TableCell>
+                    <TableCell>{t('pendingApprovals.step', { step: approval.stepOrder })}</TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {roleLabels[approval.expectedRole] ?? approval.expectedRole}
+                        {roleLabelKeys[approval.expectedRole]
+                          ? t(roleLabelKeys[approval.expectedRole])
+                          : approval.expectedRole}
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge className="bg-blue-500/10 text-blue-500">待审批</Badge>
+                      <Badge className="bg-blue-500/10 text-blue-500">{t('pendingApprovals.pending')}</Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -120,7 +122,7 @@ export default function PendingApprovalsPage() {
                           disabled={approveMutation.isPending || rejectMutation.isPending}
                         >
                           <Check className="mr-1 h-4 w-4" />
-                          通过
+                          {t('pendingApprovals.approve')}
                         </Button>
                         <Button
                           size="sm"
@@ -129,13 +131,13 @@ export default function PendingApprovalsPage() {
                           disabled={approveMutation.isPending || rejectMutation.isPending}
                         >
                           <X className="mr-1 h-4 w-4" />
-                          驳回
+                          {t('pendingApprovals.reject')}
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
                           onClick={() => navigate(`/work-orders/${approval.workOrderId}`)}
-                          title="查看工单详情"
+                          title={t('pendingApprovals.viewDetails')}
                         >
                           <ExternalLink className="h-4 w-4" />
                         </Button>
@@ -153,17 +155,20 @@ export default function PendingApprovalsPage() {
       <Dialog open={!!rejectTarget} onOpenChange={(v) => { if (!v) { setRejectTarget(null); setRejectComment(''); } }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>驳回审批</DialogTitle>
+            <DialogTitle>{t('pendingApprovals.rejectTitle')}</DialogTitle>
             <DialogDescription>
-              驳回第 {rejectTarget?.stepOrder} 级审批（工单 {rejectTarget?.id.slice(0, 8)}...）
+              {t('pendingApprovals.rejectDescription', {
+                step: rejectTarget?.stepOrder ?? 0,
+                id: rejectTarget?.id.slice(0, 8) ?? '',
+              })}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <label className="text-sm font-medium text-muted-foreground">驳回原因（可选）</label>
+            <label className="text-sm font-medium text-muted-foreground">{t('pendingApprovals.rejectReason')}</label>
             <Textarea
               value={rejectComment}
               onChange={(e) => setRejectComment(e.target.value)}
-              placeholder="请填写驳回原因..."
+              placeholder={t('pendingApprovals.rejectPlaceholder')}
               rows={3}
             />
           </div>
@@ -172,7 +177,7 @@ export default function PendingApprovalsPage() {
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleReject} disabled={rejectMutation.isPending}>
-              {rejectMutation.isPending ? t('common.loading') : '确认驳回'}
+              {rejectMutation.isPending ? t('common.loading') : t('pendingApprovals.confirmReject')}
             </Button>
           </DialogFooter>
         </DialogContent>

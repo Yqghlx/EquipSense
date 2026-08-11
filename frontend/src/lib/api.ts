@@ -44,6 +44,22 @@ function processPendingRequests(error?: unknown) {
   pendingRequests = [];
 }
 
+/**
+ * 清理本地认证状态并跳转到登录页。
+ *
+ * 仅清理 sessionStorage 不会同步更新 Zustand 内存状态，页面可能在跳转前短暂继续展示
+ * 受保护内容，也不会清空 TanStack Query 中的旧租户数据。因此统一调用 authStore.logout，
+ * 再清理其余会话键，确保认证状态、查询缓存和浏览器存储同时失效。
+ */
+function clearSessionAndRedirectToLogin(): void {
+  try {
+    useAuthStore.getState().logout();
+  } finally {
+    sessionStorage.clear();
+    window.location.href = '/login';
+  }
+}
+
 // 请求拦截器：认证 Cookie 由浏览器自动携带（withCredentials: true），无需手动设置 Authorization 头
 
 // 响应拦截器：全局错误处理 + 401 时尝试刷新令牌
@@ -104,8 +120,7 @@ api.interceptors.response.use(
     // 无存储的用户信息，说明未登录，直接跳转登录页
     const storedUser = sessionStorage.getItem('user');
     if (!storedUser) {
-      sessionStorage.clear();
-      window.location.href = '/login';
+      clearSessionAndRedirectToLogin();
       return Promise.reject(error);
     }
 
@@ -143,8 +158,7 @@ api.interceptors.response.use(
     } catch (refreshError) {
       // 刷新失败（refresh_token 也过期或被吊销），清除会话并跳转登录
       processPendingRequests(refreshError);
-      sessionStorage.clear();
-      window.location.href = '/login';
+      clearSessionAndRedirectToLogin();
       return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;

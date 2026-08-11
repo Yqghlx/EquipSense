@@ -7,8 +7,10 @@ using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Data.Common;
 using Xunit;
 
 namespace EquipAI.Tests.Unit.Analysis;
@@ -28,6 +30,7 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
 {
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
+    private readonly SelectCommandCounter _selectCommandCounter = new();
 
     public async Task InitializeAsync()
     {
@@ -35,7 +38,9 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_selectCommandCounter));
         // 复刻后台 HostedService scope：ITenantContext 回退为空租户（Guid.Empty）
         services.AddScoped<ITenantContext>(_ => new BackgroundTenantContext());
         services.AddLogging();
@@ -113,6 +118,50 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
         dC.HealthScore.Should().Be(100m, "Expired 租户被跳过，健康度不应变更");
     }
 
+    [Fact]
+    public async Task UpdateAllHealthScoresAsync_设备数量增加时数据库查询次数应保持常数级()
+    {
+        var tenantId = Guid.NewGuid();
+        var deviceIds = Enumerable.Range(0, 3).Select(_ => Guid.NewGuid()).ToArray();
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(MakeTenant(tenantId, TenantStatus.Active));
+            db.Devices.AddRange(deviceIds.Select(id => MakeDevice(id, tenantId, DeviceStatus.Online)));
+            await db.SaveChangesAsync();
+
+            var telemetryTime = DateTime.UtcNow;
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) " +
+                "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6})",
+                telemetryTime, tenantId, deviceIds[0], "temperature", 20.0, "good", "test");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) " +
+                "VALUES ({0}, {1}, {2}, {3}, {4}, {5}, {6})",
+                telemetryTime, tenantId, deviceIds[1], "temperature", 20.0, "bad", "test");
+        }
+
+        using var scope = _sp.CreateScope();
+        var healthService = scope.ServiceProvider.GetRequiredService<DeviceHealthService>();
+        _selectCommandCounter.Reset();
+
+        var updated = await healthService.UpdateAllHealthScoresAsync(tenantId, CancellationToken.None);
+
+        updated.Should().Be(3);
+        _selectCommandCounter.Count.Should().Be(3,
+            "批量健康度重算应只查询设备、告警和遥测各一次，不能随设备数量产生 N+1 往返");
+
+        using var assertScope = _sp.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await assertDb.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == deviceIds[0]))
+            .HealthScore.Should().Be(100m, "全部近期遥测质量为 good 时应得到满质量分");
+        (await assertDb.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == deviceIds[1]))
+            .HealthScore.Should().Be(70m, "近期遥测质量为 bad 时质量维度应为 0");
+        (await assertDb.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == deviceIds[2]))
+            .HealthScore.Should().Be(91m, "无遥测时应使用中性质量分 70");
+    }
+
     /// <summary>构造租户（最小必填字段）</summary>
     private static Tenant MakeTenant(Guid id, TenantStatus status) => new()
     {
@@ -142,5 +191,42 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
         public string IsolationMode => "Shared";
         public bool IsSystemAdmin => false;
         public Guid UserId => Guid.Empty;
+    }
+
+    /// <summary>统计关系型上下文执行的 SELECT 次数，防止后台批处理退化为逐设备查询。</summary>
+    private sealed class SelectCommandCounter : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Reset() => Interlocked.Exchange(ref _count, 0);
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CountSelect(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CountSelect(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void CountSelect(DbCommand command)
+        {
+            if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
     }
 }

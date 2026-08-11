@@ -4,7 +4,7 @@
  * 覆盖认证会话的生命周期管理场景：
  * - Token 过期时间读取
  * - Token 过期前自动刷新
- * - 并发登录不冲突
+ * - 独立设备登录不冲突
  * - 登出后其他标签页同步失效
  * - 长时间无操作自动锁定
  * - HttpOnly Cookie 登录状态跨浏览器重启
@@ -13,12 +13,10 @@ import { test, expect } from '@playwright/test';
 import {
   BASE_URL,
   login,
-  completeProductionMfaIfShown,
   captureErrors,
   getToken,
   getAuthState,
   isLoggedIn,
-  getE2EPassword,
   verifyAuthCookie,
 } from '../helpers';
 
@@ -103,58 +101,40 @@ test.describe('01-会话管理', () => {
     expect(errors).toEqual([]);
   });
 
-  test('3. 并发登录不冲突', async ({ page, context }) => {
+  test('3. 独立设备登录不冲突', async ({ page, browser }) => {
     const errors = captureErrors(page);
 
-    // 在第一个标签页使用 admin 登录
+    // 在第一个独立浏览器上下文使用 admin 登录。
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
     expect(await isLoggedIn(page)).toBeTruthy();
 
-    // 在第二个标签页也使用 admin 登录
-    const page2 = await context.newPage();
+    // 第二个设备必须使用独立上下文；同一 context 共享 Cookie，无法验证多设备会话隔离。
+    const context2 = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page2 = await context2.newPage();
     const errors2 = captureErrors(page2);
-
-    // 第二个标签页导航到登录页
-    await page2.goto(`${BASE_URL}/login`);
-    await page2.waitForLoadState('domcontentloaded');
-    await page2.waitForTimeout(2000);
-
-    // 检查第二个标签页是否自动继承登录状态（context 共享 cookies/sessionStorage）
-    const currentUrl2 = page2.url();
-    const alreadyLoggedIn2 = /dashboard/.test(currentUrl2);
-
-    if (!alreadyLoggedIn2) {
-      // 如果未自动登录，手动登录
-      const usernameInput2 = page2.locator('input[type="text"], input:not([type="password"], [type="checkbox"])').first();
-      await usernameInput2.waitFor({ state: 'visible', timeout: 10000 });
-      await usernameInput2.fill('admin');
-
-      const passwordInput2 = page2.locator('input[type="password"]').first();
-      await passwordInput2.waitFor({ state: 'visible', timeout: 5000 });
-      await passwordInput2.fill(getE2EPassword('admin'));
-
-      await page2.getByRole('button', { name: /登录|login/i }).click();
-      await completeProductionMfaIfShown(page2, 'admin');
-      await page2.waitForURL(/dashboard/, { timeout: 15000 });
-    }
-
-    await page2.waitForLoadState('networkidle');
-    await page2.waitForTimeout(1500);
-
-    // 验证第二个标签页登录成功（v1.3.0 后用 user 信息判断，不再读 token 字符串）
+    await login(page2);
     await expect(page2).toHaveURL(/dashboard/);
     expect(await isLoggedIn(page2)).toBeTruthy();
 
-    // 验证第一个标签页的会话仍然有效
-    // 刷新第一个页面，确认仍处于登录状态
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-    expect(await isLoggedIn(page)).toBeTruthy();
+    // 两个设备分别轮换自己的 Refresh Token；第二次登录不应让第一个设备的刷新失败。
+    const firstRefresh = await page.request.post(`${BASE_URL}/api/v1/auth/refresh`, { data: {} });
+    const secondRefresh = await page2.request.post(`${BASE_URL}/api/v1/auth/refresh`, { data: {} });
+    const firstRefreshBody = (await firstRefresh.text()).slice(0, 1000);
+    const secondRefreshBody = (await secondRefresh.text()).slice(0, 1000);
+    expect(
+      firstRefresh.ok(),
+      `第一个设备刷新失败：HTTP ${firstRefresh.status()}，响应：${firstRefreshBody}`,
+    ).toBeTruthy();
+    expect(
+      secondRefresh.ok(),
+      `第二个设备刷新失败：HTTP ${secondRefresh.status()}，响应：${secondRefreshBody}`,
+    ).toBeTruthy();
+    expect((await verifyAuthCookie(page)).ok()).toBeTruthy();
+    expect((await verifyAuthCookie(page2)).ok()).toBeTruthy();
 
     // 清理
-    await page2.close();
+    await context2.close();
 
     expect(errors).toEqual([]);
     expect(errors2).toEqual([]);

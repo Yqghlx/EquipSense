@@ -1,7 +1,8 @@
 # docker/docker-compose.yml
 # 生产环境：全套服务一键启动
-# 使用方式（在 docker/ 目录）：docker compose --env-file .env up -d
-# 在仓库根目录执行时必须显式传入：--env-file docker/.env
+# 推荐使用方式（在 docker/ 目录）：./compose-production.sh up -d
+# 该入口会先执行完整生产环境门禁；直接调用 docker compose 仅适用于
+# 已明确完成同等校验的高级运维/CI 场景。
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
