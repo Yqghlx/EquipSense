@@ -132,7 +132,7 @@ E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
 镜像和 Production 配置启动 PostgreSQL、Redis、Mosquitto、RabbitMQ、backend、frontend，
 验证迁移/种子、观察者账户真实登录与 `/auth/me` 受保护接口、startup/liveness/ready 探针、HTTPS、Nginx `/health` 和 `/api/` 反向代理。
 PR 默认执行上述快速门禁；main 推送和版本 tag 额外设置 `SMOKE_RUN_E2E=true`，在同一组
-Production 镜像中执行默认 442 个业务 E2E（5 个显式跳过），确保发布镜像本身通过完整用户流程验收。
+Production 镜像中执行默认 442 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 440 通过、2 跳过、0 失败，确保发布镜像本身通过完整用户流程验收。
 完整验收会在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户隔离测试账户的 TOTP，
 再由 Playwright 完成登录验证；不会关闭生产 MFA 策略。第二租户账户仅由 `SMOKE_RUN_E2E=true` 临时创建。
 

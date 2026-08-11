@@ -3,7 +3,7 @@
 > 基线生成时间：2026-06-14
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-11）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证包含事务 Outbox/Inbox、自动建单事务回滚、1291 个后端单元测试、161 个后端集成测试（161 个全部通过，真实 RabbitMQ 场景通过 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 显式启用）、前端 352 个单元测试、真实 PostgreSQL/RabbitMQ 迁移核验、关键流程干净浏览器冒烟、后端/前端/边缘网关生产构建，以及当前提交三镜像的隔离 Production runtime smoke（437 个 E2E 通过、5 个条件跳过、0 失败）。当前 `docker/.env` 有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
+> **当前状态说明（2026-08-11）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。最新验证包含事务 Outbox/Inbox、自动建单事务回滚、1298 个后端单元测试、163 个后端集成测试（163 个全部通过，真实 RabbitMQ 场景通过 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 显式启用）、前端 355 个单元测试、真实 PostgreSQL/RabbitMQ 迁移核验、关键流程干净浏览器冒烟、后端/前端/边缘网关生产构建，以及当前提交三镜像的隔离 Production runtime smoke（440 个 E2E 通过、2 个条件跳过、0 失败）。当前 `docker/.env` 有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
 
 ## 一、项目规模
 
@@ -12,8 +12,8 @@
 | 后端代码行（Core+Application+Infrastructure+WebAPI） | 51,534 行 |
 | 后端 API 端点 | 135 个（25 个 Controller） |
 | 前端页面 | 27 个 |
-| 单元测试 | 1291 个（后端）+ 352 个（前端） |
-| 集成测试 | 161 个用例（33 个文件） |
+| 单元测试 | 1298 个（后端）+ 355 个（前端） |
+| 集成测试 | 163 个用例（33 个文件） |
 | E2E 测试 | 442 个用例（Playwright） |
 | 压力测试 | 11 个脚本（k6） |
 
@@ -127,12 +127,12 @@
 |------|------|
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
 | 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
-| 后端单元测试 | ✅ 1291/1291 通过 |
-| 后端集成测试 | ✅ 161 通过、0 跳过、0 失败（共 161 个；真实 RabbitMQ broker 场景需显式设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true`） |
+| 后端单元测试 | ✅ 1298/1298 通过 |
+| 后端集成测试 | ✅ 163 通过、0 跳过、0 失败（共 163 个；真实 RabbitMQ broker 场景需显式设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true`） |
 | 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
-| 前端单元测试 | ✅ 352/352 通过 |
-| E2E 测试 | ✅ 开发栈与隔离 Production 镜像均执行默认 442 个场景：437 通过、5 跳过、0 失败（含五个角色与第二租户生产凭据覆盖契约）；main/tag 已接入 Production 全量门禁 |
+| 前端单元测试 | ✅ 355/355 通过 |
+| E2E 测试 | ✅ 开发栈与隔离 Production 镜像均执行默认 442 个场景：440 通过、2 跳过、0 失败（含五个角色与第二租户生产凭据覆盖契约）；main/tag 已接入 Production 全量门禁 |
 | i18n 完整性 | ✅ 753 个键在中英文资源中完全对齐 |
 | 生产构建 | ✅ PWA SW 产出 + precache 124 entries + 边缘网关镜像可复现构建 |
 | 生产配置 | ✅ appsettings.Production.json |

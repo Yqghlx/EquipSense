@@ -19,11 +19,25 @@ public class RedisService
     private const string RevokedTokenPrefix = "revoked:";
 
     /// <summary>
-    /// 初始化 Redis 服务，从配置中读取连接字符串并建立连接
+    /// 初始化 Redis 服务，复用依赖注入容器管理的连接多路复用器。
+    /// ConnectionMultiplexer 应在应用进程内单例复用；每个服务自行 Connect 会创建额外连接池，
+    /// 在高并发或多副本部署中会放大 Redis 连接数，并且难以由容器统一释放。
+    /// </summary>
+    /// <param name="multiplexer">由依赖注入容器管理的 Redis 连接多路复用器</param>
+    /// <param name="logger">日志记录器</param>
+    public RedisService(IConnectionMultiplexer multiplexer, ILogger<RedisService> logger)
+    {
+        ArgumentNullException.ThrowIfNull(multiplexer);
+        _database = multiplexer.GetDatabase();
+    }
+
+    /// <summary>
+    /// 为测试替身和需要继承 RedisService 的兼容场景保留的配置构造函数。
+    /// 生产应用由公开构造函数注入共享连接，不会走此路径。
     /// </summary>
     /// <param name="configuration">应用配置，需包含 Redis:ConnectionString 配置项</param>
     /// <param name="logger">日志记录器</param>
-    public RedisService(IConfiguration configuration, ILogger<RedisService> logger)
+    protected RedisService(IConfiguration configuration, ILogger<RedisService> logger)
     {
         var connectionString = configuration["Redis:ConnectionString"];
         if (string.IsNullOrEmpty(connectionString))

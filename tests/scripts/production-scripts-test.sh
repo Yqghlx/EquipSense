@@ -784,6 +784,132 @@ test_setup_rejects_new_placeholder_env() {
   assert_contains "$output" "必填环境变量 PG_PASSWORD"
 }
 
+test_bootstrap_production_secrets_generates_only_local_values() {
+  local case_dir="$TEST_ROOT/bootstrap-production-secrets"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  # 既有有效凭据必须原样保留，脚本只能补齐缺失或占位值。
+  sed 's/^PG_PASSWORD=.*/PG_PASSWORD=existing-pg-password-that-must-survive/' \
+    "$case_dir/.env" > "$case_dir/.env.next"
+  mv "$case_dir/.env.next" "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh --env-file .env 2>&1)"
+  result_code=$?
+  set -e
+
+  # 供应商许可证、真实租户和生产证书仍缺失，因此脚本必须保留非零退出码。
+  [[ "$result_code" -ne 0 ]] || fail "未配置供应商/部署专属值时密钥初始化不应误报成功"
+  assert_contains "$output" "仍需人工配置"
+  assert_contains "$output" "AUTOMAPPER_LICENSE_KEY"
+  assert_contains "$output" "GATEWAY_TENANT_ID"
+
+  local value
+  local key
+  local local_secret_keys=(
+    PG_PASSWORD
+    REDIS_PASSWORD
+    RABBITMQ_PASSWORD
+    MQTT_PASSWORD
+    SEED_ADMIN_PASSWORD
+    SEED_LEAD_PASSWORD
+    SEED_TECH_PASSWORD
+    SEED_OPERATOR_PASSWORD
+    SEED_VIEWER_PASSWORD
+    JWT_SECRET
+    TOTP_ENCRYPTION_KEY
+    PII_ENCRYPTION_KEY
+    GATEWAY_AUTH_KEY
+    SEQ_ADMIN_PASSWORD
+    GRAFANA_PASSWORD
+  )
+  for key in "${local_secret_keys[@]}"; do
+    value="$(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+    [[ -n "$value" ]] || fail "$key 未生成"
+    [[ "$value" != *"请修改"* && "$value" != *"PLEASE_CHANGE"* && "$value" != *"CHANGE_ME"* ]] \
+      || fail "$key 仍为占位值"
+    [[ "$output" != *"$value"* ]] || fail "日志不应包含 $key 的生成值"
+  done
+
+  value="$(awk -F= '$1 == "PG_PASSWORD" { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+  [[ "$value" = "existing-pg-password-that-must-survive" ]] || fail "已有 PG_PASSWORD 被覆盖"
+
+  local mqtt_username
+  mqtt_username="$(awk -F= '$1 == "MQTT_USERNAME" { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+  [[ "$mqtt_username" =~ ^equipsense_device_[0-9a-f]+$ ]] || fail "MQTT_USERNAME 未生成安全的机器用户名"
+
+  local totp_key
+  local pii_key
+  totp_key="$(awk -F= '$1 == "TOTP_ENCRYPTION_KEY" { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+  pii_key="$(awk -F= '$1 == "PII_ENCRYPTION_KEY" { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+  [[ "$totp_key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "TOTP_ENCRYPTION_KEY 不是 Base64 编码的 32 字节密钥"
+  [[ "$pii_key" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "PII_ENCRYPTION_KEY 不是 Base64 编码的 32 字节密钥"
+  [[ "$totp_key" != "$pii_key" ]] || fail "TOTP 和 PII 密钥不得复用"
+
+  local env_mode
+  if stat -c '%a' "$case_dir/.env" >/dev/null 2>&1; then
+    env_mode="$(stat -c '%a' "$case_dir/.env")"
+  else
+    env_mode="$(stat -f '%Lp' "$case_dir/.env")"
+  fi
+  [[ "$env_mode" = "600" ]] || fail "生成后的 .env 权限必须为 600，实际为 $env_mode"
+  [[ ! -e "$case_dir/.env.lock" ]] || fail "初始化完成后不应遗留锁目录"
+  [[ ! -e "$case_dir/.env.tmp" ]] || fail "初始化失败清理后不应遗留临时文件"
+  ! grep -q '^AUTH_MACHINE_API_KEY=' "$case_dir/.env" || fail "未启用的可选机器密钥不应被擅自追加"
+  grep -q '^AUTOMAPPER_LICENSE_KEY=PLEASE_CHANGE' "$case_dir/.env" || fail "供应商许可证占位值不应被生成器替换"
+  grep -q '^GATEWAY_TENANT_ID=PLEASE_CHANGE' "$case_dir/.env" || fail "真实租户 UUID 不应被生成器伪造"
+}
+
+test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation() {
+  local case_dir="$TEST_ROOT/bootstrap-production-secrets-duplicate"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+  printf '%s\n' 'PG_PASSWORD=second-value-that-must-not-be-used' >> "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  cp "$case_dir/.env" "$case_dir/.env.before"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh --env-file .env 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "重复环境变量不应继续写入密钥"
+  assert_contains "$output" "PG_PASSWORD 重复定义"
+  cmp -s "$case_dir/.env.before" "$case_dir/.env" || fail "重复键失败时 .env 不应被修改"
+  [[ ! -e "$case_dir/.env.lock" ]] || fail "重复键失败后不应遗留锁目录"
+}
+
+test_bootstrap_production_secrets_refuses_symlink_without_mutation() {
+  local case_dir="$TEST_ROOT/bootstrap-production-secrets-symlink"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/real.env"
+  chmod 600 "$case_dir/real.env"
+  ln -s real.env "$case_dir/.env-link"
+  cp "$case_dir/real.env" "$case_dir/real.env.before"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh --env-file .env-link 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "符号链接环境文件不应被修改"
+  assert_contains "$output" "符号链接"
+  cmp -s "$case_dir/real.env.before" "$case_dir/real.env" || fail "符号链接失败时目标 .env 不应被修改"
+}
+
 test_setup_rejects_non_production_environment_explicitly() {
   local case_dir="$TEST_ROOT/setup-non-production"
   mkdir -p "$case_dir/bin"
@@ -2252,6 +2378,19 @@ test_frontend_runtime_installs_certificate_check_dependency() {
   assert_contains "$dockerfile_content" "apk add --no-cache openssl"
 }
 
+test_frontend_runtime_rejects_self_signed_certificate_in_production() {
+  local compose_content entrypoint_content
+  compose_content="$(sed -n '/^  frontend:/,/^  seq:/p' "$PROJECT_ROOT/docker/docker-compose.yml")"
+  entrypoint_content="$(cat "$PROJECT_ROOT/docker/nginx-entrypoint.sh")"
+
+  # 直接执行生产 Compose 时不能依赖宿主机先运行 setup.sh；Nginx 入口必须自行拒绝自签名证书。
+  assert_contains "$compose_content" 'APP_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"'
+  assert_contains "$entrypoint_content" 'APP_ENVIRONMENT="${APP_ENVIRONMENT:-Production}"'
+  assert_contains "$entrypoint_content" 'CERT_ISSUER'
+  assert_contains "$entrypoint_content" 'Nginx 生产环境禁止使用自签名证书'
+  assert_contains "$entrypoint_content" 'exit 1'
+}
+
 test_docker_edgegateway_build_is_reproducible() {
   local dockerfile_content
   dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.edgegateway")"
@@ -2569,6 +2708,9 @@ case "${1:-all}" in
     test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
+    test_bootstrap_production_secrets_generates_only_local_values
+    test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation
+    test_bootstrap_production_secrets_refuses_symlink_without_mutation
     test_setup_rejects_new_placeholder_env
     test_setup_rejects_non_production_environment_explicitly
     test_setup_rejects_expired_runtime_certificates
@@ -2622,6 +2764,7 @@ case "${1:-all}" in
     test_docker_backend_build_is_reproducible
     test_nginx_does_not_log_signalr_query_tokens
     test_frontend_runtime_installs_certificate_check_dependency
+    test_frontend_runtime_rejects_self_signed_certificate_in_production
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
@@ -2657,6 +2800,9 @@ case "${1:-all}" in
     test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
+    test_bootstrap_production_secrets_generates_only_local_values
+    test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation
+    test_bootstrap_production_secrets_refuses_symlink_without_mutation
     test_setup_rejects_new_placeholder_env
     test_setup_rejects_non_production_environment_explicitly
     test_setup_rejects_expired_runtime_certificates
@@ -2702,6 +2848,7 @@ case "${1:-all}" in
     test_docker_backend_build_is_reproducible
     test_nginx_does_not_log_signalr_query_tokens
     test_frontend_runtime_installs_certificate_check_dependency
+    test_frontend_runtime_rejects_self_signed_certificate_in_production
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Tests.Integration.Infrastructure;
@@ -132,5 +133,32 @@ public class AuthControllerTests
         var afterRevoke = await client.PostAsJsonAsync("/api/v1/auth/refresh", new { refreshToken = t2 });
         afterRevoke.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
             "会话吊销后，攻击者持有的当前令牌 T2 必须不能再刷新");
+    }
+
+    /// <summary>
+    /// 浏览器刷新路径只依赖 HttpOnly Cookie，空请求体也必须能够完成令牌轮换。
+    /// </summary>
+    [Fact]
+    public async Task Refresh_仅Cookie且请求体为空_应返回成功()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+        var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest { Username = "admin", Password = "Admin@123" });
+        login.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var refreshCookie = login.Headers
+            .GetValues("Set-Cookie")
+            .First(value => value.StartsWith("refresh_token=", StringComparison.Ordinal));
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/auth/refresh");
+        request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+        request.Headers.TryAddWithoutValidation("Cookie", refreshCookie.Split(';', 2)[0]);
+
+        using (request)
+        {
+            var response = await client.SendAsync(request);
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK,
+                "Cookie-only 刷新是前端主动续期和会话恢复的实际调用方式");
+        }
     }
 }

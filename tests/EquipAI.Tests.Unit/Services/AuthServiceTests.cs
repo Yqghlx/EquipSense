@@ -214,8 +214,10 @@ public class AuthServiceTests : IAsyncDisposable
             recoveryCodes.Codes[0],
             out _).Should().BeFalse();
         _stubRedis.AtomicGetAndDeleteCount.Should().Be(1);
-        _lockProvider.AcquireCount.Should().Be(1);
-        _lockProvider.LastResource.Should().Be($"auth:mfa-recovery:{user.Id}");
+        _lockProvider.AcquireCount.Should().Be(2,
+            "恢复码消费和令牌签发分别需要各自的用户级锁");
+        _lockProvider.Resources.Should().Contain($"auth:mfa-recovery:{user.Id}");
+        _lockProvider.LastResource.Should().Be($"auth:refresh:{user.Id}");
     }
 
     [Fact]
@@ -469,6 +471,57 @@ public class AuthServiceTests : IAsyncDisposable
         storedToken.Should().Be(result.RefreshToken);
     }
 
+    /// <summary>
+    /// 正常登录也会替换用户当前刷新令牌，必须与刷新流程共用用户级会话锁。
+    /// </summary>
+    [Fact]
+    public async Task LoginAsync_成功签发令牌_应获取用户级会话锁()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("loginlockuser", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = "password123",
+        });
+
+        _lockProvider.LastResource.Should().Be($"auth:refresh:{user.Id}");
+    }
+
+    /// <summary>
+    /// 登录无法获得会话锁时必须拒绝签发令牌，避免与并发刷新交错写入会话索引。
+    /// </summary>
+    [Fact]
+    public async Task LoginAsync_会话锁未获取_应拒绝并保持原会话()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("loginlockdenied", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        const string existingRefreshToken = "existing-refresh-token";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, existingRefreshToken, TimeSpan.FromDays(7));
+        _lockProvider.IsAcquired = false;
+
+        var act = () => service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = "password123",
+        });
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        _stubRedis.GetStoredRefreshToken(user.Id).Should().Be(existingRefreshToken);
+    }
+
     // ==================== RefreshTokenAsync ====================
 
     [Fact]
@@ -539,6 +592,52 @@ public class AuthServiceTests : IAsyncDisposable
         result.AccessToken.Should().NotBeNullOrEmpty();
         result.RefreshToken.Should().NotBeNullOrEmpty();
         result.UserInfo.Username.Should().Be("refreshuser");
+    }
+
+    /// <summary>
+    /// 刷新令牌会改写用户级会话状态，必须通过分布式锁串行化，避免并发请求同时轮换同一令牌。
+    /// </summary>
+    [Fact]
+    public async Task RefreshTokenAsync_有效token_应获取用户级刷新锁()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("refreshlockuser", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        const string refreshToken = "refresh-lock-token";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
+
+        await service.RefreshTokenAsync(refreshToken);
+
+        _lockProvider.LastResource.Should().Be($"auth:refresh:{user.Id}");
+    }
+
+    /// <summary>
+    /// 用户级刷新锁无法获取时必须 fail-closed，不能继续签发可能互相覆盖的令牌。
+    /// </summary>
+    [Fact]
+    public async Task RefreshTokenAsync_用户级刷新锁未获取_应拒绝并保持原令牌()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var user = CreateTestUser("refreshlockdenied", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        const string refreshToken = "refresh-lock-denied-token";
+        await _stubRedis.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
+        _lockProvider.IsAcquired = false;
+
+        var act = () => service.RefreshTokenAsync(refreshToken);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        _stubRedis.GetStoredRefreshToken(user.Id).Should().Be(refreshToken);
     }
 
     [Fact]
@@ -1422,6 +1521,10 @@ public class AuthServiceTests : IAsyncDisposable
 
         public string? LastResource { get; private set; }
 
+        public List<string> Resources { get; } = new();
+
+        public bool IsAcquired { get; set; } = true;
+
         public Task<IDistributedLockHandle> AcquireAsync(
             string resource,
             TimeSpan expiry,
@@ -1430,7 +1533,8 @@ public class AuthServiceTests : IAsyncDisposable
         {
             AcquireCount++;
             LastResource = resource;
-            return Task.FromResult<IDistributedLockHandle>(RecordingLockHandle.Instance);
+            Resources.Add(resource);
+            return Task.FromResult<IDistributedLockHandle>(new RecordingLockHandle(IsAcquired));
         }
     }
 
@@ -1439,9 +1543,14 @@ public class AuthServiceTests : IAsyncDisposable
     /// </summary>
     private sealed class RecordingLockHandle : IDistributedLockHandle
     {
-        public static readonly RecordingLockHandle Instance = new();
+        private readonly bool _isAcquired;
 
-        public bool IsAcquired => true;
+        public RecordingLockHandle(bool isAcquired)
+        {
+            _isAcquired = isAcquired;
+        }
+
+        public bool IsAcquired => _isAcquired;
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

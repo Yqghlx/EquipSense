@@ -104,6 +104,21 @@ public class AuthService : IAuthService
     private static readonly TimeSpan MfaRecoveryLockWaitTime = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// 刷新令牌按用户加锁，避免并发请求同时轮换同一个 Refresh Token。
+    /// </summary>
+    private const string RefreshTokenLockPrefix = "auth:refresh:";
+
+    /// <summary>
+    /// 刷新流程锁租约时长，覆盖数据库查询和 Redis 令牌轮换的瞬态重试窗口。
+    /// </summary>
+    private static readonly TimeSpan RefreshTokenLockExpiry = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// 等待同一用户的另一个刷新请求完成的最长时间。
+    /// </summary>
+    private static readonly TimeSpan RefreshTokenLockWaitTime = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// 各套餐对应的配额限制（最大设备数、最大用户数、数据保留天数）
     /// 0 表示不限制
     /// </summary>
@@ -284,6 +299,9 @@ public class AuthService : IAuthService
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
         var refreshToken = _jwtTokenService.GenerateRefreshToken();
 
+        // 登录与刷新都会替换用户当前会话；共用同一把锁，避免两个流程交错写入正反向索引。
+        await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(user.Id);
+
         // 刷新令牌存入 Redis，有效期 7 天
         await _redisService.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
 
@@ -312,6 +330,30 @@ public class AuthService : IAuthService
         => user.MfaEnabled && !string.IsNullOrWhiteSpace(user.TotpSecret);
 
     /// <summary>
+    /// 获取用户级刷新令牌变更锁。
+    /// 登录、MFA 登录、注册自动登录和刷新都会改写同一组 Redis 会话索引；
+    /// 任一路径无法获得锁时都必须拒绝签发，避免返回一个已被其他请求覆盖的令牌。
+    /// </summary>
+    /// <param name="userId">会话所属用户 ID</param>
+    /// <returns>已获取的分布式锁句柄，调用方负责使用 <c>await using</c> 释放</returns>
+    /// <exception cref="UnauthorizedAccessException">锁不可用或在等待窗口内未获取</exception>
+    private async Task<IDistributedLockHandle> AcquireRefreshTokenMutationLockAsync(Guid userId)
+    {
+        var refreshLock = await _distributedLockProvider.AcquireAsync(
+            $"{RefreshTokenLockPrefix}{userId}",
+            RefreshTokenLockExpiry,
+            RefreshTokenLockWaitTime);
+        if (!refreshLock.IsAcquired)
+        {
+            await refreshLock.DisposeAsync();
+            _logger.LogWarning("获取刷新令牌用户锁超时：{UserId}", userId);
+            throw new UnauthorizedAccessException("认证请求正在处理中，请稍后重试");
+        }
+
+        return refreshLock;
+    }
+
+    /// <summary>
     /// 使用 Refresh Token 刷新 Access Token
     /// 验证 Redis 中存储的刷新令牌是否匹配，匹配则颁发新令牌对并更新 Redis
     /// </summary>
@@ -325,8 +367,22 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("刷新令牌不能为空");
         }
 
-        // 三态查询：Valid（当前令牌）/ Reused（已轮换墓碑——重放）/ Unknown（不存在）
+        // 三态查询：Valid（当前令牌）/ Reused（已轮换墓碑——重放）/ Unknown（不存在）。
+        // Valid 和 Reused 都携带用户 ID，可先据此获取用户级锁；Unknown 直接拒绝，避免无效请求放大锁竞争。
         var state = await _redisService.GetRefreshTokenStateAsync(refreshToken);
+
+        if ((state.Status != RefreshTokenStatus.Valid && state.Status != RefreshTokenStatus.Reused)
+            || !state.UserId.HasValue)
+        {
+            _logger.LogWarning("刷新令牌无效或已过期");
+            throw new UnauthorizedAccessException("刷新令牌无效或已过期");
+        }
+
+        var lockUserId = state.UserId.Value;
+        await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(lockUserId);
+
+        // 锁内重新读取状态：另一个并发请求可能已经完成轮换，不能继续使用锁外读取到的旧 Valid 状态。
+        state = await _redisService.GetRefreshTokenStateAsync(refreshToken);
 
         // 重放检测（OAuth 2.0 BCP）：该 token 曾有效但已被轮换——说明同一 token 被两方持有（典型失窃场景）。
         // 立即吊销整个会话（攻击者持有的当前 token 一并失效），强制重新登录，并记审计告警。
@@ -342,9 +398,11 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("刷新令牌无效或已过期");
         }
 
-        if (state.Status != RefreshTokenStatus.Valid || !state.UserId.HasValue)
+        if (state.Status != RefreshTokenStatus.Valid
+            || !state.UserId.HasValue
+            || state.UserId.Value != lockUserId)
         {
-            _logger.LogWarning("刷新令牌无效或已过期");
+            _logger.LogWarning("刷新令牌在锁内失效或用户归属发生变化：{UserId}", lockUserId);
             throw new UnauthorizedAccessException("刷新令牌无效或已过期");
         }
 
@@ -522,6 +580,7 @@ public class AuthService : IAuthService
         // MFA 验证通过：颁发令牌（与正常登录相同流程）
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
         var refreshToken = _jwtTokenService.GenerateRefreshToken();
+        await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(user.Id);
         await _redisService.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
 
         _logger.LogInformation("用户 {Username} MFA 验证通过，登录成功", user.Username);
@@ -593,6 +652,7 @@ public class AuthService : IAuthService
 
         var accessToken = _jwtTokenService.GenerateAccessToken(user);
         var refreshToken = _jwtTokenService.GenerateRefreshToken();
+        await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(user.Id);
         await _redisService.SetRefreshTokenAsync(user.Id, refreshToken, TimeSpan.FromDays(7));
 
         user.LastLoginAt = DateTime.UtcNow;
@@ -1112,6 +1172,8 @@ public class AuthService : IAuthService
         // 7. 自动登录，生成 JWT
         var accessToken = _jwtTokenService.GenerateAccessToken(adminUser);
         var refreshToken = _jwtTokenService.GenerateRefreshToken();
+
+        await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(adminUser.Id);
 
         // 刷新令牌存入 Redis，有效期 7 天
         await _redisService.SetRefreshTokenAsync(adminUser.Id, refreshToken, TimeSpan.FromDays(7));

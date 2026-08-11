@@ -5,6 +5,7 @@ using EquipAI.Application.Interfaces;
 using EquipAI.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.RateLimiting;
 using EquipAI.WebAPI.Middleware;
 using EquipAI.WebAPI.Security;
@@ -101,12 +102,15 @@ public class AuthController : ControllerBase
     /// <param name="request">刷新令牌请求（body 可空）</param>
     /// <returns>新的认证响应</returns>
     [HttpPost("refresh")]
-    [SkipAudit] // 刷新令牌高频，不审计（登录已记录）    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
+    [EnableRateLimiting("auth")]
+    [SkipAudit] // 刷新令牌高频，不审计（登录已记录）
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<AuthResponse>> Refresh([FromBody] RefreshTokenRequest request)
+    public async Task<ActionResult<AuthResponse>> Refresh(
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RefreshTokenRequest? request)
     {
         // 优先用请求体中的 token，其次从 HttpOnly Cookie 中读取（前端无法访问 HttpOnly cookie 时降级）
-        var refreshToken = !string.IsNullOrWhiteSpace(request.RefreshToken)
+        var refreshToken = !string.IsNullOrWhiteSpace(request?.RefreshToken)
             ? request.RefreshToken
             : Request.Cookies["refresh_token"];
 

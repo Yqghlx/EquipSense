@@ -115,11 +115,9 @@ public static class ServiceCollectionExtensions
             return new TenantContext(Guid.Empty, "Shared", false, Guid.Empty);
         });
 
-        // Redis 缓存服务，Singleton 生命周期，整个应用共享一个连接
-        services.AddSingleton<RedisService>();
-
-        // Redis 连接多路复用器（Singleton），供分布式锁等共享同一连接池。
-        // RedisService 内部自建连接以保持解耦；此处额外注册 IConnectionMultiplexer 供需要直接操作 Redis 的组件复用。
+        // Redis 连接多路复用器（Singleton），所有 Redis 组件共享同一连接池。
+        // ConnectionMultiplexer 是线程安全的长生命周期对象，必须由容器统一创建和释放，
+        // 避免 RedisService、分布式锁和告警聚合各自建立连接造成连接数膨胀。
         services.AddSingleton<IConnectionMultiplexer>(sp =>
         {
             var configuration = sp.GetRequiredService<IConfiguration>();
@@ -130,6 +128,9 @@ public static class ServiceCollectionExtensions
             }
             return ConnectionMultiplexer.Connect(connectionString);
         });
+
+        // Redis 缓存服务，Singleton 生命周期，通过构造函数注入上面的共享连接。
+        services.AddSingleton<RedisService>();
 
         // 告警聚合共享状态（Singleton），使用同一 Redis 连接保证多实例窗口计数一致。
         services.AddSingleton<IAlertAggregationStateStore, RedisAlertAggregationStateStore>();

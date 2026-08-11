@@ -233,7 +233,7 @@ GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。�
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
 backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
 健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理。PR 执行快速门禁；main 推送和
-版本 tag 还会在同一组 Production 镜像中执行默认 442 个业务 E2E（5 个显式跳过）。Smoke Compose
+版本 tag 还会在同一组 Production 镜像中执行默认 442 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 440 通过、2 跳过、0 失败。Smoke Compose
 会清除固定容器名、移除基础设施宿主端口绑定，并为应用探针分配独立端口，可与本机已有基础设施
 或并发 smoke 任务并行运行。
 全量验收在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户测试账户的 TOTP，
