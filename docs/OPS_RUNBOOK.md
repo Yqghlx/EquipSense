@@ -237,9 +237,9 @@ cd /path/to/EquipSense
 ls -lht docker/backups
 ```
 
-`backup.sh` 会逐个执行 PostgreSQL custom/tar 完整性校验；本地附件模式默认必须同时生成
+`backup.sh` 会先获取 `BACKUP_DIR/.backup.lock` 单实例锁，再校验 `RETAIN_DAYS` 并逐个执行 PostgreSQL custom/tar 完整性校验；历史备份清理失败也会返回非零，避免磁盘持续增长；本地附件模式默认必须同时生成
 `*.dump` 和 `attachments_*.tar.gz`。S3 附件模式会从配置的对象前缀同步后再生成同名归档，避免只归档空的本地卷。历史 `*.sql.gz` 仍可用于兼容恢复。显式启用 `BACKUP_REDIS=true` 后，Redis
-快照会等待 `INFO persistence` 报告后台保存完成，并校验 `REDIS` 文件头；快照或复制失败会使脚本返回非零。启用 `S3_SYNC=true` 后，异地目标缺失、未安装
+快照会等待 `INFO persistence` 报告后台保存完成，并校验 `REDIS` 文件头；缺少 `REDIS_PASSWORD`、快照或复制失败会使脚本在本地备份开始前或过程中返回非零。启用 `S3_SYNC=true` 后，本地备份不完整时会跳过异地同步，异地目标缺失、未安装
 `aws-cli` 或同步失败也会返回非零。备份文件和目录应保持 600/700 权限，并在
 密钥管理系统之外单独保护 `TOTP_ENCRYPTION_KEY`。
 `.dump` 使用容器内 `pg_restore --list` 校验；恢复脚本会先执行 TimescaleDB
@@ -247,7 +247,7 @@ ls -lht docker/backups
 
 ### 4.2 恢复流程
 
-恢复会重建目标数据库并替换附件卷内容。必须在维护窗口内
+恢复会在环境文件旁获取单实例锁，随后重建目标数据库并替换附件卷内容。必须在维护窗口内
 执行，并先在隔离环境完成演练；脚本默认只做校验和 dry-run，只有显式传入
 `--confirm` 才会停止服务并修改数据。
 
@@ -374,7 +374,7 @@ PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health`
 
 ### 6.5 生产部署自动回滚失败
 
-默认滚动部署只重建 backend/frontend/edgegateway。目标版本异常时，`deploy-production.sh` 会使用
+默认滚动部署会先获取 Compose 目录下的单实例锁，只重建 backend/frontend/edgegateway。目标版本异常时，`deploy-production.sh` 会使用
 `.last-deployed-tag` 对应的本机旧镜像回滚，并重新验证后端 readiness、边缘网关 `/health`
 与前端 health；网关的 SQLite 缓冲仍保留在 `edgegateway_data` 命名卷中。
 若日志出现“严重：回滚健康检查失败”或“旧版本容器重建失败”，执行：

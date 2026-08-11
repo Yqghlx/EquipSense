@@ -19,6 +19,12 @@ import { getE2EPassword, getE2ETotpSecret, type E2ERole } from './credentials';
 /** E2E 测试基础 URL — CI 中通过 PLAYWRIGHT_BASE_URL 环境变量覆盖 */
 export const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || 'https://localhost:8443';
 
+/** Production E2E 获取响应体 JWT 时使用的机器客户端密钥；普通浏览器流程无需配置。 */
+const machineApiKey = process.env.PLAYWRIGHT_MACHINE_API_KEY;
+export const MACHINE_API_HEADERS: Record<string, string> = machineApiKey
+  ? { 'X-API-Key': machineApiKey }
+  : {};
+
 /**
  * 后端直连地址。
  *
@@ -194,6 +200,7 @@ async function loginApiOnceWithCredentials(
 ): Promise<Record<string, unknown>> {
   const response = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
     data: { username, password },
+    headers: MACHINE_API_HEADERS,
   });
   if (!response.ok()) {
     throw new Error(`登录 API 返回 ${response.status()}，账号: ${accountLabel}`);
@@ -215,6 +222,7 @@ async function loginApiOnceWithCredentials(
         challengeToken,
         totpCode: generateTotpCode(totpSecret),
       },
+      headers: MACHINE_API_HEADERS,
     });
     if (!mfaResponse.ok()) {
       throw new Error(`MFA 验证 API 返回 ${mfaResponse.status()}，账号: ${accountLabel}`);

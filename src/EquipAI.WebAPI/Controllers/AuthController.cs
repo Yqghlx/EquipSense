@@ -7,12 +7,13 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using EquipAI.WebAPI.Middleware;
+using EquipAI.WebAPI.Security;
 
 namespace EquipAI.WebAPI.Controllers;
 
 /// <summary>
 /// 认证控制器，提供登录、令牌刷新、登出和修改密码等接口
-/// 登录和刷新接口无需认证，登出和修改密码需要 Bearer Token
+/// 登录和刷新接口无需 JWT；浏览器认证使用 HttpOnly Cookie，机器客户端响应体令牌需要 X-API-Key。
 /// </summary>
 [ApiController]
 [Route("api/v1/auth")]
@@ -20,23 +21,29 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly IRepository<EquipAI.Core.Entities.User> _userRepo;
+    private readonly AuthResponsePolicy _authResponsePolicy;
 
     /// <summary>
     /// 初始化认证控制器
     /// </summary>
     /// <param name="authService">认证服务</param>
     /// <param name="userRepo">用户仓储</param>
-    public AuthController(IAuthService authService, IRepository<EquipAI.Core.Entities.User> userRepo)
+    /// <param name="authResponsePolicy">认证响应令牌暴露策略</param>
+    public AuthController(
+        IAuthService authService,
+        IRepository<EquipAI.Core.Entities.User> userRepo,
+        AuthResponsePolicy authResponsePolicy)
     {
         _authService = authService;
         _userRepo = userRepo;
+        _authResponsePolicy = authResponsePolicy;
     }
 
     /// <summary>
     /// 用户登录，验证凭据并返回 JWT 令牌
     /// </summary>
     /// <param name="request">登录请求（用户名 + 密码）</param>
-    /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
+    /// <returns>认证响应；Production 浏览器请求只通过 Cookie 建立会话</returns>
     [HttpPost("login")]
     [EnableRateLimiting("auth")]
     [Audit("Login", "User")]
@@ -46,14 +53,14 @@ public class AuthController : ControllerBase
     {
         var response = await _authService.LoginAsync(request);
         SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
-        return Ok(response);
+        return Ok(PrepareAuthResponse(response));
     }
 
     /// <summary>
     /// 公开注册，创建租户和管理员账户并自动登录
     /// </summary>
     /// <param name="request">注册请求（含企业信息和管理员信息）</param>
-    /// <returns>认证响应（含 Access Token、Refresh Token 和用户信息）</returns>
+    /// <returns>认证响应和用户信息；Production 浏览器请求只通过 Cookie 建立会话</returns>
     [HttpPost("register")]
     [Audit("Register", "Tenant")]    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
@@ -64,7 +71,7 @@ public class AuthController : ControllerBase
         {
             var response = await _authService.RegisterAsync(request);
             SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
-            return Ok(response);
+            return Ok(PrepareAuthResponse(response));
         }
         catch (InvalidOperationException ex)
         {
@@ -104,9 +111,9 @@ public class AuthController : ControllerBase
             : Request.Cookies["refresh_token"];
 
         var response = await _authService.RefreshTokenAsync(refreshToken ?? string.Empty);
-        // 刷新令牌对：同时更新 Cookie（浏览器下次请求自动携带）和响应体（前端主动续期 Hook 读取 expiresIn）
+        // 刷新令牌对：同时更新 Cookie；响应体令牌仅对显式机器客户端返回，浏览器仍可读取 expiresIn。
         SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
-        return Ok(response);
+        return Ok(PrepareAuthResponse(response));
     }
 
     /// <summary>
@@ -214,7 +221,7 @@ public class AuthController : ControllerBase
         {
             var response = await _authService.VerifyMfaAsync(request.ChallengeToken, request.TotpCode);
             SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
-            return Ok(response);
+            return Ok(PrepareAuthResponse(response));
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -262,7 +269,7 @@ public class AuthController : ControllerBase
                 request.EnrollmentToken,
                 request.TotpCode);
             SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
-            return Ok(response);
+            return Ok(PrepareAuthResponse(response));
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -416,12 +423,15 @@ public class AuthController : ControllerBase
         {
             Id = user.Id,
             Username = user.Username,
+            TenantId = user.TenantId,
             DisplayName = user.DisplayName,
             Role = user.Role.ToString(),
             Email = user.Email,
             Phone = user.Phone,
             IsActive = user.IsActive,
-            CreatedAt = user.CreatedAt
+            CreatedAt = user.CreatedAt,
+            MustChangePassword = user.MustChangePassword,
+            MfaEnabled = user.MfaEnabled,
         });
     }
 
@@ -470,6 +480,12 @@ public class AuthController : ControllerBase
             MaxAge = TimeSpan.FromDays(7),
         });
     }
+
+    /// <summary>按请求头中的机器客户端 API Key 准备认证响应。</summary>
+    private AuthResponse PrepareAuthResponse(AuthResponse response)
+        => _authResponsePolicy.PrepareForResponse(
+            response,
+            Request.Headers[AuthResponsePolicy.MachineApiKeyHeaderName].FirstOrDefault());
 
     /// <summary>
     /// 清除认证 Cookie（登出或令牌失效时调用）

@@ -6,6 +6,12 @@
 # dotenv files
 .env
 
+# 运行时备份产物和单实例锁，不应进入版本库
+docker/backups/
+**/.backup.lock/
+**/.env.restore.lock/
+**/.deploy.lock/
+
 # User-specific files
 *.rsuser
 *.suo

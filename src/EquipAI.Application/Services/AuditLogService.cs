@@ -82,14 +82,30 @@ public class AuditLogService : IAuditLogService
 
     /// <inheritdoc />
     public async Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1,
-        int pageSize = 20, CancellationToken ct = default)
+        int pageSize = 20, CancellationToken ct = default, string? action = null,
+        string? resourceType = null)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var query = db.UnfilteredSet<AuditLog>()
-            .Where(a => a.TenantId == tenantId)
-            .OrderByDescending(a => a.CreatedAt);
+            .Where(a => a.TenantId == tenantId);
+
+        // 必须在 Count/Skip/Take 之前应用筛选，否则分页总数和页内容都会失真，
+        // 合规审计人员可能无法翻到后续页面中的匹配记录。
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            var actionFilter = action.Trim().ToLowerInvariant();
+            query = query.Where(a => a.Action.ToLower() == actionFilter);
+        }
+
+        if (!string.IsNullOrWhiteSpace(resourceType))
+        {
+            var resourceTypeFilter = resourceType.Trim().ToLowerInvariant();
+            query = query.Where(a => a.ResourceType.ToLower() == resourceTypeFilter);
+        }
+
+        query = query.OrderByDescending(a => a.CreatedAt);
 
         var total = await query.CountAsync(ct);
         var items = await query

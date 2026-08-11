@@ -193,7 +193,8 @@ try
         sp.GetRequiredService<GatewayOptions>(),
         sp.GetRequiredService<GatewayMetrics>(),
         adapterFactory,
-        sp));
+        sp,
+        sp.GetRequiredService<GatewayOptions>().HealthPort));
 
     // 注册配置定时刷新服务 — 每 60s 从后端拉取最新配置并动态应用
     builder.Services.AddSingleton<IHostedService>(sp => new ConfigRefreshService(

@@ -109,6 +109,19 @@ public class WorkOrdersControllerTests
     }
 
     /// <summary>
+    /// 验证：超出统一上限的 pageSize 必须在模型绑定阶段拒绝，避免触发超大数据库查询。
+    /// </summary>
+    [Fact]
+    public async Task GetWorkOrders_PageSizeTooLarge_Returns400()
+    {
+        var client = await GetAuthenticatedClientAsync();
+
+        var response = await client.GetAsync("/api/v1/work-orders?page=1&pageSize=101");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
     /// 验证：POST /api/v1/work-orders 创建工单并返回 201 Created
     /// 工单初始状态应为 PendingDispatch
     /// </summary>

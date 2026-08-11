@@ -14,7 +14,7 @@
  * 使用专用测试设备 + 专用告警规则，避免干扰现有数据。
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { BASE_URL, getToken, getE2EPassword } from '../helpers';
+import { BASE_URL, MACHINE_API_HEADERS, getToken, getE2EPassword } from '../helpers';
 
 const log: string[] = [];
 function record(step: string, ok: boolean, detail = '') {
@@ -26,6 +26,7 @@ function record(step: string, ok: boolean, detail = '') {
 async function adminLogin(request: APIRequestContext): Promise<string> {
   const resp = await request.post(`${BASE_URL}/api/v1/auth/login`, {
     data: { username: 'admin', password: getE2EPassword('admin') },
+    headers: MACHINE_API_HEADERS,
   });
   const body = await resp.json();
   return body.accessToken || body.token;

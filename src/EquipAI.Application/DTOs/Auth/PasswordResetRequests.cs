@@ -12,6 +12,7 @@ public class ForgotPasswordRequest
     /// </summary>
     [Required(ErrorMessage = "邮箱不能为空")]
     [EmailAddress(ErrorMessage = "邮箱格式不正确")]
+    [StringLength(254, ErrorMessage = "邮箱长度不能超过 254 个字符")]
     public string Email { get; set; } = string.Empty;
 }
 

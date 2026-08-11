@@ -82,6 +82,32 @@ public sealed class UserPiiPersistenceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void 用户邮箱列应容纳最大合法邮箱的加密密文()
+    {
+        var email = BuildMaximumLengthEmail();
+        var protector = new PiiProtector(BuildConfiguration());
+        var encryptedEmail = protector.Protect(email)!;
+        var emailProperty = _db.Model.FindEntityType(typeof(User))!
+            .FindProperty(nameof(User.Email))!;
+
+        emailProperty.GetMaxLength()
+            .Should().BeGreaterThanOrEqualTo(encryptedEmail.Length);
+    }
+
+    [Fact]
+    public void 用户名索引应为全局唯一()
+    {
+        var indexes = _db.Model.FindEntityType(typeof(User))!
+            .GetIndexes()
+            .Where(index => index.Properties.Count == 1
+                && index.Properties[0].Name == nameof(User.Username))
+            .ToList();
+
+        indexes.Should().ContainSingle();
+        indexes[0].IsUnique.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task 清空联系方式时应同步清空盲索引()
     {
         var user = new User
@@ -134,6 +160,18 @@ public sealed class UserPiiPersistenceTests : IAsyncLifetime
                 ["Security:PiiEncryptionKey"] = Convert.ToBase64String(new byte[32])
             })
             .Build();
+
+    private static string BuildMaximumLengthEmail()
+    {
+        // RFC 5321 规定邮箱地址总长度最多 254 个字符；域名各标签保持在 63 字符以内。
+        var localPart = new string('a', 64);
+        var domain = string.Join(
+            ".",
+            new string('b', 63),
+            new string('c', 63),
+            new string('d', 61));
+        return $"{localPart}@{domain}";
+    }
 
     private sealed class TestTenantContext(Guid tenantId) : ITenantContext
     {

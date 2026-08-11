@@ -874,8 +874,9 @@ public class AuthService : IAuthService
     }
 
     /// <summary>
-    /// 申请密码重置：按邮箱查找用户，生成一次性重置 token 存入 Redis（30 分钟过期），
-    /// 并发送含重置链接的邮件。即使用户不存在也返回成功（防止邮箱枚举攻击）。
+    /// 申请密码重置：按邮箱查找唯一的启用用户，生成一次性重置 token 存入 Redis（30 分钟过期），
+    /// 并发送含重置链接的邮件。邮箱对应多个启用用户时拒绝发放令牌，避免重置错号；
+    /// 即使用户不存在也返回成功（防止邮箱枚举攻击）。
     /// </summary>
     /// <param name="email">用户邮箱</param>
     /// <param name="resetUrlTemplate">重置链接模板，{token} 占位符会被替换为实际 token</param>
@@ -885,23 +886,34 @@ public class AuthService : IAuthService
         // 数据库只保存联系方式密文，认证查找必须使用盲索引；否则随机 nonce 密文无法等值匹配。
         var emailLookupHash = _piiProtector.CreateLookupHash("email", email);
         var normalizedEmail = _piiProtector.Normalize("email", email);
-        var user = emailLookupHash is null
-            ? null
+        var candidateUsers = emailLookupHash is null
+            ? []
             : await _dbContext.UnfilteredSet<Core.Entities.User>()
-                .FirstOrDefaultAsync(u => u.EmailLookupHash == emailLookupHash, ct);
+                .Where(u => u.EmailLookupHash == emailLookupHash && u.IsActive)
+                .ToListAsync(ct);
 
         // 盲索引碰撞概率极低，但仍用解密后的值做二次核验，避免错误命中。
-        if (user is null
-            || string.IsNullOrEmpty(user.Email)
-            || !string.Equals(
-                _piiProtector.Normalize("email", user.Email),
-                normalizedEmail,
-                StringComparison.Ordinal)
-            || !user.IsActive)
+        // 邮箱允许跨租户重复；多个启用账户共享邮箱时无法安全判断目标，只能拒绝发放令牌，防止重置错号。
+        var matchedUsers = candidateUsers
+            .Where(u => !string.IsNullOrEmpty(u.Email)
+                && string.Equals(
+                    _piiProtector.Normalize("email", u.Email),
+                    normalizedEmail,
+                    StringComparison.Ordinal))
+            .Take(2)
+            .ToArray();
+
+        if (matchedUsers.Length != 1)
         {
-            _logger.LogWarning("密码重置请求未匹配到启用账户");
+            _logger.LogWarning(
+                "密码重置请求未能唯一匹配启用账户，候选数量 {CandidateCount}",
+                matchedUsers.Length);
             return; // 静默返回，不暴露用户是否存在
         }
+
+        var user = matchedUsers[0];
+        // matchedUsers 已经过非空邮箱过滤，此处保留非空值供邮件服务发送。
+        var recipientEmail = user.Email!;
 
         // 生成密码重置 token（URL 安全的随机字符串）
         var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
@@ -931,7 +943,7 @@ public class AuthService : IAuthService
 
         try
         {
-            await _emailService.SendAsync(user.Email, subject, htmlBody);
+            await _emailService.SendAsync(recipientEmail, subject, htmlBody);
             _logger.LogInformation("密码重置邮件已发送: UserId={UserId}", user.Id);
         }
         catch (Exception ex)

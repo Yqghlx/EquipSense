@@ -26,16 +26,19 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const AUTH_USER = __ENV.AUTH_USER || 'admin';
 const AUTH_PASS = __ENV.AUTH_PASS || '';
+const MACHINE_API_KEY = __ENV.AUTH_MACHINE_API_KEY || '';
 
 if (!AUTH_PASS) {
   throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入压测凭据');
 }
 
 function login() {
+  const loginHeaders = { 'Content-Type': 'application/json' };
+  if (MACHINE_API_KEY) loginHeaders['X-API-Key'] = MACHINE_API_KEY;
   const res = http.post(`${BASE_URL}/api/v1/auth/login`, JSON.stringify({
     username: AUTH_USER,
     password: AUTH_PASS,
-  }), { headers: { 'Content-Type': 'application/json' } });
+  }), { headers: loginHeaders });
 
   if (res.status === 200) {
     const body = res.json();
@@ -66,10 +69,12 @@ export default function () {
 
   // 认证端点：登录本身
   {
+    const loginHeaders = { 'Content-Type': 'application/json' };
+    if (MACHINE_API_KEY) loginHeaders['X-API-Key'] = MACHINE_API_KEY;
     const res = http.post(`${BASE_URL}/api/v1/auth/login`, JSON.stringify({
       username: AUTH_USER,
       password: AUTH_PASS,
-    }), { headers: { 'Content-Type': 'application/json' } });
+    }), { headers: loginHeaders });
     const ok = check(res, { 'auth/login 200': (r) => r.status === 200 });
     if (!ok) errorRate.add(1);
     apiLatency.add(res.timings.duration);

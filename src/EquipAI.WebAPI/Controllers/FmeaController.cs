@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.Fmea;
 using EquipAI.Application.Fmea.DTOs;
 using EquipAI.Core.Models;
@@ -29,8 +31,8 @@ public class FmeaController : ControllerBase
     [RequirePermission("knowledge:read")]
     [ProducesResponseType(typeof(PagedResult<FmeaEntryResponse>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<FmeaEntryResponse>>> GetEntries(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
+        [FromQuery, Range(1, PagedQuery.MaxPage, ErrorMessage = "页码必须在 1 到 1000000 之间")] int page = 1,
+        [FromQuery, Range(1, PagedQuery.MaxPageSize, ErrorMessage = "每页条数必须在 1 到 100 之间")] int pageSize = 20,
         [FromQuery] string? deviceType = null,
         [FromQuery] bool? isEnabled = null)
     {

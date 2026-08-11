@@ -138,7 +138,6 @@ runtime_files=(
   mosquitto.prod.conf
   nginx.conf
   validate-env.sh
-  generate-cert.sh
   generate-mqtt-cert.sh
   Dockerfile.backend
   Dockerfile.frontend
@@ -171,6 +170,7 @@ TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32 | tr -d '\n')"
 PII_ENCRYPTION_KEY="$(openssl rand -base64 32 | tr -d '\n')"
 AUTOMAPPER_LICENSE_KEY="${SMOKE_AUTOMAPPER_LICENSE_KEY:-ci-smoke-license-$(random_secret)}"
 GATEWAY_AUTH_KEY="$(random_secret)"
+AUTH_MACHINE_API_KEY="$(random_secret)"
 MQTT_USERNAME="smoke_mqtt"
 MQTT_PASSWORD="$(random_secret)"
 RABBITMQ_USER="smoke_rabbit"
@@ -207,6 +207,7 @@ runtime_env=(
   "PII_ENCRYPTION_KEY=$PII_ENCRYPTION_KEY"
   "AUTOMAPPER_LICENSE_KEY=$AUTOMAPPER_LICENSE_KEY"
   "GATEWAY_AUTH_KEY=$GATEWAY_AUTH_KEY"
+  "AUTH_MACHINE_API_KEY=$AUTH_MACHINE_API_KEY"
   "MQTT_USERNAME=$MQTT_USERNAME"
   "MQTT_PASSWORD=$MQTT_PASSWORD"
   "SEED_ADMIN_PASSWORD=$SEED_ADMIN_PASSWORD"
@@ -253,10 +254,64 @@ fi
 printf '%s\n' "${runtime_env[@]}" > "$RUNTIME_DOCKER/.env"
 chmod 600 "$RUNTIME_DOCKER/.env"
 
-# 证书只用于测试 TLS 握手，正式环境仍必须替换为正式域名证书。
-bash "$RUNTIME_DOCKER/generate-cert.sh" localhost 365 >/dev/null
+# Production 校验器要求公网叶子证书不能自签名；Smoke 在临时目录中生成一套
+# 测试 CA 和由该 CA 签发的 localhost 叶子证书，既能验证真实 TLS/Nginx 链路，
+# 又不会放宽生产环境对正式 CA 证书的门禁。
+generate_smoke_issued_tls_certificate() {
+  local ssl_dir="$1"
+  local ca_key="$ssl_dir/smoke-ca.key"
+  local ca_certificate="$ssl_dir/smoke-ca.crt"
+  local leaf_csr="$ssl_dir/smoke-leaf.csr"
+  local extension_file="$ssl_dir/smoke-leaf.ext"
+  local serial_file="$ssl_dir/smoke-ca.srl"
+
+  openssl req -x509 -nodes -newkey rsa:2048 \
+    -days 365 \
+    -keyout "$ca_key" \
+    -out "$ca_certificate" \
+    -subj "/C=CN/O=EquipSense/OU=Production-Smoke/CN=EquipSense Smoke CA" \
+    -addext "basicConstraints=critical,CA:TRUE,pathlen:1" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    >/dev/null 2>&1
+
+  openssl req -new -nodes -newkey rsa:2048 \
+    -keyout "$ssl_dir/key.pem" \
+    -out "$leaf_csr" \
+    -subj "/C=CN/O=EquipSense/OU=Production-Smoke/CN=localhost" \
+    >/dev/null 2>&1
+
+  printf '%s\n' \
+    '[v3_server]' \
+    'basicConstraints=critical,CA:FALSE' \
+    'keyUsage=critical,digitalSignature,keyEncipherment' \
+    'extendedKeyUsage=serverAuth' \
+    'subjectAltName=DNS:localhost,DNS:*.localhost,IP:127.0.0.1,IP:::1' \
+    > "$extension_file"
+
+  openssl x509 -req \
+    -in "$leaf_csr" \
+    -CA "$ca_certificate" \
+    -CAkey "$ca_key" \
+    -CAcreateserial \
+    -CAserial "$serial_file" \
+    -out "$ssl_dir/cert.pem" \
+    -days 365 \
+    -sha256 \
+    -extfile "$extension_file" \
+    -extensions v3_server \
+    >/dev/null 2>&1
+
+  chmod 600 "$ssl_dir/key.pem"
+  chmod 644 "$ssl_dir/cert.pem"
+  rm -f -- "$ca_key" "$ca_certificate" "$leaf_csr" "$extension_file" "$serial_file"
+}
+
+generate_smoke_issued_tls_certificate "$RUNTIME_DOCKER/ssl"
 bash "$RUNTIME_DOCKER/generate-mqtt-cert.sh" mosquitto 365 >/dev/null
-docker run --rm -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" mosquitto_passwd -c -b /work/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD" >/dev/null
+# 密码只经标准输入交给官方工具，禁止使用 -b 或命令行参数，避免凭据出现在进程列表和审计记录中。
+printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
+  | docker run --rm -i -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" \
+    mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
 
 bash "$RUNTIME_DOCKER/validate-env.sh" "$RUNTIME_DOCKER/.env" --check-runtime-files >/dev/null
@@ -342,6 +397,7 @@ docker exec "$edge_container_id" test -f /data/buffer.db \
 # 可以验证种子数据、密码哈希、JWT 签发和受保护 API 均在 Production 镜像中可用。
 login_response="$(curl --fail --silent --show-error --max-time 10 \
   -H 'Content-Type: application/json' \
+  -H "X-API-Key: $AUTH_MACHINE_API_KEY" \
   --data-binary @- \
   "http://127.0.0.1:$BACKEND_PORT/api/v1/auth/login" <<JSON
 {"username":"viewer","password":"$SEED_VIEWER_PASSWORD"}
@@ -378,6 +434,7 @@ esac
 if [[ "$SMOKE_RUN_E2E" = true ]]; then
   mfa_bootstrap_result="$(
     MFA_BOOTSTRAP_BASE_URL="http://127.0.0.1:$BACKEND_PORT" \
+    MFA_BOOTSTRAP_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" \
     MFA_BOOTSTRAP_ADMIN_PASSWORD="$SEED_ADMIN_PASSWORD" \
     MFA_BOOTSTRAP_LEAD_PASSWORD="$SEED_LEAD_PASSWORD" \
     MFA_BOOTSTRAP_TENANT2_PASSWORD="$SEED_TENANT2_PASSWORD" \
@@ -394,6 +451,7 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
     cd "$PROJECT_ROOT/frontend"
     PLAYWRIGHT_BASE_URL="https://127.0.0.1:$FRONTEND_PORT" \
     PLAYWRIGHT_API_BASE_URL="http://127.0.0.1:$BACKEND_PORT" \
+    PLAYWRIGHT_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" \
     E2E_PRODUCTION=1 \
     E2E_FAST_LOGIN=1 \
     E2E_ADMIN_PASSWORD="$SEED_ADMIN_PASSWORD" \

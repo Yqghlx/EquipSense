@@ -10,6 +10,7 @@
 import { createHmac } from 'node:crypto';
 
 const baseUrl = requiredEnvironment('MFA_BOOTSTRAP_BASE_URL');
+const machineApiKey = requiredEnvironment('MFA_BOOTSTRAP_MACHINE_API_KEY');
 
 /**
  * 读取必填环境变量，错误信息不得包含密码或临时密钥。
@@ -28,7 +29,10 @@ function requiredEnvironment(name) {
 async function requestJson(path, data) {
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': machineApiKey,
+    },
     body: JSON.stringify(data),
   });
   const text = await response.text();

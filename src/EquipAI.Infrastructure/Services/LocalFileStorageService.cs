@@ -44,7 +44,13 @@ public class LocalFileStorageService : IFileStorageService
     {
         var safeCategory = NormalizeCategory(category);
         var safeFileName = NormalizeFileName(fileName);
-        ValidateFile(safeFileName, stream.Length);
+        if (stream is null || !stream.CanRead)
+            throw new ArgumentException("文件流必须可读", nameof(stream));
+
+        var declaredLength = stream.CanSeek ? stream.Length - stream.Position : (long?)null;
+        if (declaredLength is < 0)
+            throw new ArgumentException("文件流位置无效", nameof(stream));
+        ValidateFile(safeFileName, declaredLength);
 
         // 构建存储目录：{basePath}/{tenantId}/{category}/
         var directory = Path.GetFullPath(Path.Combine(_basePath, tenantId.ToString(), safeCategory));
@@ -65,6 +71,7 @@ public class LocalFileStorageService : IFileStorageService
         // 直接写正式文件时，网络流中断会留下带完整扩展名的半成品，可能被后续下载或扫描流程误认为有效附件。
         var temporaryPath = Path.Combine(directory, $".{uniqueName}.uploading");
         EnsureInsideBasePath(temporaryPath);
+        long bytesWritten = 0;
         try
         {
             await using (var fileStream = new FileStream(
@@ -75,11 +82,25 @@ public class LocalFileStorageService : IFileStorageService
                 bufferSize: 64 * 1024,
                 options: FileOptions.Asynchronous | FileOptions.SequentialScan))
             {
-                await stream.CopyToAsync(fileStream);
+                // 不能只相信 Stream.Length：网络流可能不可定位，或声明长度与实际内容不一致。
+                // 在写入前检查累计字节数，避免异常上传绕过请求层限制持续占用磁盘。
+                var buffer = new byte[64 * 1024];
+                int bytesRead;
+                while ((bytesRead = await stream.ReadAsync(buffer.AsMemory())) > 0)
+                {
+                    if (bytesWritten > MaxFileSizeBytes - bytesRead)
+                        throw new IOException($"文件大小超过限制（最大 {MaxFileSizeBytes / 1024 / 1024}MB）");
+
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                    bytesWritten += bytesRead;
+                }
+
                 await fileStream.FlushAsync();
             }
 
+            // 关闭文件句柄后再移动，兼容 Windows 宿主机，同时保持同目录原子替换语义。
             File.Move(temporaryPath, fullPath);
+            _logger.LogInformation("文件已保存：{Path}，大小：{Size} 字节", relativePath, bytesWritten);
         }
         catch (Exception exception)
         {
@@ -103,7 +124,6 @@ public class LocalFileStorageService : IFileStorageService
             throw;
         }
 
-        _logger.LogInformation("文件已保存：{Path}，大小：{Size} 字节", relativePath, stream.Length);
         return relativePath;
     }
 
@@ -151,12 +171,12 @@ public class LocalFileStorageService : IFileStorageService
     /// <summary>
     /// 验证文件名扩展名和大小
     /// </summary>
-    private static void ValidateFile(string fileName, long fileSize)
+    private static void ValidateFile(string fileName, long? fileSize)
     {
         if (string.IsNullOrWhiteSpace(fileName))
             throw new ArgumentException("文件名不能为空");
 
-        if (fileSize > MaxFileSizeBytes)
+        if (fileSize.HasValue && fileSize.Value > MaxFileSizeBytes)
             throw new ArgumentException($"文件大小超过限制（最大 {MaxFileSizeBytes / 1024 / 1024}MB）");
 
         var extension = Path.GetExtension(fileName).TrimStart('.').ToLowerInvariant();

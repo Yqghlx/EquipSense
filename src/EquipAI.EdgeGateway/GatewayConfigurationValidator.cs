@@ -6,6 +6,14 @@ namespace EquipAI.EdgeGateway;
 /// </summary>
 public static class GatewayConfigurationValidator
 {
+    private static readonly string[] InsecureAuthKeyValues =
+    [
+        "SET_VIA_USER_SECRETS",
+        "PLEASE_CHANGE_THIS_TO_ASCII_STRONG_KEY_AT_LEAST_32_CHARS",
+        "change-me",
+        "your-secret-key",
+    ];
+
     /// <summary>
     /// 校验边缘网关配置。
     /// </summary>
@@ -33,8 +41,51 @@ public static class GatewayConfigurationValidator
         if (string.IsNullOrWhiteSpace(options.BackendUrl))
             throw new InvalidOperationException("生产环境必须配置 Gateway:BackendUrl");
 
+        if (!Uri.TryCreate(options.BackendUrl, UriKind.Absolute, out var backendUri)
+            || (backendUri.Scheme != Uri.UriSchemeHttp && backendUri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(backendUri.Host)
+            || !string.IsNullOrEmpty(backendUri.UserInfo))
+        {
+            throw new InvalidOperationException(
+                "生产环境 Gateway:BackendUrl 必须是不带用户信息的绝对 http:// 或 https:// 地址");
+        }
+
+        // CloudUploader 会按 host:port 解析 Broker；端口拼写错误不能静默回退到默认端口，
+        // 否则网关会显示已启动但持续连接错误的 Broker，现场只能通过日志反推配置问题。
+        var mqttParts = options.MqttBroker?.Split(':', 2, StringSplitOptions.TrimEntries) ?? [];
+        var mqttPortIsValid = mqttParts.Length < 2
+            || (int.TryParse(mqttParts[1], out var mqttPort) && mqttPort is >= 1 and <= 65535);
+        if (mqttParts.Length == 0
+            || string.IsNullOrWhiteSpace(mqttParts[0])
+            || !mqttPortIsValid)
+        {
+            throw new InvalidOperationException(
+                "生产环境 Gateway:MqttBroker 必须是有效的 host[:port] 地址，端口范围为 1-65535");
+        }
+
         if (string.IsNullOrWhiteSpace(options.AuthKey))
             throw new InvalidOperationException("生产环境必须配置 Gateway:AuthKey");
+
+        // 网关认证头会在后端与边缘网关之间传输；短密钥、模板占位符或非可打印字符
+        // 都可能导致已知凭据运行、请求头解析失败或运维误把中文占位值部署到生产。
+        if (options.AuthKey.Length < 32)
+            throw new InvalidOperationException("生产环境 Gateway:AuthKey 长度必须至少为 32 个字符");
+
+        if (InsecureAuthKeyValues.Contains(options.AuthKey, StringComparer.OrdinalIgnoreCase)
+            || options.AuthKey.Contains("${", StringComparison.Ordinal)
+            || options.AuthKey.Contains("PLEASE_CHANGE", StringComparison.OrdinalIgnoreCase)
+            || options.AuthKey.Contains("CHANGE_ME", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("生产环境 Gateway:AuthKey 不能使用占位值");
+        }
+
+        if (options.AuthKey.Any(character => character < 0x21 || character > 0x7E))
+            throw new InvalidOperationException("生产环境 Gateway:AuthKey 必须只包含可打印 ASCII 字符");
+
+        // Docker 镜像以非 root 用户运行，低于 1024 的端口即使格式合法也无法监听；
+        // 提前拒绝越界和特权端口，避免容器启动后才进入假健康状态。
+        if (options.HealthPort is < 1024 or > 65535)
+            throw new InvalidOperationException("生产环境 Gateway:HealthPort 必须在 1024-65535 范围内");
 
         if (string.IsNullOrWhiteSpace(options.BufferPath) || !Path.IsPathRooted(options.BufferPath))
         {

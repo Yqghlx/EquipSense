@@ -13,7 +13,7 @@ public class User : BaseEntity
     public Guid TenantId { get; set; }
 
     /// <summary>
-    /// 登录用户名（租户内唯一）
+    /// 登录用户名（全局唯一；登录请求不携带租户标识）
     /// </summary>
     public string Username { get; set; } = string.Empty;
 

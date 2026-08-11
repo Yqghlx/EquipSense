@@ -749,7 +749,7 @@ public class DeviceServiceTests : IAsyncDisposable
             string? description = null, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
-            CancellationToken ct = default) =>
+            CancellationToken ct = default, string? action = null, string? resourceType = null) =>
             throw new NotSupportedException("桩件不支持查询");
     }
 

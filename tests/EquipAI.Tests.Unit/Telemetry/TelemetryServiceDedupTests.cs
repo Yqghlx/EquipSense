@@ -1,10 +1,13 @@
+using System.Data.Common;
 using EquipAI.Application.Telemetry;
 using EquipAI.Core.Entities;
+using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -33,6 +36,7 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
     private ServiceProvider _sp = null!;
     private TelemetryService _service = null!;
     private Mock<IEventBus> _eventBusMock = null!;
+    private readonly ThrowAfterTelemetryInsertInterceptor _ambiguousInsertInterceptor = new();
 
     private Guid _tenantId = Guid.NewGuid();
     private Guid _deviceId = Guid.NewGuid();
@@ -51,7 +55,9 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
         var tenantCtx = new Mock<ITenantContext>();
         services.AddSingleton<ITenantContext>(tenantCtx.Object);
         // SQLite：支持原生 SQL INSERT 与 LINQ 翻译，让去重的"写入后存在性查询"真实执行
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_ambiguousInsertInterceptor));
         _sp = services.BuildServiceProvider();
 
         using (var seedScope = _sp.CreateScope())
@@ -192,6 +198,105 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// 事件发布中途失败后，重试必须继续发布已成功落库的同一批事件。
+    /// 若重试重新执行数据库去重并把已存在行当作“无需处理”，会造成遥测已落库但告警评估永远缺失。
+    /// </summary>
+    [Fact]
+    public async Task 事件发布中途失败后应重试同一批事件而不是被去重跳过()
+    {
+        var t1 = DateTime.UtcNow;
+        var t2 = t1.AddSeconds(1);
+        var publishedEvents = new List<TelemetryReceivedEvent>();
+        var publishAttempts = 0;
+
+        _eventBusMock
+            .Setup(e => e.PublishAsync(
+                It.IsAny<TelemetryReceivedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<TelemetryReceivedEvent, CancellationToken>((@event, _) =>
+            {
+                publishedEvents.Add(@event);
+                publishAttempts++;
+            })
+            .Returns<TelemetryReceivedEvent, CancellationToken>((_, _) =>
+                publishAttempts == 2
+                    ? Task.FromException(new InvalidOperationException("模拟事件总线瞬时故障"))
+                    : Task.CompletedTask);
+
+        await _service.EnqueueAsync(_tenantId, _deviceId, "temperature", 80.0, t1);
+        await _service.EnqueueAsync(_tenantId, _deviceId, "temperature", 81.0, t2);
+
+        await _service.FlushAsync();
+
+        (await CountTelemetryRowsAsync()).Should().Be(2);
+        publishAttempts.Should().Be(4, "第二条事件失败后，整个已落库批次必须使用相同事件继续重试");
+        publishedEvents[0].EventId.Should().Be(publishedEvents[2].EventId);
+        publishedEvents[1].EventId.Should().Be(publishedEvents[3].EventId);
+    }
+
+    /// <summary>
+    /// 数据库命令已执行但客户端在收到响应前断开时，不能把已落库批次误判为普通重复数据。
+    /// </summary>
+    [Fact]
+    public async Task 批量写入结果不明确时仍应为已落库数据发布事件()
+    {
+        _ambiguousInsertInterceptor.ThrowAfterNextTelemetryInsert();
+
+        await _service.EnqueueAsync(
+            _tenantId,
+            _deviceId,
+            "temperature",
+            80.0,
+            DateTime.UtcNow);
+        await _service.FlushAsync();
+
+        (await CountTelemetryRowsAsync()).Should().Be(1);
+        _eventBusMock.Verify(
+            e => e.PublishAsync(It.IsAny<TelemetryReceivedEvent>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "INSERT 已完成但响应丢失时，遥测对应的告警事件仍必须进入事件总线");
+    }
+
+    /// <summary>
+    /// 应用关闭时，异步释放必须等待正在执行的 flush 完成，避免释放依赖后仍有后台事件发布。
+    /// </summary>
+    [Fact]
+    public async Task 异步释放应等待正在执行的Flush完成()
+    {
+        var publishStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePublish = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _eventBusMock
+            .Setup(e => e.PublishAsync(
+                It.IsAny<TelemetryReceivedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<TelemetryReceivedEvent, CancellationToken>((_, _) => publishStarted.TrySetResult(true))
+            .Returns<TelemetryReceivedEvent, CancellationToken>(async (_, _) =>
+            {
+                await releasePublish.Task;
+            });
+
+        await _service.EnqueueAsync(
+            _tenantId,
+            _deviceId,
+            "temperature",
+            80.0,
+            DateTime.UtcNow);
+
+        var flushTask = _service.FlushAsync();
+        await publishStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var disposeTask = _service.DisposeAsync().AsTask();
+        await Task.Delay(100);
+        disposeTask.IsCompleted.Should().BeFalse(
+            "释放必须等待当前 flush，不能让事件发布在依赖释放后继续执行");
+
+        releasePublish.TrySetResult(true);
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await flushTask;
+    }
+
+    /// <summary>
     /// DedupBatchAsync 单元级验证：传入含批内重复 + DB 已存在键的集合，应精确返回去重后的待写集合。
     /// 不经过队列/校验，直接断言去重算法本身（便于定位是去重逻辑还是写入路径的问题）。
     /// </summary>
@@ -224,5 +329,43 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
         // 去重后仅 2 条（t2、t3）：t1 被 DB 存在性排除，其批内重复被折叠
         deduped.Should().HaveCount(2);
         deduped.Select(i => i.Timestamp).Should().BeEquivalentTo(new[] { t2, t3 });
+    }
+
+    private sealed class ThrowAfterTelemetryInsertInterceptor : DbCommandInterceptor
+    {
+        private int _throwNext;
+
+        public void ThrowAfterNextTelemetryInsert()
+            => Interlocked.Exchange(ref _throwNext, 1);
+
+        public override int NonQueryExecuted(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            int result)
+        {
+            ThrowIfArmed(command);
+            return result;
+        }
+
+        public override ValueTask<int> NonQueryExecutedAsync(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            int result,
+            CancellationToken cancellationToken = default)
+        {
+            ThrowIfArmed(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void ThrowIfArmed(DbCommand command)
+        {
+            if (command.CommandText.Contains(
+                    "INSERT INTO device_telemetry",
+                    StringComparison.OrdinalIgnoreCase)
+                && Interlocked.Exchange(ref _throwNext, 0) == 1)
+            {
+                throw new InvalidOperationException("模拟数据库执行结果丢失");
+            }
+        }
     }
 }

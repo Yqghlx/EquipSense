@@ -8,7 +8,7 @@ namespace EquipAI.Infrastructure.HealthChecks;
 ///
 /// 只检查 LLM 是否配置（可选依赖，未配置属合法降级），不发真实 LLM 请求——LLM 按调用计费，
 /// readinessProbe 每 10s 触发，发真实生成请求会持续消耗 token + 可能触发 LLM 限流影响真实根因分析。
-/// LLM 真实可达性由实际分析请求验证（失败自动降级 L2 + 日志）。对比 MqttHealthCheck 用 TCP connect
+/// LLM 真实可达性由实际分析请求验证（失败自动降级 L2 + 日志）。MQTT 则由 MqttHealthCheck 直接报告实际客户端会话状态。
 /// 探活（几乎免费）合理；LLM 可选 + 按调用计费，用真实请求探活是反模式。
 /// </summary>
 public class LlmHealthCheck : IHealthCheck

@@ -125,7 +125,8 @@ api.interceptors.response.use(
     try {
       // 刷新请求不传 body：HttpOnly Cookie 中 refresh_token 由浏览器自动携带，
       // 后端 Refresh 端点在 body 为空时自动从 Cookie 读取
-      // 注意：v1.3.0 起响应体不再返回 accessToken（[JsonIgnore]），只返回 expiresIn + userInfo
+      // 注意：后端为机器客户端兼容仍保留响应体令牌字段；浏览器路径不读取它们，
+      // 仅使用 HttpOnly Cookie 和 expiresIn + userInfo，避免把令牌写入 Web 存储。
       const response = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
       const { userInfo } = response.data;
 

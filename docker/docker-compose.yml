@@ -171,9 +171,15 @@ services:
       AutoMapper__LicenseKey: "${AUTOMAPPER_LICENSE_KEY:?请在 .env 中设置 AUTOMAPPER_LICENSE_KEY}"
       Jwt__Issuer: "EquipAI"
       Jwt__Audience: "EquipAI"
+      # 浏览器默认不在响应体暴露 JWT；压测/模拟器等机器客户端如需读取令牌，
+      # 必须配置独立的 AUTH_MACHINE_API_KEY 并在请求中发送 X-API-Key。
+      Auth__MachineApiKey: "${AUTH_MACHINE_API_KEY:-}"
       # 网关认证密钥：必须与 edgegateway 服务使用同一变量，保证两侧一致
       # ⚠️ 必须为纯 ASCII（HTTP header 不允许中文），生产环境请替换为强随机值
       Gateway__AuthKey: "${GATEWAY_AUTH_KEY:?请在 .env 中设置 GATEWAY_AUTH_KEY（纯 ASCII）}"
+      # 后端注册/配置拉取只接受该生产实例声明的网关身份，阻断共享密钥导致的跨租户伪造
+      Gateway__Id: "${GATEWAY_ID:-gateway-001}"
+      Gateway__TenantId: "${GATEWAY_TENANT_ID:?请在 .env 中设置 GATEWAY_TENANT_ID（UUID）}"
       # 后端主动代理网关状态/连接测试的精确主机白名单；多主机用逗号分隔
       Gateway__AllowedHosts__0: "${GATEWAY_ALLOWED_HOSTS:-edgegateway}"
       Mqtt__Host: mosquitto
@@ -300,7 +306,7 @@ services:
       # 与后端统一环境名，避免仅设置 ASPNETCORE_ENVIRONMENT 时网关仍使用默认环境。
       DOTNET_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
       Gateway__Id: "${GATEWAY_ID:-gateway-001}"
-      Gateway__TenantId: "${GATEWAY_TENANT_ID:-}"
+      Gateway__TenantId: "${GATEWAY_TENANT_ID:?请在 .env 中设置 GATEWAY_TENANT_ID（UUID）}"
       # 必须落在 edgegateway_data 命名卷中，保障断网缓冲跨容器重建保留。
       Gateway__BufferPath: "${GATEWAY_BUFFER_PATH:-/data/buffer.db}"
       Gateway__MqttBroker: "mosquitto:8883"
@@ -311,7 +317,7 @@ services:
       Gateway__MqttPassword: "${MQTT_PASSWORD:?请在 .env 中设置 MQTT_PASSWORD}"
       # 蓝绿部署通过该变量把网关切到已通过健康门禁的目标后端；普通部署保持默认服务名。
       Gateway__BackendUrl: "${GATEWAY_BACKEND_URL:-http://backend:8080}"
-      Gateway__AuthKey: "${GATEWAY_AUTH_KEY:-}"
+      Gateway__AuthKey: "${GATEWAY_AUTH_KEY:?请在 .env 中设置 GATEWAY_AUTH_KEY（纯 ASCII）}"
       Gateway__UploadIntervalSeconds: "${GATEWAY_UPLOAD_INTERVAL:-5}"
       Gateway__Host: "edgegateway"
       Gateway__HealthPort: "8081"

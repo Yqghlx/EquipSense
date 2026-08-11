@@ -111,6 +111,23 @@ test_validate_env_rejects_invalid_rate_limiting_config() {
   assert_contains "$output" "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"
 }
 
+test_validate_env_rejects_short_machine_api_key() {
+  local env_file="$TEST_ROOT/short-machine-api-key.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' 'AUTH_MACHINE_API_KEY=too-short' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "机器客户端 API Key 过短时生产环境校验不应通过"
+  assert_contains "$output" "AUTH_MACHINE_API_KEY 长度不足 32 个字符"
+}
+
 test_validate_env_rejects_missing_automapper_license() {
   local env_file="$TEST_ROOT/missing-automapper-license.env"
   printf '%s\n' \
@@ -322,6 +339,15 @@ test_production_compose_supports_isolated_tenant2_e2e_credentials() {
   assert_contains "$compose_content" 'SEED_TENANT2_PASSWORD: "${SEED_TENANT2_PASSWORD:-}"'
   assert_contains "$compose_content" 'RateLimiting__AuthPermitLimit: "${RATE_LIMITING_AUTH_PERMIT_LIMIT:-10}"'
   assert_contains "$compose_content" 'Security__PiiEncryptionKey: "${PII_ENCRYPTION_KEY:?请在 .env 中设置 PII_ENCRYPTION_KEY}"'
+  assert_contains "$compose_content" 'Gateway__AuthKey: "${GATEWAY_AUTH_KEY:?请在 .env 中设置 GATEWAY_AUTH_KEY（纯 ASCII）}"'
+  assert_contains "$compose_content" 'Auth__MachineApiKey: "${AUTH_MACHINE_API_KEY:-}"'
+  assert_contains "$compose_content" 'Gateway__Id: "${GATEWAY_ID:-gateway-001}"'
+  assert_contains "$compose_content" 'Gateway__TenantId: "${GATEWAY_TENANT_ID:?请在 .env 中设置 GATEWAY_TENANT_ID（UUID）}"'
+  [[ "$compose_content" != *'Gateway__AuthKey: "${GATEWAY_AUTH_KEY:-}"'* ]] \
+    || fail "边缘网关认证密钥缺失时必须在 Compose 插值阶段失败"
+  assert_contains "$compose_content" 'Gateway__TenantId: "${GATEWAY_TENANT_ID:?请在 .env 中设置 GATEWAY_TENANT_ID（UUID）}"'
+  [[ "$compose_content" != *'Gateway__TenantId: "${GATEWAY_TENANT_ID:-}"'* ]] \
+    || fail "边缘网关租户 UUID 缺失时必须在 Compose 插值阶段失败"
 }
 
 test_production_smoke_exposes_optional_full_e2e_gate() {
@@ -337,6 +363,8 @@ test_production_e2e_preserves_mfa_policy() {
   bootstrap_content="$(cat "$PROJECT_ROOT/tests/scripts/production-e2e-mfa-bootstrap.mjs")"
   assert_contains "$bootstrap_content" '/api/v1/auth/mfa/enroll/setup'
   assert_contains "$bootstrap_content" '/api/v1/auth/mfa/enroll/confirm'
+  assert_contains "$bootstrap_content" 'MFA_BOOTSTRAP_MACHINE_API_KEY'
+  assert_contains "$bootstrap_content" "X-API-Key"
   assert_contains "$bootstrap_content" 'MFA_BOOTSTRAP_TENANT2_PASSWORD'
 
   local auth_content
@@ -462,7 +490,8 @@ test_validate_runtime_files_rejects_invalid_certificates() {
     'SEED_VIEWER_PASSWORD=viewer-password-long' \
     'FRONTEND_URL=https://example.com' \
     'SEQ_ADMIN_PASSWORD=seq-password-long' \
-    'GRAFANA_PASSWORD=grafana-password-long' > "$env_file"
+    'GRAFANA_PASSWORD=grafana-password-long' \
+    'ASPNETCORE_ENVIRONMENT=Development' > "$env_file"
   chmod 600 "$env_file"
   touch \
     "$case_dir/ssl/cert.pem" \
@@ -471,6 +500,7 @@ test_validate_runtime_files_rejects_invalid_certificates() {
     "$case_dir/mqtt-certs/server.crt" \
     "$case_dir/mqtt-certs/server.key" \
     "$case_dir/mosquitto.prod.conf" \
+    "$case_dir/mosquitto.conf" \
     "$case_dir/rabbitmq/rabbitmq.conf" \
     "$case_dir/rabbitmq/definitions.json" \
     "$case_dir/rabbitmq/start.sh" \
@@ -493,9 +523,21 @@ test_validate_runtime_files_rejects_invalid_certificates() {
   assert_contains "$output" "证书"
 
   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/ca.key" \
+    -out "$case_dir/ssl/ca.crt" \
+    -subj "/CN=EquipSense Test Frontend CA" >/dev/null 2>&1
+  openssl req -newkey rsa:2048 -nodes \
     -keyout "$case_dir/ssl/key.pem" \
-    -out "$case_dir/ssl/cert.pem" \
+    -out "$case_dir/ssl/cert.csr" \
     -subj "/CN=example.com" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "$case_dir/ssl/cert.csr" \
+    -CA "$case_dir/ssl/ca.crt" \
+    -CAkey "$case_dir/ssl/ca.key" \
+    -CAcreateserial \
+    -out "$case_dir/ssl/cert.pem" \
+    -days 365 \
+    -sha256 >/dev/null 2>&1
   openssl genrsa -out "$case_dir/ssl/mismatch.key" 2048 >/dev/null 2>&1
   mv "$case_dir/ssl/mismatch.key" "$case_dir/ssl/key.pem"
   set +e
@@ -527,6 +569,83 @@ test_validate_runtime_files_rejects_invalid_certificates() {
   set -e
   [[ "$result_code" -ne 0 ]] || fail "证书主机名与前端地址不匹配时不应通过运行时门禁"
   assert_contains "$output" "Nginx TLS 证书与 FRONTEND_URL 主机名不匹配"
+
+  # SAN 不能只做子串匹配，否则 DNS:example.com.evil 会错误命中 example.com。
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=example.com.evil" \
+    -addext "subjectAltName=DNS:example.com.evil" >/dev/null 2>&1
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "证书 SAN 为相似域名时不应通过运行时门禁"
+  assert_contains "$output" "Nginx TLS 证书与 FRONTEND_URL 主机名不匹配"
+}
+
+test_validate_runtime_files_rejects_production_self_signed_certificates() {
+  local case_dir="$TEST_ROOT/production-self-signed-certificates"
+  local env_file="$case_dir/.env"
+  mkdir -p \
+    "$case_dir/ssl" \
+    "$case_dir/mqtt-certs" \
+    "$case_dir/mosquitto_passwd" \
+    "$case_dir/rabbitmq" \
+    "$case_dir/prometheus" \
+    "$case_dir/grafana/provisioning/datasources" \
+    "$case_dir/grafana/provisioning/dashboards"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  touch \
+    "$case_dir/mosquitto.prod.conf" \
+    "$case_dir/mosquitto.conf" \
+    "$case_dir/rabbitmq/rabbitmq.conf" \
+    "$case_dir/rabbitmq/definitions.json" \
+    "$case_dir/rabbitmq/start.sh" \
+    "$case_dir/prometheus.yml" \
+    "$case_dir/prometheus/rules.yml" \
+    "$case_dir/alertmanager.yml" \
+    "$case_dir/alertmanager-entrypoint.sh" \
+    "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
+    "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
+  printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
+
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=example.com" \
+    -addext "subjectAltName=DNS:example.com" >/dev/null 2>&1
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/mqtt-certs/ca.key" \
+    -out "$case_dir/mqtt-certs/ca.crt" \
+    -subj "/CN=EquipSense Test MQTT CA" \
+    -addext "basicConstraints=critical,CA:TRUE" >/dev/null 2>&1
+  openssl req -newkey rsa:2048 -nodes \
+    -keyout "$case_dir/mqtt-certs/server.key" \
+    -out "$case_dir/mqtt-certs/server.csr" \
+    -subj "/CN=mosquitto" >/dev/null 2>&1
+  printf '%s\n' 'subjectAltName=DNS:mosquitto' > "$case_dir/mqtt-certs/server.ext"
+  openssl x509 -req \
+    -in "$case_dir/mqtt-certs/server.csr" \
+    -CA "$case_dir/mqtt-certs/ca.crt" \
+    -CAkey "$case_dir/mqtt-certs/ca.key" \
+    -CAcreateserial \
+    -out "$case_dir/mqtt-certs/server.crt" \
+    -days 365 \
+    -sha256 \
+    -extfile "$case_dir/mqtt-certs/server.ext" >/dev/null 2>&1
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产环境不应接受自签名 Nginx TLS 证书"
+  assert_contains "$output" "Nginx TLS 证书不得使用自签名证书"
 }
 
 test_validate_runtime_files_gate() {
@@ -555,7 +674,8 @@ test_validate_runtime_files_gate() {
     'SEED_VIEWER_PASSWORD=viewer-password-long' \
     'FRONTEND_URL=https://example.com' \
     'SEQ_ADMIN_PASSWORD=seq-password-long' \
-    'GRAFANA_PASSWORD=grafana-password-long' > "$env_file"
+    'GRAFANA_PASSWORD=grafana-password-long' \
+    'ASPNETCORE_ENVIRONMENT=Production' > "$env_file"
   chmod 600 "$env_file"
 
   local output
@@ -588,9 +708,21 @@ test_validate_runtime_files_gate() {
     "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
     "$case_dir/grafana/provisioning/dashboards/dashboard.yml"
   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/ssl/ca.key" \
+    -out "$case_dir/ssl/ca.crt" \
+    -subj "/CN=EquipSense Test Frontend CA" >/dev/null 2>&1
+  openssl req -newkey rsa:2048 -nodes \
     -keyout "$case_dir/ssl/key.pem" \
-    -out "$case_dir/ssl/cert.pem" \
+    -out "$case_dir/ssl/cert.csr" \
     -subj "/CN=example.com" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "$case_dir/ssl/cert.csr" \
+    -CA "$case_dir/ssl/ca.crt" \
+    -CAkey "$case_dir/ssl/ca.key" \
+    -CAcreateserial \
+    -out "$case_dir/ssl/cert.pem" \
+    -days 365 \
+    -sha256 >/dev/null 2>&1
   openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
     -keyout "$case_dir/mqtt-certs/ca.key" \
     -out "$case_dir/mqtt-certs/ca.crt" \
@@ -625,8 +757,8 @@ test_setup_rejects_new_placeholder_env() {
   cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
   cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
 
-  # 新版 setup.sh 会在复制模板后调用验证器；测试复制验证器时兼容旧代码，
-  # 这样当前版本会因为继续生成证书而失败，证明测试确实能捕获回归。
+  # setup.sh 会在复制模板后调用 Production-only 验证器；凭据门禁不通过时
+  # 不得继续生成任何 TLS/MQTT 或认证运行时文件。
   if [[ -f "$PROJECT_ROOT/docker/validate-env.sh" ]]; then
     cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
   fi
@@ -650,6 +782,216 @@ test_setup_rejects_new_placeholder_env() {
   [[ ! -d "$case_dir/ssl" ]] || fail "凭据未通过时不应继续生成 TLS 文件"
   [[ ! -d "$case_dir/mqtt-certs" ]] || fail "凭据未通过时不应继续生成 MQTT 证书"
   assert_contains "$output" "必填环境变量 PG_PASSWORD"
+}
+
+test_setup_rejects_non_production_environment_explicitly() {
+  local case_dir="$TEST_ROOT/setup-non-production"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  sed 's/^FRONTEND_URL=/ASPNETCORE_ENVIRONMENT=Development\nFRONTEND_URL=/' \
+    "$TEST_ROOT/valid.env" > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  # setup.sh 只需要 Docker 的版本探测；测试不启动或修改任何容器。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非 Production 环境不应进入生产 setup 流程"
+  assert_contains "$output" "setup.sh 仅支持 Production"
+  [[ ! -d "$case_dir/ssl" ]] || fail "非 Production 环境被拒绝前不应生成 TLS 文件"
+  [[ ! -d "$case_dir/mqtt-certs" ]] || fail "非 Production 环境被拒绝前不应生成 MQTT 证书"
+}
+
+test_setup_rejects_expired_runtime_certificates() {
+  local case_dir="$TEST_ROOT/setup-expired-cert"
+  mkdir -p \
+    "$case_dir/bin" \
+    "$case_dir/ssl" \
+    "$case_dir/mqtt-certs" \
+    "$case_dir/mosquitto_passwd" \
+    "$case_dir/rabbitmq" \
+    "$case_dir/prometheus" \
+    "$case_dir/grafana/provisioning/datasources" \
+    "$case_dir/grafana/provisioning/dashboards"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  : > "$case_dir/.env.example"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  # Nginx 证书有效但已进入 30 天窗口；setup.sh 不应把它当作成功配置。
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+    -keyout "$case_dir/ssl/key.pem" \
+    -out "$case_dir/ssl/cert.pem" \
+    -subj "/CN=example.com" \
+    -addext "subjectAltName=DNS:example.com" >/dev/null 2>&1
+
+  # MQTT 证书保持有效，确保测试只命中过期的 Nginx 证书原因。
+  openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+    -keyout "$case_dir/mqtt-certs/ca.key" \
+    -out "$case_dir/mqtt-certs/ca.crt" \
+    -subj "/CN=EquipSense Test MQTT CA" \
+    -addext "basicConstraints=critical,CA:TRUE" >/dev/null 2>&1
+  openssl req -newkey rsa:2048 -nodes \
+    -keyout "$case_dir/mqtt-certs/server.key" \
+    -out "$case_dir/mqtt-certs/server.csr" \
+    -subj "/CN=mosquitto" >/dev/null 2>&1
+  printf '%s\n' 'subjectAltName=DNS:mosquitto' > "$case_dir/mqtt-certs/server.ext"
+  openssl x509 -req \
+    -in "$case_dir/mqtt-certs/server.csr" \
+    -CA "$case_dir/mqtt-certs/ca.crt" \
+    -CAkey "$case_dir/mqtt-certs/ca.key" \
+    -CAcreateserial \
+    -out "$case_dir/mqtt-certs/server.crt" \
+    -days 365 \
+    -sha256 \
+    -extfile "$case_dir/mqtt-certs/server.ext" >/dev/null 2>&1
+  printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
+
+  touch \
+    "$case_dir/mosquitto.prod.conf" \
+    "$case_dir/mosquitto.conf" \
+    "$case_dir/rabbitmq/rabbitmq.conf" \
+    "$case_dir/rabbitmq/definitions.json" \
+    "$case_dir/rabbitmq/start.sh" \
+    "$case_dir/prometheus.yml" \
+    "$case_dir/prometheus/rules.yml" \
+    "$case_dir/alertmanager.yml" \
+    "$case_dir/alertmanager-entrypoint.sh" \
+    "$case_dir/grafana/provisioning/datasources/prometheus.yml" \
+    "$case_dir/grafana/provisioning/dashboards/dashboard.yml" \
+    "$case_dir/docker-compose.yml" \
+    "$case_dir/docker-compose.dev.yml" \
+    "$case_dir/Dockerfile.backend" \
+    "$case_dir/Dockerfile.frontend" \
+    "$case_dir/entrypoint.sh" \
+    "$case_dir/nginx-entrypoint.sh"
+  touch "$case_dir/nginx.conf"
+
+  # setup.sh 只需要 Docker 的版本探测；不启动或修改任何容器。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "已有过期运行时证书时 setup.sh 不应返回成功"
+  assert_contains "$output" "Nginx TLS 证书 已过期或将在 30 天内过期"
+}
+
+test_setup_rejects_generating_self_signed_certificates_in_production() {
+  local case_dir="$TEST_ROOT/setup-production-missing-certs"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$TEST_ROOT/valid.env" "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  # setup.sh 只需要 Docker 的版本探测；测试不启动或修改任何容器。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产环境缺少运行时证书时 setup.sh 不应自动生成自签名证书"
+  assert_contains "$output" "生产环境禁止自动生成自签名 TLS/MQTT 证书"
+  [[ ! -d "$case_dir/ssl" ]] || fail "生产环境门禁失败前不应生成 Nginx 自签名证书"
+  [[ ! -d "$case_dir/mqtt-certs" ]] || fail "生产环境门禁失败前不应生成 MQTT 自签名证书"
+}
+
+test_setup_mosquitto_does_not_expose_password_in_process_arguments() {
+  local case_dir="$TEST_ROOT/setup-mosquitto-stdin"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup-mosquitto.sh" "$case_dir/setup-mosquitto.sh"
+  printf '%s\n' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-that-must-not-be-an-argument' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  # 伪造官方工具：记录命令行和标准输入，并生成一个最小可用密码文件。
+  # 这样可以在不依赖本机 Mosquitto 版本的情况下锁定“密码只能走 stdin”的契约。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\\n" "$*" > "$TEST_CASE_DIR/args"' \
+    'cat > "$TEST_CASE_DIR/stdin"' \
+    'password_file=""' \
+    'previous=""' \
+    'for argument in "$@"; do' \
+    '  if [[ "$previous" = "-c" ]]; then password_file="$argument"; fi' \
+    '  previous="$argument"' \
+    'done' \
+    'printf "%s\\n" "loadtest:dummy-hash" > "$password_file"' > "$case_dir/bin/mosquitto_passwd"
+  chmod +x "$case_dir/bin/mosquitto_passwd"
+
+  local output
+  if ! output="$(cd "$case_dir" && TEST_CASE_DIR="$case_dir" PATH="$case_dir/bin:$PATH" bash ./setup-mosquitto.sh 2>&1)"; then
+    printf '%s\n' "$output" >&2
+    fail "Mosquitto 密码文件配置应成功"
+  fi
+
+  [[ "$(cat "$case_dir/args")" != *"mqtt-password-that-must-not-be-an-argument"* ]] \
+    || fail "MQTT 密码不得出现在 mosquitto_passwd 命令行参数中"
+  [[ "$(cat "$case_dir/stdin")" = $'mqtt-password-that-must-not-be-an-argument\nmqtt-password-that-must-not-be-an-argument' ]] \
+    || fail "MQTT 密码必须通过标准输入交给密码工具"
+
+  local rejected_output
+  local rejected_code
+  set +e
+  rejected_output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup-mosquitto.sh loadtest forbidden-password 2>&1)"
+  rejected_code=$?
+  set -e
+  [[ "$rejected_code" -ne 0 ]] || fail "通过命令行传递 MQTT 密码时必须拒绝执行"
+  assert_contains "$rejected_output" "禁止通过命令行参数传递 MQTT 密码"
 }
 
 test_backup_includes_attachments() {
@@ -700,6 +1042,7 @@ test_backup_includes_attachments() {
   [[ -n "$attachment_file" ]] || fail "应生成工单附件备份"
   [[ "$(head -c 5 "$dump_file")" = "PGDMP" ]] || fail "PostgreSQL 备份应使用 custom format"
   tar -tzf "$attachment_file" | grep -q 'report.txt' || fail "附件归档中缺少测试文件"
+  [[ ! -d "$backup_dir/.backup.lock" ]] || fail "备份成功退出后必须释放单实例锁"
 
   local backup_mode
   local file_mode
@@ -803,6 +1146,109 @@ test_backup_rejects_missing_remote_target() {
   assert_contains "$output" "S3_BUCKET"
 }
 
+test_backup_rejects_invalid_retention_config() {
+  local case_dir="$TEST_ROOT/backup-invalid-retention"
+  local backup_dir="$case_dir/backups"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'BACKUP_REDIS=false' \
+    'BACKUP_ATTACHMENTS=false' \
+    'RETAIN_DAYS=not-a-number' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" bash "$case_dir/backup.sh" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非法 RETAIN_DAYS 不应让备份脚本成功"
+  assert_contains "$output" "RETAIN_DAYS 必须是大于 0 的整数"
+}
+
+test_backup_skips_remote_sync_after_local_failure() {
+  local case_dir="$TEST_ROOT/backup-partial-remote-sync"
+  local backup_dir="$case_dir/backups"
+  local aws_log="$case_dir/aws.log"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'PG_CONTAINER=missing-postgres' \
+    'BACKUP_REDIS=false' \
+    'BACKUP_ATTACHMENTS=false' \
+    'S3_SYNC=true' \
+    'S3_BUCKET=s3://equipsense-backups' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "${1:-}" in' \
+    '  ps) printf "unrelated-container\\n" ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$BACKUP_AWS_LOG"' \
+    'exit 0' > "$case_dir/bin/aws"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/aws"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" BACKUP_AWS_LOG="$aws_log" bash "$case_dir/backup.sh" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "本地备份失败时整体备份不应成功"
+  assert_contains "$output" "本地备份不完整，跳过 S3 同步"
+  [[ ! -f "$aws_log" ]] || fail "本地备份失败时不应把不完整目录同步到 S3"
+}
+
+test_backup_rejects_enabled_redis_without_password() {
+  local case_dir="$TEST_ROOT/backup-redis-no-password"
+  local backup_dir="$case_dir/backups"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'PG_CONTAINER=fake-postgres' \
+    'BACKUP_REDIS=true' \
+    'BACKUP_ATTACHMENTS=false' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
+    '    exit 1 ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" bash "$case_dir/backup.sh" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "启用 Redis 备份但缺少密码时不应返回成功"
+  assert_contains "$output" "BACKUP_REDIS=true 但 REDIS_PASSWORD 未设置"
+}
+
 test_backup_rejects_requested_redis_failure() {
   local case_dir="$TEST_ROOT/backup-redis"
   local backup_dir="$case_dir/backups"
@@ -898,6 +1344,136 @@ test_backup_uses_configured_redis_container_and_waits_for_snapshot() {
   [[ "$(head -c 5 "$redis_file")" = "REDIS" ]] || fail "Redis 备份应包含 RDB 文件头"
   grep -q 'fake-redis' "$docker_log" || fail "备份应使用 REDIS_CONTAINER 配置，而不是硬编码容器名"
   grep -q 'INFO persistence' "$docker_log" || fail "备份复制前应等待 Redis 后台快照完成"
+}
+
+test_backup_does_not_expose_credentials_in_docker_arguments() {
+  local case_dir="$TEST_ROOT/backup-credential-arguments"
+  local backup_dir="$case_dir/backups"
+  local docker_log="$case_dir/docker.log"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=pg-secret-that-must-not-be-logged' \
+    'PG_CONTAINER=fake-postgres' \
+    'REDIS_CONTAINER=fake-redis' \
+    'REDIS_PASSWORD=redis-secret-that-must-not-be-logged' \
+    'BACKUP_REDIS=true' \
+    'BACKUP_ATTACHMENTS=false' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  # 记录 Docker CLI 实际收到的参数；真实密码不应出现在命令参数或调用日志中。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$BACKUP_DOCKER_LOG"' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\nfake-redis\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then read -r supplied_password; [[ "$supplied_password" = "pg-secret-that-must-not-be-logged" ]]; printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
+    '    if [[ "$*" == *"redis-cli"* && "$*" == *"BGSAVE"* ]]; then read -r supplied_password; [[ "$supplied_password" = "redis-secret-that-must-not-be-logged" ]]; exit 0; fi' \
+    '    if [[ "$*" == *"redis-cli"* && "$*" == *"INFO persistence"* ]]; then read -r supplied_password; [[ "$supplied_password" = "redis-secret-that-must-not-be-logged" ]]; printf "rdb_bgsave_in_progress:0\\r\\nrdb_last_bgsave_status:ok\\r\\n"; exit 0; fi' \
+    '    exit 1 ;;' \
+    '  cp) printf "REDIS0009" > "$3" ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  if ! PATH="$case_dir/bin:$PATH" BACKUP_DOCKER_LOG="$docker_log" \
+    bash "$case_dir/backup.sh" > "$case_dir/backup.log" 2>&1; then
+    cat "$case_dir/backup.log" >&2
+    fail "备份脚本应在凭据通过标准输入传递时成功完成"
+  fi
+
+  ! grep -Fq 'pg-secret-that-must-not-be-logged' "$docker_log" \
+    || fail "PostgreSQL 密码不应出现在 docker exec 参数中"
+  ! grep -Fq 'redis-secret-that-must-not-be-logged' "$docker_log" \
+    || fail "Redis 密码不应出现在 docker exec 参数中"
+  ! grep -Fq 'PGPASSWORD=' "$docker_log" \
+    || fail "PostgreSQL 密码不应通过 docker exec -e 传递"
+  ! grep -Fq 'REDISCLI_AUTH=' "$docker_log" \
+    || fail "Redis 密码不应通过 docker exec -e 传递"
+}
+
+test_backup_rejects_retention_cleanup_failure() {
+  local case_dir="$TEST_ROOT/backup-retention-cleanup-failure"
+  local backup_dir="$case_dir/backups"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'PG_CONTAINER=fake-postgres' \
+    'BACKUP_REDIS=false' \
+    'BACKUP_ATTACHMENTS=false' \
+    'RETAIN_DAYS=7' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
+    '    exit 1 ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 42' > "$case_dir/bin/find"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/find"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" bash "$case_dir/backup.sh" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "旧备份清理失败时整体备份不应返回成功"
+  assert_contains "$output" "旧备份清理失败"
+}
+
+test_backup_rejects_overlapping_runs() {
+  local case_dir="$TEST_ROOT/backup-overlap"
+  local backup_dir="$case_dir/backups"
+  mkdir -p "$case_dir/bin" "$backup_dir/.backup.lock"
+
+  cp "$PROJECT_ROOT/docker/backup.sh" "$case_dir/backup.sh"
+  printf '%s\n' \
+    'PG_PASSWORD=test-password-long' \
+    'PG_CONTAINER=fake-postgres' \
+    'BACKUP_REDIS=false' \
+    'BACKUP_ATTACHMENTS=false' \
+    "BACKUP_DIR=$backup_dir" > "$case_dir/.env"
+  printf '%s\n' '999999' > "$backup_dir/.backup.lock/pid"
+
+  # Docker 即使可用，也不应在检测到已有锁后开始导出。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'case "${1:-}" in' \
+    '  ps) printf "fake-postgres\\n" ;;' \
+    '  exec)' \
+    '    if [[ "$*" == *"pg_dump"* ]]; then printf "PGDMP\\001\\n"; exit 0; fi' \
+    '    if [[ "$*" == *"pg_restore"* ]]; then cat >/dev/null; exit 0; fi' \
+    '    exit 1 ;;' \
+    '  *) exit 1 ;;' \
+    'esac' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" bash "$case_dir/backup.sh" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "重叠备份任务不应返回成功"
+  assert_contains "$output" "已有备份任务"
 }
 
 create_restore_fixtures() {
@@ -1025,6 +1601,7 @@ test_restore_confirm_cleans_attachments_without_running_backend() {
   fi
 
   assert_contains "$output" "恢复完成"
+  [[ ! -d "$case_dir/.env.restore.lock" ]] || fail "恢复成功退出后必须释放单实例锁"
   grep -q 'compose.yml.*compose.prod.yml' "$docker_log" \
     || fail "确认恢复应同时传递基础 Compose 和生产覆盖文件"
   grep -q 'DROP DATABASE' "$docker_log" \
@@ -1175,6 +1752,7 @@ test_restore_failure_exits_timescale_restore_mode() {
 
   [[ "$result_code" -ne 0 ]] || fail "pg_restore 失败时恢复必须返回非零"
   assert_contains "$output" "恢复异常"
+  [[ ! -d "$case_dir/.env.restore.lock" ]] || fail "恢复失败退出后也必须释放单实例锁"
   grep -q 'timescaledb_pre_restore' "$docker_log" \
     || fail "恢复失败测试必须确认曾进入 TimescaleDB restoring 模式"
   grep -q 'timescaledb_post_restore' "$docker_log" \
@@ -1251,6 +1829,41 @@ test_restore_rejects_corrupted_redis_backup() {
 
   [[ "$result_code" -ne 0 ]] || fail "损坏的 Redis RDB 备份不应通过恢复前校验"
   assert_contains "$output" "RDB"
+}
+
+test_restore_rejects_overlapping_confirm_runs() {
+  local case_dir="$TEST_ROOT/restore-overlap"
+  local docker_called="$case_dir/docker-called"
+  mkdir -p "$case_dir/bin"
+  create_custom_restore_fixture "$case_dir"
+  : > "$case_dir/compose.yml"
+  mkdir "$case_dir/.env.restore.lock"
+  printf '%s\n' '999999' > "$case_dir/.env.restore.lock/pid"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$RESTORE_DOCKER_CALLED"' \
+    'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/curl"
+  chmod +x "$case_dir/bin/docker" "$case_dir/bin/curl"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$docker_called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --compose-file "$case_dir/compose.yml" \
+      --db-backup "$case_dir/database.dump" \
+      --skip-attachments --confirm 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "重叠的确认恢复任务不应返回成功"
+  assert_contains "$output" "已有恢复任务"
+  [[ ! -f "$docker_called" ]] || fail "检测到恢复锁后不应调用 Docker"
 }
 
 create_deploy_fixtures() {
@@ -1358,6 +1971,27 @@ test_deploy_preflight_failure_does_not_mutate_services() {
   [[ "$output" != *"部署成功"* ]] || fail "预检失败时不应报告部署成功"
 }
 
+test_deploy_rejects_overlapping_runs() {
+  local case_dir="$TEST_ROOT/deploy-overlap"
+  local docker_log="$case_dir/docker.log"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  mkdir "$case_dir/.deploy.lock"
+  printf '%s\n' '999999' > "$case_dir/.deploy.lock/pid"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_DOCKER_LOG="$docker_log" \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "重叠部署任务不应返回成功"
+  assert_contains "$output" "已有部署任务"
+  [[ ! -s "$docker_log" ]] || fail "检测到部署锁后不应调用 Docker"
+}
+
 test_deploy_success_updates_version_atomically() {
   local case_dir="$TEST_ROOT/deploy-success"
   create_deploy_fixtures "$case_dir"
@@ -1372,6 +2006,7 @@ test_deploy_success_updates_version_atomically() {
 
   [[ "$(cat "$case_dir/.last-deployed-tag")" = "2.0.0" ]] \
     || fail "成功部署后应原子记录目标版本"
+  [[ ! -d "$case_dir/.deploy.lock" ]] || fail "部署成功退出后必须释放单实例锁"
   assert_contains "$output" "部署成功"
   grep -q '^2.0.0|.* pull backend frontend' "$case_dir/docker.log" \
     || fail "部署应使用目标 tag 拉取 backend/frontend"
@@ -1433,6 +2068,7 @@ test_deploy_health_failure_rolls_back_and_verifies_health() {
   [[ "$result_code" -ne 0 ]] || fail "目标版本健康失败后部署必须返回非零"
   [[ "$(cat "$case_dir/.last-deployed-tag")" = "1.0.0" ]] \
     || fail "回滚后版本记录必须保持旧版本"
+  [[ ! -d "$case_dir/.deploy.lock" ]] || fail "部署失败回滚后必须释放单实例锁"
   assert_contains "$output" "回滚验证通过"
   grep -q '^1.0.0|.* up .*--pull never.*backend frontend' "$case_dir/docker.log" \
     || fail "健康失败后应使用本机旧镜像回滚 backend/frontend"
@@ -1596,6 +2232,20 @@ test_docker_backend_build_is_reproducible() {
   assert_contains "$dockerfile_content" "--no-restore"
 }
 
+test_nginx_does_not_log_signalr_query_tokens() {
+  local nginx_content bluegreen_content
+  nginx_content="$(cat "$PROJECT_ROOT/docker/nginx.conf")"
+  bluegreen_content="$(cat "$PROJECT_ROOT/docker/nginx.bluegreen.conf")"
+
+  local nginx_hub_block bluegreen_hub_block
+  nginx_hub_block="$(sed -n '/location \/hubs\//,/^    }/p' "$PROJECT_ROOT/docker/nginx.conf")"
+  bluegreen_hub_block="$(sed -n '/location \/hubs\//,/^    }/p' "$PROJECT_ROOT/docker/nginx.bluegreen.conf")"
+  assert_contains "$nginx_hub_block" "access_log off;"
+  assert_contains "$bluegreen_hub_block" "access_log off;"
+  assert_contains "$nginx_content" "非浏览器兼容客户端可能把 access_token 放在 query string"
+  assert_contains "$bluegreen_content" "非浏览器兼容客户端可能把 access_token 放在 query string"
+}
+
 test_frontend_runtime_installs_certificate_check_dependency() {
   local dockerfile_content
   dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.frontend")"
@@ -1621,6 +2271,7 @@ test_edgegateway_production_runtime_contract() {
   assert_contains "$compose_content" 'edgegateway_data:/data'
   assert_contains "$options_content" 'public string BufferPath'
   assert_contains "$program_content" 'GatewayConfigurationValidator.Validate'
+  assert_contains "$program_content" 'sp.GetRequiredService<GatewayOptions>().HealthPort'
   assert_contains "$program_content" 'Environment.ExitCode = 1'
 }
 
@@ -1684,7 +2335,27 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "/api/v1/gateways"
   assert_contains "$smoke_script" "jq -r"
   assert_contains "$smoke_script" "SMOKE_RUN_E2E"
+  assert_contains "$smoke_script" 'MFA_BOOTSTRAP_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY"'
+  assert_contains "$smoke_script" 'X-API-Key: $AUTH_MACHINE_API_KEY'
+  assert_contains "$smoke_script" "smoke-ca"
+  assert_contains "$smoke_script" "openssl x509 -req"
+  [[ "$smoke_script" != *'bash "$RUNTIME_DOCKER/generate-cert.sh"'* ]] \
+    || fail "Production smoke 不得使用自签名 Nginx 证书生成脚本"
+  assert_contains "$(cat "$PROJECT_ROOT/frontend/e2e-comprehensive/helpers/auth.ts")" 'PLAYWRIGHT_MACHINE_API_KEY'
+  for direct_login_file in \
+    frontend/e2e-comprehensive/01-auth/force-password-change.spec.ts \
+    frontend/e2e-comprehensive/99-manual-audit/page-audit.spec.ts \
+    frontend/e2e-comprehensive/99-manual-audit/data-integrity.spec.ts \
+    frontend/e2e-comprehensive/99-manual-audit/alert-pipeline.spec.ts \
+    frontend/e2e-comprehensive/99-manual-audit/permission-boundary.spec.ts; do
+    assert_contains "$(cat "$PROJECT_ROOT/$direct_login_file")" 'MACHINE_API_HEADERS'
+  done
   assert_contains "$smoke_script" "playwright test e2e-comprehensive"
+  assert_contains "$smoke_script" "printf '%s\\n%s\\n' \"\$MQTT_PASSWORD\" \"\$MQTT_PASSWORD\""
+  [[ "$smoke_script" != *"mosquitto_passwd -c -b"* ]] \
+    || fail "Production smoke 不得使用 -b 参数暴露 MQTT 密码"
+  [[ "$smoke_script" != *'mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" "$MQTT_PASSWORD"'* ]] \
+    || fail "Production smoke 不得把 MQTT 密码作为命令行参数传递"
 
   local smoke_block
   smoke_block="$(sed -n '/^  production-smoke:/,/^  release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
@@ -1771,6 +2442,44 @@ test_bluegreen_has_fail_closed_preflight() {
     || fail "蓝绿部署必须在 GHCR 登录和拉取镜像之前完成配置校验"
 }
 
+test_deploy_paths_share_single_instance_lock() {
+  local rolling_script bluegreen_script
+  rolling_script="$(cat "$PROJECT_ROOT/docker/deploy-production.sh")"
+  bluegreen_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
+  assert_contains "$rolling_script" 'DEPLOY_LOCK_DIR="$COMPOSE_DIR/.deploy.lock"'
+  assert_contains "$bluegreen_script" 'BLUEGREEN_LOCK_DIR="$COMPOSE_DIR/.deploy.lock"'
+  assert_contains "$bluegreen_script" 'release_bluegreen_lock'
+}
+
+test_bluegreen_updates_upstream_atomically() {
+  local bluegreen_script
+  bluegreen_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
+  assert_contains "$bluegreen_script" 'mktemp "$UPSTREAM_FILE.XXXXXX"'
+  assert_contains "$bluegreen_script" 'mv -f -- "$UPSTREAM_TEMP_FILE" "$UPSTREAM_FILE"'
+}
+
+test_bluegreen_backend_health_check_has_timeout() {
+  local bluegreen_script
+  bluegreen_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
+  assert_contains "$bluegreen_script" '--connect-timeout 5 --max-time 10'
+  assert_contains "$bluegreen_script" '"http://localhost:$TARGET_BACKEND_PORT/health"'
+}
+
+test_bluegreen_validates_target_tag() {
+  local bluegreen_script
+  bluegreen_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
+  assert_contains "$bluegreen_script" '[[ $# -eq 1 ]]'
+  assert_contains "$bluegreen_script" 'is_valid_tag "$TAG"'
+}
+
+test_bluegreen_state_files_are_atomic() {
+  local bluegreen_script
+  bluegreen_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
+  assert_contains "$bluegreen_script" 'write_state_atomic'
+  assert_contains "$bluegreen_script" 'write_state_atomic ".active-color" "$TARGET_COLOR"'
+  assert_contains "$bluegreen_script" 'write_state_atomic ".last-deployed-tag" "$TAG"'
+}
+
 test_bluegreen_keeps_edgegateway_on_target_backend() {
   local deploy_script compose_content base_compose
   deploy_script="$(cat "$PROJECT_ROOT/scripts/deploy-bluegreen.sh")"
@@ -1843,6 +2552,7 @@ case "${1:-all}" in
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
+    test_validate_env_rejects_short_machine_api_key
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
@@ -1857,15 +2567,26 @@ case "${1:-all}" in
     test_validate_env_rejects_ephemeral_jaeger_storage_in_production
     test_validate_env_rejects_invalid_alert_webhook_url
     test_validate_runtime_files_rejects_invalid_certificates
+    test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
+    test_setup_rejects_non_production_environment_explicitly
+    test_setup_rejects_expired_runtime_certificates
+    test_setup_rejects_generating_self_signed_certificates_in_production
+    test_setup_mosquitto_does_not_expose_password_in_process_arguments
     ;;
   backup)
     test_backup_includes_attachments
     test_backup_s3_storage_includes_object_prefix
     test_backup_rejects_missing_remote_target
+    test_backup_rejects_invalid_retention_config
+    test_backup_skips_remote_sync_after_local_failure
+    test_backup_rejects_enabled_redis_without_password
     test_backup_rejects_requested_redis_failure
     test_backup_uses_configured_redis_container_and_waits_for_snapshot
+    test_backup_does_not_expose_credentials_in_docker_arguments
+    test_backup_rejects_retention_cleanup_failure
+    test_backup_rejects_overlapping_runs
     ;;
   restore)
     test_restore_dry_run_does_not_mutate_services
@@ -1878,9 +2599,11 @@ case "${1:-all}" in
     test_restore_rejects_corrupted_archive
     test_restore_rejects_unsafe_attachment_archive
     test_restore_rejects_corrupted_redis_backup
+    test_restore_rejects_overlapping_confirm_runs
     ;;
   deploy)
     test_deploy_preflight_failure_does_not_mutate_services
+    test_deploy_rejects_overlapping_runs
     test_deploy_success_updates_version_atomically
     test_deploy_uses_edge_port_from_env_for_health_check
     test_deploy_final_status_display_failure_does_not_reverse_success
@@ -1897,6 +2620,7 @@ case "${1:-all}" in
     test_ci_build_disables_unreliable_build_servers
     test_docker_build_context_excludes_local_artifacts_and_secrets
     test_docker_backend_build_is_reproducible
+    test_nginx_does_not_log_signalr_query_tokens
     test_frontend_runtime_installs_certificate_check_dependency
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
@@ -1906,11 +2630,17 @@ case "${1:-all}" in
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
+    test_deploy_paths_share_single_instance_lock
+    test_bluegreen_updates_upstream_atomically
+    test_bluegreen_backend_health_check_has_timeout
+    test_bluegreen_validates_target_tag
+    test_bluegreen_state_files_are_atomic
     ;;
   all)
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
+    test_validate_env_rejects_short_machine_api_key
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
@@ -1925,13 +2655,24 @@ case "${1:-all}" in
     test_validate_env_rejects_ephemeral_jaeger_storage_in_production
     test_validate_env_rejects_invalid_alert_webhook_url
     test_validate_runtime_files_rejects_invalid_certificates
+    test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
     test_setup_rejects_new_placeholder_env
+    test_setup_rejects_non_production_environment_explicitly
+    test_setup_rejects_expired_runtime_certificates
+    test_setup_rejects_generating_self_signed_certificates_in_production
+    test_setup_mosquitto_does_not_expose_password_in_process_arguments
     test_backup_includes_attachments
     test_backup_s3_storage_includes_object_prefix
     test_backup_rejects_missing_remote_target
+    test_backup_rejects_invalid_retention_config
+    test_backup_skips_remote_sync_after_local_failure
+    test_backup_rejects_enabled_redis_without_password
     test_backup_rejects_requested_redis_failure
     test_backup_uses_configured_redis_container_and_waits_for_snapshot
+    test_backup_does_not_expose_credentials_in_docker_arguments
+    test_backup_rejects_retention_cleanup_failure
+    test_backup_rejects_overlapping_runs
     test_restore_dry_run_does_not_mutate_services
     test_restore_does_not_execute_env_file
     test_restore_dry_run_accepts_custom_backup
@@ -1942,7 +2683,9 @@ case "${1:-all}" in
     test_restore_rejects_corrupted_archive
     test_restore_rejects_unsafe_attachment_archive
     test_restore_rejects_corrupted_redis_backup
+    test_restore_rejects_overlapping_confirm_runs
     test_deploy_preflight_failure_does_not_mutate_services
+    test_deploy_rejects_overlapping_runs
     test_deploy_success_updates_version_atomically
     test_deploy_uses_edge_port_from_env_for_health_check
     test_deploy_final_status_display_failure_does_not_reverse_success
@@ -1957,6 +2700,7 @@ case "${1:-all}" in
     test_ci_build_disables_unreliable_build_servers
     test_docker_build_context_excludes_local_artifacts_and_secrets
     test_docker_backend_build_is_reproducible
+    test_nginx_does_not_log_signalr_query_tokens
     test_frontend_runtime_installs_certificate_check_dependency
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
@@ -1966,6 +2710,11 @@ case "${1:-all}" in
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
+    test_deploy_paths_share_single_instance_lock
+    test_bluegreen_updates_upstream_atomically
+    test_bluegreen_backend_health_check_has_timeout
+    test_bluegreen_validates_target_tag
+    test_bluegreen_state_files_are_atomic
     test_bluegreen_router_does_not_cross_color_dependency
     test_bluegreen_has_fail_closed_preflight
     test_bluegreen_keeps_edgegateway_on_target_backend

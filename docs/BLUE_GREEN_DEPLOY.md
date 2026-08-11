@@ -50,6 +50,7 @@
 | `docker/nginx.bluegreen.conf` | router 容器 Nginx 配置（含 upstream_active include） |
 | `docker/upstream-active.conf` | 当前活跃色 upstream（由部署脚本维护，reload 生效） |
 | `docker/.active-color` | 当前活跃色记录（blue/green，首次部署默认 blue） |
+| `docker/.deploy.lock` | 发布运行时单实例锁（由滚动和蓝绿脚本共同使用，遗留锁需人工确认） |
 | `docker/deploy-production.sh` | 默认单实例滚动部署（预检 → 重建三类应用服务 → 三重健康门禁 → 已验证回滚） |
 | `scripts/deploy-bluegreen.sh` | 部署编排脚本（拉三类镜像 → 后端健康 → 网关切换并复验 → 切换 → 停旧） |
 
@@ -104,7 +105,7 @@ GHCR_PULL_USER=xxx GHCR_PULL_TOKEN=xxx \
 2. **拉镜像** — GHCR 登录 + pull 目标色 backend/frontend 和共享 edgegateway（旧色仍服务）
 3. **后端健康门禁** — 轮询目标色 `/health` 最多 120s（旧色不受影响）
 4. **切换边缘网关** — 以 `GATEWAY_BACKEND_URL=http://backend-<目标色>:8080` 重建网关，并验证 `http://localhost:18081/health`；目标后端启动初始化由 PostgreSQL advisory lock 串行保护
-5. **原子切换** — 重写 `upstream-active.conf` → `nginx -s reload`（<1s 中断）
+5. **原子切换** — 通过同目录临时文件和 `mv` 替换 `upstream-active.conf` → `nginx -s reload`（<1s 中断）
 6. **drain 旧色** — 等待 30s 让现有连接完成 → stop 旧色
 7. **记录** — 更新 `.active-color` + `.last-deployed-tag`
 

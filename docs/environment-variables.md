@@ -92,7 +92,7 @@ CIDR 网段；这样认证限流可以按真实客户端 IP 工作，同时不�
 | `Mqtt__Username` | MQTT 用户名 | — | 生产环境必填 |
 | `Mqtt__Password` | MQTT 密码 | — | 生产环境必填 |
 
-生产 Docker Compose 使用 8883/TLS，并要求 `MQTT_USERNAME`、`MQTT_PASSWORD` 显式配置；开发 Compose 仍使用 1883 明文。生产校验器会拒绝 `MQTT_PASSWORD` 与其他基础设施密码、安全密钥或种子账户密码复用，拒绝重复环境变量和非 `Production` 运行环境，且不会在错误输出中打印凭据值。部署门禁还会校验 Nginx/MQTT 证书的格式、30 天有效期、证书-私钥匹配关系和 MQTT CA 链；证书文件存在但为空、过期或错配时仍会阻断部署。
+生产 Docker Compose 使用 8883/TLS，并要求 `MQTT_USERNAME`、`MQTT_PASSWORD` 显式配置；开发 Compose 仍使用 1883 明文。生产校验器会拒绝 `MQTT_PASSWORD` 与其他基础设施密码、安全密钥或种子账户密码复用，拒绝重复环境变量和非 `Production` 运行环境，且不会在错误输出中打印凭据值。部署门禁还会校验 Nginx/MQTT 证书的格式、30 天有效期、生产叶子证书不能自签名、证书-私钥匹配关系和 MQTT CA 链；证书文件存在但为空、过期、自签名或错配时仍会阻断部署。
 
 ## 生产种子账户
 
@@ -206,12 +206,20 @@ PostgreSQL 新备份使用 custom format（文件名为 `*.dump`，由容器内 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
 | `Gateway__AuthKey` | 网关认证密钥 | — | 使用网关时必填 |
+| `Gateway__Id` / `GATEWAY_ID` | 后端允许注册和拉取配置的唯一网关标识；生产必须与边缘网关一致 | `gateway-001` | 生产环境必填 |
+| `Gateway__TenantId` / `GATEWAY_TENANT_ID` | 后端允许注册和拉取配置的唯一租户 UUID；生产必须与边缘网关一致 | — | 生产环境必填 |
 | `GATEWAY_ALLOWED_HOSTS` | 后端代理网关状态/连接测试的精确主机白名单，多主机逗号分隔 | `edgegateway`（Docker） | 使用网关时必填 |
 | `Gateway__DefaultGatewayId` | 默认网关标识 | `gateway-001` | 否 |
 | `Gateway__HealthPort` | 网关健康端点端口 | `8081` | 否 |
 | `Gateway__Host` | 网关主机地址 | `localhost` | 否 |
-| `Gateway__BackendUrl` / `GATEWAY_BACKEND_URL` | 网关上传目标后端；蓝绿部署由编排脚本临时切到目标颜色 | `http://backend:8080` | 否 |
+| `Gateway__BackendUrl` / `GATEWAY_BACKEND_URL` | 网关上传目标后端；蓝绿部署由编排脚本临时切到目标颜色；Production 必须是不带用户信息的绝对 `http://`/`https://` 地址 | `http://backend:8080` | 否 |
 | `EDGE_BLUEGREEN_PORT` | 蓝绿部署边缘网关健康探针宿主端口 | `18081` | 否 |
+
+## 认证响应
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `AUTH_MACHINE_API_KEY` | 机器客户端读取登录/刷新响应体 JWT 所需的独立 API Key；浏览器不需要，生产配置时至少 32 位可打印 ASCII，不能复用其他凭据 | — | 机器客户端需要响应体令牌时必填 |
 
 ## 事件总线
 
@@ -268,7 +276,7 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `Gateway__BackendUrl` | 后端 API 地址 | `http://localhost:8080` | 是 |
 | `Gateway__BufferPath` | SQLite 断网缓冲数据库路径；Docker 生产必须指向 `/data` 持久化卷 | `data/buffer.db`（开发） | 生产环境必须为绝对路径 |
 | `Gateway__RequireHttps` | 强制后端 API 走 HTTPS（AuthKey 经 `X-Gateway-Auth-Key` 头明文传输，HTTP 下会泄露密钥） | `false` | 网关独立部署（跨网络访问后端）时必填 `true`；Docker Compose 内网（容器间通信）可保持 `false` |
-| `Gateway__MqttBroker` | MQTT Broker 地址 | `localhost:1883` | 否 |
+| `Gateway__MqttBroker` | MQTT Broker 地址（`host[:port]`；Production 端口必须为 1-65535 的数字） | `localhost:1883` | 否 |
 | `Gateway__MqttUseTls` | 是否启用 MQTT TLS | `false` | 生产环境必填为 `true` |
 | `Gateway__MqttAllowUntrustedCertificates` | 是否忽略服务端证书校验 | `false` | 生产环境必须为 `false` |
 | `Gateway__MqttCaCertificatePath` | 自定义 CA 证书路径 | — | 否（未配置时使用系统信任链） |

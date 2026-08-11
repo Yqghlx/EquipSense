@@ -177,6 +177,34 @@ public class TelemetryServiceTests : IDisposable
             Times.Never);
     }
 
+    /// <summary>
+    /// 数据库校验阶段异常时，后台 Timer/手动 flush 都不能把异常传播到调用方或进程级。
+    /// </summary>
+    [Fact]
+    public async Task FlushAsync_数据库校验作用域创建失败时不应抛出异常()
+    {
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory
+            .Setup(factory => factory.CreateScope())
+            .Throws<InvalidOperationException>();
+
+        using var service = new TelemetryService(
+            scopeFactory.Object,
+            _eventBusMock.Object,
+            _serviceProvider.GetRequiredService<ILogger<TelemetryService>>());
+
+        await service.EnqueueAsync(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "temperature",
+            95.0,
+            DateTime.UtcNow);
+
+        var act = () => service.FlushAsync();
+
+        await act.Should().NotThrowAsync();
+    }
+
     public void Dispose()
     {
         _service.Dispose();

@@ -920,6 +920,23 @@ public class AuthServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task RequestPasswordResetAsync_同邮箱匹配多个启用用户_不应发出重置令牌()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        db.Users.AddRange(
+            CreateTestUser("ambiguous-reset-a", Guid.NewGuid(), "OldPwd123", email: "shared@test.com"),
+            CreateTestUser("ambiguous-reset-b", Guid.NewGuid(), "OldPwd123", email: "shared@test.com"));
+        await db.SaveChangesAsync();
+
+        await service.RequestPasswordResetAsync("shared@test.com", "https://app/reset?token={token}");
+
+        _stubRedis.HasStringKeyStartingWith("pwdreset:").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RequestPasswordResetAsync_不存在邮箱_应静默返回不抛异常()
     {
         // Arrange：不创建任何用户
@@ -1356,7 +1373,8 @@ public class AuthServiceTests : IAsyncDisposable
         public Task LogFromContextAsync(string action, string resourceType, string? resourceId = null, string? description = null, CancellationToken ct = default)
             => Task.CompletedTask;
 
-        public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20, CancellationToken ct = default)
+        public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
+            CancellationToken ct = default, string? action = null, string? resourceType = null)
             => Task.FromResult(new PagedResult<AuditLogDto> { Items = [], Total = 0, Page = page, PageSize = pageSize });
     }
 

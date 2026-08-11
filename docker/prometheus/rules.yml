@@ -214,6 +214,17 @@ groups:
           summary: "遥测处理 P95 耗时 > 500ms"
           description: "遥测处理步骤 {{ $labels.step }} P95 耗时 {{ $value | humanize }} ms，可能 DB 写入或事件总线堵塞"
 
+      # 遥测已落库但事件发布失败 — 数据看似完整，告警评估实际缺失
+      - alert: TelemetryEventPublishDropped
+        expr: increase(equipai_telemetry_event_dropped_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: business
+        annotations:
+          summary: "遥测事件发布失败"
+          description: "过去 5 分钟有 {{ $value }} 个遥测事件在数据落库后仍未发布，相关告警可能未被评估"
+
       # 活跃 Critical 告警 > 50（异常风暴）
       - alert: CriticalAlertsSurge
         expr: equipai_active_alerts{severity="critical"} > 50

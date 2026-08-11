@@ -20,10 +20,18 @@
 
 set -euo pipefail
 
-TAG="${1:?用法: deploy-bluegreen.sh <TAG>}"
+[[ $# -eq 1 ]] || {
+  echo "❌ 用法: deploy-bluegreen.sh <TAG>" >&2
+  exit 1
+}
+TAG="$1"
 COMPOSE_DIR="${COMPOSE_DIR:-$(cd "$(dirname "$0")/../docker" && pwd)}"
 EDGE_BLUEGREEN_PORT="${EDGE_BLUEGREEN_PORT:-}"
 BLUEGREEN_EDGE_HEALTH_URL="${BLUEGREEN_EDGE_HEALTH_URL:-}"
+if ! COMPOSE_DIR="$(cd "$COMPOSE_DIR" 2>/dev/null && pwd)"; then
+  echo "❌ 部署目录不存在：$COMPOSE_DIR" >&2
+  exit 1
+fi
 if [ ! -f "$COMPOSE_DIR/.env" ]; then
   echo "❌ 未找到生产环境配置文件: $COMPOSE_DIR/.env" >&2
   exit 1
@@ -38,6 +46,93 @@ COMPOSE=(
 )
 
 cd "$COMPOSE_DIR"
+
+# 蓝绿部署与默认滚动部署共享同一把 Compose 目录锁，避免两条发布路径同时
+# 重建边缘网关、切换 upstream 或覆盖版本状态。
+BLUEGREEN_LOCK_DIR="$COMPOSE_DIR/.deploy.lock"
+BLUEGREEN_LOCK_OWNED=false
+UPSTREAM_FILE="$COMPOSE_DIR/upstream-active.conf"
+UPSTREAM_TEMP_FILE=""
+
+release_bluegreen_lock() {
+  if [ "$BLUEGREEN_LOCK_OWNED" = true ]; then
+    rm -f "$BLUEGREEN_LOCK_DIR/pid" 2>/dev/null || true
+    rmdir "$BLUEGREEN_LOCK_DIR" 2>/dev/null || true
+    BLUEGREEN_LOCK_OWNED=false
+  fi
+}
+
+cleanup_bluegreen() {
+  if [ -n "$UPSTREAM_TEMP_FILE" ]; then
+    rm -f "$UPSTREAM_TEMP_FILE" 2>/dev/null || true
+    UPSTREAM_TEMP_FILE=""
+  fi
+  release_bluegreen_lock
+}
+
+if ! mkdir "$BLUEGREEN_LOCK_DIR" 2>/dev/null; then
+  lock_pid="$(cat "$BLUEGREEN_LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ]; then
+    echo "❌ 已有部署任务正在运行或遗留锁（PID ${lock_pid}），请确认后再处理 $BLUEGREEN_LOCK_DIR" >&2
+  else
+    echo "❌ 已有部署任务正在运行或遗留锁，请确认后再处理 $BLUEGREEN_LOCK_DIR" >&2
+  fi
+  exit 1
+fi
+BLUEGREEN_LOCK_OWNED=true
+trap cleanup_bluegreen EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s\n' "$$" > "$BLUEGREEN_LOCK_DIR/pid"
+chmod 600 "$BLUEGREEN_LOCK_DIR/pid"
+
+write_upstream_atomic() {
+  local color="$1"
+  if ! UPSTREAM_TEMP_FILE="$(mktemp "$UPSTREAM_FILE.XXXXXX")"; then
+    echo "❌ 无法创建 Nginx upstream 临时文件：$UPSTREAM_FILE" >&2
+    return 1
+  fi
+
+  # 先在同一目录完整写入，再用同文件系统 mv 替换，避免 Nginx 读到半写配置。
+  if ! cat > "$UPSTREAM_TEMP_FILE" <<EOF
+# 由 deploy-bluegreen.sh 自动生成 — $(date -u +%FT%TZ)
+upstream backend_active { server backend-$color:8080; }
+upstream frontend_active { server frontend-$color:80; }
+EOF
+  then
+    rm -f "$UPSTREAM_TEMP_FILE" 2>/dev/null || true
+    UPSTREAM_TEMP_FILE=""
+    return 1
+  fi
+  chmod 644 "$UPSTREAM_TEMP_FILE"
+  if ! mv -f -- "$UPSTREAM_TEMP_FILE" "$UPSTREAM_FILE"; then
+    echo "❌ 无法原子替换 Nginx upstream 文件：$UPSTREAM_FILE" >&2
+    rm -f "$UPSTREAM_TEMP_FILE" 2>/dev/null || true
+    UPSTREAM_TEMP_FILE=""
+    return 1
+  fi
+  UPSTREAM_TEMP_FILE=""
+}
+
+write_state_atomic() {
+  local file="$1"
+  local value="$2"
+  local temp_file
+  if ! temp_file="$(mktemp "$file.XXXXXX")"; then
+    echo "❌ 无法创建发布状态临时文件：$file" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$value" > "$temp_file"; then
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+  chmod 600 "$temp_file"
+  if ! mv -f -- "$temp_file" "$file"; then
+    echo "❌ 无法原子更新发布状态文件：$file" >&2
+    rm -f "$temp_file" 2>/dev/null || true
+    return 1
+  fi
+}
 
 if [[ -z "$EDGE_BLUEGREEN_PORT" ]]; then
   EDGE_BLUEGREEN_PORT="$(awk -F= '$1 == "EDGE_BLUEGREEN_PORT" { print $2 }' "$COMPOSE_DIR/.env" | tail -n 1)"
@@ -61,6 +156,11 @@ is_valid_tag() {
   [[ -n "$tag" ]] \
     && [[ "${#tag}" -le 128 ]] \
     && [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]]
+}
+
+is_valid_tag "$TAG" || {
+  echo "❌ 目标镜像标签不合法：$TAG" >&2
+  exit 1
 }
 
 CURRENT_TAG=$(cat .last-deployed-tag 2>/dev/null || true)
@@ -119,7 +219,9 @@ echo "等待 $TARGET_COLOR 后端健康检查..."
 sleep 10  # 给容器初始化时间
 HEALTHY=false
 for i in $(seq 1 12); do
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$TARGET_BACKEND_PORT/health" || echo "000")
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    --connect-timeout 5 --max-time 10 \
+    "http://localhost:$TARGET_BACKEND_PORT/health" || echo "000")
   if [ "$HTTP_CODE" = "200" ]; then
     echo "✅ $TARGET_COLOR 后端健康检查通过（第 $i 次探测）"
     HEALTHY=true
@@ -173,20 +275,22 @@ fi
 
 # ── 7. 原子切换：重写 Nginx upstream → reload（<1s 中断） ──
 echo "切换 Nginx upstream 到 $TARGET_COLOR..."
-cat > upstream-active.conf <<EOF
-# 由 deploy-bluegreen.sh 自动生成 — $(date -u +%FT%TZ)
-upstream backend_active { server backend-$TARGET_COLOR:8080; }
-upstream frontend_active { server frontend-$TARGET_COLOR:80; }
-EOF
+if ! write_upstream_atomic "$TARGET_COLOR"; then
+  echo "❌ Nginx upstream 写入失败，回滚目标色。" >&2
+  "${COMPOSE[@]}" --profile "$TARGET_COLOR" stop backend-$TARGET_COLOR frontend-$TARGET_COLOR || true
+  export TAG="$CURRENT_TAG"
+  export GATEWAY_BACKEND_URL="http://backend-$ACTIVE_COLOR:8080"
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate --pull never edgegateway || true
+  exit 1
+fi
 
 # router 容器挂载了 upstream-active.conf，reload 即生效
 docker exec equipai-router nginx -t && \
 docker exec equipai-router nginx -s reload || {
   echo "❌ Nginx reload 失败，回滚 upstream"
-  cat > upstream-active.conf <<EOF
-  upstream backend_active { server backend-$ACTIVE_COLOR:8080; }
-  upstream frontend_active { server frontend-$ACTIVE_COLOR:80; }
-EOF
+  if ! write_upstream_atomic "$ACTIVE_COLOR"; then
+    echo "🚨 严重：Nginx upstream 回切文件写入失败，请立即人工处置。" >&2
+  fi
   docker exec equipai-router nginx -s reload || true
   "${COMPOSE[@]}" --profile "$TARGET_COLOR" stop backend-$TARGET_COLOR frontend-$TARGET_COLOR || true
   export TAG="$CURRENT_TAG"
@@ -203,7 +307,10 @@ sleep 30
 "${COMPOSE[@]}" --profile "$ACTIVE_COLOR" stop backend-$ACTIVE_COLOR frontend-$ACTIVE_COLOR || true
 
 # ── 9. 记录新活跃色 + 版本 ──
-echo "$TARGET_COLOR" > .active-color
-echo "$TAG" > .last-deployed-tag
+if ! write_state_atomic ".active-color" "$TARGET_COLOR" \
+  || ! write_state_atomic ".last-deployed-tag" "$TAG"; then
+  echo "🚨 严重：流量已切换但发布状态记录失败，请立即人工核对 active-color 和版本。" >&2
+  exit 1
+fi
 echo "=== 蓝绿部署成功: $TAG (active=$TARGET_COLOR) ==="
 "${COMPOSE[@]}" --profile "$TARGET_COLOR" ps backend-$TARGET_COLOR frontend-$TARGET_COLOR edgegateway

@@ -77,6 +77,10 @@ run_probe() {
   local scenario="$1"
   local outfile="$SCRIPT_DIR/chaos-result-${scenario}.xml"
   local k6_status=0
+  local machine_api_key_args=()
+  if [ -n "${AUTH_MACHINE_API_KEY:-}" ]; then
+    machine_api_key_args=(-e "AUTH_MACHINE_API_KEY=$AUTH_MACHINE_API_KEY")
+  fi
   log "启动 k6 探针（场景: $scenario, 时长: $PROBE_DURATION, VUs: $PROBE_VUS）"
   # 不吞掉 k6 失败状态；否则脚本会在阈值失败或探针配置错误时错误地报告“完成”。
   set +e
@@ -84,6 +88,7 @@ run_probe() {
     -e "BASE_URL=$BASE_URL" \
     -e "AUTH_USER=$AUTH_USER" \
     -e "AUTH_PASS=$AUTH_PASS" \
+    "${machine_api_key_args[@]}" \
     --vus "$PROBE_VUS" \
     --duration "$PROBE_DURATION" \
     --out json="$SCRIPT_DIR/chaos-probe-${scenario}.json" \
@@ -204,6 +209,7 @@ usage() {
   BASE_URL          被测后端地址（默认 http://localhost:8080）
   AUTH_USER         压测账户（默认 admin）
   AUTH_PASS         压测账户密码（必填，不提供公开默认值）
+  AUTH_MACHINE_API_KEY 生产环境读取响应体 JWT 时的机器客户端密钥（可选）
 EOF
 }
 

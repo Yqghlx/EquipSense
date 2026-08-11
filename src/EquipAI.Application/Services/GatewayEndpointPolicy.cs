@@ -20,6 +20,9 @@ public sealed class GatewayEndpointPolicy
     };
 
     private readonly HashSet<string> _allowedHosts;
+    private readonly string? _gatewayAuthKey;
+    private readonly Guid? _boundTenantId;
+    private readonly string? _boundGatewayId;
 
     /// <summary>
     /// 从 Gateway:AllowedHosts 读取精确主机白名单。
@@ -37,6 +40,60 @@ public sealed class GatewayEndpointPolicy
             .Select(NormalizeHost)
             .Where(host => !string.IsNullOrEmpty(host) && host != "*")
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _gatewayAuthKey = configuration["Gateway:AuthKey"];
+
+        // 生产 Compose 为单个边缘网关注入租户和网关标识。注册/拉取配置时必须同时匹配，
+        // 否则持有共享 AuthKey 的调用方仍可通过伪造请求体切换到其他租户。
+        var configuredTenantId = configuration["Gateway:TenantId"];
+        if (Guid.TryParse(configuredTenantId, out var parsedTenantId) && parsedTenantId != Guid.Empty)
+            _boundTenantId = parsedTenantId;
+
+        var configuredGatewayId = configuration["Gateway:Id"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configuredGatewayId))
+            _boundGatewayId = configuredGatewayId;
+    }
+
+    /// <summary>
+    /// 为后端到边缘网关的内部请求附加认证头。
+    /// 密钥只从服务端配置读取，不能由网关地址或用户请求体提供。
+    /// </summary>
+    public void AddGatewayAuthHeader(HttpRequestMessage request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!string.IsNullOrWhiteSpace(_gatewayAuthKey))
+        {
+            request.Headers.TryAddWithoutValidation("X-Gateway-Auth-Key", _gatewayAuthKey);
+        }
+    }
+
+    /// <summary>
+    /// 校验网关请求声明的租户和标识是否与服务端绑定值一致。
+    /// 未配置绑定时保留开发/测试环境的多租户联调能力；生产启动门禁会强制配置两者。
+    /// </summary>
+    public bool IsGatewayIdentityAllowed(Guid tenantId, string? gatewayId, out string reason)
+    {
+        if (tenantId == Guid.Empty)
+        {
+            reason = "网关租户标识不能为空";
+            return false;
+        }
+
+        if (_boundTenantId.HasValue && _boundTenantId.Value != tenantId)
+        {
+            reason = "网关租户标识与服务端绑定不一致";
+            return false;
+        }
+
+        if (_boundGatewayId is not null
+            && !string.Equals(_boundGatewayId, gatewayId?.Trim(), StringComparison.Ordinal))
+        {
+            reason = "网关标识与服务端绑定不一致";
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
     }
 
     /// <summary>

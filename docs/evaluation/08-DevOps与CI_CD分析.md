@@ -45,8 +45,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 1239 xUnit 测试 |
-| Integration test | ~120s | 159 xUnit（含真实 RabbitMQ 场景） |
+| Unit test | ~30s | 1291 xUnit 测试 |
+| Integration test | ~120s | 161 xUnit（含真实 RabbitMQ 场景） |
 | NuGet vuln | ~20s | 已纳入阻断门禁 |
 | **合计** | **~5min** | |
 
@@ -168,7 +168,7 @@ timeout: 60s
 | 1 | 真实生产环境验收 | Production smoke 已覆盖启动/迁移/探针/代理，main/tag 还会在 Production 镜像执行完整 442 用例；剩余工作是正式凭据、证书、容量和现场协议验收 |
 | 2 | 数据库迁移发布治理 | 当前应用启动已用 PostgreSQL advisory lock 串行迁移；仍建议在独立发布流水线执行迁移并完成审批/回滚演练 |
 | 3 | 跨主机附件存储 | 当前命名卷 + 备份补偿已覆盖单机；跨主机仍需 S3/MinIO 和恢复演练 |
-| 4 | 供应商运行时凭据 | 当前工作区 `.env` 仍有 26 项生产门禁问题，必须由密钥管理系统注入真实凭据和证书后再发布 |
+| 4 | 供应商运行时凭据 | 当前工作区 `.env` 仍有 27 项生产门禁问题，必须由密钥管理系统注入真实凭据和证书后再发布 |
 | 5 | 蓝绿生产演练 | 脚本和回滚行为测试已完成，仍需在真实生产资源上做首次容量与切换演练 |
 
 ---

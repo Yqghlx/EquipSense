@@ -54,4 +54,42 @@ public class GatewayEndpointPolicyTests
         policy.IsAllowed(host, port, out var reason).Should().BeFalse();
         reason.Should().NotBeNullOrWhiteSpace();
     }
+
+    [Fact]
+    public void IsGatewayIdentityAllowed_配置绑定时拒绝其他租户和网关()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:TenantId"] = "11111111-1111-1111-1111-111111111111",
+                ["Gateway:Id"] = "gateway-001",
+            })
+            .Build();
+        var policy = new GatewayEndpointPolicy(configuration);
+
+        policy.IsGatewayIdentityAllowed(
+                Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                "gateway-001",
+                out var allowedReason)
+            .Should().BeTrue(allowedReason);
+        policy.IsGatewayIdentityAllowed(Guid.NewGuid(), "gateway-001", out var tenantReason)
+            .Should().BeFalse();
+        tenantReason.Should().Contain("租户");
+        policy.IsGatewayIdentityAllowed(
+                Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                "gateway-other",
+                out var gatewayReason)
+            .Should().BeFalse();
+        gatewayReason.Should().Contain("网关标识");
+    }
+
+    [Fact]
+    public void IsGatewayIdentityAllowed_未配置绑定时仍允许开发联调但拒绝空租户()
+    {
+        var policy = CreatePolicy();
+
+        policy.IsGatewayIdentityAllowed(Guid.NewGuid(), "gateway-dev", out _).Should().BeTrue();
+        policy.IsGatewayIdentityAllowed(Guid.Empty, "gateway-dev", out var reason).Should().BeFalse();
+        reason.Should().Contain("租户");
+    }
 }

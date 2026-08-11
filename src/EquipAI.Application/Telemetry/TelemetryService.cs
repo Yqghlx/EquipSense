@@ -25,15 +25,21 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
 
     private readonly ConcurrentQueue<TelemetryQueueItem> _queue = new();
     private readonly Timer _flushTimer;
+    private readonly object _lifecycleLock = new();
+
+    /// <summary>
+    /// flush 并发门闩。
+    /// Timer(500ms) 与 EnqueueAsync 满批都会触发 flush；DB 慢时一次 flush 可能跨越多个 tick，
+    /// 不加保护会导致多个 flush 并发重试，对已不堪重负的 DB 形成惊群效应。
+    /// 释放流程也使用同一把门闩，确保关闭时会等待正在执行的 flush，而不是绕过保护直接访问数据库。
+    /// </summary>
+    private readonly SemaphoreSlim _flushGate = new(1, 1);
     private const int BatchSize = 100;
 
     /// <summary>
-    /// flush 并发保护标志：0=空闲，1=正在 flush。
-    /// Timer(500ms) 与 EnqueueAsync 满批都会触发 flush；DB 慢时一次 flush 可能跨越多个 tick，
-    /// 不加保护会导致多个 flush 并发重试，对已不堪重负的 DB 形成惊群效应。用 Interlocked 保证
-    /// 同一时刻只有一个 flush 执行，其余跳过（数据留在队列，下次 tick 再处理）。
+    /// 是否已经开始释放；设置后拒绝新的入队并让后续 flush 直接返回。
     /// </summary>
-    private int _isFlushing;
+    private int _disposeStarted;
 
     public TelemetryService(
         IServiceScopeFactory scopeFactory,
@@ -44,25 +50,44 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
         _eventBus = eventBus;
         _logger = logger;
 
-        _flushTimer = new Timer(async _ => await FlushAsync(), null,
+        // TimerCallback 本身是 void；不能直接传 async lambda，否则会隐式生成 async void，
+        // 数据库校验异常会绕过 Task 观察机制，严重时触发进程级未处理异常。
+        _flushTimer = new Timer(static state =>
+        {
+            var service = (TelemetryService)state!;
+            _ = service.FlushSafelyAsync();
+        }, this,
             TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
     }
 
     public async Task EnqueueAsync(Guid tenantId, Guid deviceId, string metric, double value,
         DateTime timestamp, string quality = "good", string source = "mqtt")
     {
-        _queue.Enqueue(new TelemetryQueueItem
+        bool shouldFlush;
+        lock (_lifecycleLock)
         {
-            TenantId = tenantId,
-            DeviceId = deviceId,
-            Metric = metric,
-            Value = value,
-            Timestamp = timestamp,
-            Quality = quality,
-            Source = source
-        });
+            // 关闭开始后不再接收新数据，避免排空完成后又有消息落入无人处理的队列。
+            // MQTT 回调可能与宿主关闭并行到达，静默丢弃比向后台消息线程抛出 ObjectDisposedException 更安全。
+            if (Volatile.Read(ref _disposeStarted) != 0)
+            {
+                _logger.LogDebug("遥测服务已开始关闭，丢弃设备 {DeviceId} 的新遥测", deviceId);
+                return;
+            }
 
-        if (_queue.Count >= BatchSize)
+            _queue.Enqueue(new TelemetryQueueItem
+            {
+                TenantId = tenantId,
+                DeviceId = deviceId,
+                Metric = metric,
+                Value = value,
+                Timestamp = timestamp,
+                Quality = quality,
+                Source = source
+            });
+            shouldFlush = _queue.Count >= BatchSize;
+        }
+
+        if (shouldFlush)
         {
             await FlushAsync();
         }
@@ -70,23 +95,46 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
 
     public async Task FlushAsync()
     {
-        // 并发保护：见 _isFlushing 注释。CompareExchange 原子地"尝试获取锁"，
-        // 已有 flush 进行中则直接返回（数据留队列，下次 tick 处理）。
-        if (Interlocked.CompareExchange(ref _isFlushing, 1, 0) != 0)
+        if (Volatile.Read(ref _disposeStarted) != 0)
+            return;
+
+        // 非阻塞获取：已有 flush 进行中时直接返回，数据留在队列由当前 flush 结束后的下一次 tick 处理。
+        // 释放流程使用阻塞获取，因而能够在关闭时等待这次正在进行的 flush。
+        if (!await _flushGate.WaitAsync(0).ConfigureAwait(false))
             return;
 
         try
         {
+            // 在等待门闩期间可能已经开始关闭；此时让 DisposeAsync 负责最后一次排空。
+            if (Volatile.Read(ref _disposeStarted) != 0)
+                return;
+
             await FlushCoreAsync();
         }
         finally
         {
-            _isFlushing = 0;
+            _flushGate.Release();
         }
     }
 
     /// <summary>
-    /// 实际的批量写入逻辑（无并发保护，由 FlushAsync 包装或 Dispose 直接调用）
+    /// Timer 的安全异步入口。
+    /// 即使未来 FlushAsync 增加了保护范围之外的逻辑，也不能让后台回调把异常抛到进程级。
+    /// </summary>
+    private async Task FlushSafelyAsync()
+    {
+        try
+        {
+            await FlushAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "定时排空遥测队列时发生未处理异常");
+        }
+    }
+
+    /// <summary>
+    /// 实际的批量写入逻辑（由 FlushAsync 或释放流程在 _flushGate 保护下调用）
     ///
     /// 关键改进：DB 写入带有限重试。瞬时错误（连接抖动、短暂锁竞争）是遥测落库最常见的失败，
     /// 原实现直接 catch 丢弃整批，造成数据盲区。现重试至多 4 次（退避 200ms→500ms→1s）覆盖绝大多数
@@ -108,25 +156,15 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
         if (items.Count == 0)
             return;
 
-        // 多租户纵深防御：校验每条遥测的设备存在且归属租户与上报租户一致。
-        // 校验独立于写入重试（只做一次）：设备归属在写入重试窗口内不会变化。
-        List<TelemetryQueueItem> validItems;
-        using (var validateScope = _scopeFactory.CreateScope())
-        {
-            var validateDb = validateScope.ServiceProvider.GetRequiredService<AppDbContext>();
-            validItems = await ValidateItemsAsync(validateDb, items);
-        }
-
-        if (validItems.Count == 0)
-            return; // 全部被拒（未知设备/租户不符），无数据可写
-
         // 退避序列：首次失败后 200ms、500ms、1s 各重试一次，共 4 次尝试
         var backoffDelays = new[] { 200, 500, 1000 };
         var maxAttempts = backoffDelays.Length + 1;
 
-        // toInsert：每次重试重新去重后的实际待写入集合。提到循环外以便重试耗尽时统计真实丢弃量
-        //（重试期间部分行可能因"模糊成功"已落库被去重排除，此时 toInsert 会小于 validItems）。
-        var toInsert = validItems;
+        // 事件发布失败时，遥测行已经落库，不能重新用数据库去重结果决定是否发布事件：
+        // 否则重试会把整批识别为“已有数据”并直接返回，形成“时序数据存在但告警未评估”的静默丢失。
+        // 保存稳定的事件 ID，既能让 RabbitMQ/Outbox 幂等，又能让整批在短暂故障后继续发布。
+        var pendingEvents = new List<TelemetryReceivedEvent>();
+        var hasPersistedBatch = false;
 
         for (var attempt = 0; ; attempt++)
         {
@@ -138,36 +176,66 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
                 // 生产模式解析当前作用域的 Outbox 总线，测试/兼容容器没有注册时回退到注入实例。
                 var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
-                // 去重（批内 + DB 已存在）：见 DedupBatchAsync。放在循环内，覆盖写入重试的"模糊成功"场景
-                // ——上一次 INSERT 已提交落库但响应未送达客户端，重试时的存在性查询会排除已落库行，
-                // 避免重复写入污染基线/触发重复告警。
-                toInsert = await DedupBatchAsync(dbContext, validItems);
-
-                if (toInsert.Count == 0)
+                if (!hasPersistedBatch)
                 {
-                    _logger.LogDebug("批次 {Count} 条全部为重复数据（已去重），跳过写入与事件发布",
-                        validItems.Count);
-                    return;
+                    // 多租户纵深防御：校验每条遥测的设备存在且归属租户与上报租户一致。
+                    // 校验也必须处于重试范围内，数据库短暂不可用时不能让异常逃出 Timer 回调。
+                    List<TelemetryQueueItem> validItems;
+                    using (var validateScope = _scopeFactory.CreateScope())
+                    {
+                        var validateDb = validateScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                        validItems = await ValidateItemsAsync(validateDb, items);
+                    }
+
+                    if (validItems.Count == 0)
+                        return; // 全部被拒（未知设备/租户不符），无数据可写
+
+                    // 去重（批内 + DB 已存在）：见 DedupBatchAsync。放在首次写入前，
+                    // 覆盖 MQTT 重传和边缘网关重放，避免重复写入污染基线/触发重复告警。
+                    var toInsert = await DedupBatchAsync(dbContext, validItems);
+                    if (toInsert.Count == 0)
+                    {
+                        _logger.LogDebug("批次 {Count} 条全部为重复数据（已去重），跳过写入与事件发布",
+                            validItems.Count);
+                        return;
+                    }
+
+                    // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
+                    // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
+                    try
+                    {
+                        await InsertBatchAsync(dbContext, toInsert);
+                    }
+                    catch (Exception insertException)
+                    {
+                        // 数据库可能已经提交 INSERT，但客户端在收到响应前断开。
+                        // 多值 INSERT 在数据库侧是原子的；整批键均存在时应继续发布事件，
+                        // 否则下一次去重会把“已落库但未告警”的批次误判为普通重复数据。
+                        if (await IsBatchPersistedAsync(dbContext, toInsert))
+                        {
+                            pendingEvents = CreateTelemetryEvents(toInsert);
+                            hasPersistedBatch = true;
+                            _logger.LogWarning(
+                                insertException,
+                                "遥测批量 INSERT 响应丢失但数据已确认落库，继续发布 {Count} 个事件",
+                                pendingEvents.Count);
+                            continue;
+                        }
+
+                        throw;
+                    }
+
+                    pendingEvents = CreateTelemetryEvents(toInsert);
+                    hasPersistedBatch = true;
+
+                    _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}，去重前 {Before}）",
+                        pendingEvents.Count, attempt + 1, maxAttempts, validItems.Count);
                 }
 
-                // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
-                // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
-                await InsertBatchAsync(dbContext, toInsert);
-
-                _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}，去重前 {Before}）",
-                    toInsert.Count, attempt + 1, maxAttempts, validItems.Count);
-
-                // 仅为实际写入的新行发布事件，避免重复数据触发重复告警/分析
-                foreach (var item in toInsert)
-                {
-                    var evt = new TelemetryReceivedEvent(
-                        Guid.NewGuid(), DateTime.UtcNow,
-                        item.TenantId, item.DeviceId,
-                        item.Metric, item.Value,
-                        item.Timestamp, item.Quality);
-
-                    await eventBus.PublishAsync(evt);
-                }
+                // 仅为实际写入的新行发布事件；重试时复用同一批稳定 EventId，
+                // 不再重新查询去重结果，也不会因时序行已存在而跳过告警评估。
+                foreach (var @event in pendingEvents)
+                    await eventBus.PublishAsync(@event);
 
                 return; // 写入成功，退出重试循环
             }
@@ -183,11 +251,26 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
                 }
 
                 // 重试耗尽：记录丢弃指标供运维告警，放弃本批。
-                // 用 toInsert.Count（去重后实际待写量）而非 validItems.Count：重试期间被去重排除的行已落库，
-                // 真正丢失的仅是最后一次尝试写入的 toInsert。
-                BusinessMetrics.TelemetryDropped.Inc(toInsert.Count);
-                _logger.LogError(ex, "遥测批量写入重试 {Total} 次仍失败，丢弃 {Count} 条数据",
-                    maxAttempts, toInsert.Count);
+                // 若写入已成功但事件始终失败，遥测数据本身仍在库中，必须使用独立指标；
+                // 否则运维会误以为数据库写入失败，错过告警评估链路的故障。
+                if (hasPersistedBatch)
+                {
+                    BusinessMetrics.TelemetryEventDropped.Inc(pendingEvents.Count);
+                    _logger.LogError(
+                        ex,
+                        "遥测已落库但事件发布重试 {Total} 次仍失败，丢弃 {Count} 个事件",
+                        maxAttempts,
+                        pendingEvents.Count);
+                }
+                else
+                {
+                    BusinessMetrics.TelemetryDropped.Inc(items.Count);
+                    _logger.LogError(
+                        ex,
+                        "遥测批量写入重试 {Total} 次仍失败，丢弃 {Count} 条数据",
+                        maxAttempts,
+                        items.Count);
+                }
                 return;
             }
         }
@@ -272,6 +355,48 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// 检查一次批量 INSERT 抛错后，数据库是否已经包含该批次的全部键。
+    /// 只在 INSERT 异常路径调用，用于识别“提交成功但响应丢失”的模糊结果。
+    /// </summary>
+    private static async Task<bool> IsBatchPersistedAsync(
+        AppDbContext dbContext,
+        IReadOnlyCollection<TelemetryQueueItem> items)
+    {
+        foreach (var group in items.GroupBy(i => (i.TenantId, i.DeviceId, i.Metric)))
+        {
+            var expectedTimes = group
+                .Select(item => item.Timestamp.ToSafeUtc())
+                .ToHashSet();
+            var persistedTimes = await dbContext.DeviceTelemetry
+                .IgnoreQueryFilters()
+                .Where(t => t.TenantId == group.Key.TenantId
+                         && t.DeviceId == group.Key.DeviceId
+                         && t.Metric == group.Key.Metric
+                         && expectedTimes.Contains(t.Time))
+                .Select(t => t.Time)
+                .ToListAsync();
+
+            if (!expectedTimes.IsSubsetOf(persistedTimes))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 为实际写入的遥测生成稳定批次事件。
+    /// </summary>
+    private static List<TelemetryReceivedEvent> CreateTelemetryEvents(
+        IEnumerable<TelemetryQueueItem> items)
+        => items
+            .Select(item => new TelemetryReceivedEvent(
+                Guid.NewGuid(), DateTime.UtcNow,
+                item.TenantId, item.DeviceId,
+                item.Metric, item.Value,
+                item.Timestamp, item.Quality))
+            .ToList();
+
+    /// <summary>
     /// 校验批次内每条遥测的设备归属：设备必须存在，且其 tenant_id 与上报的 tenantId 一致。
     ///
     /// 安全背景：MQTT 主题 factory/{tenantId}/telemetry/{deviceId} 中的 tenantId 由发布方填写、不可信。
@@ -326,13 +451,22 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _flushTimer.Dispose();
-        // 关闭时排空：Timer 已 Dispose 不会再触发新回调，此时直接调 FlushCoreAsync 绕过并发保护，
-        // 确保关闭瞬间队列中残留的数据被写入（若走受保护的 FlushAsync，可能因上一次回调仍在执行而被跳过）。
+        if (!BeginDispose())
+            return;
+
+        // Timer 已停止接受新回调；等待同一把门闩可确保已经开始的 Timer/手动 flush 完成后再排空剩余队列。
         // 异步路径：.NET Core 3.0+ 容器释放 Singleton 时优先调用 DisposeAsync，避免 sync-over-async 死锁。
         try
         {
-            await FlushCoreAsync();
+            await _flushGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await FlushCoreAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _flushGate.Release();
+            }
         }
         catch (Exception ex)
         {
@@ -343,20 +477,52 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        _flushTimer.Dispose();
+        if (!BeginDispose())
+            return;
+
         // 同步兜底路径：仅在调用方未走异步释放（如某些宿主或显式 Dispose）时触发。
         // 用带超时的等待替代 GetAwaiter().GetResult()：FlushCoreAsync 含 DB 往返，
         // 若 DB 已不可达，无限等待会阻塞应用关闭进程；超时后残留数据由边缘网关 7 天缓冲兜底。
         try
         {
-            if (!FlushCoreAsync().Wait(TimeSpan.FromSeconds(10)))
+            if (!_flushGate.Wait(TimeSpan.FromSeconds(10)))
             {
-                _logger.LogWarning("应用关闭时排空遥测队列超时（10s），队列残留数据将丢弃（边缘网关会重传）");
+                _logger.LogWarning("应用关闭时等待正在执行的遥测 flush 超时（10s），队列残留数据将丢弃（边缘网关会重传）");
+                return;
+            }
+
+            try
+            {
+                if (!FlushCoreAsync().Wait(TimeSpan.FromSeconds(10)))
+                {
+                    _logger.LogWarning("应用关闭时排空遥测队列超时（10s），队列残留数据将丢弃（边缘网关会重传）");
+                }
+            }
+            finally
+            {
+                _flushGate.Release();
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "应用关闭时排空遥测队列失败");
+        }
+    }
+
+    /// <summary>
+    /// 原子地进入释放状态并停止定时器。
+    /// 使用生命周期锁与入队操作形成互斥，保证排空之后不会再有新数据进入队列。
+    /// </summary>
+    private bool BeginDispose()
+    {
+        lock (_lifecycleLock)
+        {
+            if (_disposeStarted != 0)
+                return false;
+
+            _disposeStarted = 1;
+            _flushTimer.Dispose();
+            return true;
         }
     }
 

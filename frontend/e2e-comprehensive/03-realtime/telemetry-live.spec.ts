@@ -440,9 +440,14 @@ test.describe('03-实时遥测数据', () => {
     await sendTelemetryBatch(page1, token1, device1.id as string, 5, 200);
     await sendTelemetryBatch(page2, token2, device2.id as string, 5, 200);
 
+    // getToken 已通过 API 写入了 Cookie。为验证真实 UI 登录流程，先清掉 API 会话，
+    // 再分别登录；否则新的 Cookie 会话恢复逻辑会正确地把 /login 重定向回业务页。
+    await context1.clearCookies();
+    await context2.clearCookies();
+
     // 两个页面分别登录并导航到各自设备详情
     await page1.goto(`${BASE_URL}/login`);
-    await page1.waitForLoadState('networkidle');
+    await page1.waitForLoadState('domcontentloaded');
     await page1.getByPlaceholder(/用户名|username/i).fill('admin');
     await page1.getByPlaceholder(/密码|password/i).fill(getE2EPassword('admin'));
     await page1.getByRole('button', { name: /登录|login/i }).click();
@@ -451,7 +456,7 @@ test.describe('03-实时遥测数据', () => {
     await gotoDeviceDetail(page1, device1.id as string);
 
     await page2.goto(`${BASE_URL}/login`);
-    await page2.waitForLoadState('networkidle');
+    await page2.waitForLoadState('domcontentloaded');
     await page2.getByPlaceholder(/用户名|username/i).fill('admin');
     await page2.getByPlaceholder(/密码|password/i).fill(getE2EPassword('admin'));
     await page2.getByRole('button', { name: /登录|login/i }).click();

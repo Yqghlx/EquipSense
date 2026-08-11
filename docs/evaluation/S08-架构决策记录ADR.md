@@ -203,7 +203,8 @@ v1.4:  + MFA/TOTP + 令牌重用检测 (OAuth 2.0 BCP)
 **决策**：
 - Access Token: JWT (HMAC-SHA256), 15 分钟有效期, HttpOnly Cookie (`SameSite=Strict`)
 - Refresh Token: GUID, 7 天有效期, Redis 正向+反向索引, 含重用检测
-- 三源 Token 读取: Cookie > Header > QueryString (SignalR)
+- 三源 Token 读取: Cookie > QueryString (仅 SignalR 非浏览器兼容回退) > Header 默认处理
+- 认证响应体：Production 浏览器默认不返回 JWT；机器客户端必须使用独立 `AUTH_MACHINE_API_KEY` + `X-API-Key` 显式获取
 - MFA: TOTP (RFC 6238), ±1 步时间窗口
 
 **后果**：
@@ -211,7 +212,7 @@ v1.4:  + MFA/TOTP + 令牌重用检测 (OAuth 2.0 BCP)
 - 正面：刷新令牌重放检测（失窃时自动吊销整个会话）
 - 正面：主动续期 + Page Visibility API 防止操作中 401
 - 正面：Token 版本号支持主动失效（改密后递增）
-- 负面：SignalR WebSocket 需要从 QueryString 取 token（浏览器限制）
+- 负面：非浏览器 SignalR 客户端仍可能通过 QueryString 传递 token，部署侧应避免记录 `/hubs/` 的完整请求 URL；浏览器前端使用 Cookie，不走该路径
 - 负面：跨源开发环境需 withCredentials 支持
 
 ---

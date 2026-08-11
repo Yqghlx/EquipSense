@@ -320,6 +320,32 @@ if [[ "$CONFIRM" = false ]]; then
   exit 0
 fi
 
+# 恢复会停止服务、重建数据库并覆盖附件；同一环境的确认恢复必须串行执行。
+# 使用环境文件旁的原子目录锁，遗留锁必须由运维确认后处理，不能自动猜测持锁进程已退出。
+RESTORE_LOCK_DIR="${ENV_FILE}.restore.lock"
+RESTORE_LOCK_OWNED=false
+release_restore_lock() {
+  if [ "$RESTORE_LOCK_OWNED" = true ]; then
+    rm -f "$RESTORE_LOCK_DIR/pid" 2>/dev/null || true
+    rmdir "$RESTORE_LOCK_DIR" 2>/dev/null || true
+    RESTORE_LOCK_OWNED=false
+  fi
+}
+
+if ! mkdir "$RESTORE_LOCK_DIR" 2>/dev/null; then
+  lock_pid="$(cat "$RESTORE_LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ]; then
+    fatal "已有恢复任务正在运行或遗留锁（PID ${lock_pid}），请确认后再处理 $RESTORE_LOCK_DIR"
+  fi
+  fatal "已有恢复任务正在运行或遗留锁，请确认后再处理 $RESTORE_LOCK_DIR"
+fi
+RESTORE_LOCK_OWNED=true
+trap release_restore_lock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s\n' "$$" > "$RESTORE_LOCK_DIR/pid"
+chmod 600 "$RESTORE_LOCK_DIR/pid"
+
 command -v docker >/dev/null 2>&1 || fatal "未找到 docker 命令"
 command -v curl >/dev/null 2>&1 || fatal "未找到 curl 命令"
 
@@ -365,7 +391,8 @@ cleanup_restore() {
     TIMESCALE_RESTORE_PREPARED=false
   fi
 
-  rm -rf -- "$TEMP_DIR"
+  rm -rf -- "$TEMP_DIR" 2>/dev/null || true
+  release_restore_lock
   exit "$exit_code"
 }
 trap cleanup_restore EXIT

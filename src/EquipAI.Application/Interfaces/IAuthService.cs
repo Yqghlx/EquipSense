@@ -36,7 +36,7 @@ public interface IAuthService
     Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
 
     /// <summary>
-    /// 申请密码重置 — 按邮箱查找用户并发送重置链接邮件
+    /// 申请密码重置；邮箱无法唯一匹配启用用户时静默返回，避免跨租户重复邮箱导致重置错号。
     /// </summary>
     /// <param name="email">用户邮箱</param>
     /// <param name="resetUrlTemplate">重置链接模板，{token} 会被替换为实际 token</param>

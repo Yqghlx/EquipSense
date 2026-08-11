@@ -293,6 +293,37 @@ try
         throw new InvalidOperationException("网关认证密钥不安全，应用拒绝启动。请在环境变量中设置至少 32 位的随机密钥");
     }
 
+    // 生产浏览器认证默认只通过 HttpOnly Cookie 建立会话。
+    // 如果启用机器客户端响应体令牌，必须使用独立的长随机 API Key，不能复用其他凭据。
+    var machineAuthApiKey = builder.Configuration["Auth:MachineApiKey"];
+    if (app.Environment.IsProduction()
+        && !string.IsNullOrWhiteSpace(machineAuthApiKey)
+        && (machineAuthApiKey.Contains("PLEASE_CHANGE", StringComparison.OrdinalIgnoreCase)
+            || machineAuthApiKey.Contains("CHANGE_ME", StringComparison.OrdinalIgnoreCase)
+            || machineAuthApiKey.Contains("SET_VIA_ENVIRONMENT", StringComparison.OrdinalIgnoreCase)
+            || machineAuthApiKey.Contains("请修改", StringComparison.Ordinal)
+            || machineAuthApiKey.Length < 32
+            || machineAuthApiKey.Any(character => character < 0x21 || character > 0x7E)))
+    {
+        Log.Fatal("Auth:MachineApiKey 不安全，必须为至少 32 位的可打印 ASCII 字符串");
+        throw new InvalidOperationException(
+            "生产机器客户端 API Key 必须为至少 32 位的可打印 ASCII 字符串");
+    }
+
+    // 生产网关认证不仅需要共享密钥，还必须绑定唯一的租户和网关标识。
+    // 仅验证 AuthKey 会允许持钥方伪造请求体，读取或注册任意租户的网关配置。
+    var boundGatewayTenantId = builder.Configuration["Gateway:TenantId"];
+    var boundGatewayId = builder.Configuration["Gateway:Id"];
+    if (app.Environment.IsProduction()
+        && (!Guid.TryParse(boundGatewayTenantId, out var parsedBoundGatewayTenantId)
+            || parsedBoundGatewayTenantId == Guid.Empty
+            || string.IsNullOrWhiteSpace(boundGatewayId)))
+    {
+        Log.Fatal("生产环境未配置有效的 Gateway:TenantId 或 Gateway:Id，网关身份绑定已拒绝启动");
+        throw new InvalidOperationException(
+            "生产环境必须配置 Gateway:TenantId（有效 UUID）和 Gateway:Id，防止网关认证跨租户伪造");
+    }
+
     var gatewayAllowedHosts = builder.Configuration
         .GetSection("Gateway:AllowedHosts")
         .Get<string[]>()

@@ -75,6 +75,20 @@ public class DevicesControllerTests
     }
 
     /// <summary>
+    /// 验证：排序字段不存在时应返回 400，而不是把 EF 查询异常暴露为 500。
+    /// </summary>
+    [Fact]
+    public async Task GetDevices_WithUnknownSort_Returns400()
+    {
+        var client = await GetAuthenticatedClientAsync();
+
+        var response = await client.GetAsync(
+            "/api/v1/devices?page=1&pageSize=10&sort=field_that_does_not_exist");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
     /// 验证：POST /api/v1/devices 创建新设备并返回 201 Created
     /// </summary>
     [Fact]

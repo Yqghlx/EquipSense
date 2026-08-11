@@ -21,10 +21,20 @@ CURRENT_TAG=""
 MUTATION_STARTED=false
 VERSION_TEMP_FILE=""
 COMPOSE=()
+DEPLOY_LOCK_DIR=""
+DEPLOY_LOCK_OWNED=false
 
 fatal() {
   printf '部署失败：%s\n' "$*" >&2
   exit 1
+}
+
+release_deploy_lock() {
+  if [ "$DEPLOY_LOCK_OWNED" = true ]; then
+    rm -f "$DEPLOY_LOCK_DIR/pid" 2>/dev/null || true
+    rmdir "$DEPLOY_LOCK_DIR" 2>/dev/null || true
+    DEPLOY_LOCK_OWNED=false
+  fi
 }
 
 is_valid_tag() {
@@ -156,6 +166,23 @@ for required_file in \
   "$COMPOSE_DIR/docker-compose.prod.yml"; do
   [[ -f "$required_file" ]] || fatal "缺少必需文件 $required_file"
 done
+
+# 发布会拉取镜像、重建三个应用容器并原子更新版本记录；同一 Compose 目录
+# 只能允许一个发布流程，避免两个版本互相覆盖健康探测和回滚状态。
+DEPLOY_LOCK_DIR="$COMPOSE_DIR/.deploy.lock"
+if ! mkdir "$DEPLOY_LOCK_DIR" 2>/dev/null; then
+  lock_pid="$(cat "$DEPLOY_LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ]; then
+    fatal "已有部署任务正在运行或遗留锁（PID ${lock_pid}），请确认后再处理 $DEPLOY_LOCK_DIR"
+  fi
+  fatal "已有部署任务正在运行或遗留锁，请确认后再处理 $DEPLOY_LOCK_DIR"
+fi
+DEPLOY_LOCK_OWNED=true
+trap release_deploy_lock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s\n' "$$" > "$DEPLOY_LOCK_DIR/pid"
+chmod 600 "$DEPLOY_LOCK_DIR/pid"
 
 # 部署脚本不会 source .env，避免把生产凭据带入当前 shell；仅读取并校验 EDGE_PORT，
 # 让自定义边缘网关端口仍能被健康门禁覆盖。显式设置 DEPLOY_EDGE_HEALTH_URL 时优先使用它。

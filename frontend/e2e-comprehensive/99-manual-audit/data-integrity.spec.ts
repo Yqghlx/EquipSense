@@ -12,7 +12,7 @@
  * 5. 知识规则：创建字段回读
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { BASE_URL, getE2EPassword } from '../helpers';
+import { BASE_URL, MACHINE_API_HEADERS, getE2EPassword } from '../helpers';
 
 const log: string[] = [];
 function record(entity: string, check: string, ok: boolean, detail = '') {
@@ -34,6 +34,7 @@ test.describe('数据正确性测试', () => {
   test.beforeAll(async ({ request }) => {
     const resp = await request.post(`${BASE_URL}/api/v1/auth/login`, {
       data: { username: 'admin', password: getE2EPassword('admin') },
+      headers: MACHINE_API_HEADERS,
     });
     token = (await resp.json()).accessToken;
   });

@@ -27,6 +27,15 @@ public static class BusinessMetrics
         .CreateCounter("equipai_telemetry_dropped_total", "遥测数据写入失败丢弃总数（重试耗尽后）");
 
     /// <summary>
+    /// 时序数据已落库但对应事件发布失败的总数。
+    /// 与 TelemetryDropped 分开，避免把“数据存在但告警未评估”误判成数据库写入丢失。
+    /// </summary>
+    public static readonly Counter TelemetryEventDropped = Prometheus.Metrics
+        .CreateCounter(
+            "equipai_telemetry_event_dropped_total",
+            "已落库遥测对应的事件发布失败丢弃总数（重试耗尽后）");
+
+    /// <summary>
     /// 遥测数据因设备/租户校验被拒绝的总数
     /// 多租户纵深防御：MQTT 主题中的 tenantId 不可信，入库前按设备实际归属租户校验。
     /// reason=unknown_device：设备不存在（误配置或攻击）；reason=tenant_mismatch：设备归属租户

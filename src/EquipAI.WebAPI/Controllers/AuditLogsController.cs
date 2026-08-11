@@ -40,22 +40,14 @@ public class AuditLogsController : ControllerBase
         [FromQuery] string? resourceType = null,
         CancellationToken ct = default)
     {
-        var logs = await _auditLogService.GetAuditLogsAsync(_tenantContext.TenantId, query.Page, query.PageSize, ct);
-        // 在内存中按可选筛选条件二次过滤（查询服务暂不支持条件参数）
-        var items = logs.Items.AsEnumerable();
-        if (!string.IsNullOrWhiteSpace(action))
-            items = items.Where(l => l.Action.Equals(action, StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(resourceType))
-            items = items.Where(l => l.ResourceType.Equals(resourceType, StringComparison.OrdinalIgnoreCase));
-
-        var filtered = items.ToList();
-        return Ok(new PagedResult<AuditLogDto>
-        {
-            Items = filtered,
-            Total = filtered.Count,
-            Page = query.Page,
-            PageSize = query.PageSize,
-        });
+        var logs = await _auditLogService.GetAuditLogsAsync(
+            _tenantContext.TenantId,
+            query.Page,
+            query.PageSize,
+            ct,
+            action,
+            resourceType);
+        return Ok(logs);
     }
 
     /// <summary>

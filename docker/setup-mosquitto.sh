@@ -8,12 +8,14 @@
 #
 # 使用方式：
 #   cd docker && ./setup-mosquitto.sh
-#   cd docker && ./setup-mosquitto.sh <用户名> <密码>
+#   cd docker && MQTT_USERNAME=<用户名> ./setup-mosquitto.sh
 #
-# 用户名和密码必须通过命令行参数、环境变量或 docker/.env 提供，脚本不再内置公开默认值。
+# 用户名可通过第一个参数、环境变量或 docker/.env 提供；密码只能通过环境变量或
+# docker/.env 提供，随后仅经标准输入交给 mosquitto_passwd，禁止作为命令行参数传递。
 # =============================================================================
 
 set -euo pipefail
+umask 077
 
 # 脚本所在目录（即 docker/）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,8 +23,13 @@ PASSWD_DIR="${SCRIPT_DIR}/mosquitto_passwd"
 PASSWD_FILE="${PASSWD_DIR}/passwd"
 
 # 从命令行参数或环境变量读取。
+if [ "$#" -gt 1 ]; then
+    echo "错误：禁止通过命令行参数传递 MQTT 密码；请使用 docker/.env 或 MQTT_PASSWORD 环境变量" >&2
+    exit 1
+fi
+
 USERNAME="${1:-${MQTT_USERNAME:-}}"
-PASSWORD="${2:-${MQTT_PASSWORD:-}}"
+PASSWORD="${MQTT_PASSWORD:-}"
 
 # setup.sh 会在密码文件缺失时调用本脚本，此时优先从同目录 .env 读取，避免把密码打印到日志。
 ENV_FILE="${SCRIPT_DIR}/.env"
@@ -62,65 +69,31 @@ if [ -f "${PASSWD_FILE}" ]; then
     cp "${PASSWD_FILE}" "${BACKUP_FILE}"
 fi
 
-# 尝试使用 mosquitto_passwd 命令（如果系统已安装 mosquitto）
+# 密码只通过标准输入传递给官方工具，禁止使用 -b 将明文密码放进进程参数。
+# 官方工具会交互式读取两次密码（输入和确认），因此这里显式提供两行 stdin。
 if command -v mosquitto_passwd &> /dev/null; then
     echo -e "${GREEN}使用 mosquitto_passwd 命令创建密码文件${NC}"
 
-    # 创建新密码文件并添加用户
-    # -c：创建新文件（会覆盖已有文件）
-    # -b：批处理模式（从命令行参数读取密码，非交互式）
-    mosquitto_passwd -c -b "${PASSWD_FILE}" "${USERNAME}" "${PASSWORD}"
-
-    echo -e "${GREEN}已创建用户: ${USERNAME}${NC}"
-else
-    echo -e "${YELLOW}未找到 mosquitto_passwd 命令，使用替代方案...${NC}"
-    echo -e "${YELLOW}提示：可通过 'apt install mosquitto-clients' 或 'brew install mosquitto' 安装${NC}"
-    echo ""
-
-    # 替代方案：使用 openssl 生成 PBKDF2 哈希密码
-    # Mosquitto 2.x 支持 $7$ 格式（PBKDF2-SHA512）
-    if command -v openssl &> /dev/null; then
-        echo -e "${YELLOW}使用 openssl 生成密码哈希${NC}"
-
-        # 生成盐值（16 字节，十六进制编码）
-        SALT=$(openssl rand -hex 16)
-        # 迭代次数（Mosquitto 默认 10000）
-        ITERATIONS=10000
-        # 生成 PBKDF2-SHA512 哈希
-        HASH=$(echo -n "${PASSWORD}" | openssl kdf -keylen 64 -kdfopt digest:SHA512 \
-            -kdfopt pass:"${PASSWORD}" -kdfopt salt:"${SALT}" \
-            -kdfopt iter:${ITERATIONS} 2>/dev/null | head -1 || \
-            openssl passwd -6 "${PASSWORD}" 2>/dev/null || \
-            echo "")
-
-        if [ -z "${HASH}" ]; then
-            # 如果 PBKDF2 不可用，尝试使用 Docker 容器中的 mosquitto_passwd
-            if command -v docker &> /dev/null; then
-                echo -e "${YELLOW}使用 Docker 容器生成密码哈希${NC}"
-                docker run --rm -v "${PASSWD_DIR}":/work \
-                    eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 \
-                    mosquitto_passwd -c -b /work/passwd "${USERNAME}" "${PASSWORD}"
-            else
-                echo -e "${RED}错误：无法生成密码哈希。${NC}"
-                echo -e "${RED}请安装以下任一工具：${NC}"
-                echo -e "${RED}  1. mosquitto-clients（推荐）${NC}"
-                echo -e "${RED}  2. Docker（使用容器内 mosquitto_passwd）${NC}"
-                exit 1
-            fi
-        else
-            # 写入密码文件
-            echo "${USERNAME}:${HASH}" > "${PASSWD_FILE}"
-        fi
-    elif command -v docker &> /dev/null; then
-        echo -e "${YELLOW}使用 Docker 容器生成密码哈希${NC}"
-        docker run --rm -v "${PASSWD_DIR}":/work \
-            eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 \
-            mosquitto_passwd -c -b /work/passwd "${USERNAME}" "${PASSWORD}"
-    else
-        echo -e "${RED}错误：未找到 openssl 或 docker，无法生成密码哈希${NC}"
-        echo -e "${RED}请安装 openssl 或 Docker 后重试${NC}"
+    if ! printf '%s\n%s\n' "${PASSWORD}" "${PASSWORD}" \
+        | mosquitto_passwd -c "${PASSWD_FILE}" "${USERNAME}"; then
+        echo -e "${RED}错误：mosquitto_passwd 无法创建密码文件${NC}" >&2
         exit 1
     fi
+
+    echo -e "${GREEN}已创建用户: ${USERNAME}${NC}"
+elif command -v docker &> /dev/null; then
+    echo -e "${YELLOW}未找到本机 mosquitto_passwd，使用固定版本 Docker 工具生成密码哈希${NC}"
+    if ! printf '%s\n%s\n' "${PASSWORD}" "${PASSWORD}" \
+        | docker run --rm -i -v "${PASSWD_DIR}":/work \
+            eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 \
+            mosquitto_passwd -c /work/passwd "${USERNAME}"; then
+        echo -e "${RED}错误：Docker 中的 mosquitto_passwd 无法创建密码文件${NC}" >&2
+        exit 1
+    fi
+else
+    echo -e "${RED}错误：未找到 mosquitto_passwd 或 Docker，无法安全生成密码哈希${NC}" >&2
+    echo -e "${RED}请安装 mosquitto-clients，或启动 Docker 后重试${NC}" >&2
+    exit 1
 fi
 
 # 设置密码文件权限（仅所有者可读写，mosquitto 容器内进程需要可读）
@@ -142,6 +115,7 @@ fi
 # 提示添加更多用户
 echo ""
 echo -e "${GREEN}如需添加更多用户，可执行：${NC}"
-echo "  mosquitto_passwd -b ${PASSWD_FILE} <用户名> <密码>"
+echo "  mosquitto_passwd ${PASSWD_FILE} <用户名>"
+echo "  # 按提示输入密码，不要把密码写入命令行参数"
 echo "  # 或者使用 Docker："
-echo "  docker run --rm -v ${PASSWD_DIR}:/work eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 mosquitto_passwd -b /work/passwd <用户名> <密码>"
+echo "  docker run --rm -it -v ${PASSWD_DIR}:/work eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 mosquitto_passwd /work/passwd <用户名>"

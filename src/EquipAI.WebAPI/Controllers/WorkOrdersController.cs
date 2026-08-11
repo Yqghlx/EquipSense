@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using EquipAI.Application.Approvals;
 using EquipAI.Application.Approvals.DTOs;
 using EquipAI.Application.DTOs.Common;
@@ -50,7 +51,8 @@ public class WorkOrdersController : ControllerBase
     [RequirePermission("workorder:read")]
     [ProducesResponseType(typeof(PagedResult<WorkOrderDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<WorkOrderDto>>> GetWorkOrders(
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 20,
+        [FromQuery, Range(1, PagedQuery.MaxPage, ErrorMessage = "页码必须在 1 到 1000000 之间")] int page = 1,
+        [FromQuery, Range(1, PagedQuery.MaxPageSize, ErrorMessage = "每页条数必须在 1 到 100 之间")] int pageSize = 20,
         [FromQuery] string? status = null, [FromQuery] Guid? deviceId = null)
     {
         var result = await _workOrderService.ListAsync(_tenantContext.TenantId, page, pageSize, status, deviceId);

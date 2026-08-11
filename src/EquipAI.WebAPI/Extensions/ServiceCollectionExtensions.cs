@@ -203,6 +203,7 @@ public static class ServiceCollectionExtensions
         // 租户可配置出站地址的 SSRF 防护策略，保存时与实际发送时均执行校验。
         services.AddSingleton<OutboundEndpointPolicy>();
         services.AddTransient<OutboundEndpointValidationHandler>();
+        services.AddSingleton<Security.AuthResponsePolicy>();
 
         // MQTT 配置选项
         services.Configure<MqttOptions>(configuration.GetSection("Mqtt"));
@@ -582,31 +583,33 @@ public static class ServiceCollectionExtensions
             };
 
             // Token 来源优先级：
-            //   1. SignalR WebSocket：从 query string 的 access_token 参数读取（WebSocket 无法携带 Cookie/Header）
-            //   2. HttpOnly Cookie：浏览器自动携带，防 XSS 窃取（前端迁移完成后主要来源）
-            //   3. Authorization Header：Bearer Token（向后兼容，开发阶段 / 非浏览器客户端）
+            //   1. HttpOnly Cookie：浏览器自动携带，防 XSS 窃取（浏览器和同源 SignalR 的主要来源）
+            //   2. SignalR WebSocket query string：仅作为非浏览器客户端的兼容回退
+            //   3. Authorization Header：Bearer Token（由 JwtBearerHandler 默认处理）
             options.Events = new JwtBearerEvents
             {
                 OnMessageReceived = context =>
                 {
                     var path = context.HttpContext.Request.Path;
 
-                    // SignalR WebSocket 路径：优先从 query string 取 token
+                    // Cookie 优先：query string 可能被反向代理、访问日志或监控系统记录，
+                    // 不能让它覆盖浏览器已经安全存储的 HttpOnly Cookie。
+                    if (context.Request.Cookies.TryGetValue("access_token", out var cookieToken)
+                        && !string.IsNullOrEmpty(cookieToken))
+                    {
+                        context.Token = cookieToken;
+                        return Task.CompletedTask;
+                    }
+
+                    // SignalR WebSocket 的兼容回退：部分非浏览器客户端无法携带 Cookie，
+                    // 仍允许通过 access_token query string 建立连接。浏览器前端不使用此路径。
                     if (path.StartsWithSegments("/hubs"))
                     {
                         var qsToken = context.Request.Query["access_token"];
                         if (!string.IsNullOrEmpty(qsToken))
                         {
                             context.Token = qsToken;
-                            return Task.CompletedTask;
                         }
-                    }
-
-                    // 非 SignalR 请求（或 SignalR 未携带 query token）：从 HttpOnly Cookie 读取
-                    if (context.Request.Cookies.TryGetValue("access_token", out var cookieToken)
-                        && !string.IsNullOrEmpty(cookieToken))
-                    {
-                        context.Token = cookieToken;
                     }
 
                     return Task.CompletedTask;

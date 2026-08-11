@@ -146,6 +146,19 @@ else
     fi
   fi
 
+  machine_auth_api_key="$(read_env_value AUTH_MACHINE_API_KEY)"
+  if [ -n "$machine_auth_api_key" ]; then
+    if [[ "$machine_auth_api_key" == *"请修改"* ]] || [[ "$machine_auth_api_key" == *"PLEASE_CHANGE"* ]] || [[ "$machine_auth_api_key" == *"CHANGE_ME"* ]] || [[ "$machine_auth_api_key" == *"SET_VIA_ENVIRONMENT"* ]]; then
+      error "AUTH_MACHINE_API_KEY 仍为占位值"
+    fi
+    if [ "${#machine_auth_api_key}" -lt 32 ]; then
+      error "AUTH_MACHINE_API_KEY 长度不足 32 个字符"
+    fi
+    if printf '%s' "$machine_auth_api_key" | LC_ALL=C grep -q '[^ -~]'; then
+      error "AUTH_MACHINE_API_KEY 必须只包含 ASCII 字符"
+    fi
+  fi
+
   gateway_tenant_id="$(read_env_value GATEWAY_TENANT_ID)"
   if [ -n "$gateway_tenant_id" ] \
     && [[ "$gateway_tenant_id" != *"请修改"* ]] \
@@ -209,6 +222,7 @@ else
     "TOTP_ENCRYPTION_KEY"
     "PII_ENCRYPTION_KEY"
     "GATEWAY_AUTH_KEY"
+    "AUTH_MACHINE_API_KEY"
     "LLM_API_KEY"
     "SMTP_PASSWORD"
     "VAPID__PRIVATEKEY"
@@ -382,6 +396,10 @@ else
       check_runtime_certificate() {
         local path="$1"
         local description="$2"
+        local require_issued_certificate="${3:-false}"
+        local certificate_identity
+        local subject
+        local issuer
         if [ ! -s "$path" ]; then
           error "$description 为空或缺失"
           return 1
@@ -393,6 +411,21 @@ else
         if ! openssl x509 -checkend 2592000 -noout -in "$path" >/dev/null 2>&1; then
           error "$description 已过期或将在 30 天内过期"
           return 1
+        fi
+        if [ "$require_issued_certificate" = true ] \
+          && [ "${aspnet_environment:-Production}" = "Production" ]; then
+          # 生产叶子证书必须由 CA 签发；开发自签名证书不能因为有效期和主机名
+          # 都正确就混入公网或跨主机部署。MQTT CA 根证书本身不走此检查。
+          if ! certificate_identity="$(openssl x509 -in "$path" -noout -subject -issuer -nameopt RFC2253 2>/dev/null)"; then
+            error "$description 无法读取证书签发者信息"
+            return 1
+          fi
+          subject="$(printf '%s\n' "$certificate_identity" | sed -n 's/^subject=//p')"
+          issuer="$(printf '%s\n' "$certificate_identity" | sed -n 's/^issuer=//p')"
+          if [ -n "$subject" ] && [ "$subject" = "$issuer" ]; then
+            error "${description}不得使用自签名证书"
+            return 1
+          fi
         fi
         return 0
       }
@@ -447,6 +480,7 @@ else
         local error_message="$3"
         local certificate_text
         local san_line
+        local san_entries
         local common_name
         local wildcard_host=""
 
@@ -471,9 +505,12 @@ else
         fi
 
         if [ -n "$san_line" ]; then
-          if printf '%s\n' "$san_line" | grep -Fq "DNS:${host}" \
-            || { [ -n "$wildcard_host" ] && printf '%s\n' "$san_line" | grep -Fq "DNS:${wildcard_host}"; } \
-            || printf '%s\n' "$san_line" | grep -Fq "IP Address:${host}"; then
+          # SAN 是逗号分隔的条目，必须按完整条目匹配，避免
+          # DNS:example.com.evil 被错误地当成 DNS:example.com。
+          san_entries="$(printf '%s\n' "$san_line" | tr ',' '\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          if printf '%s\n' "$san_entries" | grep -Fqx "DNS:${host}" \
+            || { [ -n "$wildcard_host" ] && printf '%s\n' "$san_entries" | grep -Fqx "DNS:${wildcard_host}"; } \
+            || printf '%s\n' "$san_entries" | grep -Fqx "IP Address:${host}"; then
             return 0
           fi
         elif [ "$common_name" = "$host" ] || { [ -n "$wildcard_host" ] && [ "$common_name" = "$wildcard_host" ]; }; then
@@ -500,7 +537,7 @@ else
       mqtt_server_certificate_valid=false
       mqtt_server_key_valid=false
 
-      check_runtime_certificate "$ssl_certificate" "Nginx TLS 证书" && ssl_certificate_valid=true
+      check_runtime_certificate "$ssl_certificate" "Nginx TLS 证书" true && ssl_certificate_valid=true
       check_runtime_private_key "$ssl_key" "Nginx TLS 私钥" && ssl_key_valid=true
       if [ "$ssl_certificate_valid" = true ] && [ "$ssl_key_valid" = true ]; then
         if ! check_runtime_key_pair "$ssl_certificate" "$ssl_key" "Nginx TLS"; then
@@ -516,7 +553,7 @@ else
       fi
 
       check_runtime_certificate "$mqtt_ca_certificate" "MQTT CA 证书" && mqtt_ca_certificate_valid=true
-      check_runtime_certificate "$mqtt_server_certificate" "MQTT 服务端证书" && mqtt_server_certificate_valid=true
+      check_runtime_certificate "$mqtt_server_certificate" "MQTT 服务端证书" true && mqtt_server_certificate_valid=true
       check_runtime_private_key "$mqtt_server_key" "MQTT 服务端私钥" && mqtt_server_key_valid=true
       if [ "$mqtt_ca_certificate_valid" = true ] && [ "$mqtt_server_certificate_valid" = true ]; then
         if ! openssl verify -CAfile "$mqtt_ca_certificate" "$mqtt_server_certificate" >/dev/null 2>&1; then

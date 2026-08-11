@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.Application.DTOs.Common;
@@ -20,13 +21,24 @@ public static class QueryableExtensions
         this IQueryable<T> query, PagedQuery pagedQuery, CancellationToken ct = default)
     where T : class
     {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(pagedQuery);
+
+        var sortPropertyName = ResolveSortPropertyName<T>(pagedQuery.Sort);
+        var isAscending = pagedQuery.Order.Equals("asc", StringComparison.OrdinalIgnoreCase);
+        if (!isAscending && !pagedQuery.Order.Equals("desc", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("排序方向只能是 asc 或 desc。", nameof(pagedQuery.Order));
+        }
+
         var total = await query.CountAsync(ct);
 
         // 动态排序：将 Sort 字段名映射为 EF.Property，根据 Order 方向排序
-        // 如果排序字段不存在，EF Core 会在运行时抛出异常，由全局异常中间件捕获
-        var sorted = pagedQuery.Order.Equals("asc", StringComparison.OrdinalIgnoreCase)
-            ? query.OrderBy(e => EF.Property<object>(e, ToPascalCase(pagedQuery.Sort)))
-            : query.OrderByDescending(e => EF.Property<object>(e, ToPascalCase(pagedQuery.Sort)));
+        // 先在应用层确认字段确实存在且是可排序的标量属性，再交给 EF 生成 SQL。
+        // 这样客户端拼写错误会得到 400，而不是在数据库查询阶段变成 500。
+        var sorted = isAscending
+            ? query.OrderBy(e => EF.Property<object>(e, sortPropertyName))
+            : query.OrderByDescending(e => EF.Property<object>(e, sortPropertyName));
 
         var items = await sorted
             .Skip((pagedQuery.Page - 1) * pagedQuery.PageSize)
@@ -34,6 +46,43 @@ public static class QueryableExtensions
             .ToListAsync(ct);
 
         return (items, total);
+    }
+
+    /// <summary>
+    /// 将外部排序字段解析为实体上的可排序标量属性。
+    /// </summary>
+    private static string ResolveSortPropertyName<T>(string sort)
+        where T : class
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sort);
+
+        var requestedPropertyName = ToPascalCase(sort);
+        var property = typeof(T)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, requestedPropertyName, StringComparison.OrdinalIgnoreCase)
+                && IsSortableScalar(candidate.PropertyType));
+
+        return property?.Name
+            ?? throw new ArgumentException($"排序字段不存在或不可排序：{sort}", nameof(sort));
+    }
+
+    /// <summary>
+    /// 只允许 EF 可以稳定转换为 ORDER BY 的标量类型，拒绝导航属性和集合属性。
+    /// </summary>
+    private static bool IsSortableScalar(Type type)
+    {
+        var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
+        return underlyingType.IsPrimitive
+            || underlyingType.IsEnum
+            || underlyingType == typeof(string)
+            || underlyingType == typeof(decimal)
+            || underlyingType == typeof(Guid)
+            || underlyingType == typeof(DateTime)
+            || underlyingType == typeof(DateTimeOffset)
+            || underlyingType == typeof(TimeSpan)
+            || underlyingType == typeof(DateOnly)
+            || underlyingType == typeof(TimeOnly);
     }
 
     /// <summary>

@@ -62,7 +62,11 @@ public class GatewayConfigController : ControllerBase
         try
         {
             var httpClient = _httpClientFactory.CreateClient("GatewayProxy");
-            var response = await httpClient.GetAsync($"http://{gatewayHost}:{parsedPort}/status", ct);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"http://{gatewayHost}:{parsedPort}/status");
+            _endpointPolicy.AddGatewayAuthHeader(request);
+            using var response = await httpClient.SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {
@@ -121,6 +125,13 @@ public class GatewayConfigController : ControllerBase
         // 单按 gatewayId 过滤会跨租户泄漏工业敏感信息（OPC UA 连接串等）。tenantId 必填，缺失即拒绝。
         if (tenantId is null || tenantId == Guid.Empty)
             return BadRequest(new { code = 400, message = "tenantId 参数不能为空" });
+
+        if (!_endpointPolicy.IsGatewayIdentityAllowed(tenantId.Value, gatewayId, out var identityReason))
+        {
+            _logger.LogWarning("拒绝未绑定的网关配置拉取：GatewayId={GatewayId}, TenantId={TenantId}, Reason={Reason}",
+                gatewayId, tenantId, identityReason);
+            return Unauthorized(new { code = 401, message = "网关身份未通过服务端绑定校验" });
+        }
 
         var result = await _service.PullConfigAsync(tenantId.Value, gatewayId, ct);
         return Ok(result);

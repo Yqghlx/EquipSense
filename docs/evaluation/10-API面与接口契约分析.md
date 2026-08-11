@@ -10,7 +10,7 @@
 |------|------|---------|
 | 前缀 | `/api/v1/` | ✅ 全部 Controller Route 统一 |
 | 分页 | `?page=1&pageSize=20&sort=created_at&order=desc` | ✅ 统一 `PagedResult<T>` |
-| 认证 | JWT (三源: Cookie/Header/QueryString) | ✅ 全局 [Authorize] |
+| 认证 | JWT (Cookie 优先；SignalR QueryString 仅兼容回退；Header 默认处理) | ✅ 全局 [Authorize] |
 | 错误响应 | `{code, message, details}` | ✅ ExceptionHandlingMiddleware 统一 |
 | 审计过滤 | 全局 AuditActionFilter | ✅ |
 | 缓存 | OutputCache: GET 30s 基线 | ⚠️ 部分端点 |

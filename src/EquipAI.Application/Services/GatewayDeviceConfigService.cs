@@ -131,9 +131,14 @@ public class GatewayDeviceConfigService
 
             var httpClient = _httpClientFactory.CreateClient("GatewayProxy");
             var payload = new { protocol, connectionString = connectionConfig };
-            var response = await httpClient.PostAsJsonAsync(
-                $"http://{gateway.Host}:{gateway.HealthPort}/test-connection",
-                payload, ct);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"http://{gateway.Host}:{gateway.HealthPort}/test-connection")
+            {
+                Content = JsonContent.Create(payload),
+            };
+            _endpointPolicy.AddGatewayAuthHeader(request);
+            using var response = await httpClient.SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {

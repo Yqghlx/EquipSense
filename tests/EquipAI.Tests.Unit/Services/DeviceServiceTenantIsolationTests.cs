@@ -197,6 +197,6 @@ public class DeviceServiceTenantIsolationTests : IAsyncLifetime
         public Task LogFromContextAsync(string action, string resourceType, string? resourceId = null,
             string? description = null, CancellationToken ct = default) => Task.CompletedTask;
         public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
-            CancellationToken ct = default) => throw new NotSupportedException();
+            CancellationToken ct = default, string? action = null, string? resourceType = null) => throw new NotSupportedException();
     }
 }

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+using EquipAI.Application.DTOs.Common;
 using EquipAI.Application.Notifications;
 using EquipAI.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
@@ -32,8 +34,8 @@ public class NotificationsController : ControllerBase
     /// </summary>
     [HttpGet]
     public async Task<ActionResult> GetNotifications(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
+        [FromQuery, Range(1, PagedQuery.MaxPage, ErrorMessage = "页码必须在 1 到 1000000 之间")] int page = 1,
+        [FromQuery, Range(1, PagedQuery.MaxPageSize, ErrorMessage = "每页条数必须在 1 到 100 之间")] int pageSize = 20,
         [FromQuery] bool? unreadOnly = null,
         CancellationToken ct = default)
         => Ok(await _notificationService.ListAsync(page, pageSize, unreadOnly, ct));

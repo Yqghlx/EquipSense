@@ -9,7 +9,7 @@
  * - 普通用户登录不触发改密
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, login, loginAs, captureErrors, getE2EPassword } from '../helpers';
+import { BASE_URL, MACHINE_API_HEADERS, login, loginAs, captureErrors, getE2EPassword } from '../helpers';
 
 test.describe('01-强制改密流程', () => {
   test('1. MustChangePassword 用户登录后应弹出改密对话框', async ({ page }) => {
@@ -19,6 +19,7 @@ test.describe('01-强制改密流程', () => {
     const adminToken = await (async () => {
       const resp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
         data: { username: 'admin', password: getE2EPassword('admin') },
+        headers: MACHINE_API_HEADERS,
       });
       const body = await resp.json();
       return body.accessToken || body.token;

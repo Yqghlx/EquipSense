@@ -53,12 +53,15 @@ dotnet run --project src/EquipAI.WebAPI
 # 跑全部三套（约 2 分钟）
 export AUTH_USER=admin
 export AUTH_PASS='<与后端 SEED_ADMIN_PASSWORD 相同的测试密码>'
-k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/api-read.js
-k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/mqtt-publish.js
-k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/telemetry-write.js
+# 生产环境另需设置 AUTH_MACHINE_API_KEY（对应后端 AUTH_MACHINE_API_KEY），
+# 仅用于让机器客户端读取登录响应体 JWT；开发/测试环境可省略。
+export AUTH_MACHINE_API_KEY='<生产机器客户端 API Key（如需）>'
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/api-read.js
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/mqtt-publish.js
+k6 run -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/telemetry-write.js
 
 # 高压测试（200 VU）
-k6 run -e VUS=200 -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" tests/load/api-read.js
+k6 run -e VUS=200 -e AUTH_USER="$AUTH_USER" -e AUTH_PASS="$AUTH_PASS" -e AUTH_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" tests/load/api-read.js
 ```
 
 > 压测脚本不内置任何公开账户密码。生产 MQTT 压测还必须显式设置

@@ -98,6 +98,33 @@ public class AuditLogServiceTests : IAsyncDisposable
         resultB.Total.Should().Be(1);
     }
 
+    [Fact]
+    public async Task GetAuditLogsAsync_筛选条件应在分页前应用()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IAuditLogService>();
+        var tenantId = Guid.NewGuid();
+
+        await service.LogAsync(tenantId, "Create", "Device");
+        await service.LogAsync(tenantId, "Update", "Device");
+        await service.LogAsync(tenantId, "Create", "WorkOrder");
+        await service.LogAsync(tenantId, "Create", "Device");
+
+        // 过滤后应有 2 条记录，再取第 2 页时仍应得到第 2 条匹配记录，不能先取全量第 2 页再过滤。
+        var result = await service.GetAuditLogsAsync(
+            tenantId,
+            page: 2,
+            pageSize: 1,
+            ct: default,
+            action: "Create",
+            resourceType: "Device");
+
+        result.Total.Should().Be(2);
+        result.Items.Should().ContainSingle();
+        result.Items[0].Action.Should().Be("Create");
+        result.Items[0].ResourceType.Should().Be("Device");
+    }
+
     /// <summary>
     /// 测试用租户上下文 — 模拟 ITenantContext
     /// </summary>

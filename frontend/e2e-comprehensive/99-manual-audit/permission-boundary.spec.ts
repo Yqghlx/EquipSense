@@ -16,7 +16,7 @@
  *   Viewer: 全部只读
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { BASE_URL, getE2EPassword } from '../helpers';
+import { BASE_URL, MACHINE_API_HEADERS, getE2EPassword } from '../helpers';
 
 const log: string[] = [];
 function record(role: string, action: string, expected: 'allow' | 'deny', actual: number, detail = '') {
@@ -42,6 +42,7 @@ async function getToken(request: APIRequestContext, username: string, password: 
   try {
     const resp = await request.post(`${BASE_URL}/api/v1/auth/login`, {
       data: { username, password },
+      headers: MACHINE_API_HEADERS,
     });
     if (!resp.ok()) return null;
     const body = await resp.json();

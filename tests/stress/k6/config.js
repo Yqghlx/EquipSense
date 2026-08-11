@@ -1,6 +1,7 @@
 import http from 'k6/http';
 
 export const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
+const MACHINE_API_KEY = __ENV.AUTH_MACHINE_API_KEY || '';
 
 /**
  * 登录压测账户。密码必须由运行者显式传入，禁止在压测脚本中保留公开默认值。
@@ -10,9 +11,12 @@ export function login(username = __ENV.AUTH_USER || 'admin', password = __ENV.AU
     throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入压测凭据');
   }
 
+  const loginHeaders = { 'Content-Type': 'application/json' };
+  if (MACHINE_API_KEY) loginHeaders['X-API-Key'] = MACHINE_API_KEY;
+
   const resp = http.post(`${BASE_URL}/api/v1/auth/login`,
     JSON.stringify({ username, password }),
-    { headers: { 'Content-Type': 'application/json' } }
+    { headers: loginHeaders }
   );
 
   if (resp.status !== 200) {

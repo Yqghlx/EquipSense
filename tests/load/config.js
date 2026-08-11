@@ -19,6 +19,9 @@ export const config = {
 
   /** 认证密码，必须由运行者显式传入，避免压测误用公开默认凭据 */
   password: __ENV.AUTH_PASS || '',
+
+  /** Production 读取响应体 JWT 所需的机器客户端 API Key（开发/测试可留空） */
+  machineApiKey: __ENV.AUTH_MACHINE_API_KEY || '',
 };
 
 /** 标准性能阈值 — 读路径 SLO：P95 < 500ms、P99 < 1000ms，错误率 < 0.1% */
@@ -52,11 +55,16 @@ export function getToken() {
     throw new Error('缺少 AUTH_PASS，请使用 -e AUTH_PASS=<测试账户密码> 显式传入压测凭据');
   }
 
+  const loginHeaders = {
+    'Content-Type': 'application/json',
+  };
+  if (config.machineApiKey) loginHeaders['X-API-Key'] = config.machineApiKey;
+
   const res = http.post(`${config.baseUrl}/api/v1/auth/login`, JSON.stringify({
     username: config.username,
     password: config.password,
   }), {
-    headers: { 'Content-Type': 'application/json' },
+    headers: loginHeaders,
   });
 
   if (res.status !== 200) {

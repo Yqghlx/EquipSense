@@ -8,10 +8,10 @@ namespace EquipAI.Application.DTOs.Users;
 public class CreateUserRequest
 {
     /// <summary>
-    /// 登录用户名（租户内唯一）
+    /// 登录用户名（全局唯一；登录请求不携带租户标识）
     /// </summary>
     [Required(ErrorMessage = "用户名不能为空")]
-    [StringLength(100, ErrorMessage = "用户名长度不能超过 100 个字符")]
+    [StringLength(50, ErrorMessage = "用户名长度不能超过 50 个字符")]
     public string Username { get; set; } = string.Empty;
 
     /// <summary>
@@ -24,6 +24,7 @@ public class CreateUserRequest
     /// <summary>
     /// 显示名称
     /// </summary>
+    [StringLength(100, ErrorMessage = "显示名称长度不能超过 100 个字符")]
     public string? DisplayName { get; set; }
 
     /// <summary>
@@ -34,10 +35,13 @@ public class CreateUserRequest
     /// <summary>
     /// 邮箱地址
     /// </summary>
+    [EmailAddress(ErrorMessage = "邮箱格式不正确")]
+    [StringLength(254, ErrorMessage = "邮箱长度不能超过 254 个字符")]
     public string? Email { get; set; }
 
     /// <summary>
     /// 手机号
     /// </summary>
+    [StringLength(32, ErrorMessage = "手机号长度不能超过 32 个字符")]
     public string? Phone { get; set; }
 }

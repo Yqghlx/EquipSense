@@ -21,12 +21,16 @@ interface AuthState {
   user: UserInfo | null;
   /** 是否已认证（根据 user 是否存在推断） */
   isAuthenticated: boolean;
+  /** 首屏是否已完成 sessionStorage/Cookie 会话恢复，未完成前路由不应重定向。 */
+  isSessionReady: boolean;
   /** 保存认证状态（Cookie 由后端登录响应自动设置，前端只存 user） */
   setAuth: (user: UserInfo) => void;
   /** 清除前端认证状态（Cookie 由后端 /auth/logout 清除） */
   logout: () => void;
   /** 从 sessionStorage 恢复认证状态（页面刷新时调用） */
   loadFromStorage: () => void;
+  /** 标记首屏会话恢复完成，允许路由开始做认证判断。 */
+  finishSessionRestore: () => void;
 }
 
 /**
@@ -37,18 +41,24 @@ interface AuthState {
  * 会立即重定向到 /login（然后又因已认证跳回 /dashboard），导致刷新或直接访问
  * 任意业务页面 URL 时都落到 /dashboard，懒加载子页面永远无法直接访问。
  */
-function loadFromStorageSync(): { user: UserInfo | null; isAuthenticated: boolean } {
-  if (typeof window === 'undefined') return { user: null, isAuthenticated: false };
+function loadFromStorageSync(): {
+  user: UserInfo | null;
+  isAuthenticated: boolean;
+  isSessionReady: boolean;
+} {
+  if (typeof window === 'undefined') {
+    return { user: null, isAuthenticated: false, isSessionReady: true };
+  }
   const userStr = sessionStorage.getItem('user');
   if (userStr) {
     try {
       const user = JSON.parse(userStr) as UserInfo;
-      return { user, isAuthenticated: true };
+      return { user, isAuthenticated: true, isSessionReady: false };
     } catch {
       sessionStorage.removeItem('user');
     }
   }
-  return { user: null, isAuthenticated: false };
+  return { user: null, isAuthenticated: false, isSessionReady: false };
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -56,14 +66,14 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   setAuth: (user) => {
     sessionStorage.setItem('user', JSON.stringify(user));
-    set({ user, isAuthenticated: true });
+    set({ user, isAuthenticated: true, isSessionReady: true });
   },
 
   logout: () => {
     sessionStorage.removeItem('user');
     // 清除主动刷新用的过期时间戳：登出后不再调度刷新，且避免残留值在异常路径下误导下次会话
     clearTokenExpiry();
-    set({ user: null, isAuthenticated: false });
+    set({ user: null, isAuthenticated: false, isSessionReady: true });
   },
 
   loadFromStorage: () => {
@@ -80,5 +90,9 @@ export const useAuthStore = create<AuthState>((set) => ({
     } else {
       set({ user: null, isAuthenticated: false });
     }
+  },
+
+  finishSessionRestore: () => {
+    set({ isSessionReady: true });
   },
 }));

@@ -1772,8 +1772,8 @@ public class PermissionMiddleware
 ```
 登录 → 验证用户名密码（bcrypt）
     → 检查 token_version（密码修改后版本号递增，旧 Token 自动失效）
-    → 生成 Access Token（24h 有效）+ Refresh Token（7d 有效，存 Redis）
-    → 返回两个 Token
+    → 生成 Access Token（默认 15min，配置钳制 10min-24h）+ Refresh Token（7d 有效，存 Redis）
+    → 写入 HttpOnly Cookie；Production 浏览器响应体清空令牌，机器客户端需 X-API-Key 才返回令牌
 
 请求 → JWT 中间件验证签名 + 过期时间
     → 从 token_version claim 与数据库比对（防止旧 Token 复用）
@@ -1902,7 +1902,7 @@ export function useSignalR(hubUrl: string) {
 
   useEffect(() => {
     const connection = new HubConnectionBuilder()
-      .withUrl(hubUrl, { accessTokenFactory: () => getToken() })
+      .withUrl(hubUrl) // 浏览器自动携带 HttpOnly Cookie，不把令牌交给页面脚本
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build();
 
@@ -1969,15 +1969,13 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// 请求拦截：自动注入 JWT
+// 请求拦截：认证 Cookie 由浏览器自动携带，不从 Web Storage 读取 JWT
 api.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem('access_token');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
 // 响应拦截：401 自动刷新 Token（加锁防止并发刷新）
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<number> | null = null;
 
 api.interceptors.response.use(
   (res) => res,
@@ -1988,17 +1986,13 @@ api.interceptors.response.use(
       // 多个请求同时 401 时，只刷新一次，其他请求排队等待
       if (!refreshPromise) {
         refreshPromise = (async () => {
-          const refreshToken = sessionStorage.getItem('refresh_token');
-          const { data } = await axios.post('/api/v1/auth/refresh', { refreshToken });
-          sessionStorage.setItem('access_token', data.accessToken);
-          sessionStorage.setItem('refresh_token', data.refreshToken);
+          const { data } = await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true });
           refreshPromise = null;
-          return data.accessToken;
+          return data.expiresIn;
         })();
       }
 
-      const newToken = await refreshPromise;
-      error.config.headers.Authorization = `Bearer ${newToken}`;
+      await refreshPromise;
       return api(error.config);
     }
     return Promise.reject(error);
@@ -2006,7 +2000,7 @@ api.interceptors.response.use(
 );
 ```
 
-> **安全说明：** Phase 1 使用 sessionStorage 存储 Token（XSS 可读取但关闭标签页自动清除）。Phase 2 升级方案：Access Token 存内存（Zustand store，不持久化），Refresh Token 通过 HttpOnly Cookie 传递（后端 Set-Cookie），彻底防止 XSS 窃取。
+> **当前安全说明：** 浏览器仅在 sessionStorage 保存用户信息和刷新调度时间戳；Access/Refresh Token 均由 HttpOnly + SameSite=Strict Cookie 管理，Production 响应体默认不返回 JWT。需要读取响应体 JWT 的机器客户端必须配置独立 `AUTH_MACHINE_API_KEY` 并发送 `X-API-Key`。
 
 | 数据类型 | 管理方式 | 示例 |
 |----------|----------|------|
@@ -2340,7 +2334,7 @@ volumes:
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/v1/auth/login | 登录（返回 JWT + Refresh Token） |
+| POST | /api/v1/auth/login | 登录（浏览器通过 HttpOnly Cookie；机器客户端携带 `X-API-Key` 时返回 JWT + Refresh Token） |
 | POST | /api/v1/auth/refresh | 刷新 Token |
 | POST | /api/v1/auth/logout | 登出（失效 Token） |
 | POST | /api/v1/auth/change-password | 修改密码 |

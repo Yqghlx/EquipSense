@@ -106,8 +106,46 @@ if [ -n "${BACKUP_WEBHOOK:-}" ]; then
   fi
 fi
 
+# 保留策略属于备份正确性的一部分；配置错误时必须在创建备份前失败，
+# 不能让 find 的清理错误被后面的 `|| true` 吞掉后仍报告成功。
+if ! [[ "$RETAIN_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[FATAL] RETAIN_DAYS 必须是大于 0 的整数" >&2
+  exit 1
+fi
+
+# 默认启用 Redis 备份时，缺少密码意味着无法证明 RDB 是完整快照，必须拒绝继续。
+if [ "$BACKUP_REDIS" = "true" ] && [ -z "${REDIS_PASSWORD:-}" ]; then
+  echo "[FATAL] BACKUP_REDIS=true 但 REDIS_PASSWORD 未设置；如需跳过 Redis 备份请显式设置 BACKUP_REDIS=false" >&2
+  exit 1
+fi
+
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"
+
+# 定时任务可能因上一次备份变慢而重叠；并发执行会同时导出、清理和同步同一目录，
+# 造成远端副本不可预测。使用原子 mkdir 获取跨平台锁，遗留锁必须由运维确认后清理，
+# 不能自动删除并假定持锁进程已经死亡。
+BACKUP_LOCK_DIR="$BACKUP_DIR/.backup.lock"
+if ! mkdir "$BACKUP_LOCK_DIR" 2>/dev/null; then
+  lock_pid="$(cat "$BACKUP_LOCK_DIR/pid" 2>/dev/null || true)"
+  if [ -n "$lock_pid" ]; then
+    echo "[FATAL] 已有备份任务正在运行或遗留锁（PID ${lock_pid}），请确认后再处理 $BACKUP_LOCK_DIR" >&2
+  else
+    echo "[FATAL] 已有备份任务正在运行或遗留锁，请确认后再处理 $BACKUP_LOCK_DIR" >&2
+  fi
+  exit 1
+fi
+
+release_backup_lock() {
+  rm -f "$BACKUP_LOCK_DIR/pid" 2>/dev/null || true
+  rmdir "$BACKUP_LOCK_DIR" 2>/dev/null || true
+}
+trap release_backup_lock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s\n' "$$" > "$BACKUP_LOCK_DIR/pid"
+chmod 600 "$BACKUP_LOCK_DIR/pid"
+
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_SUCCESS=true
 declare -a BACKUP_FILES
@@ -132,12 +170,15 @@ if ! docker ps --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
 else
   # 使用 PostgreSQL custom format。它自带压缩，并保留 pg_restore 的对象依赖信息，
   # 这样 TimescaleDB 的 catalog、hypertable 和 chunk 可以按正确顺序恢复。
-  # PGPASSWORD 通过 -e 传入容器环境，避免进程列表泄露
-  if docker exec -e PGPASSWORD="$PG_PASSWORD" "$PG_CONTAINER" \
-    pg_dump -U "$PG_USER" -d "$PG_DB" \
-    --format=custom \
-    --no-owner --no-privileges \
-    > "$PG_FILE"; then
+  # 密码通过标准输入交给容器内的临时 shell，再导出给 pg_dump；不能使用 docker exec -e，
+  # 因为 -e 的完整参数可能出现在宿主机进程列表或审计日志中。
+  if printf '%s\n' "$PG_PASSWORD" | docker exec -i "$PG_CONTAINER" sh -c '
+    IFS= read -r PGPASSWORD
+    export PGPASSWORD
+    exec pg_dump -U "$1" -d "$2" \
+      --format=custom \
+      --no-owner --no-privileges
+  ' sh "$PG_USER" "$PG_DB" > "$PG_FILE"; then
 
     # 完整性校验必须在数据库容器内执行，避免生产主机还需要安装 pg_restore。
     if docker exec -i "$PG_CONTAINER" pg_restore --list - < "$PG_FILE" >/dev/null 2>&1; then
@@ -246,11 +287,15 @@ if [ "$BACKUP_REDIS" = "true" ] && [ -n "${REDIS_PASSWORD:-}" ]; then
     echo "  ✗ Redis 容器 $REDIS_CONTAINER 未运行，无法完成已启用的 Redis 备份" >&2
     BACKUP_SUCCESS=false
   else
-    # 使用 REDISCLI_AUTH 传递凭据，避免 redis-cli 在错误输出中回显 -a 参数；
-    # INFO persistence 会等待后台快照真正完成，不能用固定 sleep 猜测完成时间。
+    # 使用标准输入在容器内设置 REDISCLI_AUTH，避免 redis-cli 的 -a 参数以及
+    # docker exec -e 参数把凭据暴露在宿主机进程列表中；INFO persistence 会等待
+    # 后台快照真正完成，不能用固定 sleep 猜测完成时间。
     redis_cli() {
-      docker exec -e REDISCLI_AUTH="$REDIS_PASSWORD" "$REDIS_CONTAINER" \
-        redis-cli --no-auth-warning "$@"
+      printf '%s\n' "$REDIS_PASSWORD" | docker exec -i "$REDIS_CONTAINER" sh -c '
+        IFS= read -r REDISCLI_AUTH
+        export REDISCLI_AUTH
+        exec redis-cli --no-auth-warning "$@"
+      ' redis "$@"
     }
 
     if redis_cli BGSAVE >/dev/null 2>&1; then
@@ -296,7 +341,7 @@ if [ "$BACKUP_REDIS" = "true" ] && [ -n "${REDIS_PASSWORD:-}" ]; then
     fi
   fi
 else
-  echo "[3/4] Redis 备份已跳过（未配置 REDIS_PASSWORD 或 BACKUP_REDIS=false）"
+  echo "[3/4] Redis 备份已跳过（BACKUP_REDIS=false）"
 fi
 
 # ============================================================
@@ -309,11 +354,30 @@ echo "[4/4] Grafana 配置已在 git 版本管理（docker/grafana/provisioning/
 # ============================================================
 echo ""
 echo "清理 $RETAIN_DAYS 天前的旧备份..."
-find "$BACKUP_DIR" -name "${PG_DB}_*.dump" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
-# 保留历史版本纯文本 gzip 备份的自动清理能力；restore.sh 仍兼容该格式。
-find "$BACKUP_DIR" -name "${PG_DB}_*.sql.gz" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
-find "$BACKUP_DIR" -name "redis_*.rdb" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
-find "$BACKUP_DIR" -name "attachments_*.tar.gz" -mtime +$RETAIN_DAYS -delete 2>/dev/null || true
+cleanup_old_backups() {
+  local cleanup_failed=false
+  local pattern
+  local -a patterns=(
+    "${PG_DB}_*.dump"
+    "${PG_DB}_*.sql.gz"
+    "redis_*.rdb"
+    "attachments_*.tar.gz"
+  )
+
+  # 清理失败会让磁盘持续增长，必须纳入备份结果，而不能再用 `|| true` 静默吞掉。
+  for pattern in "${patterns[@]}"; do
+    if ! find "$BACKUP_DIR" -name "$pattern" -mtime +"$RETAIN_DAYS" -delete 2>/dev/null; then
+      echo "  ✗ 旧备份清理失败: $pattern" >&2
+      cleanup_failed=true
+    fi
+  done
+
+  if [ "$cleanup_failed" = "true" ]; then
+    BACKUP_SUCCESS=false
+  fi
+}
+
+cleanup_old_backups
 
 # ============================================================
 # 异地同步（S3/OSS，可选）
@@ -321,7 +385,10 @@ find "$BACKUP_DIR" -name "attachments_*.tar.gz" -mtime +$RETAIN_DAYS -delete 2>/
 if [[ "${S3_SYNC:-false}" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
   echo ""
   echo "同步到 S3/OSS: ${S3_BUCKET:-<未配置>}"
-  if [ -z "${S3_BUCKET:-}" ]; then
+  if [ "$BACKUP_SUCCESS" != "true" ]; then
+    # 只允许同步已经通过本地逐项校验的批次，避免把半成品扩散到异地副本。
+    echo "  ✗ 本地备份不完整，跳过 S3 同步" >&2
+  elif [ -z "${S3_BUCKET:-}" ]; then
     echo "  ✗ S3_SYNC 已开启，但 S3_BUCKET 未配置" >&2
     BACKUP_SUCCESS=false
   elif ! command -v aws >/dev/null 2>&1; then

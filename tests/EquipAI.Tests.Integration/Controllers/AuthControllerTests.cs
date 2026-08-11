@@ -1,6 +1,8 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using EquipAI.Application.DTOs.Auth;
+using EquipAI.Application.DTOs.Users;
 using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
 
@@ -38,6 +40,34 @@ public class AuthControllerTests
         result!.AccessToken.Should().NotBeEmpty();
         result.RefreshToken.Should().NotBeEmpty();
         result.UserInfo.Username.Should().Be("admin");
+    }
+
+    /// <summary>
+    /// 验证：Cookie 会话恢复依赖的 /auth/me 必须返回完整用户上下文，
+    /// 尤其是租户 ID、强制改密标记和 MFA 状态，避免前端跨标签页恢复后出现半初始化状态。
+    /// </summary>
+    [Fact]
+    public async Task Me_ReturnsCompleteUserContext()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+        var login = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest { Username = "admin", Password = "Admin@123" });
+        var loginResult = await login.Content.ReadFromJsonAsync<AuthResponse>();
+
+        login.StatusCode.Should().Be(HttpStatusCode.OK);
+        loginResult.Should().NotBeNull();
+        loginResult!.AccessToken.Should().NotBeNullOrWhiteSpace();
+
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", loginResult.AccessToken);
+        var response = await client.GetAsync("/api/v1/auth/me");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var user = await response.Content.ReadFromJsonAsync<UserDto>();
+        user.Should().NotBeNull();
+        user!.TenantId.Should().Be(loginResult.UserInfo.TenantId);
+        user.MustChangePassword.Should().Be(loginResult.UserInfo.MustChangePassword);
+        user.MfaEnabled.Should().Be(loginResult.UserInfo.MfaEnabled);
     }
 
     /// <summary>

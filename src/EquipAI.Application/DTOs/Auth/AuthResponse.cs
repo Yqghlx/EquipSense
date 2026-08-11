@@ -6,21 +6,17 @@ namespace EquipAI.Application.DTOs.Auth;
 /// <summary>
 /// 认证成功响应 DTO
 ///
-/// v1.3.0 安全策略（折衷方案）：
+/// v1.4.0 安全策略：
 ///   - Token 通过 HttpOnly + SameSite=Strict + Secure Cookie 传递（浏览器主路径）
-///   - 响应体仍包含 AccessToken / RefreshToken 字段：
-///     * 兼容机器客户端（k6 压测脚本 / Simulator 等）
-///     * 浏览器前端已不再依赖响应体 token（不存 sessionStorage）
-///   - 前端 sessionStorage 只存 user 信息（XSS 偷不到 token）
-///
-/// 进一步强化（v1.4 候选）：可拆分为 /auth/login（浏览器，无 token 响应体）
-/// 和 /auth/machine-login（机器客户端，需 X-API-Key，返回 token）。
+///   - Production 浏览器响应会清空 AccessToken / RefreshToken 字段，避免页面脚本或日志获得 JWT
+///   - 机器客户端必须使用独立的 X-API-Key 请求头，才能读取响应体令牌
+///   - Development/Testing 保留响应体令牌，便于本地联调和测试契约兼容
 /// </summary>
 public class AuthResponse
 {
     /// <summary>
     /// JWT 访问令牌
-    /// 浏览器前端不读取此字段（依赖 Cookie），机器客户端可直接使用
+    /// Production 浏览器请求下为空；携带有效机器客户端 API Key 时返回真实令牌
     /// </summary>
     public string AccessToken { get; set; } = string.Empty;
 
@@ -32,7 +28,7 @@ public class AuthResponse
 
     /// <summary>
     /// 刷新令牌，用于续期 Access Token
-    /// 浏览器前端不读取此字段（依赖 HttpOnly Cookie），机器客户端可直接使用
+    /// Production 浏览器请求下为空；携带有效机器客户端 API Key 时返回真实令牌
     /// </summary>
     public string RefreshToken { get; set; } = string.Empty;
 

@@ -10,6 +10,8 @@ namespace EquipAI.Infrastructure.Data.Configurations;
 /// </summary>
 public class UserConfiguration : IEntityTypeConfiguration<User>
 {
+    private const int EncryptedPiiMaxLength = 512;
+
     /// <summary>
     /// 配置用户实体的表映射、字段约束、唯一索引和外键关系
     /// </summary>
@@ -59,12 +61,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(e => e.Phone)
             .HasColumnName("phone")
             // AES-GCM 密文包含版本、nonce、认证标签和 Base64 编码，长度会大于原始手机号。
-            .HasMaxLength(256);
+            .HasMaxLength(EncryptedPiiMaxLength);
 
         builder.Property(e => e.Email)
             .HasColumnName("email")
-            // 为最长合法邮箱预留加密后长度，避免 ValueConverter 截断密文。
-            .HasMaxLength(256);
+            // 254 字符的最长合法邮箱加密后约 389 字符，512 为密文格式和未来格式升级预留空间。
+            .HasMaxLength(EncryptedPiiMaxLength);
 
         builder.Property(e => e.EmailLookupHash)
             .HasColumnName("email_lookup_hash")
@@ -117,8 +119,10 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
             .HasColumnName("mfa_recovery_codes")
             .HasColumnType("jsonb");
 
-        // 唯一复合索引 — 确保同一租户内用户名唯一
-        builder.HasIndex(e => new { e.TenantId, e.Username }).IsUnique();
+        // 登录请求不携带租户标识，用户名必须全局唯一，避免跨租户登录时命中不确定的账号。
+        builder.HasIndex(e => e.Username)
+            .HasDatabaseName("IX_users_username")
+            .IsUnique();
 
         // 盲索引只支持等值查找，不能用于模糊搜索；不设唯一约束以兼容不同租户使用同一联系方式。
         builder.HasIndex(e => e.EmailLookupHash)

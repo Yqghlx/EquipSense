@@ -5,8 +5,8 @@
  * - 页面加载与元素可见性
  * - 表单校验（空值、错误密码）
  * - 正确登录流程与 Token 存储
- * - Token 过期自动刷新
- * - 多标签页登录状态同步
+ * - HttpOnly Cookie 过期自动刷新
+ * - 多标签页 Cookie 会话恢复
  * - 登出流程与状态清理
  */
 import { test, expect } from '@playwright/test';
@@ -145,51 +145,42 @@ test.describe('01-登录功能', () => {
     expect(errors).toEqual([]);
   });
 
-  test.skip('6. Token 过期自动刷新 — 用 API 模拟', async ({ page }) => {
+  test('6. Access Token 过期自动刷新 — HttpOnly Cookie + Refresh Cookie', async ({ page, context }) => {
     const errors = captureErrors(page);
 
     // 先正常登录
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
 
-    // 获取当前 Token
-    const originalToken = await page.evaluate(() => sessionStorage.getItem('token'));
-    expect(originalToken).toBeTruthy();
+    // access_token 是 HttpOnly，测试只能通过清除它模拟过期；refresh_token 保留，
+    // 由页面内真实 API 请求触发 401 拦截器完成刷新。
+    await context.clearCookies({ name: 'access_token' });
 
-    // 模拟 Token 过期：将 Token 替换为一个无效值
-    await page.evaluate(() => {
-      sessionStorage.setItem('token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.expired.invalid');
-    });
+    // 监听刷新请求后访问另一个需要请求数据的业务页面，确保浏览器真正走过
+    // 401 → refresh → 重试链路。SignalR 会保持长连接，因此不能等待 networkidle。
+    const refreshResponsePromise = page.waitForResponse(
+      (response) => response.url().includes('/api/v1/auth/refresh')
+        && response.request().method() === 'POST',
+      { timeout: 15000 },
+    ).catch(() => null);
+    await page.goto(`${BASE_URL}/devices`, { waitUntil: 'domcontentloaded' });
+    const refreshResponse = await refreshResponsePromise;
+    expect(refreshResponse?.ok()).toBeTruthy();
 
-    // 触发一次 API 请求，观察刷新行为
-    // 如果应用有自动刷新机制，它会尝试用 refreshToken 获取新 Token
-    await page.reload();
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
-
-    // 验证：要么 Token 已被刷新（新值），要么页面跳转回登录页
-    const currentToken = await page.evaluate(() => sessionStorage.getItem('token'));
-    const currentUrl = page.url();
-
-    // 两种可接受结果：
-    // 1. Token 被自动刷新（值发生了变化且不再是无效 Token）
-    // 2. 检测到 Token 失效后跳转回登录页
-    const tokenRefreshed = currentToken !== null && currentToken !== 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.expired.invalid';
-    const redirectedToLogin = /login/.test(currentUrl);
-    expect(tokenRefreshed || redirectedToLogin).toBeTruthy();
+    // 刷新成功后 Cookie 会被后端重新写入，/auth/me 应恢复为 200，且前端仍在业务页。
+    await expect(page).toHaveURL(/devices/);
+    expect((await verifyAuthCookie(page)).ok()).toBeTruthy();
+    expect((await getAuthState(page)).user).toBeTruthy();
 
     expect(errors).toEqual([]);
   });
 
-  test.skip('7. 多标签页登录状态同步', async ({ page, context }) => {
+  test('7. 多标签页登录状态同步 — 新标签页通过 Cookie 恢复', async ({ page, context }) => {
     const errors = captureErrors(page);
 
     // 在第一个标签页登录
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
-
-    // 获取第一个标签页的 Token
-    const token1 = await page.evaluate(() => sessionStorage.getItem('token'));
 
     // 打开第二个标签页
     const page2 = await context.newPage();
@@ -200,10 +191,10 @@ test.describe('01-登录功能', () => {
     await page2.waitForLoadState('networkidle');
     await page2.waitForTimeout(2000);
 
-    // 验证第二个标签页也能获取到 Token（localStorage 跨标签页共享）
-    const token2 = await page2.evaluate(() => sessionStorage.getItem('token'));
-    expect(token2).toBeTruthy();
-    expect(token2).toBe(token1);
+    // sessionStorage 不跨标签页共享；应用应使用共享的 HttpOnly Cookie 调用 /auth/me 恢复用户。
+    const { user: user2 } = await getAuthState(page2);
+    expect(user2).toBeTruthy();
+    expect((await verifyAuthCookie(page2)).ok()).toBeTruthy();
 
     // 清理：关闭第二个标签页
     await page2.close();

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using EquipAI.EdgeGateway.Protocols;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,12 +17,20 @@ namespace EquipAI.EdgeGateway;
 /// </summary>
 public class HealthEndpoints : BackgroundService
 {
+    private const int DefaultMaxConcurrentConnectionTests = 16;
+    private const int DefaultMaxRequestBodyBytes = 64 * 1024;
+    private static readonly TimeSpan InFlightRequestShutdownTimeout = TimeSpan.FromSeconds(10);
+
     private readonly ILogger<HealthEndpoints> _logger;
     private readonly GatewayOptions _options;
     private readonly Pipeline.GatewayMetrics _metrics;
     private readonly Func<IServiceProvider, string, IProtocolAdapter> _adapterFactory;
     private readonly IServiceProvider _serviceProvider;
     private readonly int _port;
+    private readonly SemaphoreSlim _connectionTestGate;
+    private readonly int _maxRequestBodyBytes;
+    private readonly object _inFlightRequestsLock = new();
+    private readonly HashSet<Task> _inFlightRequests = [];
 
     /// <summary>
     /// 初始化健康检查端点服务
@@ -31,20 +41,31 @@ public class HealthEndpoints : BackgroundService
     /// <param name="adapterFactory">协议适配器工厂</param>
     /// <param name="serviceProvider">DI 服务提供者（用于创建适配器）</param>
     /// <param name="port">监听端口（默认 8081）</param>
+    /// <param name="maxConcurrentConnectionTests">同时执行的协议连接测试上限。</param>
+    /// <param name="maxRequestBodyBytes">连接测试请求体大小上限。</param>
     public HealthEndpoints(
         ILogger<HealthEndpoints> logger,
         GatewayOptions options,
         Pipeline.GatewayMetrics metrics,
         Func<IServiceProvider, string, IProtocolAdapter> adapterFactory,
         IServiceProvider serviceProvider,
-        int port = 8081)
+        int port = 8081,
+        int maxConcurrentConnectionTests = DefaultMaxConcurrentConnectionTests,
+        int maxRequestBodyBytes = DefaultMaxRequestBodyBytes)
     {
+        if (maxConcurrentConnectionTests < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxConcurrentConnectionTests));
+        if (maxRequestBodyBytes < 1024)
+            throw new ArgumentOutOfRangeException(nameof(maxRequestBodyBytes));
+
         _logger = logger;
         _options = options;
         _metrics = metrics;
         _adapterFactory = adapterFactory;
         _serviceProvider = serviceProvider;
         _port = port;
+        _connectionTestGate = new SemaphoreSlim(maxConcurrentConnectionTests, maxConcurrentConnectionTests);
+        _maxRequestBodyBytes = maxRequestBodyBytes;
     }
 
     /// <summary>
@@ -71,9 +92,17 @@ public class HealthEndpoints : BackgroundService
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                var context = await listener.GetContextAsync();
-                _ = Task.Run(() => HandleRequestAsync(context, stoppingToken), stoppingToken);
+                // HttpListener 原生等待不感知宿主取消令牌；用 WaitAsync 让优雅停机能够进入 finally，
+                // 由 finally 统一 Stop/Close 监听器，避免后台服务永久卡在 GetContextAsync。
+                var context = await listener.GetContextAsync().WaitAsync(stoppingToken);
+                // 不使用未跟踪的 Task.Run：已接受请求必须进入集合，停机时等待其完成，
+                // 否则宿主可能已经释放依赖而连接测试仍在后台访问适配器。
+                TrackRequest(HandleRequestAsync(context, stoppingToken));
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // 正常关闭
         }
         catch (HttpListenerException) when (stoppingToken.IsCancellationRequested)
         {
@@ -83,6 +112,64 @@ public class HealthEndpoints : BackgroundService
         {
             listener.Stop();
             listener.Close();
+            await WaitForInFlightRequestsAsync();
+            // 不在这里 Dispose 闸门：超时后仍可能有第三方适配器晚些返回并释放信号量，
+            // 提前释放会把一次可控的停机超时变成后台 ObjectDisposedException。
+        }
+    }
+
+    /// <summary>
+    /// 记录已接受的请求，并在完成后及时移除，避免长时间运行的网关累积任务对象。
+    /// </summary>
+    private void TrackRequest(Task requestTask)
+    {
+        lock (_inFlightRequestsLock)
+        {
+            _inFlightRequests.Add(requestTask);
+        }
+
+        _ = requestTask.ContinueWith(
+            completedTask =>
+            {
+                // 读取 Exception，避免极端情况下未观察到的任务异常触发进程级告警。
+                _ = completedTask.Exception;
+                lock (_inFlightRequestsLock)
+                {
+                    _inFlightRequests.Remove(completedTask);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    /// <summary>
+    /// 监听器关闭后等待已接受的请求，最多等待固定时间，避免不遵守取消令牌的第三方适配器阻塞整个进程退出。
+    /// </summary>
+    private async Task WaitForInFlightRequestsAsync()
+    {
+        Task[] pendingTasks;
+        lock (_inFlightRequestsLock)
+        {
+            pendingTasks = _inFlightRequests.ToArray();
+        }
+
+        if (pendingTasks.Length == 0)
+            return;
+
+        try
+        {
+            await Task.WhenAll(pendingTasks).WaitAsync(InFlightRequestShutdownTimeout);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogError(
+                "健康端点仍有 {Count} 个请求在停机超时后未完成，已停止继续等待",
+                pendingTasks.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "等待健康端点请求完成时发生异常");
         }
     }
 
@@ -96,6 +183,16 @@ public class HealthEndpoints : BackgroundService
 
         try
         {
+            if (RequiresAuthentication(path) && !IsAuthorized(context.Request))
+            {
+                await WriteJsonAsync(
+                    context,
+                    new { success = false, message = "网关认证失败" },
+                    401,
+                    ct);
+                return;
+            }
+
             switch (path)
             {
                 case "/health":
@@ -108,7 +205,7 @@ public class HealthEndpoints : BackgroundService
                     await WriteMetricsAsync(response, ct);
                     break;
                 case "/test-connection":
-                    await HandleTestConnectionAsync(context, ct);
+                    await HandleTestConnectionWithLimitAsync(context, ct);
                     break;
                 default:
                     response.StatusCode = 404;
@@ -124,6 +221,56 @@ public class HealthEndpoints : BackgroundService
     }
 
     /// <summary>
+    /// 限制真实协议连接测试的并发量。健康探针和指标端点不共享该闸门，
+    /// 保证设备连接异常或慢响应时运维仍能观察网关状态。
+    /// </summary>
+    private async Task HandleTestConnectionWithLimitAsync(HttpListenerContext context, CancellationToken ct)
+    {
+        if (!_connectionTestGate.Wait(0))
+        {
+            await WriteJsonAsync(
+                context,
+                new { success = false, message = "连接测试并发已满，请稍后重试" },
+                503,
+                CancellationToken.None);
+            return;
+        }
+
+        try
+        {
+            await HandleTestConnectionAsync(context, ct);
+        }
+        finally
+        {
+            _connectionTestGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 判断端点是否需要网关间认证。存活探针和 Prometheus 指标必须保持匿名，
+    /// 状态详情和真实连接测试则可能泄露拓扑或触发主动网络连接，必须受保护。
+    /// </summary>
+    private static bool RequiresAuthentication(string path)
+        => path is "/status" or "/test-connection";
+
+    /// <summary>
+    /// 使用固定时间比较校验后端/运维请求携带的网关认证密钥。
+    /// </summary>
+    private bool IsAuthorized(HttpListenerRequest request)
+    {
+        if (string.IsNullOrEmpty(_options.AuthKey))
+            return false;
+
+        var providedKey = request.Headers["X-Gateway-Auth-Key"];
+        if (string.IsNullOrEmpty(providedKey))
+            return false;
+
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(_options.AuthKey),
+            Encoding.UTF8.GetBytes(providedKey));
+    }
+
+    /// <summary>
     /// 处理真实协议连接测试请求
     /// 请求体 JSON 格式：{ "protocol": "opcua|modbus-tcp|modbus-rtu", "connectionString": "..." }
     /// </summary>
@@ -136,28 +283,54 @@ public class HealthEndpoints : BackgroundService
             return;
         }
 
-        string body;
-        using (var reader = new StreamReader(context.Request.InputStream))
+        if (context.Request.ContentLength64 > _maxRequestBodyBytes)
         {
-            body = await reader.ReadToEndAsync(ct);
+            await WriteJsonAsync(
+                context,
+                new { success = false, message = "请求体过大" },
+                413,
+                ct);
+            return;
         }
 
         string protocol;
         string connectionString;
         try
         {
-            var doc = JsonDocument.Parse(body);
-            protocol = doc.RootElement.GetProperty("protocol").GetString()!;
-            connectionString = doc.RootElement.GetProperty("connectionString").GetString()!;
+            var body = await ReadRequestBodyAsync(context.Request.InputStream, _maxRequestBodyBytes, ct);
+            if (body is null)
+            {
+                await WriteJsonAsync(
+                    context,
+                    new { success = false, message = "请求体过大" },
+                    413,
+                    ct);
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("protocol", out var protocolProperty)
+                || protocolProperty.ValueKind != JsonValueKind.String
+                || !doc.RootElement.TryGetProperty("connectionString", out var connectionProperty)
+                || connectionProperty.ValueKind != JsonValueKind.String)
+            {
+                throw new JsonException("缺少 protocol 或 connectionString 字段");
+            }
+
+            protocol = protocolProperty.GetString()?.Trim().ToLowerInvariant() ?? string.Empty;
+            connectionString = connectionProperty.GetString()?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(protocol) || string.IsNullOrEmpty(connectionString))
+                throw new JsonException("protocol 和 connectionString 不能为空");
         }
-        catch (Exception ex)
+        catch (JsonException)
         {
-            await WriteJsonAsync(context, new { success = false, message = $"请求格式无效: {ex.Message}" }, 400, ct);
+            await WriteJsonAsync(context, new { success = false, message = "请求格式无效" }, 400, ct);
             return;
         }
 
         var supportedProtocols = new[] { "opcua", "modbus-tcp", "modbus-rtu" };
-        if (!supportedProtocols.Contains(protocol.ToLowerInvariant()))
+        if (!supportedProtocols.Contains(protocol, StringComparer.Ordinal))
         {
             await WriteJsonAsync(context, new { success = false, message = $"不支持的协议: {protocol}" }, 400, ct);
             return;
@@ -200,6 +373,34 @@ public class HealthEndpoints : BackgroundService
                 try { await adapter.DisposeAsync(); } catch { }
             }
         }
+    }
+
+    /// <summary>
+    /// 读取分块请求体并在达到上限后立即停止，防止 chunked 请求绕过 Content-Length 检查占满内存。
+    /// </summary>
+    private static async Task<string?> ReadRequestBodyAsync(
+        Stream input,
+        int maxBytes,
+        CancellationToken ct)
+    {
+        await using var body = new MemoryStream(Math.Min(maxBytes, 16 * 1024));
+        var buffer = new byte[4096];
+        var totalBytes = 0;
+
+        while (true)
+        {
+            var read = await input.ReadAsync(buffer.AsMemory(), ct);
+            if (read == 0)
+                break;
+
+            totalBytes += read;
+            if (totalBytes > maxBytes)
+                return null;
+
+            await body.WriteAsync(buffer.AsMemory(0, read), ct);
+        }
+
+        return Encoding.UTF8.GetString(body.GetBuffer(), 0, (int)body.Length);
     }
 
     /// <summary>

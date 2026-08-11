@@ -60,6 +60,13 @@ public class GatewaysController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.GatewayId))
             return BadRequest(new { code = 400, message = "GatewayId 不能为空" });
 
+        if (!_endpointPolicy.IsGatewayIdentityAllowed(request.TenantId, request.GatewayId, out var identityReason))
+        {
+            _logger.LogWarning("拒绝未绑定的网关身份：GatewayId={GatewayId}, TenantId={TenantId}, Reason={Reason}",
+                request.GatewayId, request.TenantId, identityReason);
+            return Unauthorized(new { code = 401, message = "网关身份未通过服务端绑定校验" });
+        }
+
         var host = string.IsNullOrWhiteSpace(request.Host) ? "edgegateway" : request.Host;
         if (!_endpointPolicy.IsAllowed(host, request.HealthPort ?? 8081, out var endpointReason))
             return BadRequest(new { code = 400, message = $"网关地址不在允许范围内：{endpointReason}" });
@@ -103,7 +110,11 @@ public class GatewaysController : ControllerBase
         try
         {
             var httpClient = _httpClientFactory.CreateClient("GatewayProxy");
-            var response = await httpClient.GetAsync($"http://{gateway.Host}:{gateway.HealthPort}/status", ct);
+            using var request = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"http://{gateway.Host}:{gateway.HealthPort}/status");
+            _endpointPolicy.AddGatewayAuthHeader(request);
+            using var response = await httpClient.SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {

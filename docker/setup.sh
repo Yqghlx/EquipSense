@@ -3,9 +3,9 @@
 # setup.sh — EquipSense Docker 环境一键配置脚本
 # =============================================================================
 #
-# 用途：首次部署前执行此脚本，完成所有必要的环境准备工作：
+# 用途：生产环境首次部署前执行此脚本，完成所有必要的环境准备工作：
 #   1. 从模板创建 .env 配置文件（如果不存在）
-#   2. 生成自签名 TLS 证书（开发/测试用）
+#   2. 确认生产 TLS/MQTT 证书已预置（本脚本不会生成自签名证书）
 #   3. 创建 Mosquitto MQTT Broker 密码文件
 #   4. 验证所有必需文件是否存在且配置正确
 #
@@ -134,8 +134,29 @@ if [ ! -f "${SCRIPT_DIR}/validate-env.sh" ]; then
     error "缺少环境变量校验器: ${SCRIPT_DIR}/validate-env.sh"
     exit 1
 fi
+
+# validate-env.sh 是 Production-only 门禁；这里提前给出明确错误，避免
+# Development/Testing 配置先走到证书生成逻辑后才得到令人困惑的校验失败。
+environment_name="$(read_env_value ASPNETCORE_ENVIRONMENT)"
+environment_name="${environment_name:-Production}"
+if [ "${environment_name}" != "Production" ]; then
+    error "setup.sh 仅支持 Production；Development/Testing 请直接使用 docker-compose.dev.yml，并按需运行 generate-cert.sh/generate-mqtt-cert.sh"
+    exit 1
+fi
+
 if ! bash "${SCRIPT_DIR}/validate-env.sh" "${ENV_FILE}"; then
     error "环境变量校验未通过，请编辑 ${ENV_FILE} 后重新运行 setup.sh"
+    exit 1
+fi
+
+# 生产环境必须由部署者预置 CA 签发的 TLS/MQTT 文件；任何缺失都在
+# 生成密码文件或启动容器前失败，绝不自动生成开发证书。
+if [ ! -s "${SCRIPT_DIR}/ssl/cert.pem" ] ||
+   [ ! -s "${SCRIPT_DIR}/ssl/key.pem" ] ||
+   [ ! -s "${SCRIPT_DIR}/mqtt-certs/ca.crt" ] ||
+   [ ! -s "${SCRIPT_DIR}/mqtt-certs/server.crt" ] ||
+   [ ! -s "${SCRIPT_DIR}/mqtt-certs/server.key" ]; then
+    error "生产环境禁止自动生成自签名 TLS/MQTT 证书，请先配置正式证书和私钥后重新运行 setup.sh"
     exit 1
 fi
 
@@ -143,7 +164,7 @@ fi
 # 步骤 3：生成 TLS 证书
 # =============================================================================
 
-step "步骤 3/5：生成 TLS 证书"
+step "步骤 3/5：确认生产 TLS 证书"
 
 SSL_DIR="${SCRIPT_DIR}/ssl"
 CERT_FILE="${SSL_DIR}/cert.pem"
@@ -162,26 +183,8 @@ if [ -f "${CERT_FILE}" ] && [ -f "${KEY_FILE}" ]; then
         echo -e "  运行以下命令重新生成：${SCRIPT_DIR}/generate-cert.sh"
     fi
 else
-    echo -e "  ${YELLOW}TLS 证书不存在，正在生成自签名证书...${NC}"
-
-    # 调用证书生成脚本
-    if [ -f "${SCRIPT_DIR}/generate-cert.sh" ]; then
-        bash "${SCRIPT_DIR}/generate-cert.sh"
-        success "TLS 证书生成完成"
-    else
-        # 如果脚本不存在，直接使用 openssl 生成
-        mkdir -p "${SSL_DIR}"
-        openssl req -x509 -nodes -days 365 \
-            -newkey rsa:2048 \
-            -keyout "${KEY_FILE}" \
-            -out "${CERT_FILE}" \
-            -subj "/C=CN/ST=Shanghai/L=Shanghai/O=EquipSense-Dev/OU=Development/CN=localhost" \
-            -addext "subjectAltName=DNS:localhost,DNS:*.localhost,IP:127.0.0.1,IP:::1" \
-            2>/dev/null
-        chmod 600 "${KEY_FILE}"
-        chmod 644 "${CERT_FILE}"
-        success "TLS 证书生成完成（简化模式）"
-    fi
+    error "生产 TLS 证书或私钥缺失；请先预置 CA 签发的文件后重新运行 setup.sh"
+    exit 1
 fi
 
 # 生产 Compose 的 Mosquitto 使用 8883/TLS，需要单独的 Broker 证书和 CA。
@@ -189,13 +192,11 @@ MQTT_CERT_DIR="${SCRIPT_DIR}/mqtt-certs"
 if [ -f "${MQTT_CERT_DIR}/ca.crt" ] && [ -f "${MQTT_CERT_DIR}/server.crt" ] && [ -f "${MQTT_CERT_DIR}/server.key" ]; then
     success "MQTT TLS 证书已存在"
 else
-    echo -e "  ${YELLOW}MQTT TLS 证书不存在，正在生成开发/测试证书...${NC}"
-    bash "${SCRIPT_DIR}/generate-mqtt-cert.sh"
-    success "MQTT TLS 证书生成完成"
+    error "生产 MQTT TLS 证书或私钥缺失；请先预置证书文件后重新运行 setup.sh"
+    exit 1
 fi
 
-echo -e "  ${YELLOW}⚠️  当前使用自签名证书，仅适用于开发/测试环境。${NC}"
-echo -e "  ${YELLOW}   生产环境请使用 Let's Encrypt 或购买正式证书。${NC}"
+echo -e "  ${GREEN}生产 TLS/MQTT 证书已找到，最终有效期、主机名、CA 链和私钥匹配将在运行时门禁中校验。${NC}"
 
 # =============================================================================
 # 步骤 4：配置 Mosquitto 密码
@@ -312,6 +313,14 @@ for SCRIPT_NAME in "${EXECUTABLE_SCRIPTS[@]}"; do
     fi
 done
 
+# 环境变量通过后，证书和运行时 bind mount 文件才刚刚生成或确认存在；
+# 在报告“配置验证全部通过”前必须再次执行完整运行时门禁，避免已有过期、
+# 主机名不匹配或证书私钥不匹配的文件仅被 warning 后继续部署。
+if ! bash "${SCRIPT_DIR}/validate-env.sh" "${ENV_FILE}" --check-runtime-files; then
+    error "运行时文件或 TLS/MQTT 证书校验未通过，请修复后重新运行 setup.sh"
+    exit 1
+fi
+
 # =============================================================================
 # 输出最终结果
 # =============================================================================
@@ -331,7 +340,7 @@ if [ ${ERRORS} -eq 0 ]; then
     echo ""
     echo -e "${YELLOW}注意事项：${NC}"
     echo "  1. 首次启动前请确认 .env 文件中的密码和密钥已修改"
-    echo "  2. 自签名 TLS 证书仅用于开发/测试，浏览器会提示不安全"
+    echo "  2. 生产 TLS/MQTT 证书必须由受信任 CA 签发并定期轮换"
     echo "  3. Mosquitto 用户密码来自 .env 中的 MQTT_USERNAME/MQTT_PASSWORD"
     echo "  4. Grafana 默认管理员: admin（密码见 .env 中 GRAFANA_PASSWORD）"
 else

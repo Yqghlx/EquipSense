@@ -9,6 +9,7 @@
 export {
   BASE_URL,
   BACKEND_URL,
+  MACHINE_API_HEADERS,
   login,
   loginAs,
   loginAsFast,

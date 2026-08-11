@@ -12,6 +12,8 @@ import { RootErrorBoundary } from './components/layout/RootErrorBoundary';
 import { useEffect } from 'react';
 import { useAuthStore } from './stores/authStore';
 import useTokenRefresh from './hooks/useTokenRefresh';
+import { restoreSessionFromCookie } from './lib/authSession';
+import { persistTokenExpiry } from './lib/tokenExpiry';
 
 // 认证页面 — 首屏需要，直接导入
 import LoginPage from './pages/LoginPage';
@@ -54,6 +56,15 @@ function PageFallback() {
   );
 }
 
+/** 首屏认证状态恢复中的回退界面，避免 AuthGuard 在 Cookie 尚未探活前误跳登录页。 */
+function SessionRestoreFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center" role="status" aria-live="polite">
+      <div className="text-muted-foreground">正在恢复登录状态...</div>
+    </div>
+  );
+}
+
 /**
  * 应用路由配置
  *
@@ -63,15 +74,44 @@ function PageFallback() {
  */
 function AppRoutes() {
   const loadFromStorage = useAuthStore((s) => s.loadFromStorage);
+  const setAuth = useAuthStore((s) => s.setAuth);
+  const finishSessionRestore = useAuthStore((s) => s.finishSessionRestore);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isSessionReady = useAuthStore((s) => s.isSessionReady);
 
-  /** 页面加载时从 sessionStorage 恢复认证状态（Cookie 由浏览器自动管理） */
+  /** 页面加载时优先恢复 sessionStorage，再探活 HttpOnly Cookie，支持新标签页和浏览器重启。 */
   useEffect(() => {
     loadFromStorage();
-  }, [loadFromStorage]);
+
+    // 当前标签页已有用户信息时无需发起额外请求；新标签页则通过 Cookie 恢复。
+    if (useAuthStore.getState().isAuthenticated) {
+      finishSessionRestore();
+      return;
+    }
+
+    let cancelled = false;
+    void restoreSessionFromCookie().then((session) => {
+      if (cancelled) return;
+      if (session) {
+        setAuth(session.user);
+        if (session.expiresIn !== undefined) {
+          persistTokenExpiry(session.expiresIn);
+        }
+      }
+      finishSessionRestore();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [finishSessionRestore, loadFromStorage, setAuth]);
 
   /** Access Token 过期前 5 分钟自动刷新，避免用户操作中途 401 */
   useTokenRefresh();
+
+  if (!isSessionReady) {
+    return <SessionRestoreFallback />;
+  }
 
   return (
     <Routes>

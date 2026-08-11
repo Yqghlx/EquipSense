@@ -38,6 +38,7 @@ public class RegisterRequest
 
     /// <summary>管理员邮箱</summary>
     [EmailAddress(ErrorMessage = "邮箱格式不正确")]
+    [StringLength(254, ErrorMessage = "邮箱长度不能超过 254 个字符")]
     public string? Email { get; set; }
 
     /// <summary>选择的套餐（Trial/Professional/Enterprise），默认 Trial</summary>

@@ -1597,8 +1597,8 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnName("display_name");
 
                     b.Property<string>("Email")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
                         .HasColumnName("email");
 
                     b.Property<string>("EmailLookupHash")
@@ -1648,8 +1648,8 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnName("password_hash");
 
                     b.Property<string>("Phone")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
                         .HasColumnName("phone");
 
                     b.Property<string>("PhoneLookupHash")
@@ -1693,8 +1693,9 @@ namespace EquipAI.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Username")
-                        .IsUnique();
+                    b.HasIndex("Username")
+                        .IsUnique()
+                        .HasDatabaseName("IX_users_username");
 
                     b.HasIndex("EmailLookupHash")
                         .HasDatabaseName("IX_users_email_lookup_hash");

@@ -7,7 +7,7 @@
  * - 并发登录不冲突
  * - 登出后其他标签页同步失效
  * - 长时间无操作自动锁定
- * - 记住登录状态跨浏览器重启
+ * - HttpOnly Cookie 登录状态跨浏览器重启
  */
 import { test, expect } from '@playwright/test';
 import {
@@ -19,6 +19,7 @@ import {
   getAuthState,
   isLoggedIn,
   getE2EPassword,
+  verifyAuthCookie,
 } from '../helpers';
 
 test.describe('01-会话管理', () => {
@@ -276,42 +277,32 @@ test.describe('01-会话管理', () => {
     expect(errors).toEqual([]);
   });
 
-  test.skip('6. 记住登录状态跨浏览器重启', async ({ page, context }) => {
+  test('6. HttpOnly Cookie 登录状态跨浏览器重启', async ({ page, context, browser }) => {
     const errors = captureErrors(page);
 
     // 正常登录
     await login(page);
     await expect(page).toHaveURL(/dashboard/);
 
-    // 记录当前 Token 和用户信息
-    const tokenBefore = await page.evaluate(() => sessionStorage.getItem('token'));
-    const userBefore = await page.evaluate(() => sessionStorage.getItem('user'));
-    expect(tokenBefore).toBeTruthy();
-    expect(userBefore).toBeTruthy();
-
-    // 模拟"浏览器重启"：在新页面中重新访问应用
-    // 由于使用相同的 context（共享 sessionStorage），Token 应被保留
-    const page2 = await context.newPage();
+    // 新建浏览器上下文模拟真正的浏览器重启：Cookie 保留，sessionStorage 清空。
+    const restartedContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page2 = await restartedContext.newPage();
     const errors2 = captureErrors(page2);
 
-    await page2.goto(`${BASE_URL}/dashboard`);
-    await page2.waitForLoadState('networkidle');
-    await page2.waitForTimeout(2000);
+    try {
+      await restartedContext.addCookies(await context.cookies());
+      await page2.goto(`${BASE_URL}/dashboard`);
+      await page2.waitForLoadState('networkidle');
+      await page2.waitForTimeout(2000);
 
-    // 验证新页面能够读取到之前存储的 Token
-    const tokenAfter = await page2.evaluate(() => sessionStorage.getItem('token'));
-    const userAfter = await page2.evaluate(() => sessionStorage.getItem('user'));
-
-    // Token 和用户信息应保持一致
-    expect(tokenAfter).toBe(tokenBefore);
-    expect(userAfter).toBe(userBefore);
-
-    // 验证页面成功加载仪表盘（而非跳转到登录页）
-    // 这说明应用从 localStorage 恢复了认证状态（loadFromStorage）
-    await expect(page2).toHaveURL(/dashboard/);
-
-    // 清理
-    await page2.close();
+      // 新上下文没有 sessionStorage user，必须依靠 Cookie + /auth/me 恢复。
+      const userAfter = await page2.evaluate(() => sessionStorage.getItem('user'));
+      expect(userAfter).toBeTruthy();
+      await expect(page2).toHaveURL(/dashboard/);
+      expect((await verifyAuthCookie(page2)).ok()).toBeTruthy();
+    } finally {
+      await restartedContext.close();
+    }
 
     expect(errors).toEqual([]);
     expect(errors2).toEqual([]);

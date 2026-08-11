@@ -31,6 +31,8 @@ AUTOMAPPER_LICENSE_KEY=<Lucky Penny Software 签发的 AutoMapper 15+ 许可证�
 MQTT_USERNAME=<MQTT用户名>
 MQTT_PASSWORD=<MQTT强密码>
 GATEWAY_AUTH_KEY=<至少32位的纯ASCII网关认证密钥>
+AUTH_MACHINE_API_KEY=<机器客户端需要响应体 JWT 时配置的独立至少32位 ASCII 密钥>
+GATEWAY_ID=<与边缘网关一致的唯一网关标识，默认 gateway-001>
 GATEWAY_TENANT_ID=<实际租户 UUID，边缘网关生产必填>
 GATEWAY_BUFFER_PATH=/data/buffer.db
 GATEWAY_BACKEND_URL=http://backend:8080
@@ -56,17 +58,19 @@ JAEGER_BADGER_EPHEMERAL=false
 DOMAIN=your-domain.com
 ```
 
-确认 `docker/.env` 中的必填项已替换占位值后，生成开发/测试用 Nginx 与 MQTT TLS 证书，并创建 MQTT 密码文件：
+生产部署先将正式 Nginx/MQTT 证书放入 `docker/ssl/` 和 `docker/mqtt-certs/`，再确认 `docker/.env` 中的必填项已替换占位值并创建 MQTT 密码文件：
 
 ```bash
 cd docker
 ./setup.sh   # 首次运行会创建 .env 并因占位凭据返回非零，这是预期行为
 nano .env    # 填写所有必填凭据
-./setup.sh   # 配置通过后才会生成证书和 MQTT 密码文件
+./setup.sh   # 生产环境不会自动生成自签名证书；配置通过后会创建/校验 MQTT 密码文件
 cd ..
 ```
 
-`setup.sh` 会在生成任何证书或认证文件前，一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；任一项不满足都会返回非零状态，不会让服务以半配置状态启动。部署脚本额外使用 `--check-runtime-files` 校验证书是非空、可解析、至少还有 30 天有效期，且证书与私钥匹配、MQTT 服务端证书通过配置的 CA 链；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+开发/测试只启动基础设施时使用 `docker-compose.dev.yml`；如需测试完整 Compose 的 TLS 挂载链路，可按“TLS 证书配置”中的自签名方案单独运行 `generate-cert.sh` 和 `generate-mqtt-cert.sh`，但不得将其用于生产环境。
+
+`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，避免仅打印 warning 后误报配置成功。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
 
 > 注意：Docker Compose 默认只从当前工作目录加载 `.env`。本项目配置文件位于 `docker/.env`，因此从仓库根目录执行 Compose 命令时必须带 `--env-file docker/.env`；本手册的生产命令已统一显式指定该参数。
 
@@ -156,7 +160,8 @@ curl http://localhost:8080/api/v1/system/info
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
 | `GATEWAY_AUTH_KEY` | 边缘网关认证密钥（至少 32 位纯 ASCII） | - | 使用边缘网关时必填 |
-| `GATEWAY_TENANT_ID` | 边缘网关所属租户 UUID；生产环境缺失或无效时网关拒绝启动 | - | 使用边缘网关时必填 |
+| `GATEWAY_ID` | 后端与边缘网关绑定的唯一网关标识；生产注册/配置拉取必须匹配 | `gateway-001` | 使用边缘网关时必填 |
+| `GATEWAY_TENANT_ID` | 后端与边缘网关绑定的所属租户 UUID；生产环境缺失或无效时后端/网关拒绝启动 | - | 使用边缘网关时必填 |
 | `GATEWAY_BUFFER_PATH` | 边缘网关 SQLite 断网缓冲路径，必须落在持久化卷 | `/data/buffer.db` | 否 |
 | `GATEWAY_BACKEND_URL` | 边缘网关上传目标后端；蓝绿部署由脚本临时设置为目标颜色服务名 | `http://backend:8080` | 否 |
 | `EDGE_BLUEGREEN_PORT` | 蓝绿部署边缘网关健康探针宿主端口 | `18081` | 否 |
@@ -220,7 +225,7 @@ GitHub Actions 的 `deploy` job 要求 `DEPLOY_PATH` 指向生产 Docker 文件�
 - `docker-compose.yml` 与 `docker-compose.prod.yml`
 - `deploy-production.sh`（与仓库 `docker/deploy-production.sh` 保持一致并具备执行权限）
 
-GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。脚本会先执行
+GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。脚本会先获取 Compose 目录下的单实例部署锁，再执行
 `bash ./validate-env.sh .env --check-runtime-files` 和 Compose 渲染门禁；只有生产凭据、
 镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重建容器。校验或
 镜像拉取失败发生在运行态变更前，不触发回滚。
@@ -248,7 +253,7 @@ cd "$DEPLOY_PATH"
 ./deploy-production.sh 1.2.3
 ```
 
-脚本不会停止或重建 PostgreSQL、Redis、RabbitMQ、Mosquitto 和任何数据卷。回滚失败时
+脚本不会停止或重建 PostgreSQL、Redis、RabbitMQ、Mosquitto 和任何数据卷。并发部署会被锁拒绝；回滚失败时
 仍返回非零并保留旧版本记录，按 [`OPS_RUNBOOK.md`](OPS_RUNBOOK.md) 的部署回滚故障剧本处理。
 如需启用零停机蓝绿部署，再按 [`BLUE_GREEN_DEPLOY.md`](BLUE_GREEN_DEPLOY.md) 准备 `docker-compose.bluegreen.yml`、router 配置和部署脚本。
 
@@ -327,17 +332,18 @@ curl -X POST http://localhost:8080/api/v1/devices/health-score/refresh-all \
 ### 全量备份（推荐）
 
 ```bash
-# 备份 PostgreSQL、工单附件；如配置了 REDIS_PASSWORD，也会备份 Redis
+# 备份 PostgreSQL、工单附件和 Redis（生产默认要求配置 REDIS_PASSWORD）
 cd docker
 ./backup.sh
 cd ..
 ```
 
-脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）以及可选的 `redis_*.rdb`。Redis 备份会轮询 `INFO persistence`，确认后台快照完成并校验 RDB 文件头后才保存。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。显式启用 `BACKUP_REDIS=true` 后，如果 Redis 快照或复制失败，脚本也会以非零状态结束；开启 `S3_SYNC=true` 后，如果未配置目标、主机未安装 `aws-cli` 或同步失败，脚本会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
+脚本会先在 `BACKUP_DIR/.backup.lock` 获取单实例锁，避免重叠任务并发导出、清理或同步；遗留锁必须确认没有备份进程后再人工处理。脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）以及 `redis_*.rdb`。`RETAIN_DAYS` 必须是大于 0 的整数，历史备份清理失败也会使脚本返回非零；Redis 备份会轮询 `INFO persistence`，确认后台快照完成并校验 RDB 文件头后才保存。生产环境默认启用 `BACKUP_REDIS=true`，因此未配置 `REDIS_PASSWORD` 会在备份开始前失败；如确实不需要 Redis 数据，必须显式设置 `BACKUP_REDIS=false`。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。开启 `S3_SYNC=true` 后，如果本地任一备份不完整，脚本会跳过异地同步；目标未配置、主机未安装 `aws-cli` 或同步失败时也会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
 
 ### PostgreSQL 与附件恢复
 
-恢复请统一使用 [`docker/restore.sh`](../docker/restore.sh)，不要手工把 SQL
+恢复请统一使用 [`docker/restore.sh`](../docker/restore.sh)。确认执行时脚本会在环境文件旁获取单实例锁，
+不要手工把 SQL
 追加到现有数据库或只覆盖附件而不清理旧文件。脚本默认只做 dry-run 校验；确认
 备份批次、维护窗口和回滚预案后，才追加 `--confirm`。生产镜像部署需要同时传入
 基础 Compose 与生产覆盖文件：
@@ -450,9 +456,9 @@ docker compose --env-file docker/.env -f docker/docker-compose.yml restart front
 
 ## v1.3+ 安全与数据准确性部署要求
 
-### HttpOnly Cookie + SameSite=Strict（v1.3.0）
+### HttpOnly Cookie + SameSite=Strict（v1.3.0+）
 
-v1.3.0 起，认证 Token 完全通过 HttpOnly + SameSite=Strict + Secure Cookie 传递。**部署时必须满足**：
+浏览器认证 Token 通过 HttpOnly + SameSite=Strict + Secure Cookie 传递。Production 浏览器响应体默认清空 JWT；机器客户端如需读取响应体令牌，必须配置独立的 `AUTH_MACHINE_API_KEY` 并发送 `X-API-Key`。**部署时必须满足**：
 
 1. **前后端必须同站点**（同源或同子域）
    - 推荐用 Nginx 反代：前端走 `/`，API 走 `/api/`，SignalR 走 `/hubs/`

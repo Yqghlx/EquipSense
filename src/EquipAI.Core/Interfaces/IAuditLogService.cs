@@ -37,9 +37,11 @@ public interface IAuditLogService
     /// <param name="page">页码（从 1 开始）</param>
     /// <param name="pageSize">每页条数</param>
     /// <param name="ct">取消令牌</param>
+    /// <param name="action">可选操作类型过滤条件</param>
+    /// <param name="resourceType">可选资源类型过滤条件</param>
     /// <returns>分页结果</returns>
     Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
-        CancellationToken ct = default);
+        CancellationToken ct = default, string? action = null, string? resourceType = null);
 }
 
 /// <summary>
