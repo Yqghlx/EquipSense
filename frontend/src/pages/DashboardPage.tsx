@@ -5,6 +5,7 @@ import { Badge } from '../components/ui/badge';
 import { TrendChart } from '../components/charts/TrendChart';
 import { PieChart } from '../components/charts/PieChart';
 import { SeverityBadge } from '../components/alert/SeverityBadge';
+import TrendWarningsCard from '../components/analysis/TrendWarningsCard';
 import { useDashboardStats, useOee } from '../hooks/useDashboard';
 import { useAlerts } from '../hooks/useAlerts';
 import { useGlobalStats } from '../hooks/useTenantsAdmin';
@@ -248,6 +249,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* 趋势预警：复用已有分析查询，帮助用户在告警发生前安排维护 */}
+      <TrendWarningsCard />
 
       {/* 图表区域：设备状态 + 告警级别分布 */}
       <div className="grid gap-4 md:grid-cols-2">

@@ -237,6 +237,33 @@
     "workOrderTrend": "工单趋势（最近 7 天）",
     "workOrderStatusDistribution": "工单状态分布",
     "recentAlerts": "最近告警",
+    "trendWarnings": {
+      "title": "趋势预警",
+      "description": "未来 7 天内可能越过阈值的指标",
+      "count": "{{count}} 条预警",
+      "empty": "当前没有预计即将越过阈值的指标",
+      "loadFailed": "趋势预警加载失败",
+      "retry": "重试趋势预警",
+      "more": "另有 {{count}} 条预警",
+      "currentValue": "当前值",
+      "threshold": "阈值",
+      "oneDay": "1 天",
+      "days": "{{count}} 天",
+      "noEstimate": "暂无估算",
+      "openDevice": "打开设备 {{deviceId}} 的 {{metric}} 趋势",
+      "direction": {
+        "up": "上升",
+        "down": "下降",
+        "stable": "平稳",
+        "unknown": "未知趋势"
+      },
+      "risk": {
+        "critical": "1 天内",
+        "warning": "3 天内",
+        "info": "7 天内",
+        "noEstimate": "暂无时间估算"
+      }
+    },
     "oee": {
       "title": "设备综合效率 (OEE)",
       "formula": "OEE = 可用率 × 性能 × 质量",

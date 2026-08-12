@@ -99,21 +99,21 @@ Observed: 9 个组件测试通过，覆盖初始红灯、错误态修复和生�
 - Consumes: `TrendWarningsCard` 默认导出组件和新增 `dashboard.trendWarnings.*` 键。
 - Produces: 登录后的 Dashboard 在 OEE 卡片后、趋势图前显示趋势预警卡片；现有统计、告警和工单区域行为不变。
 
-- [ ] **Step 1: 扩展 Dashboard 测试契约**
+- [x] **Step 1: 扩展 Dashboard 测试契约**
 
 在现有 `DashboardPage.i18n.test.tsx` 中 mock `useTrendWarnings` 为成功空数据，并把新增标题和空态文案加入英文翻译表；断言渲染 Dashboard 后能找到英文趋势预警标题/空态，且查不到中文“趋势预警”常量。测试不发起网络请求。
 
-- [ ] **Step 2: 运行 Dashboard 测试确认新增契约先红灯**
+- [x] **Step 2: 运行 Dashboard 测试确认新增契约先红灯**
 
 Run: `cd frontend && npm test -- --run src/pages/__tests__/DashboardPage.i18n.test.tsx`
 
 Expected: FAIL，原因是 Dashboard 尚未挂载 `TrendWarningsCard` 或新增英文文案尚未存在。
 
-- [ ] **Step 3: 挂载卡片并添加 i18n**
+- [x] **Step 3: 挂载卡片并添加 i18n**
 
 在 `DashboardPage.tsx` 导入并挂载 `TrendWarningsCard`。在中英文资源中同步添加这些静态键：`title`、`description`、`count`、`empty`、`loadFailed`、`retry`、`more`、`currentValue`、`threshold`、`oneDay`、`days`、`noEstimate`、`direction.up`、`direction.down`、`direction.stable`、`direction.unknown`、`risk.critical`、`risk.warning`、`risk.info`、`risk.noEstimate`、`openDevice`。使用插值表达数量和天数，不能在组件中写中文或英文常量。
 
-- [ ] **Step 4: 运行 Dashboard 与组件聚焦测试确认绿灯**
+- [x] **Step 4: 运行 Dashboard 与组件聚焦测试确认绿灯**
 
 Run: `cd frontend && npm test -- --run src/pages/__tests__/DashboardPage.i18n.test.tsx src/components/analysis/__tests__/TrendWarningsCard.test.tsx`
 
@@ -125,11 +125,11 @@ Expected: 相关测试全部通过，英文界面不出现中文趋势文案。
 
 - Modify: `docs/PHASE5_ROADMAP.md`
 
-- [ ] **Step 1: 更新路线图事实状态**
+- [x] **Step 1: 更新路线图事实状态**
 
 在趋势预警条目中记录“后端分析、前端 hook 和仪表盘预警卡片已接入”；同时明确独立趋势分析页、设备名称富化和通知推送仍是单独后续范围，避免文档把“有接口”或“有卡片”夸大为完整分析中心。
 
-- [ ] **Step 2: 运行前端完整质量门禁**
+- [x] **Step 2: 运行前端完整质量门禁**
 
 按顺序执行：
 

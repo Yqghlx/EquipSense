@@ -4,6 +4,7 @@ import DashboardPage from '../DashboardPage';
 import { useDashboardStats, useOee } from '../../hooks/useDashboard';
 import { useAlerts } from '../../hooks/useAlerts';
 import { useGlobalStats } from '../../hooks/useTenantsAdmin';
+import { useTrendWarnings } from '../../hooks/useTrendAnalysis';
 import type { DashboardStats } from '../../hooks/useDashboard';
 
 const translations: Record<string, string> = {
@@ -19,6 +20,26 @@ const translations: Record<string, string> = {
   'dashboard.workOrderTrend': 'Work Order Trend',
   'dashboard.workOrderStatusDistribution': 'Work Order Status Distribution',
   'dashboard.recentAlerts': 'Recent Alerts',
+  'dashboard.trendWarnings.title': 'Trend warnings',
+  'dashboard.trendWarnings.description': 'Metrics that may exceed a threshold within 7 days',
+  'dashboard.trendWarnings.count': '{{count}} warnings',
+  'dashboard.trendWarnings.empty': 'No metrics are expected to exceed a threshold soon',
+  'dashboard.trendWarnings.loadFailed': 'Trend warnings failed to load',
+  'dashboard.trendWarnings.retry': 'Retry trend warnings',
+  'dashboard.trendWarnings.more': '{{count}} more warnings',
+  'dashboard.trendWarnings.currentValue': 'Current',
+  'dashboard.trendWarnings.threshold': 'Threshold',
+  'dashboard.trendWarnings.oneDay': '1 day',
+  'dashboard.trendWarnings.days': '{{count}} days',
+  'dashboard.trendWarnings.noEstimate': 'No estimate',
+  'dashboard.trendWarnings.direction.up': 'Rising',
+  'dashboard.trendWarnings.direction.down': 'Falling',
+  'dashboard.trendWarnings.direction.stable': 'Stable',
+  'dashboard.trendWarnings.direction.unknown': 'Unknown direction',
+  'dashboard.trendWarnings.risk.critical': 'Within 1 day',
+  'dashboard.trendWarnings.risk.warning': 'Within 3 days',
+  'dashboard.trendWarnings.risk.info': 'Within 7 days',
+  'dashboard.trendWarnings.risk.noEstimate': 'No time estimate',
   'common.noData': 'No data',
   'workorder.status.pendingDispatch': 'Pending Dispatch',
   'workorder.status.assigned': 'Assigned',
@@ -55,6 +76,10 @@ vi.mock('../../hooks/useTenantsAdmin', () => ({
   useGlobalStats: vi.fn(),
 }));
 
+vi.mock('../../hooks/useTrendAnalysis', () => ({
+  useTrendWarnings: vi.fn(),
+}));
+
 vi.mock('../../stores/authStore', () => ({
   useAuthStore: (selector: (state: { user: null }) => unknown) => selector({ user: null }),
 }));
@@ -75,6 +100,7 @@ const mockedUseDashboardStats = vi.mocked(useDashboardStats);
 const mockedUseOee = vi.mocked(useOee);
 const mockedUseAlerts = vi.mocked(useAlerts);
 const mockedUseGlobalStats = vi.mocked(useGlobalStats);
+const mockedUseTrendWarnings = vi.mocked(useTrendWarnings);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,6 +119,12 @@ beforeEach(() => {
   mockedUseOee.mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useOee>);
   mockedUseAlerts.mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useAlerts>);
   mockedUseGlobalStats.mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useGlobalStats>);
+  mockedUseTrendWarnings.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as never);
 });
 
 describe('仪表盘工单状态英文界面', () => {
@@ -101,5 +133,13 @@ describe('仪表盘工单状态英文界面', () => {
 
     expect(screen.getByText('Pending Dispatch')).toBeInTheDocument();
     expect(screen.queryByText('待派工')).not.toBeInTheDocument();
+  });
+
+  it('Dashboard 应显示趋势预警卡片并复用英文翻译资源', () => {
+    render(<DashboardPage />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Trend warnings' })).toBeInTheDocument();
+    expect(screen.getByText('No metrics are expected to exceed a threshold soon')).toBeInTheDocument();
+    expect(screen.queryByText('趋势预警')).not.toBeInTheDocument();
   });
 });

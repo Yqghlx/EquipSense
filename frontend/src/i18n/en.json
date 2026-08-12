@@ -237,6 +237,33 @@
     "workOrderTrend": "Work Order Trend (Last 7 Days)",
     "workOrderStatusDistribution": "Work Order Status Distribution",
     "recentAlerts": "Recent Alerts",
+    "trendWarnings": {
+      "title": "Trend warnings",
+      "description": "Metrics that may exceed a threshold within 7 days",
+      "count": "{{count}} warnings",
+      "empty": "No metrics are expected to exceed a threshold soon",
+      "loadFailed": "Trend warnings failed to load",
+      "retry": "Retry trend warnings",
+      "more": "{{count}} more warnings",
+      "currentValue": "Current",
+      "threshold": "Threshold",
+      "oneDay": "1 day",
+      "days": "{{count}} days",
+      "noEstimate": "No estimate",
+      "openDevice": "Open device {{deviceId}} trend for {{metric}}",
+      "direction": {
+        "up": "Rising",
+        "down": "Falling",
+        "stable": "Stable",
+        "unknown": "Unknown direction"
+      },
+      "risk": {
+        "critical": "Within 1 day",
+        "warning": "Within 3 days",
+        "info": "Within 7 days",
+        "noEstimate": "No time estimate"
+      }
+    },
     "oee": {
       "title": "Overall Equipment Effectiveness (OEE)",
       "formula": "OEE = Availability × Performance × Quality",
