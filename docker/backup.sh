@@ -429,6 +429,14 @@ write_backup_manifest() {
         return 1
       }
       filename="$(basename -- "$file")"
+      case "$file" in
+        "$BACKUP_DIR"/*)
+          ;;
+        *)
+          echo "  ✗ 备份文件不在 BACKUP_DIR 内，无法写入批次清单: $filename" >&2
+          return 1
+          ;;
+      esac
       if ! [[ "$filename" =~ ^[A-Za-z0-9_.-]+$ ]]; then
         echo "  ✗ 备份文件名包含不安全字符，无法写入批次清单: $filename" >&2
         return 1
