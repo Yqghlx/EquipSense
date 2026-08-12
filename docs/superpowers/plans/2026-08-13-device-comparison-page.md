@@ -168,14 +168,14 @@ normalizedDeviceIds.forEach((id) => search.append('deviceIds', id));
 - Modify: `docs/evaluation/01-项目总览与综合评估.md`
 - Modify: `docs/evaluation/14-测试策略与金字塔分析.md`
 
-- [ ] **Step 1: 更新产品路线与质量证据**
+- [x] **Step 1: 更新产品路线与质量证据**
 
 记录设备对比页面已交付，明确趋势图、通知推送和生产真实凭据/证书/恢复演练仍未完成；统计数据必须以实际命令输出为准。
 
-- [ ] **Step 2: 运行完整门禁**
+- [x] **Step 2: 运行完整门禁**
 
 运行后端单元/集成相关测试、Release build、生产脚本测试，以及前端 `check:i18n`、TypeScript、ESLint、全量 Vitest、生产构建。
 
-- [ ] **Step 3: 任务级审查、差异检查和提交**
+- [x] **Step 3: 任务级审查、差异检查和提交**
 
 执行 `git diff --check`，确认无凭据、租户参数或无关文件变更；通过任务级审查后按 Conventional Commits 提交实现和证据更新。
