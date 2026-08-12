@@ -162,6 +162,7 @@ COMPOSE_DIR="$(cd "$COMPOSE_DIR" && pwd)"
 for required_file in \
   "$COMPOSE_DIR/.env" \
   "$COMPOSE_DIR/validate-env.sh" \
+  "$COMPOSE_DIR/production-readiness.sh" \
   "$COMPOSE_DIR/docker-compose.yml" \
   "$COMPOSE_DIR/docker-compose.prod.yml"; do
   [[ -f "$required_file" ]] || fatal "缺少必需文件 $required_file"
@@ -209,11 +210,23 @@ COMPOSE=(
   -f "$COMPOSE_DIR/docker-compose.prod.yml"
 )
 
+run_readiness_gate() {
+  local runtime_flag="${1:-}"
+  local readiness_args=(
+    --env-file "$COMPOSE_DIR/.env"
+    --compose-file "$COMPOSE_DIR/docker-compose.yml"
+    --compose-file "$COMPOSE_DIR/docker-compose.prod.yml"
+  )
+  if [ "$runtime_flag" = "--runtime" ]; then
+    readiness_args+=(--runtime)
+  fi
+  bash "$COMPOSE_DIR/production-readiness.sh" "${readiness_args[@]}"
+}
+
 export TAG="$TARGET_TAG"
 
-# 在登录仓库、拉取镜像或重建容器之前执行生产配置与 Compose 门禁。
-bash "$COMPOSE_DIR/validate-env.sh" "$COMPOSE_DIR/.env" --check-runtime-files
-"${COMPOSE[@]}" config --quiet
+# 在登录仓库、拉取镜像或重建容器之前执行统一的生产配置与 Compose 门禁。
+run_readiness_gate
 
 VERSION_FILE="$COMPOSE_DIR/.last-deployed-tag"
 if [[ -f "$VERSION_FILE" ]]; then

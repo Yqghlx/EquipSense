@@ -2763,6 +2763,22 @@ create_deploy_runtime_doubles() {
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$DEPLOY_READINESS_LOG"' \
+    'if [[ "$*" == *"--runtime"* ]]; then' \
+    '  counter=0' \
+    '  if [[ -f "$DEPLOY_READINESS_COUNTER" ]]; then counter="$(cat "$DEPLOY_READINESS_COUNTER")"; fi' \
+    '  counter=$((counter + 1))' \
+    '  printf "%s\\n" "$counter" > "$DEPLOY_READINESS_COUNTER"' \
+    '  code="$(printf "%s" "${DEPLOY_READINESS_RUNTIME_CODES:-0}" | cut -d, -f"$counter")"' \
+    '  [[ -n "$code" ]] || code=1' \
+    'else' \
+    '  code="${DEPLOY_READINESS_STATIC_RESULT:-0}"' \
+    'fi' \
+    'exit "$code"' > "$case_dir/production-readiness.sh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s|%s\\n" "docker" "$*" >> "$DEPLOY_ORDER_LOG"' \
     'printf "%s|%s\\n" "${TAG:-unset}" "$*" >> "$DEPLOY_DOCKER_LOG"' \
     'if [[ "${1:-}" = "login" ]]; then cat >/dev/null; exit 0; fi' \
     'if [[ "${1:-}" = "inspect" ]]; then' \
@@ -2795,6 +2811,7 @@ create_deploy_runtime_doubles() {
     '[[ -n "$code" ]] || code="000"' \
     'printf "%s" "$code"' > "$case_dir/bin/curl"
   chmod +x "$case_dir/validate-env.sh" "$case_dir/bin/docker" "$case_dir/bin/curl"
+  chmod +x "$case_dir/production-readiness.sh"
 }
 
 run_deploy_fixture() {
@@ -2807,6 +2824,11 @@ run_deploy_fixture() {
     DEPLOY_CURL_COUNTER="$case_dir/curl-counter" \
     DEPLOY_EDGE_CURL_COUNTER="$case_dir/edge-curl-counter" \
     DEPLOY_CURL_LOG="$case_dir/curl.log" \
+    DEPLOY_READINESS_LOG="$case_dir/readiness.log" \
+    DEPLOY_READINESS_COUNTER="$case_dir/readiness-counter" \
+    DEPLOY_ORDER_LOG="$case_dir/order.log" \
+    DEPLOY_READINESS_STATIC_RESULT="${DEPLOY_READINESS_STATIC_RESULT:-0}" \
+    DEPLOY_READINESS_RUNTIME_CODES="${DEPLOY_READINESS_RUNTIME_CODES:-0}" \
     DEPLOY_MAX_ATTEMPTS=1 \
     DEPLOY_INITIAL_DELAY_SECONDS=0 \
     DEPLOY_ROLLBACK_INITIAL_DELAY_SECONDS=0 \
@@ -2819,18 +2841,25 @@ run_deploy_fixture() {
 test_deploy_preflight_failure_does_not_mutate_services() {
   local case_dir="$TEST_ROOT/deploy-preflight"
   local docker_log="$case_dir/docker.log"
-  local validate_marker="$case_dir/validate-called"
+  local readiness_marker="$case_dir/readiness-called"
   create_deploy_fixtures "$case_dir"
 
   printf '%s\n' \
     '#!/usr/bin/env bash' \
-    ': > "$DEPLOY_VALIDATE_CALLED"' \
-    'exit 1' > "$case_dir/validate-env.sh"
+    ': > "$DEPLOY_READINESS_CALLED"' \
+    'exit 1' > "$case_dir/production-readiness.sh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/validate-env.sh"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'printf "%s\\n" "$*" >> "$DEPLOY_DOCKER_LOG"' \
     'exit 0' > "$case_dir/bin/docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s" "503"' > "$case_dir/bin/curl"
   chmod +x "$case_dir/validate-env.sh" "$case_dir/bin/docker"
+  chmod +x "$case_dir/production-readiness.sh" "$case_dir/bin/curl"
 
   local output
   local result_code
@@ -2838,17 +2867,21 @@ test_deploy_preflight_failure_does_not_mutate_services() {
   output="$(PATH="$case_dir/bin:$PATH" \
     COMPOSE_DIR="$case_dir" \
     DEPLOY_DOCKER_LOG="$docker_log" \
-    DEPLOY_VALIDATE_CALLED="$validate_marker" \
+    DEPLOY_READINESS_CALLED="$readiness_marker" \
+    DEPLOY_MAX_ATTEMPTS=1 \
+    DEPLOY_INITIAL_DELAY_SECONDS=0 \
+    DEPLOY_ROLLBACK_INITIAL_DELAY_SECONDS=0 \
+    DEPLOY_POLL_INTERVAL_SECONDS=0 \
     GHCR_PULL_USER="test-user" \
     GHCR_PULL_TOKEN="test-token" \
     bash "$PROJECT_ROOT/docker/deploy-production.sh" 2.0.0 2>&1)"
   result_code=$?
   set -e
 
-  [[ "$result_code" -ne 0 ]] || fail "生产配置预检失败时部署不应成功"
-  [[ -f "$validate_marker" ]] || fail "部署必须调用生产环境验证器"
-  [[ ! -s "$docker_log" ]] || fail "生产配置预检失败时不应调用 Docker"
-  [[ "$output" != *"部署成功"* ]] || fail "预检失败时不应报告部署成功"
+  [[ "$result_code" -ne 0 ]] || fail "静态 readiness 失败时部署不应成功"
+  [[ -f "$readiness_marker" ]] || fail "部署必须调用生产 readiness"
+  [[ ! -s "$docker_log" ]] || fail "静态 readiness 失败时不应调用 Docker"
+  [[ "$output" != *"部署成功"* ]] || fail "readiness 失败时不应报告部署成功"
 }
 
 test_deploy_rejects_overlapping_runs() {

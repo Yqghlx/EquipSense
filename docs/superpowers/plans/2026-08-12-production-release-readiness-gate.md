@@ -111,7 +111,7 @@ git commit -m "feat: support layered compose files in readiness gate"
 - Consumes: Task 1 的 `production-readiness.sh --env-file --compose-file --runtime` 接口。
 - Produces: `deploy-production.sh` 内部 `run_readiness_gate [--runtime]`；部署目录必须包含 `production-readiness.sh`。
 
-- [ ] **Step 1: 写部署预检顺序测试**
+- [x] **Step 1: 写部署预检顺序测试**
 
 在 `create_deploy_fixtures` 中创建可执行 readiness 替身，写入 `DEPLOY_ORDER_LOG`，并由 `DEPLOY_READINESS_STATIC_RESULT` 控制无 `--runtime` 调用的退出码：
 
@@ -126,7 +126,7 @@ chmod 700 "$case_dir/production-readiness.sh"
 
 让 Docker 替身把 `docker|...` 写入同一日志；预检失败测试断言 readiness 先出现、返回非零、Docker 日志为空，且未调用登录、拉取或容器重建。
 
-- [ ] **Step 2: 运行部署测试确认先失败**
+- [x] **Step 2: 运行部署测试确认先失败**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh deploy
@@ -134,7 +134,7 @@ bash tests/scripts/production-scripts-test.sh deploy
 
 预期：新顺序断言失败，因为当前部署脚本只直接调用 `validate-env.sh`。
 
-- [ ] **Step 3: 实现 `run_readiness_gate`**
+- [x] **Step 3: 实现 `run_readiness_gate`**
 
 在部署脚本中定义：
 
@@ -155,7 +155,7 @@ run_readiness_gate() {
 
 将 `production-readiness.sh` 加入部署必需文件清单；在仓库登录、镜像拉取和容器变更前，用 `run_readiness_gate` 替换直接调用 `validate-env.sh` 与单独的 `compose config --quiet`，避免部署脚本维护第二套静态预检。
 
-- [ ] **Step 4: 运行部署预检回归**
+- [x] **Step 4: 运行部署预检回归**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh deploy
@@ -164,10 +164,11 @@ bash -n docker/deploy-production.sh
 
 预期：静态 readiness 失败不会登录仓库、拉取镜像或重建容器；正常 fixture 继续进入部署流程。
 
-- [ ] **Step 5: 提交 Task 2**
+- [x] **Step 5: 提交 Task 2**
 
 ```bash
-git add docker/deploy-production.sh tests/scripts/production-scripts-test.sh
+git add docker/deploy-production.sh tests/scripts/production-scripts-test.sh \
+  docs/superpowers/plans/2026-08-12-production-release-readiness-gate.md
 git commit -m "feat: gate deployments with production readiness"
 ```
 
