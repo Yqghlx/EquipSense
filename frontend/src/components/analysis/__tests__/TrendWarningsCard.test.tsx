@@ -18,6 +18,7 @@ const translations: Record<string, string> = {
   'dashboard.trendWarnings.more': '{{count}} more warnings',
   'dashboard.trendWarnings.currentValue': 'Current',
   'dashboard.trendWarnings.threshold': 'Threshold',
+  'dashboard.trendWarnings.oneDay': '1 day',
   'dashboard.trendWarnings.days': '{{count}} days',
   'dashboard.trendWarnings.noEstimate': 'No estimate',
   'dashboard.trendWarnings.openDevice': 'Open device {{deviceId}} trend for {{metric}}',
@@ -28,6 +29,7 @@ const translations: Record<string, string> = {
   'dashboard.trendWarnings.risk.critical': 'Within 1 day',
   'dashboard.trendWarnings.risk.warning': 'Within 3 days',
   'dashboard.trendWarnings.risk.info': 'Within 7 days',
+  'dashboard.trendWarnings.risk.noEstimate': 'No estimate available',
   'common.loading': 'Loading...',
 };
 
@@ -56,7 +58,7 @@ const mockedUseTrendWarnings = vi.mocked(useTrendWarnings);
 
 function createWarning(overrides: Partial<TrendAnalysisResult> = {}): TrendAnalysisResult {
   return {
-    deviceId: 'device-1',
+    deviceId: '11111111-1111-1111-1111-111111111111',
     metric: 'temperature',
     currentValue: 88.2,
     averageValue: 80,
@@ -76,13 +78,13 @@ function createWarning(overrides: Partial<TrendAnalysisResult> = {}): TrendAnaly
 
 function createWarnings(): TrendAnalysisResult[] {
   return [
-    createWarning({ deviceId: 'device-1', daysToThreshold: 6 }),
-    createWarning({ deviceId: 'device-2', daysToThreshold: null }),
-    createWarning({ deviceId: 'device-3', daysToThreshold: 3 }),
-    createWarning({ deviceId: 'device-4', daysToThreshold: 0.5 }),
-    createWarning({ deviceId: 'device-5', daysToThreshold: 2 }),
-    createWarning({ deviceId: 'device-6', daysToThreshold: 1 }),
-    createWarning({ deviceId: 'device-7', daysToThreshold: 4 }),
+    createWarning({ deviceId: '11111111-1111-1111-1111-111111111111', daysToThreshold: 6 }),
+    createWarning({ deviceId: '22222222-2222-2222-2222-222222222222', daysToThreshold: null }),
+    createWarning({ deviceId: '33333333-3333-3333-3333-333333333333', daysToThreshold: 3 }),
+    createWarning({ deviceId: '44444444-4444-4444-4444-444444444444', daysToThreshold: 0.5 }),
+    createWarning({ deviceId: '55555555-5555-5555-5555-555555555555', daysToThreshold: 2 }),
+    createWarning({ deviceId: '66666666-6666-6666-6666-666666666666', daysToThreshold: 1 }),
+    createWarning({ deviceId: '77777777-7777-7777-7777-777777777777', daysToThreshold: 4 }),
   ];
 }
 
@@ -110,22 +112,22 @@ describe('TrendWarningsCard', () => {
     const rows = screen.getAllByRole('button', { name: /Open device/i });
     expect(rows).toHaveLength(5);
     expect(rows[0]).toHaveTextContent('0.5');
-    expect(rows[1]).toHaveTextContent('1 days');
+    expect(rows[1]).toHaveTextContent('1 day');
     expect(screen.getByText('2 more warnings')).toBeInTheDocument();
   });
 
   it('点击预警行跳转到设备详情', async () => {
     mockedUseTrendWarnings.mockReturnValue({
-      data: [createWarning({ deviceId: 'device-123', metric: 'temperature' })],
+      data: [createWarning({ deviceId: '12345678-1234-1234-1234-1234567890ab', metric: 'temperature' })],
       isLoading: false,
       isError: false,
       refetch: vi.fn(),
     } as never);
 
     render(<TrendWarningsCard />);
-    await userEvent.click(screen.getByRole('button', { name: /device-123.*temperature/i }));
+    await userEvent.click(screen.getByRole('button', { name: /12345678-1234-1234-1234-1234567890ab.*temperature/i }));
 
-    expect(mocks.navigate).toHaveBeenCalledWith('/devices/device-123');
+    expect(mocks.navigate).toHaveBeenCalledWith('/devices/12345678-1234-1234-1234-1234567890ab');
   });
 
   it('空数据时显示正常空状态而不是失败提示', () => {
@@ -138,7 +140,7 @@ describe('TrendWarningsCard', () => {
   it('缓存旧数据且加载失败时显示错误并保留旧数据', async () => {
     const refetch = vi.fn();
     mockedUseTrendWarnings.mockReturnValue({
-      data: [createWarning({ deviceId: 'device-old', metric: 'pressure' })],
+      data: [createWarning({ deviceId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', metric: 'pressure' })],
       isLoading: false,
       isError: true,
       refetch,
@@ -148,7 +150,7 @@ describe('TrendWarningsCard', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Trend warnings failed to load');
     expect(screen.getByRole('button', { name: 'Retry trend warnings' })).toBeInTheDocument();
     expect(screen.queryByText('No metrics are expected to exceed a threshold soon')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /device-old.*pressure/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.*pressure/i })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Retry trend warnings' }));
     expect(refetch).toHaveBeenCalledOnce();
@@ -181,7 +183,49 @@ describe('TrendWarningsCard', () => {
     expect(screen.getByText('Rising')).toBeInTheDocument();
     expect(screen.queryByText('上升')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open device/i })).toHaveAccessibleName(
-      'Open device device-1 trend for temperature',
+      'Open device 11111111-1111-1111-1111-111111111111 trend for temperature',
     );
+  });
+
+  it('daysToThreshold 为 null 时显示中性无估算文案而不是 7 天内提示', () => {
+    mockedUseTrendWarnings.mockReturnValue({
+      data: [createWarning({ daysToThreshold: null, deviceId: '88888888-8888-8888-8888-888888888888' })],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as never);
+
+    render(<TrendWarningsCard />);
+
+    expect(screen.getByText('No estimate')).toBeInTheDocument();
+    expect(screen.getByText('No estimate available')).toBeInTheDocument();
+    expect(screen.queryByText('Within 7 days')).not.toBeInTheDocument();
+  });
+
+  it('忽略 deviceId 或 metric 非法的运行时记录，避免渲染无效导航', () => {
+    mockedUseTrendWarnings.mockReturnValue({
+      data: [
+        createWarning({ deviceId: '99999999-9999-9999-9999-999999999999', metric: 'temperature' }),
+        null as unknown as TrendAnalysisResult,
+        createWarning({ deviceId: '', metric: 'pressure' }) as TrendAnalysisResult,
+        createWarning({ deviceId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', metric: '   ' }) as TrendAnalysisResult,
+      ],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as never);
+
+    render(<TrendWarningsCard />);
+
+    const rows = screen.getAllByRole('button', { name: /Open device/i });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveAccessibleName('Open device 99999999-9999-9999-9999-999999999999 trend for temperature');
+    expect(screen.queryByRole('button', { name: /undefined/i })).not.toBeInTheDocument();
+  });
+
+  it('标题提供二级 heading 语义，便于仪表盘区块导航', () => {
+    render(<TrendWarningsCard />);
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Trend warnings' })).toBeInTheDocument();
   });
 });

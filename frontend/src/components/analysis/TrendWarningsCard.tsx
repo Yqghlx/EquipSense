@@ -14,8 +14,9 @@ import { useTrendWarnings, type TrendAnalysisResult } from '../../hooks/useTrend
 
 const MAX_VISIBLE_WARNINGS = 5;
 
-type RiskLevel = 'critical' | 'warning' | 'info';
+type RiskLevel = 'critical' | 'warning' | 'info' | 'noEstimate';
 type DirectionKey = 'up' | 'down' | 'stable' | 'unknown';
+type ValidTrendWarning = TrendAnalysisResult & { deviceId: string; metric: string };
 
 const riskStyles: Record<RiskLevel, { row: string; badge: string }> = {
   critical: {
@@ -29,6 +30,10 @@ const riskStyles: Record<RiskLevel, { row: string; badge: string }> = {
   info: {
     row: 'border-l-blue-500 bg-blue-500/[0.04] hover:border-blue-500/70 hover:bg-blue-500/[0.08]',
     badge: 'border-blue-300 bg-blue-500/10 text-blue-700 dark:border-blue-800 dark:text-blue-300',
+  },
+  noEstimate: {
+    row: 'border-l-slate-400 bg-slate-500/[0.03] hover:border-slate-400/80 hover:bg-slate-500/[0.06]',
+    badge: 'border-slate-300 bg-slate-500/10 text-slate-700 dark:border-slate-700 dark:text-slate-300',
   },
 };
 
@@ -48,8 +53,9 @@ function getRiskLevel(daysToThreshold: number | null): RiskLevel {
   if (typeof daysToThreshold === 'number' && Number.isFinite(daysToThreshold)) {
     if (daysToThreshold <= 1) return 'critical';
     if (daysToThreshold <= 3) return 'warning';
+    return 'info';
   }
-  return 'info';
+  return 'noEstimate';
 }
 
 function getDirectionKey(direction: string | null | undefined): DirectionKey {
@@ -66,6 +72,56 @@ function getFiniteDays(warning: TrendAnalysisResult): number {
     : Number.POSITIVE_INFINITY;
 }
 
+/** 运行时接口数据不可信，先过滤掉无法安全导航和展示的记录。 */
+function isValidWarning(warning: unknown): warning is ValidTrendWarning {
+  if (typeof warning !== 'object' || warning === null) return false;
+
+  const candidate = warning as { deviceId?: unknown; metric?: unknown };
+  return typeof candidate.deviceId === 'string'
+    && candidate.deviceId.trim().length > 0
+    && typeof candidate.metric === 'string'
+    && candidate.metric.trim().length > 0;
+}
+
+function getDirectionLabel(t: ReturnType<typeof useTranslation>['t'], directionKey: DirectionKey): string {
+  switch (directionKey) {
+    case 'up':
+      return t('dashboard.trendWarnings.direction.up');
+    case 'down':
+      return t('dashboard.trendWarnings.direction.down');
+    case 'stable':
+      return t('dashboard.trendWarnings.direction.stable');
+    default:
+      return t('dashboard.trendWarnings.direction.unknown');
+  }
+}
+
+function getRiskLabel(t: ReturnType<typeof useTranslation>['t'], riskLevel: RiskLevel): string {
+  switch (riskLevel) {
+    case 'critical':
+      return t('dashboard.trendWarnings.risk.critical');
+    case 'warning':
+      return t('dashboard.trendWarnings.risk.warning');
+    case 'info':
+      return t('dashboard.trendWarnings.risk.info');
+    default:
+      return t('dashboard.trendWarnings.risk.noEstimate');
+  }
+}
+
+function getExactDaysLabel(
+  t: ReturnType<typeof useTranslation>['t'],
+  daysToThreshold: number | null,
+): string {
+  if (typeof daysToThreshold !== 'number' || !Number.isFinite(daysToThreshold)) {
+    return t('dashboard.trendWarnings.noEstimate');
+  }
+
+  return daysToThreshold === 1
+    ? t('dashboard.trendWarnings.oneDay')
+    : t('dashboard.trendWarnings.days', { count: daysToThreshold });
+}
+
 /**
  * 仪表盘趋势预警卡片。
  *
@@ -76,7 +132,15 @@ export default function TrendWarningsCard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, isLoading, isError, refetch } = useTrendWarnings();
-  const warnings = Array.isArray(data) ? data : [];
+  const warnings = Array.isArray(data)
+    ? data
+      .filter(isValidWarning)
+      .map((warning) => ({
+        ...warning,
+        deviceId: warning.deviceId.trim(),
+        metric: warning.metric.trim(),
+      }))
+    : [];
   const sortedWarnings = [...warnings].sort((a, b) => getFiniteDays(a) - getFiniteDays(b));
   const visibleWarnings = sortedWarnings.slice(0, MAX_VISIBLE_WARNINGS);
   const remainingCount = Math.max(0, sortedWarnings.length - visibleWarnings.length);
@@ -86,7 +150,12 @@ export default function TrendWarningsCard() {
       <CardHeader className="border-b border-border/60">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <CardTitle id="dashboard-trend-warnings-title" className="flex items-center gap-2">
+            <CardTitle
+              id="dashboard-trend-warnings-title"
+              role="heading"
+              aria-level={2}
+              className="flex items-center gap-2"
+            >
               <TrendingUp className="h-4 w-4 text-primary" aria-hidden="true" />
               {t('dashboard.trendWarnings.title')}
             </CardTitle>
@@ -129,10 +198,9 @@ export default function TrendWarningsCard() {
             {visibleWarnings.map((warning) => {
               const riskLevel = getRiskLevel(warning.daysToThreshold);
               const directionKey = getDirectionKey(warning.trendDirection);
-              const riskLabel = t(`dashboard.trendWarnings.risk.${riskLevel}`);
-              const exactDays = typeof warning.daysToThreshold === 'number' && Number.isFinite(warning.daysToThreshold)
-                ? t('dashboard.trendWarnings.days', { count: warning.daysToThreshold })
-                : t('dashboard.trendWarnings.noEstimate');
+              const riskLabel = getRiskLabel(t, riskLevel);
+              const exactDays = getExactDaysLabel(t, warning.daysToThreshold);
+              const directionLabel = getDirectionLabel(t, directionKey);
 
               return (
                 <button
@@ -149,7 +217,7 @@ export default function TrendWarningsCard() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium text-foreground">{warning.metric}</span>
                       <Badge variant="outline" className="text-xs">
-                        {t(`dashboard.trendWarnings.direction.${directionKey}`)}
+                        {directionLabel}
                       </Badge>
                     </div>
                     <p className="mt-1 truncate font-mono text-xs text-muted-foreground" title={warning.deviceId}>
