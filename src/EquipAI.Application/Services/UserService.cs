@@ -14,7 +14,7 @@ namespace EquipAI.Application.Services;
 
 /// <summary>
 /// 用户管理服务实现，提供用户 CRUD 和角色管理能力
-/// 所有操作均在指定租户范围内进行（依赖 AppDbContext 全局租户过滤器）
+/// 所有操作均在指定租户范围内进行；全局租户过滤器作为纵深防御，业务谓词仍显式匹配 TenantId
 /// 创建和唯一性检查使用 IgnoreQueryFilters 以确保跨租户的用户名唯一性
 /// </summary>
 public class UserService : IUserService
@@ -42,14 +42,17 @@ public class UserService : IUserService
 
     /// <summary>
     /// 分页查询用户列表
-    /// 自动受租户全局过滤器约束，仅返回当前租户的用户
+    /// 显式按租户筛选，并由全局过滤器提供第二层隔离
     /// </summary>
     /// <param name="query">分页查询参数</param>
-    /// <param name="tenantId">租户 ID（由全局过滤器使用，此参数用于日志记录）</param>
+    /// <param name="tenantId">租户 ID</param>
     /// <returns>分页用户结果</returns>
     public async Task<PagedResult<UserDto>> GetUsersAsync(PagedQuery query, Guid tenantId)
     {
-        var users = _dbContext.Users.AsQueryable();
+        // tenantId 是服务契约的一部分，不能只依赖 DbContext 的全局过滤器。
+        var users = _dbContext.Users
+            .Where(u => u.TenantId == tenantId)
+            .AsQueryable();
 
         // 关键词搜索：匹配用户名或显示名称
         if (!string.IsNullOrWhiteSpace(query.Keyword))
@@ -79,7 +82,9 @@ public class UserService : IUserService
     /// <returns>用户信息，不存在则返回 null</returns>
     public async Task<UserDto?> GetUserByIdAsync(Guid userId, Guid tenantId)
     {
-        var user = await _dbContext.Users.FindAsync(userId);
+        // 不使用 FindAsync：它可能从 ChangeTracker 返回实体，从而绕过查询过滤器。
+        var user = await _dbContext.Users
+            .FirstOrDefaultAsync(u => u.Id == userId && u.TenantId == tenantId);
         return user == null ? null : _mapper.Map<UserDto>(user);
     }
 
@@ -141,7 +146,9 @@ public class UserService : IUserService
     /// <exception cref="KeyNotFoundException">用户不存在</exception>
     public async Task<UserDto> UpdateUserAsync(Guid userId, Guid tenantId, UpdateUserRequest request)
     {
-        var user = await _dbContext.Users.FindAsync(userId)
+        // ID 和租户必须在同一个业务谓词中校验，跨租户资源按不存在处理。
+        var user = await _dbContext.Users
+            .FirstOrDefaultAsync(u => u.Id == userId && u.TenantId == tenantId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         _mapper.Map(request, user);
@@ -161,7 +168,9 @@ public class UserService : IUserService
     /// <exception cref="KeyNotFoundException">用户不存在</exception>
     public async Task DeactivateUserAsync(Guid userId, Guid tenantId)
     {
-        var user = await _dbContext.Users.FindAsync(userId)
+        // 停用会影响登录权限和租户席位，必须显式绑定租户。
+        var user = await _dbContext.Users
+            .FirstOrDefaultAsync(u => u.Id == userId && u.TenantId == tenantId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         // 仅在用户当前为启用状态时停用并释放席位，避免对同一用户重复停用导致重复扣减计数。
@@ -202,7 +211,9 @@ public class UserService : IUserService
     /// <exception cref="ArgumentException">角色名称无效</exception>
     public async Task ChangeUserRoleAsync(Guid userId, Guid tenantId, string newRole)
     {
-        var user = await _dbContext.Users.FindAsync(userId)
+        // 角色变更可能造成提权，必须显式绑定租户，不能依赖 FindAsync 或跟踪状态。
+        var user = await _dbContext.Users
+            .FirstOrDefaultAsync(u => u.Id == userId && u.TenantId == tenantId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         if (!Enum.TryParse<UserRole>(newRole, ignoreCase: true, out var role))

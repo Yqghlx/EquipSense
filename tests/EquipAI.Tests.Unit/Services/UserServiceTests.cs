@@ -131,6 +131,25 @@ public class UserServiceTests : IAsyncDisposable
         result.Should().BeNull();
     }
 
+    [Fact]
+    public async Task GetUserByIdAsync_租户不匹配_应返回null()
+    {
+        // Arrange：将其他租户用户写入当前上下文，模拟已被 ChangeTracker 跟踪的路径。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("other-get", otherTenantId);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        var result = await service.GetUserByIdAsync(user.Id, _tenantId);
+
+        // Assert：用户详情必须同时匹配用户 ID 和当前租户。
+        result.Should().BeNull("当前租户不得读取其他租户的用户详情");
+    }
+
     // ==================== CreateUserAsync ====================
 
     [Fact]
@@ -320,6 +339,31 @@ public class UserServiceTests : IAsyncDisposable
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    [Fact]
+    public async Task UpdateUserAsync_租户不匹配_应抛出KeyNotFoundException且保持原数据()
+    {
+        // Arrange：其他租户用户已被当前上下文跟踪，验证更新不会信任 FindAsync 的命中结果。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("other-update", otherTenantId, email: "original@example.com");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        var act = () => service.UpdateUserAsync(
+            user.Id,
+            _tenantId,
+            new UpdateUserRequest { Email = "attacker@example.com" });
+
+        // Assert
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        var persisted = await db.Users.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(u => u.Id == user.Id);
+        persisted.Email.Should().Be("original@example.com");
+    }
+
     // ==================== DeactivateUserAsync ====================
 
     [Fact]
@@ -392,6 +436,28 @@ public class UserServiceTests : IAsyncDisposable
         // Assert：计数不应变为负数（重复扣减）
         var tenant = await db.UnfilteredSet<Tenant>().FirstAsync(t => t.Id == _tenantId);
         tenant.CurrentUserCount.Should().Be(0, "重复停用同一用户不应重复扣减席位（IsActive 守卫防重复扣减）");
+    }
+
+    [Fact]
+    public async Task DeactivateUserAsync_租户不匹配_应抛出KeyNotFoundException且不改变状态()
+    {
+        // Arrange：其他租户用户已被当前上下文跟踪，验证停用不会跨租户执行。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("other-deactivate", otherTenantId);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        var act = () => service.DeactivateUserAsync(user.Id, _tenantId);
+
+        // Assert
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        var persisted = await db.Users.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(u => u.Id == user.Id);
+        persisted.IsActive.Should().BeTrue();
     }
 
     // ==================== ChangeUserRoleAsync ====================
@@ -481,6 +547,28 @@ public class UserServiceTests : IAsyncDisposable
         var act = () => service.ChangeUserRoleAsync(user.Id, _tenantId, "InvalidRole");
         await act.Should().ThrowAsync<ArgumentException>()
             .WithMessage("*InvalidRole*");
+    }
+
+    [Fact]
+    public async Task ChangeUserRoleAsync_租户不匹配_应抛出KeyNotFoundException且不改变角色()
+    {
+        // Arrange：其他租户用户已被当前上下文跟踪，验证角色变更不会造成跨租户提权。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("other-role", otherTenantId, role: UserRole.Operator);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        var act = () => service.ChangeUserRoleAsync(user.Id, _tenantId, "SystemAdmin");
+
+        // Assert
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        var persisted = await db.Users.IgnoreQueryFilters().AsNoTracking()
+            .SingleAsync(u => u.Id == user.Id);
+        persisted.Role.Should().Be(UserRole.Operator);
     }
 
     // ==================== 辅助方法 ====================
