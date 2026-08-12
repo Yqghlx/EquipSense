@@ -16,6 +16,7 @@ namespace EquipAI.Application.Notifications;
 public class PushNotificationService : IPushNotificationService
 {
     private readonly AppDbContext _dbContext;
+    private readonly ITenantContext _tenantContext;
     private readonly ILogger<PushNotificationService> _logger;
     private readonly string _vapidSubject;
     private readonly string? _vapidPublicKey;
@@ -23,10 +24,12 @@ public class PushNotificationService : IPushNotificationService
 
     public PushNotificationService(
         AppDbContext dbContext,
+        ITenantContext tenantContext,
         IConfiguration configuration,
         ILogger<PushNotificationService> logger)
     {
         _dbContext = dbContext;
+        _tenantContext = tenantContext;
         _logger = logger;
 
         _vapidSubject = configuration["Vapid:Subject"]
@@ -49,6 +52,11 @@ public class PushNotificationService : IPushNotificationService
 
         if (existing != null)
         {
+            if (existing.TenantId != tenantId)
+            {
+                throw new InvalidOperationException("推送 endpoint 已属于其他租户，不能重复注册");
+            }
+
             existing.TenantId = tenantId;
             existing.UserId = userId;
             existing.P256dh = p256dh;
@@ -79,7 +87,9 @@ public class PushNotificationService : IPushNotificationService
     {
         var sub = await _dbContext.PushSubscriptions
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(s => s.UserId == userId && s.Endpoint == endpoint);
+            .FirstOrDefaultAsync(s => s.TenantId == _tenantContext.TenantId
+                                   && s.UserId == userId
+                                   && s.Endpoint == endpoint);
 
         if (sub != null)
         {

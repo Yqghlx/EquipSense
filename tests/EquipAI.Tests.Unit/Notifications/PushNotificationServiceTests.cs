@@ -18,6 +18,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
 {
     private readonly AppDbContext _db;
     private readonly Guid _tenantId = Guid.NewGuid();
+    private readonly TestTenantContext _tenantContext;
 
     public PushNotificationServiceTests()
     {
@@ -25,7 +26,8 @@ public class PushNotificationServiceTests : IAsyncDisposable
             .UseInMemoryDatabase($"TestPushNotify_{Guid.NewGuid()}")
             .Options;
 
-        _db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        _tenantContext = new TestTenantContext(_tenantId);
+        _db = new AppDbContext(options, _tenantContext);
 
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -35,7 +37,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
             .Build();
 
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<PushNotificationService>();
-        Service = new PushNotificationService(_db, config, logger);
+        Service = new PushNotificationService(_db, _tenantContext, config, logger);
     }
 
     private PushNotificationService Service { get; }
@@ -191,6 +193,73 @@ public class PushNotificationServiceTests : IAsyncDisposable
     {
         var act = () => Service.UnregisterSubscriptionAsync(Guid.NewGuid(), "https://not-exist");
         await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// 安全边界：当前租户不能注销其他租户的订阅。
+    ///
+    /// Why：后台/应用层查询使用 IgnoreQueryFilters 后，必须补回租户条件；否则只要拿到用户 ID 和 endpoint，
+    /// 就可以删除其他租户的浏览器推送订阅，导致对方失去关键告警通知。
+    /// </summary>
+    [Fact]
+    public async Task UnregisterSubscriptionAsync_其他租户订阅不应被删除()
+    {
+        var otherTenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var endpoint = "https://fcm.googleapis.com/fcm/send/other-tenant-unreg";
+        _db.PushSubscriptions.Add(new PushSubscription
+        {
+            TenantId = otherTenantId,
+            UserId = userId,
+            Endpoint = endpoint,
+            P256dh = "p256dh",
+            Auth = "auth",
+        });
+        await _db.SaveChangesAsync();
+
+        await Service.UnregisterSubscriptionAsync(userId, endpoint);
+
+        var remaining = await _db.PushSubscriptions
+            .IgnoreQueryFilters()
+            .SingleAsync(s => s.Endpoint == endpoint);
+        remaining.TenantId.Should().Be(otherTenantId);
+        remaining.UserId.Should().Be(userId);
+    }
+
+    /// <summary>
+    /// 安全边界：全局唯一 endpoint 已属于其他租户时，不能被当前租户接管。
+    /// </summary>
+    [Fact]
+    public async Task RegisterSubscriptionAsync_其他租户endpoint不应被接管()
+    {
+        var otherTenantId = Guid.NewGuid();
+        var originalUserId = Guid.NewGuid();
+        var newUserId = Guid.NewGuid();
+        var endpoint = "https://fcm.googleapis.com/fcm/send/other-tenant-register";
+        _db.PushSubscriptions.Add(new PushSubscription
+        {
+            TenantId = otherTenantId,
+            UserId = originalUserId,
+            Endpoint = endpoint,
+            P256dh = "original-key",
+            Auth = "original-auth",
+        });
+        await _db.SaveChangesAsync();
+
+        var act = () => Service.RegisterSubscriptionAsync(
+            _tenantId,
+            newUserId,
+            endpoint,
+            "new-key",
+            "new-auth");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        var unchanged = await _db.PushSubscriptions
+            .IgnoreQueryFilters()
+            .SingleAsync(s => s.Endpoint == endpoint);
+        unchanged.TenantId.Should().Be(otherTenantId);
+        unchanged.UserId.Should().Be(originalUserId);
+        unchanged.P256dh.Should().Be("original-key");
     }
 
     private class TestTenantContext : ITenantContext
