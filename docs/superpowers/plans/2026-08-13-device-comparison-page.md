@@ -56,7 +56,7 @@ Task<DeviceComparisonResult> CompareAsync(
 - Modify: `src/EquipAI.WebAPI/Controllers/DeviceComparisonController.cs`
 - Test: Task 1 files
 
-- [ ] **Step 1: 扩展接口与控制器绑定**
+- [x] **Step 1: 扩展接口与控制器绑定**
 
 将 `IEnumerable<Guid>? deviceIds` 从控制器传入服务；控制器对去重后的数量、GUID 模型绑定和空值进行 fail-fast 校验，错误响应只包含字段名和范围，不回显租户或敏感信息。
 
@@ -71,11 +71,11 @@ public async Task<ActionResult<DeviceComparisonResult>> Compare(
     CancellationToken ct = default)
 ```
 
-- [ ] **Step 2: 在服务中叠加租户/类型/ID 条件**
+- [x] **Step 2: 在服务中叠加租户/类型/ID 条件**
 
 设备候选查询先限定 `TenantId` 与 `Type`，有 `deviceIds` 时再限定 ID 集合；遥测查询复用筛选后的设备字典。若可见设备少于 2 台，返回现有业务消息，不透露被过滤设备是否存在。
 
-- [ ] **Step 3: 运行后端聚焦测试和 Release 构建**
+- [x] **Step 3: 运行后端聚焦测试和 Release 构建**
 
 运行设备对比服务/控制器测试，随后运行 `dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers`。
 
