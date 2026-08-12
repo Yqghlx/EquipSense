@@ -30,11 +30,12 @@ public interface IAuthService
     Task LogoutAsync(Guid userId, string? sessionId = null);
 
     /// <summary>
-    /// 修改密码
+    /// 修改密码并为当前浏览器会话签发新的令牌对
     /// </summary>
     /// <param name="userId">用户 ID</param>
     /// <param name="request">修改密码请求（当前密码 + 新密码）</param>
-    Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
+    /// <returns>已清除强制改密状态的新认证响应</returns>
+    Task<AuthResponse> ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
 
     /// <summary>
     /// 申请密码重置；邮箱无法唯一匹配启用用户时静默返回，避免跨租户重复邮箱导致重置错号。

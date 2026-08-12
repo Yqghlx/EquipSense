@@ -124,6 +124,18 @@ public class GatewayConfigurationValidatorTests
     }
 
     [Fact]
+    public void 生产环境禁止回退到本地设备配置()
+    {
+        var options = CreateValidProductionOptions();
+        options.UseLocalDeviceConfigFallback = true;
+
+        var act = () => GatewayConfigurationValidator.Validate("Production", options);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*UseLocalDeviceConfigFallback*");
+    }
+
+    [Fact]
     public void 生产环境健康端口必须是可由非特权进程监听的有效端口()
     {
         var options = CreateValidProductionOptions();
@@ -143,5 +155,51 @@ public class GatewayConfigurationValidatorTests
         var act = () => GatewayConfigurationValidator.Validate("Development", options);
 
         act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void 生产环境OPCUA明文模式未显式放行时必须拒绝()
+    {
+        var options = CreateValidProductionOptions();
+        options.OpcUaSecurityMode = "None";
+
+        var act = () => GatewayConfigurationValidator.ValidateOpcUaSecurity(
+            "Production",
+            options,
+            enabledProtocols: ["opcua"]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AllowInsecureOpcUa*");
+    }
+
+    [Fact]
+    public void 生产环境OPCUA明文模式只有显式breakglass才允许启动()
+    {
+        var options = CreateValidProductionOptions();
+        options.OpcUaSecurityMode = "None";
+        options.AllowInsecureOpcUa = true;
+
+        var act = () => GatewayConfigurationValidator.ValidateOpcUaSecurity(
+            "Production",
+            options,
+            enabledProtocols: ["opcua"]);
+
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void 生产环境OPCUA未知模式即使breakglass也必须拒绝()
+    {
+        var options = CreateValidProductionOptions();
+        options.OpcUaSecurityMode = "UnknownMode";
+        options.AllowInsecureOpcUa = true;
+
+        var act = () => GatewayConfigurationValidator.ValidateOpcUaSecurity(
+            "Production",
+            options,
+            enabledProtocols: ["opcua"]);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*不支持*");
     }
 }

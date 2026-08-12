@@ -132,9 +132,9 @@ E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
 镜像和 Production 配置启动 PostgreSQL、Redis、Mosquitto、RabbitMQ、backend、frontend，
 验证迁移/种子、观察者账户真实登录与 `/auth/me` 受保护接口、startup/liveness/ready 探针、HTTPS、Nginx `/health` 和 `/api/` 反向代理。
 PR 默认执行上述快速门禁；main 推送和版本 tag 额外设置 `SMOKE_RUN_E2E=true`，在同一组
-Production 镜像中执行默认 433 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 431 通过、2 跳过、0 失败，确保发布镜像本身通过完整用户流程验收。
+Production 镜像中执行默认 433 个业务 E2E；当前仅保留 1 个有明确架构原因的条件跳过点，本次隔离 Production smoke 实际为 432 通过、1 跳过、0 失败，确保发布镜像本身通过完整用户流程验收。
 完整验收会在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户隔离测试账户的 TOTP，
-再由 Playwright 完成登录验证；不会关闭生产 MFA 策略。第二租户账户仅由 `SMOKE_RUN_E2E=true` 临时创建。
+再由 Playwright 完成登录验证；不会关闭生产 MFA 策略。第二租户账户仅由 `SMOKE_RUN_E2E=true` 临时创建。启动 E2E 前置脚本还会用真实登录会话完成种子账户改密，验证后端 `must_change_password` 门禁、刷新令牌吊销和新会话签发；测试只在进程内传递轮换后的临时密码，不通过伪造 `sessionStorage` 或关闭后端安全策略来制造登录态。非 E2E smoke 也会对观察者账户执行一次真实改密，再访问受保护 API。
 
 本地执行完整 Production 验收：
 

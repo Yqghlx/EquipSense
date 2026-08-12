@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
+import { shouldRedirectForPasswordChange } from '../../lib/authRouting';
 
 /**
  * 路由认证守卫
@@ -7,6 +8,7 @@ import { useAuthStore } from '../../stores/authStore';
  * 包裹需要认证的业务路由，未登录用户自动重定向到 /login，
  * 登录后跳回原始请求路径。
  * 额外保护 /admin 路由，仅 SystemAdmin 角色可访问。
+ * 必须修改密码的会话只能回到认证页完成改密，不能直接进入业务页面。
  */
 export function AuthGuard() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -14,6 +16,10 @@ export function AuthGuard() {
   const location = useLocation();
 
   if (!isAuthenticated) {
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  }
+
+  if (shouldRedirectForPasswordChange(isAuthenticated, user)) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
 

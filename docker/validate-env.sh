@@ -7,9 +7,23 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${1:-$SCRIPT_DIR/.env}"
 CHECK_RUNTIME_FILES=false
-if [ "${2:-}" = "--check-runtime-files" ]; then
-  CHECK_RUNTIME_FILES=true
-fi
+ALLOW_ISOLATED_E2E=false
+for option in "${@:2}"; do
+  case "$option" in
+    --check-runtime-files)
+      CHECK_RUNTIME_FILES=true
+      ;;
+    --allow-isolated-e2e)
+      # 仅供 tests/scripts/production-runtime-smoke.sh 的临时 Compose 使用；
+      # 普通 setup/compose-production 调用不会传入该选项。
+      ALLOW_ISOLATED_E2E=true
+      ;;
+    *)
+      printf '未知校验选项：%s\n' "$option" >&2
+      exit 2
+      ;;
+  esac
+done
 ERRORS=0
 
 error() {
@@ -387,6 +401,9 @@ else
 
   tenant2_account="$(read_env_value SEED_TENANT2_ACCOUNT)"
   if [[ "$tenant2_account" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
+    if [ "${aspnet_environment:-Production}" = "Production" ] && [ "$ALLOW_ISOLATED_E2E" != true ]; then
+      error "生产环境禁止开启 SEED_TENANT2_ACCOUNT；该测试账户只能在隔离验收环境中显式授权"
+    fi
     tenant2_password="$(read_env_value SEED_TENANT2_PASSWORD)"
     if [ -z "$tenant2_password" ] || [[ "$tenant2_password" == *"请修改"* ]] || [ "$tenant2_password" = "Tenant2@123" ]; then
       error "SEED_TENANT2_ACCOUNT 已开启，但 SEED_TENANT2_PASSWORD 缺失或仍为公开默认值"

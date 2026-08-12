@@ -5,8 +5,8 @@ namespace EquipAI.Tests.Unit.Security;
 
 /// <summary>
 /// OPC UA 安全模式配置校验测试。
-/// 与 MQTT 校验器不同，OPC UA 采用"告警不阻断"策略（部分老旧 PLC 不支持安全模式），
-/// 因此校验器返回 (Level, Message)? 而非抛异常。
+/// 校验器只返回结构化级别，具体是否阻断由边缘网关宿主决定；
+/// 生产环境的 Error 结果会在宿主层形成启动门禁，老旧设备兼容必须显式 break-glass。
 /// </summary>
 public class OpcUaSecurityConfigurationValidatorTests
 {
@@ -107,6 +107,18 @@ public class OpcUaSecurityConfigurationValidatorTests
     }
 
     [Fact]
+    public void 当前没有设备配置时不校验OPCUA安全模式()
+    {
+        // 空协议列表表示当前没有实际启用 OPC UA，不能因为配置默认值为 None 阻断空网关启动。
+        var result = OpcUaSecurityConfigurationValidator.Validate(
+            environmentName: Production,
+            securityMode: "None",
+            enabledProtocols: []);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
     public void 启用协议列表含OPCUA时校验安全模式()
     {
         var result = OpcUaSecurityConfigurationValidator.Validate(
@@ -140,5 +152,28 @@ public class OpcUaSecurityConfigurationValidatorTests
             enabledProtocols: null);
 
         result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void 启用协议列表包含空值时不应抛出空引用异常()
+    {
+        var result = OpcUaSecurityConfigurationValidator.Validate(
+            environmentName: Production,
+            securityMode: "None",
+            enabledProtocols: new[] { (string)null! });
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public void 生产环境未知安全模式必须返回Error级别告警()
+    {
+        var result = OpcUaSecurityConfigurationValidator.Validate(
+            environmentName: Production,
+            securityMode: "UnknownMode");
+
+        result.Should().NotBeNull();
+        result!.Value.Level.Should().Be(OpcUaSecurityAlertLevel.Error);
+        result.Value.Message.Should().Contain("不支持");
     }
 }

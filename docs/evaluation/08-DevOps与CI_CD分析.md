@@ -45,8 +45,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 1344 xUnit 测试 |
-| Integration test | ~120s | 166 xUnit（含真实 RabbitMQ 场景） |
+| Unit test | ~30s | 1372 xUnit 测试 |
+| Integration test | ~120s | 167 xUnit（含真实 RabbitMQ 场景） |
 | NuGet vuln | ~20s | 已纳入阻断门禁 |
 | **合计** | **~5min** | |
 
@@ -60,7 +60,7 @@ workflow_dispatch: true  # 手动触发
 | tsc --noEmit | ~30s | strict: true, 0 error |
 | check:i18n | ~5s | key 完整性 |
 | ESLint | ~30s | `--max-warnings 1` |
-| vitest | ~30s | 416 测试 |
+| vitest | ~30s | 421 测试 |
 | vite build | ~60s | 分包构建 |
 | **合计** | **~3.5min** | |
 
@@ -106,7 +106,7 @@ services:
   redis: redis:7-alpine
 ```
 
-### E2E 目录结构（当前 433 用例，3 个条件跳过点；本次 Production smoke 实际跳过 2 个）
+### E2E 目录结构（当前 433 用例，1 个架构性条件跳过点；本次 Production smoke 实际跳过 1 个）
 
 ```
 00-setup/        (2)  — 健康检查 + 种子数据
@@ -152,7 +152,7 @@ timeout: 60s
 |------|------|------|
 | 构建速度 | ⭐⭐⭐⭐☆ | 质量门禁与运行时 smoke 分离，层缓存利用充分 |
 | 测试门禁 | ⭐⭐⭐⭐⭐ | 7 道门禁 (TS/ESLint/i18n/Vitest/Vite/xUnit/Integration) |
-| E2E 覆盖 | ⭐⭐⭐⭐⭐ | 433 用例/8 场景/含安全测试；开发栈与隔离 Production 镜像均为 431 通过、2 跳过、0 失败；main/tag 已接入全量门禁 |
+| E2E 覆盖 | ⭐⭐⭐⭐⭐ | 433 用例/8 场景/含安全测试；最新隔离 Production 镜像为 432 通过、1 个架构性条件跳过、0 失败；main/tag 已接入全量门禁 |
 | Docker 构建 | ⭐⭐⭐⭐⭐ | 多阶段 + 层缓存 + GHCR + 三镜像版本标签 |
 | 安全扫描 | ⭐⭐⭐⭐⭐ | Gitleaks + NuGet/npm + 三镜像 Trivy，HIGH/CRITICAL 阻断 |
 | 压测集成 | ⭐⭐⭐⭐☆ | K6 读路径与 20 VU × 30s 遥测写路径已进入 main/PR 门禁，高吞吐容量压测保留手动 |

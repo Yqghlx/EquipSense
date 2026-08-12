@@ -1,3 +1,5 @@
+using EquipAI.Core.Security;
+
 namespace EquipAI.EdgeGateway;
 
 /// <summary>
@@ -92,5 +94,50 @@ public static class GatewayConfigurationValidator
             throw new InvalidOperationException(
                 "生产环境 Gateway:BufferPath 必须是绝对路径，并指向持久化卷（例如 /data/buffer.db）");
         }
+
+        if (options.UseLocalDeviceConfigFallback)
+        {
+            throw new InvalidOperationException(
+                "生产环境禁止启用 Gateway:UseLocalDeviceConfigFallback，设备配置必须来自后端登记数据");
+        }
+    }
+
+    /// <summary>
+    /// 校验 OPC UA 实际启用时的生产安全策略。
+    /// </summary>
+    /// <param name="environmentName">宿主环境名称。</param>
+    /// <param name="options">网关配置。</param>
+    /// <param name="enabledProtocols">从后端拉取并实际启用的协议列表。</param>
+    /// <returns>
+    /// 启动允许时返回需要记录的 OPC UA 告警；SignAndEncrypt、未启用 OPC UA 或非生产环境返回 null。
+    /// 生产环境的 Error 级结果只有在明确的 None break-glass 配置下才会返回，否则直接抛出异常。
+    /// </returns>
+    /// <exception cref="InvalidOperationException">生产环境未显式授权不安全 OPC UA 配置时抛出。</exception>
+    public static (OpcUaSecurityAlertLevel Level, string Message)? ValidateOpcUaSecurity(
+        string environmentName,
+        GatewayOptions options,
+        IReadOnlyCollection<string> enabledProtocols)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(enabledProtocols);
+
+        var alert = OpcUaSecurityConfigurationValidator.Validate(
+            environmentName,
+            options.OpcUaSecurityMode,
+            enabledProtocols);
+
+        var explicitlyAllowsPlaintext = string.Equals(
+            options.OpcUaSecurityMode?.Trim(),
+            "None",
+            StringComparison.OrdinalIgnoreCase);
+        if (alert is { } opcUaAlert
+            && opcUaAlert.Level == OpcUaSecurityAlertLevel.Error
+            && (!options.AllowInsecureOpcUa || !explicitlyAllowsPlaintext))
+        {
+            throw new InvalidOperationException(
+                $"{opcUaAlert.Message} 如必须兼容旧设备，请在完成网络隔离和风险评估后显式设置 Gateway:AllowInsecureOpcUa=true。");
+        }
+
+        return alert;
     }
 }

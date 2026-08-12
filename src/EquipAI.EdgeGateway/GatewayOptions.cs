@@ -78,6 +78,12 @@ public class GatewayOptions
     public string BufferPath { get; set; } = "data/buffer.db";
 
     /// <summary>
+    /// 后端配置不可达时是否回退到 appsettings.json 中的本地设备列表。
+    /// 开发环境可开启；生产环境必须关闭，避免把镜像内的示例设备当成真实设备采集。
+    /// </summary>
+    public bool UseLocalDeviceConfigFallback { get; set; }
+
+    /// <summary>
     /// 网关认证密钥（与后端 GATEWAY_AUTH_KEY 对应）。
     /// </summary>
     public string AuthKey { get; set; } = string.Empty;
@@ -87,6 +93,12 @@ public class GatewayOptions
     /// 默认 None 用于开发环境，生产环境建议 SignAndEncrypt。
     /// </summary>
     public string OpcUaSecurityMode { get; set; } = "None";
+
+    /// <summary>
+    /// 是否显式允许 OPC UA 使用 None 明文模式。
+    /// 仅用于兼容经过网络隔离的老旧设备；生产环境默认关闭，开启前必须完成现场风险评估。
+    /// </summary>
+    public bool AllowInsecureOpcUa { get; set; }
 
     /// <summary>
     /// OPC UA 客户端证书路径（PFX 格式），用于 Sign/SignAndEncrypt 模式下的客户端认证。

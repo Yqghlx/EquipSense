@@ -15,6 +15,8 @@ import {
 } from '../ui/dialog';
 import api from '../../lib/api';
 import { useAuthStore } from '../../stores/authStore';
+import { persistTokenExpiry } from '../../lib/tokenExpiry';
+import type { AuthResponse } from '../../types';
 
 /** 修改密码表单数据 */
 type ChangePasswordFormData = {
@@ -65,13 +67,17 @@ export function ChangePasswordDialog({ forced = false, onSuccess }: ChangePasswo
     setLoading(true);
     setError('');
     try {
-      await api.post('/auth/change-password', {
+      const response = await api.post<AuthResponse>('/auth/change-password', {
         currentPassword: data.currentPassword,
         newPassword: data.newPassword,
       });
-      // 更新本地用户信息，清除 mustChangePassword 标志
-      // v1.3.0 HttpOnly Cookie 迁移后，setAuth 只接收 user（token 不再前端管理）
-      if (user) {
+      // 后端在改密成功后已吊销旧会话并通过 HttpOnly Cookie 写入新令牌对。
+      // 同步更新本地用户状态和过期时间，避免旧的强制改密状态阻止新会话进入业务页面。
+      if (response.data.userInfo) {
+        setAuth(response.data.userInfo);
+        persistTokenExpiry(response.data.expiresIn);
+      } else if (user) {
+        // 兼容旧后端响应，避免升级过程中前端因缺少 userInfo 而卡死在强制改密页。
         setAuth({ ...user, mustChangePassword: false });
       }
       onSuccess?.();

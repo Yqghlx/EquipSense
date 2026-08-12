@@ -8,10 +8,51 @@
  * - 正确提交后状态更新
  * - 普通用户登录不触发改密
  */
-import { test, expect } from '@playwright/test';
-import { BASE_URL, login, loginAs, captureErrors, getE2EPassword, getToken } from '../helpers';
+import { test, expect, type Page } from '@playwright/test';
+import { BASE_URL, MACHINE_API_HEADERS, login, captureErrors, getToken } from '../helpers';
 
 test.describe('01-强制改密流程', () => {
+  /**
+   * 创建真实的强制改密用户并通过真实登录建立 Cookie 会话。
+   * 不能只伪造 sessionStorage：后端门禁会校验 JWT，伪造用户无法覆盖真实错误状态。
+   */
+  async function openForcedPasswordDialog(page: Page): Promise<string> {
+    const adminToken = await getToken(page);
+    const suffix = Date.now().toString(36);
+    const testUsername = `e2e-mcp-form-${suffix}`;
+    const currentPassword = 'Test@12345';
+    const createResponse = await page.request.post(`${BASE_URL}/api/v1/admin/users`, {
+      headers: {
+        ...MACHINE_API_HEADERS,
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
+      data: {
+        username: testUsername,
+        password: currentPassword,
+        role: 'Technician',
+      },
+    });
+    expect(createResponse.ok(), `创建强制改密表单用户失败：HTTP ${createResponse.status()}`).toBeTruthy();
+
+    // 清除管理员 Cookie 后再登录测试用户，确保请求和改密 API 都使用真实用户会话。
+    await page.context().clearCookies();
+    await page.goto(`${BASE_URL}/login`);
+    await page.waitForLoadState('networkidle');
+    await page.getByPlaceholder(/用户名|username/i).fill(testUsername);
+    await page.getByPlaceholder(/密码|password/i).fill(currentPassword);
+    const loginResponsePromise = page.waitForResponse(
+      (response) => response.url().includes('/api/v1/auth/login')
+        && response.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: /登录|login/i }).click();
+    const loginResponse = await loginResponsePromise;
+    expect(loginResponse.ok(), `强制改密表单用户登录失败：HTTP ${loginResponse.status()}`).toBeTruthy();
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5000 });
+
+    return currentPassword;
+  }
+
   test('1. MustChangePassword 用户登录后应弹出改密对话框', async ({ page }) => {
     const errors = captureErrors(page);
 
@@ -23,7 +64,11 @@ test.describe('01-强制改密流程', () => {
     const suffix = Date.now().toString(36);
     const testUsername = `e2e-mcp-${suffix}`;
     const resp = await page.request.post(`${BASE_URL}/api/v1/admin/users`, {
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      headers: {
+        ...MACHINE_API_HEADERS,
+        Authorization: `Bearer ${adminToken}`,
+        'Content-Type': 'application/json',
+      },
       data: {
         username: testUsername,
         password: 'Test@12345',
@@ -106,37 +151,15 @@ test.describe('01-强制改密流程', () => {
   test('3. 新密码少于 8 位应显示验证错误', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 先导航到可触发修改密码的页面
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState('networkidle');
-
-    // 模拟强制改密场景：通过 JS 注入状态
-    await page.evaluate(() => {
-      // 设置用户状态为 mustChangePassword
-      const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      sessionStorage.setItem('user', JSON.stringify(user));
-    });
-
-    // 重新加载页面，触发改密对话框
-    await page.goto(`${BASE_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    await openForcedPasswordDialog(page);
 
     // 查找改密对话框
     const dialog = page.getByRole('dialog');
-    if (await dialog.isVisible().catch(() => false)) {
-      const newPasswordInput = dialog.getByPlaceholder('').locator('input[type="password"]').nth(1);
-      if (await newPasswordInput.isVisible().catch(() => false)) {
-        await newPasswordInput.fill('Short1');
-        // 触发失焦以激活验证
-        await dialog.getByPlaceholder('').locator('input[type="password"]').nth(2).click();
-        await page.waitForTimeout(500);
-
-        // 验证验证错误信息出现
-        const validationError = dialog.locator('.text-destructive');
-        await expect(validationError.first()).toBeVisible({ timeout: 3000 });
-      }
-    }
+    const newPasswordInput = dialog.locator('input[type="password"]').nth(1);
+    await newPasswordInput.fill('Short1');
+    // 提交表单触发 Zod 校验（表单默认仅在提交时运行 resolver）。
+    await dialog.getByRole('button', { name: /保存|save/i }).click();
+    await expect(dialog.locator('.text-destructive').first()).toBeVisible({ timeout: 3000 });
 
     expect(errors).toEqual([]);
   });
@@ -144,36 +167,17 @@ test.describe('01-强制改密流程', () => {
   test('4. 确认密码不匹配应显示错误', async ({ page }) => {
     const errors = captureErrors(page);
 
-    // 通过注入用户状态触发改密对话框
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState('networkidle');
-
-    await page.evaluate(() => {
-      const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      sessionStorage.setItem('user', JSON.stringify(user));
-    });
-
-    await page.goto(`${BASE_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    await openForcedPasswordDialog(page);
 
     const dialog = page.getByRole('dialog');
-    if (await dialog.isVisible().catch(() => false)) {
-      const passwordInputs = dialog.locator('input[type="password"]');
-      const count = await passwordInputs.count();
-      if (count >= 3) {
-        // 填写新密码和确认密码（不匹配）
-        await passwordInputs.nth(1).fill('NewPass@123');
-        await passwordInputs.nth(2).fill('Different@456');
-        // 触发验证
-        await dialog.getByRole('button', { name: /保存|save/i }).click();
-        await page.waitForTimeout(1000);
+    const passwordInputs = dialog.locator('input[type="password"]');
+    await passwordInputs.nth(1).fill('NewPass@123');
+    await passwordInputs.nth(2).fill('Different@456');
+    await dialog.getByRole('button', { name: /保存|save/i }).click();
 
-        // 验证密码不匹配错误
-        const mismatchError = dialog.getByText(/不匹配|mismatch/i);
-        await expect(mismatchError).toBeVisible({ timeout: 3000 });
-      }
-    }
+    // 验证密码不匹配错误
+    const mismatchError = dialog.getByText(/不匹配|不一致|mismatch/i);
+    await expect(mismatchError).toBeVisible({ timeout: 3000 });
 
     expect(errors).toEqual([]);
   });
@@ -181,34 +185,17 @@ test.describe('01-强制改密流程', () => {
   test('5. 当前密码错误应显示 API 错误', async ({ page }) => {
     const errors = captureErrors(page);
 
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState('networkidle');
-
-    await page.evaluate(() => {
-      const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      sessionStorage.setItem('user', JSON.stringify(user));
-    });
-
-    await page.goto(`${BASE_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    await openForcedPasswordDialog(page);
 
     const dialog = page.getByRole('dialog');
-    if (await dialog.isVisible().catch(() => false)) {
-      const passwordInputs = dialog.locator('input[type="password"]');
-      const count = await passwordInputs.count();
-      if (count >= 3) {
-        await passwordInputs.nth(0).fill('WrongPassword@999');
-        await passwordInputs.nth(1).fill('NewValidPass@123');
-        await passwordInputs.nth(2).fill('NewValidPass@123');
-        await dialog.getByRole('button', { name: /保存|save/i }).click();
-        await page.waitForTimeout(2000);
+    const passwordInputs = dialog.locator('input[type="password"]');
+    await passwordInputs.nth(0).fill('WrongPassword@999');
+    await passwordInputs.nth(1).fill('NewValidPass@123');
+    await passwordInputs.nth(2).fill('NewValidPass@123');
+    await dialog.getByRole('button', { name: /保存|save/i }).click();
 
-        // 验证 API 错误显示
-        const apiError = dialog.locator('.text-destructive');
-        await expect(apiError.last()).toBeVisible({ timeout: 3000 });
-      }
-    }
+    // 验证 API 错误显示
+    await expect(dialog.locator('.text-destructive').last()).toBeVisible({ timeout: 3000 });
 
     expect(errors).toEqual([]);
   });
@@ -216,33 +203,17 @@ test.describe('01-强制改密流程', () => {
   test('6. 正确提交后应关闭对话框', async ({ page }) => {
     const errors = captureErrors(page);
 
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState('networkidle');
-
-    await page.evaluate(() => {
-      const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      sessionStorage.setItem('user', JSON.stringify(user));
-    });
-
-    await page.goto(`${BASE_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    const currentPassword = await openForcedPasswordDialog(page);
 
     const dialog = page.getByRole('dialog');
-    if (await dialog.isVisible().catch(() => false)) {
-      const passwordInputs = dialog.locator('input[type="password"]');
-      const count = await passwordInputs.count();
-      if (count >= 3) {
-        await passwordInputs.nth(0).fill(getE2EPassword('admin'));
-        await passwordInputs.nth(1).fill('Admin@456');
-        await passwordInputs.nth(2).fill('Admin@456');
-        await dialog.getByRole('button', { name: /保存|save/i }).click();
-        await page.waitForTimeout(2000);
+    const passwordInputs = dialog.locator('input[type="password"]');
+    await passwordInputs.nth(0).fill(currentPassword);
+    await passwordInputs.nth(1).fill('Admin@456');
+    await passwordInputs.nth(2).fill('Admin@456');
+    await dialog.getByRole('button', { name: /保存|save/i }).click();
 
-        // 成功后对话框应消失
-        await expect(dialog).not.toBeVisible({ timeout: 5000 });
-      }
-    }
+    // 成功后对话框应消失
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
     expect(errors).toEqual([]);
   });
@@ -267,35 +238,18 @@ test.describe('01-强制改密流程', () => {
   test('8. 连续两次改密应成功', async ({ page }) => {
     const errors = captureErrors(page);
 
-    await page.goto(`${BASE_URL}/login`);
-    await page.waitForLoadState('networkidle');
-
-    await page.evaluate(() => {
-      const user = { username: 'admin', role: 'SystemAdmin', mustChangePassword: true };
-      sessionStorage.setItem('user', JSON.stringify(user));
-    });
-
-    await page.goto(`${BASE_URL}/dashboard`);
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    const currentPassword = await openForcedPasswordDialog(page);
 
     const dialog = page.getByRole('dialog');
-    if (await dialog.isVisible().catch(() => false)) {
-      const passwordInputs = dialog.locator('input[type="password"]');
-      const count = await passwordInputs.count();
-      if (count >= 3) {
-        // 第一次改密
-        await passwordInputs.nth(0).fill(getE2EPassword('admin'));
-        await passwordInputs.nth(1).fill('Admin@456');
-        await passwordInputs.nth(2).fill('Admin@456');
-        await dialog.getByRole('button', { name: /保存|save/i }).click();
-        await page.waitForTimeout(2000);
+    const passwordInputs = dialog.locator('input[type="password"]');
+    // 第一次改密
+    await passwordInputs.nth(0).fill(currentPassword);
+    await passwordInputs.nth(1).fill('Admin@456');
+    await passwordInputs.nth(2).fill('Admin@456');
+    await dialog.getByRole('button', { name: /保存|save/i }).click();
 
-        // 如果对话框关闭，验证正常
-        const dialogVisible = await dialog.isVisible().catch(() => false);
-        expect(typeof dialogVisible).toBe('boolean');
-      }
-    }
+    // 如果对话框关闭，验证正常
+    await expect(dialog).not.toBeVisible({ timeout: 5000 });
 
     expect(errors).toEqual([]);
   });

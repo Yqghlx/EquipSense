@@ -74,6 +74,29 @@ test_validate_env_accepts_complete_config() {
   assert_contains "$output" ".env 文件权限不安全"
 }
 
+test_validate_env_rejects_tenant2_account_in_production_without_isolated_flag() {
+  local env_file="$TEST_ROOT/tenant2-production.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  printf '%s\n' \
+    'ASPNETCORE_ENVIRONMENT=Production' \
+    'SEED_TENANT2_ACCOUNT=true' \
+    'SEED_TENANT2_PASSWORD=tenant2-password-long' >> "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产环境不应开启第二租户测试账户"
+  assert_contains "$output" "生产环境禁止开启 SEED_TENANT2_ACCOUNT"
+
+  bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" --allow-isolated-e2e >/dev/null \
+    || fail "隔离 E2E 显式授权后应允许临时第二租户账户"
+}
+
 test_validate_env_rejects_missing_pii_encryption_key() {
   local env_file="$TEST_ROOT/missing-pii-key.env"
   sed '/^PII_ENCRYPTION_KEY=/d' "$TEST_ROOT/valid.env" > "$env_file"
@@ -1144,6 +1167,30 @@ test_bootstrap_production_secrets_generates_only_local_values() {
   ! grep -q '^AUTH_MACHINE_API_KEY=' "$case_dir/.env" || fail "未启用的可选机器密钥不应被擅自追加"
   grep -q '^AUTOMAPPER_LICENSE_KEY=PLEASE_CHANGE' "$case_dir/.env" || fail "供应商许可证占位值不应被生成器替换"
   grep -q '^GATEWAY_TENANT_ID=PLEASE_CHANGE' "$case_dir/.env" || fail "真实租户 UUID 不应被生成器伪造"
+}
+
+test_bootstrap_production_secrets_preserves_non_environment_lines_once() {
+  local case_dir="$TEST_ROOT/bootstrap-production-secrets-preserves-lines"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+  printf '%s\n' '# bootstrap-preservation-sentinel' >> "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh --env-file .env 2>&1)"
+  result_code=$?
+  set -e
+
+  # 供应商许可证、真实租户和证书仍未配置，非零是预期的；环境文件的注释和空行
+  # 仍必须保持一次，不能因为重写分支重复追加而持续膨胀。
+  [[ "$result_code" -ne 0 ]] || fail "未配置生产专属值时密钥初始化不应误报成功"
+  local sentinel_count
+  sentinel_count="$(grep -c '^# bootstrap-preservation-sentinel$' "$case_dir/.env" || true)"
+  [[ "$sentinel_count" -eq 1 ]] || fail "环境文件非变量行被重复写入"
 }
 
 test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation() {
@@ -2829,19 +2876,36 @@ test_docker_edgegateway_build_is_reproducible() {
 }
 
 test_edgegateway_production_runtime_contract() {
-  local compose_content options_content program_content
+  local compose_content options_content program_content project_content refresh_content
   compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
   options_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/GatewayOptions.cs")"
   program_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Program.cs")"
+  project_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj")"
+  refresh_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Pipeline/ConfigRefreshService.cs")"
 
   assert_contains "$compose_content" 'DOTNET_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"'
   assert_contains "$compose_content" 'Gateway__BufferPath: "${GATEWAY_BUFFER_PATH:-/data/buffer.db}"'
+  assert_contains "$compose_content" 'Gateway__UseLocalDeviceConfigFallback: "${GATEWAY_USE_LOCAL_DEVICE_CONFIG_FALLBACK:-false}"'
+  assert_contains "$compose_content" 'Gateway__AllowInsecureOpcUa: "${GATEWAY_ALLOW_INSECURE_OPCUA:-false}"'
   assert_contains "$compose_content" 'GATEWAY_TENANT_ID'
   assert_contains "$compose_content" 'edgegateway_data:/data'
   assert_contains "$options_content" 'public string BufferPath'
+  assert_contains "$options_content" 'public bool UseLocalDeviceConfigFallback'
+  assert_contains "$options_content" 'public bool AllowInsecureOpcUa'
   assert_contains "$program_content" 'GatewayConfigurationValidator.Validate'
+  assert_contains "$program_content" 'ValidateOpcUaSecurity'
+  assert_contains "$program_content" 'gatewayOpts.UseLocalDeviceConfigFallback'
   assert_contains "$program_content" 'sp.GetRequiredService<GatewayOptions>().HealthPort'
   assert_contains "$program_content" 'Environment.ExitCode = 1'
+  assert_contains "$refresh_content" 'ValidateRuntimeConfiguration'
+  assert_contains "$refresh_content" 'GatewayConfigurationValidator.ValidateOpcUaSecurity'
+  assert_contains "$refresh_content" '动态设备配置未通过安全门禁，本轮未应用'
+  assert_contains "$refresh_content" 'if (!fetchResult.IsAvailable)'
+  assert_contains "$refresh_content" 'DeviceConfigurationFetchResult.FromBackend'
+  assert_contains "$refresh_content" 'await _deviceManager.ApplyConfigAsync(devices)'
+  assert_contains "$project_content" '<None Update="appsettings*.json">'
+  assert_contains "$project_content" '<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>'
+  assert_contains "$project_content" '<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>'
 }
 
 test_edgegateway_release_and_deploy_contract() {
@@ -2890,6 +2954,7 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_compose" "SMOKE_FRONTEND_IMAGE"
   assert_contains "$smoke_compose" "SMOKE_EDGEGATEWAY_IMAGE"
   assert_contains "$smoke_compose" "ports: !reset []"
+  assert_contains "$smoke_compose" "EQUIPAI_ISOLATED_E2E: \"true\""
 
   local smoke_script
   smoke_script="$(cat "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh")"
@@ -2904,6 +2969,7 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "/api/v1/gateways"
   assert_contains "$smoke_script" "jq -r"
   assert_contains "$smoke_script" "SMOKE_RUN_E2E"
+  assert_contains "$smoke_script" "--allow-isolated-e2e"
   assert_contains "$smoke_script" "SMOKE_E2E_WORKERS"
   assert_contains "$smoke_script" "SMOKE_E2E_GREP"
   assert_contains "$smoke_script" "--workers"
@@ -3219,6 +3285,7 @@ case "${1:-all}" in
     test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
     test_bootstrap_production_secrets_generates_only_local_values
+    test_bootstrap_production_secrets_preserves_non_environment_lines_once
     test_bootstrap_production_secrets_refuses_duplicate_keys_without_mutation
     test_bootstrap_production_secrets_repairs_only_identical_duplicates
     test_bootstrap_production_secrets_rejects_conflicting_duplicates_when_repair_requested
@@ -3305,6 +3372,7 @@ case "${1:-all}" in
     ;;
   all)
     test_validate_env_accepts_complete_config
+    test_validate_env_rejects_tenant2_account_in_production_without_isolated_flag
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
     test_validate_env_rejects_relative_local_attachment_path

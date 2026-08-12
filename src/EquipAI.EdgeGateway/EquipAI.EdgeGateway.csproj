@@ -9,6 +9,13 @@
     <ProjectReference Include="..\EquipAI.Core\EquipAI.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- 独立发布边缘网关时必须携带 Production 默认门禁，不能依赖 Compose 环境变量覆盖。 -->
+    <None Update="appsettings*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="FluentModbus" Version="5.3.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />

@@ -142,6 +142,21 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
         var seeder = scope.ServiceProvider.GetRequiredService<DataSeeder>();
         await seeder.SeedAsync();
+
+        // 集成测试关注业务 API，而不是首次登录向导；测试夹具显式完成种子账户的改密步骤。
+        // 生产环境仍由 DataSeeder 将这些账户标记为 MustChangePassword=true，
+        // 强制改密门禁的生产行为由单元测试和专门的认证集成测试覆盖。
+        var seedUsernames = new[] { "admin", "lead", "tech", "operator", "viewer", "tenant2admin" };
+        var seededUsers = await dbContext.Users
+            .IgnoreQueryFilters()
+            .Where(user => seedUsernames.Contains(user.Username))
+            .ToListAsync();
+        foreach (var seededUser in seededUsers)
+        {
+            seededUser.MustChangePassword = false;
+        }
+        await dbContext.SaveChangesAsync();
+
         return client;
     }
 }

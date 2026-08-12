@@ -7,7 +7,7 @@
  * 由 smoke 脚本把临时密钥传给 Playwright 进程。
  */
 
-import { createHmac } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 
 const baseUrl = requiredEnvironment('MFA_BOOTSTRAP_BASE_URL');
 const machineApiKey = requiredEnvironment('MFA_BOOTSTRAP_MACHINE_API_KEY');
@@ -26,13 +26,18 @@ function requiredEnvironment(name) {
 /**
  * 调用认证接口并解析 JSON 响应。
  */
-async function requestJson(path, data) {
+async function requestJson(path, data, accessToken) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-API-Key': machineApiKey,
+  };
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
   const response = await fetch(`${baseUrl}${path}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-API-Key': machineApiKey,
-    },
+    headers,
     body: JSON.stringify(data),
   });
   const text = await response.text();
@@ -49,6 +54,31 @@ async function requestJson(path, data) {
   }
 
   return body;
+}
+
+/**
+ * 生成只在本次隔离验收中使用的新密码。
+ * 密码不写入仓库，也不直接输出到日志；调用方通过进程环境传给 Playwright。
+ */
+function generateRotatedPassword() {
+  return `E2E-${randomBytes(24).toString('hex')}`;
+}
+
+/**
+ * 使用当前令牌完成真实改密，验证强制改密门禁的唯一放行接口并清除状态。
+ */
+async function rotatePassword(username, currentPassword, accessToken) {
+  const newPassword = generateRotatedPassword();
+  const response = await requestJson(
+    '/api/v1/auth/change-password',
+    { currentPassword, newPassword },
+    accessToken,
+  );
+  const responseUser = response.userInfo ?? response.UserInfo;
+  if (!responseUser || responseUser.mustChangePassword === true || responseUser.MustChangePassword === true) {
+    throw new Error(`${username} 改密后响应仍保留强制改密状态`);
+  }
+  return newPassword;
 }
 
 /**
@@ -120,20 +150,68 @@ async function enroll(username, password) {
     throw new Error(`${username} 的 MFA 注册确认未签发访问令牌`);
   }
 
-  return setupResponse.secret;
+  const accessToken = confirmResponse.accessToken ?? confirmResponse.AccessToken;
+  if (typeof accessToken !== 'string' || accessToken.length === 0) {
+    throw new Error(`${username} 的 MFA 注册确认未返回访问令牌`);
+  }
+
+  return { secret: setupResponse.secret, accessToken };
 }
 
-const adminTotpSecret = await enroll(
+const adminEnrollment = await enroll(
   'admin',
   requiredEnvironment('MFA_BOOTSTRAP_ADMIN_PASSWORD'),
 );
-const leadTotpSecret = await enroll(
+const leadEnrollment = await enroll(
   'lead',
   requiredEnvironment('MFA_BOOTSTRAP_LEAD_PASSWORD'),
 );
-const tenant2TotpSecret = await enroll(
+const tenant2Enrollment = await enroll(
   'tenant2admin',
   requiredEnvironment('MFA_BOOTSTRAP_TENANT2_PASSWORD'),
 );
 
-process.stdout.write(JSON.stringify({ adminTotpSecret, leadTotpSecret, tenant2TotpSecret }));
+const techPassword = requiredEnvironment('MFA_BOOTSTRAP_TECH_PASSWORD');
+const operatorPassword = requiredEnvironment('MFA_BOOTSTRAP_OPERATOR_PASSWORD');
+const viewerPassword = requiredEnvironment('MFA_BOOTSTRAP_VIEWER_PASSWORD');
+
+const adminPassword = await rotatePassword(
+  'admin',
+  requiredEnvironment('MFA_BOOTSTRAP_ADMIN_PASSWORD'),
+  adminEnrollment.accessToken,
+);
+const leadPassword = await rotatePassword(
+  'lead',
+  requiredEnvironment('MFA_BOOTSTRAP_LEAD_PASSWORD'),
+  leadEnrollment.accessToken,
+);
+const tenant2Password = await rotatePassword(
+  'tenant2admin',
+  requiredEnvironment('MFA_BOOTSTRAP_TENANT2_PASSWORD'),
+  tenant2Enrollment.accessToken,
+);
+
+async function loginAndRotate(username, password) {
+  const loginResponse = await requestJson('/api/v1/auth/login', { username, password });
+  const accessToken = loginResponse.accessToken ?? loginResponse.AccessToken;
+  if (typeof accessToken !== 'string' || accessToken.length === 0) {
+    throw new Error(`${username} 登录未返回访问令牌`);
+  }
+  return rotatePassword(username, password, accessToken);
+}
+
+const rotatedTechPassword = await loginAndRotate('tech', techPassword);
+const rotatedOperatorPassword = await loginAndRotate('operator', operatorPassword);
+const rotatedViewerPassword = await loginAndRotate('viewer', viewerPassword);
+
+process.stdout.write(JSON.stringify({
+  adminTotpSecret: adminEnrollment.secret,
+  leadTotpSecret: leadEnrollment.secret,
+  tenant2TotpSecret: tenant2Enrollment.secret,
+  adminPassword,
+  leadPassword,
+  techPassword: rotatedTechPassword,
+  operatorPassword: rotatedOperatorPassword,
+  viewerPassword: rotatedViewerPassword,
+  tenant2Password,
+}));

@@ -26,6 +26,9 @@ services:
     container_name: !reset null
     build: !reset null
     pull_policy: never
+    environment:
+      # 仅允许隔离 Production smoke 创建跨租户验收账户；生产 Compose 不注入该变量。
+      EQUIPAI_ISOLATED_E2E: "true"
 
   frontend:
     image: ${SMOKE_FRONTEND_IMAGE:?请设置 SMOKE_FRONTEND_IMAGE}

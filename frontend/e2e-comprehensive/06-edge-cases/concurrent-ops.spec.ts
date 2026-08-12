@@ -55,9 +55,8 @@ test.describe('并发操作', () => {
     const page2 = await context.newPage();
     const errors2 = captureErrors(page2);
 
-    // 第二个标签页直接访问受保护路由，让应用通过共享 HttpOnly Cookie 恢复会话。
-    // 不能先访问 /login：Production 种子账户的 MustChangePassword 状态会在该路由
-    // 正确展示强制改密对话框，而不是登录表单。
+    // 第二个标签页直接访问受保护路由，让应用通过共享 HttpOnly Cookie 恢复会话，
+    // 同时验证跨标签页的会话恢复不会把用户送回错误的认证状态。
     await page2.goto(`${BASE_URL}/devices`, { waitUntil: 'domcontentloaded' });
     await page2.waitForURL(/\/devices(?:\?|$)/, { timeout: 15000 });
     await page2.getByRole('heading', { name: /设备管理/i }).waitFor({ state: 'visible', timeout: 15000 });

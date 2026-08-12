@@ -33,15 +33,26 @@ public static class SeedCredentialValidator
     /// <param name="isProduction">是否为生产环境。</param>
     /// <param name="credentials">环境变量名到密码是否配置的映射。</param>
     /// <param name="includeTenant2Account">是否显式创建测试用第二租户账户。</param>
+    /// <param name="allowTenant2AccountInProduction">是否由隔离 Production E2E 显式授权创建测试账户。</param>
     /// <exception cref="InvalidOperationException">生产凭据缺失或不安全时抛出。</exception>
     public static void Validate(
         bool isProduction,
         IReadOnlyDictionary<string, string?> credentials,
-        bool includeTenant2Account)
+        bool includeTenant2Account,
+        bool allowTenant2AccountInProduction = false)
     {
         if (!isProduction)
         {
             return;
+        }
+
+        // 第二租户管理员是跨租户 E2E 专用账户，不能因为密码足够强就进入真实生产库。
+        // 隔离 Production smoke 必须通过独立 Compose 覆盖显式授权；普通生产 Compose
+        // 不会注入该授权，因此配置错误会在应用启动阶段 fail-closed。
+        if (includeTenant2Account && !allowTenant2AccountInProduction)
+        {
+            throw new InvalidOperationException(
+                "生产环境禁止开启 SEED_TENANT2_ACCOUNT；该测试账户只能在隔离验收环境中显式授权。请关闭该配置后重启服务。");
         }
 
         var requiredVariables = RequiredPasswordVariables.AsEnumerable();

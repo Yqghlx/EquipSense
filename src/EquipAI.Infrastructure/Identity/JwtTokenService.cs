@@ -63,7 +63,7 @@ public class JwtTokenService
 
     /// <summary>
     /// 为指定用户生成 JWT 访问令牌
-    /// 包含 Claims：sub（用户ID）、tenant_id、role、username、token_version、jti；
+    /// 包含 Claims：sub（用户ID）、tenant_id、role、username、token_version、must_change_password、jti；
     /// 认证会话还会写入 sid，用于登出时只吊销当前设备会话。
     /// </summary>
     /// <param name="user">目标用户实体</param>
@@ -86,6 +86,8 @@ public class JwtTokenService
             new("role", user.Role.ToString()),
             new("username", user.Username),
             new("token_version", user.TokenVersion.ToString()),
+            // 强制改密必须进入签名令牌，后端门禁才能防止客户端绕过前端直接调用业务 API。
+            new("must_change_password", user.MustChangePassword.ToString().ToLowerInvariant()),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 

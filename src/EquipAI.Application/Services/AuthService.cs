@@ -902,15 +902,19 @@ public class AuthService : IAuthService
     }
 
     /// <summary>
-    /// 修改密码
-    /// 验证当前密码正确后，哈希新密码并递增 TokenVersion 使已颁发的令牌失效
+    /// 修改密码并刷新当前会话
+    /// 验证当前密码正确后，哈希新密码、吊销旧刷新令牌并签发不带强制改密声明的新令牌对。
     /// </summary>
     /// <param name="userId">用户 ID</param>
     /// <param name="request">修改密码请求（当前密码 + 新密码）</param>
     /// <exception cref="KeyNotFoundException">用户不存在</exception>
     /// <exception cref="UnauthorizedAccessException">当前密码错误</exception>
-    public async Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
+    public async Task<AuthResponse> ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
     {
+        // 改密会同时清理和重建刷新令牌索引，必须与登录/刷新共用用户级锁，
+        // 否则并发刷新可能在旧会话清理后又把已吊销令牌写回 Redis。
+        await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(userId);
+
         var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
             .FirstOrDefaultAsync(u => u.Id == userId)
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
@@ -923,18 +927,22 @@ public class AuthService : IAuthService
         // 更新密码哈希
         user.PasswordHash = PasswordHasher.HashPassword(request.NewPassword);
 
-        // 递增 TokenVersion：保留作为令牌版本号（未来可在请求管线做 per-request 校验实现即时吊销）。
-        // 即时吊销当前由两道防线达成：（1）下方移除 refresh token 使旧会话无法续期；
-        // （2）access token 短有效期（默认 15min）——旧 access token 最迟 15 分钟后自然失效。
+        // 递增 TokenVersion：保留作为令牌版本号，供后续按请求校验实现即时吊销。
+        // 旧 access token 仍会在短有效期内自然过期；当前浏览器会在下方获得新的令牌对。
         user.TokenVersion++;
 
         // 密码修改成功后清除强制改密标记
         user.MustChangePassword = false;
 
-        // 移除刷新令牌，强制重新登录
+        // 先吊销所有旧刷新令牌，再为刚完成改密的当前会话创建全新令牌对。
         await _redisService.RemoveRefreshTokenAsync(userId);
 
         await _dbContext.SaveChangesAsync();
+
+        var sessionId = Guid.NewGuid().ToString("N");
+        var accessToken = _jwtTokenService.GenerateAccessToken(user, sessionId);
+        var refreshToken = _jwtTokenService.GenerateRefreshToken();
+        await _redisService.SetRefreshTokenAsync(userId, sessionId, refreshToken, TimeSpan.FromDays(7));
 
         // 改密码是认证系统最高敏感操作之一（修改哈希 + 吊销全部会话 + TokenVersion++），必须留痕审计：
         // 追溯"谁在何时改了密码"。同 AuthService 内密码重置（ResetPasswordAsync）已记 PasswordReset，
@@ -943,6 +951,14 @@ public class AuthService : IAuthService
             user.Id.ToString(), $"用户 {user.Username} 修改密码", default);
 
         _logger.LogInformation("用户 {UserId} 密码修改成功", userId);
+
+        return new AuthResponse
+        {
+            AccessToken = accessToken,
+            RefreshToken = refreshToken,
+            ExpiresIn = _jwtTokenService.AccessTokenMinutes * 60,
+            UserInfo = _mapper.Map<UserDto>(user)!,
+        };
     }
 
     /// <summary>

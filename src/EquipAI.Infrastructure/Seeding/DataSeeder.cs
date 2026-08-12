@@ -220,10 +220,14 @@ public class DataSeeder
             seedUser => Environment.GetEnvironmentVariable(seedUser.EnvVar));
         seedCredentials["SEED_TENANT2_PASSWORD"] =
             Environment.GetEnvironmentVariable("SEED_TENANT2_PASSWORD");
+        var allowIsolatedE2eTenant2Account =
+            Environment.GetEnvironmentVariable("EQUIPAI_ISOLATED_E2E")
+                ?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         SeedCredentialValidator.Validate(
             _hostEnvironment.IsProduction(),
             seedCredentials,
-            seedTenant2Account);
+            seedTenant2Account,
+            allowIsolatedE2eTenant2Account);
 
         var usingDefaultPassword = false;
         foreach (var seedUser in seedUsers)

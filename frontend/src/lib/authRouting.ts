@@ -12,3 +12,16 @@ export function shouldRenderLoginPage(
 ): boolean {
   return !isAuthenticated || user?.mustChangePassword === true;
 }
+
+/**
+ * 判断业务路由是否应把已认证但必须改密的用户送回登录页。
+ *
+ * 前端路由门禁负责用户体验，后端强制改密中间件负责真正的安全边界；
+ * 两层同时存在，既避免页面闪现业务数据，也防止非浏览器客户端绕过限制。
+ */
+export function shouldRedirectForPasswordChange(
+  isAuthenticated: boolean,
+  user: Pick<UserInfo, 'mustChangePassword'> | null,
+): boolean {
+  return isAuthenticated && user?.mustChangePassword === true;
+}

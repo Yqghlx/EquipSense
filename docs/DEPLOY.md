@@ -208,7 +208,13 @@ curl http://localhost:8080/api/v1/system/info
 
 工单附件默认写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机、多副本或 Kubernetes 部署时应配置 `FILE_STORAGE_PROVIDER=S3` 使用共享对象存储。应用会在生产启动时校验桶、端点、凭据和安全对象键前缀；项目不会自动启动 MinIO，切换前必须完成历史附件迁移、最小权限配置和隔离恢复演练。
 
+边缘网关在 Production 中不会回退到镜像内的开发设备列表。`Gateway__UseLocalDeviceConfigFallback` 必须保持 `false`，设备配置应先在后端网关设备管理中登记；后端暂时不可达时网关保持空采集配置并持续刷新，而不会误连接示例 PLC/OPC UA 地址。开发环境可显式设为 `true`。
+
+Production 中实际启用 OPC UA 时必须使用 `SignAndEncrypt`；未配置安全模式或填写未知值会阻止网关启动。只有完成现场风险评估、网络隔离和防火墙限制后，才允许通过 `GATEWAY_ALLOW_INSECURE_OPCUA=true` 兼容无法升级的旧设备，并应将该 break-glass 配置纳入变更审批。
+
 管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符、彼此独立且不得包含占位值；所有种子用户首次登录后必须修改密码。数据库、Redis、RabbitMQ、MQTT、Seq、Grafana 和五个种子账户也必须分别使用不同的随机凭据，不能为了方便复制同一个密码；TOTP、PII、JWT 和网关认证密钥也必须彼此独立，直接通过编排平台注入环境变量时，应用启动校验仍会拒绝种子账户密码复用。
+
+强制改密同时由后端执行，不依赖前端路由。JWT 会携带 `must_change_password` 声明，`PasswordChangeRequiredMiddleware` 会对业务 API 返回 `403` 和 `X-Password-Change-Required: true`，仅保留登录挑战、首次 MFA 注册、找回密码、`/auth/me`、刷新、登出和改密等认证闭环接口；MFA 设置、确认、禁用及恢复码重置等高风险管理接口必须先完成改密。改密成功后会吊销旧 refresh 会话并签发新的令牌对/HttpOnly Cookie。旧 access token 会在其短生命周期内自然过期，不能绕过该门禁继续调用业务接口。
 
 `TOTP_ENCRYPTION_KEY` 用于保护数据库中的 MFA 密钥，应用启动时会校验它必须解码为 32 字节；该密钥必须与数据库备份分开保存并纳入密钥管理系统的备份策略。密钥丢失后，历史 MFA 密钥无法恢复；轮换前必须先制定批量重新加密和回滚方案。
 
@@ -247,7 +253,7 @@ GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。�
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
 backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
 健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理。PR 执行快速门禁；main 推送和
-版本 tag 还会在同一组 Production 镜像中执行默认 433 个业务 E2E；当前代码保留 3 个条件跳过点，本次隔离 Production smoke 实际为 431 通过、2 跳过、0 失败。Smoke Compose
+版本 tag 还会在同一组 Production 镜像中执行默认 433 个业务 E2E；当前仅保留 1 个有明确架构原因的条件跳过点，本次隔离 Production smoke 实际为 432 通过、1 跳过、0 失败。Smoke Compose
 会清除固定容器名、移除基础设施宿主端口绑定，并为应用探针分配独立端口，可与本机已有基础设施
 或并发 smoke 任务并行运行。
 全量验收在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户测试账户的 TOTP，

@@ -335,7 +335,12 @@ printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
     mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
 
-bash "$RUNTIME_DOCKER/validate-env.sh" "$RUNTIME_DOCKER/.env" --check-runtime-files >/dev/null
+validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files")
+if [[ "$SMOKE_RUN_E2E" = true ]]; then
+  # 跨租户 E2E 需要临时测试账户；只有隔离 smoke 才能显式授予该校验例外。
+  validation_args+=("--allow-isolated-e2e")
+fi
+bash "$RUNTIME_DOCKER/validate-env.sh" "${validation_args[@]}" >/dev/null
 
 COMPOSE=(
   docker compose
@@ -366,6 +371,9 @@ wait_for_health() {
       fi
       if [[ "$health" = unhealthy || "$health" = exited || "$health" = dead ]]; then
         printf '服务 %s 状态异常：%s\n' "$service" "$health" >&2
+        # 健康检查失败时保留对应服务的最近日志，否则容器可能在清理前已重启，
+        # 只看 ps 无法判断是配置门禁、依赖连接还是应用自身启动异常。
+        "${COMPOSE[@]}" logs --no-color --tail=200 "$service" >&2 || true
         "${COMPOSE[@]}" ps >&2 || true
         return 1
       fi
@@ -396,6 +404,9 @@ wait_for_health frontend
 
 environment_name="$("${COMPOSE[@]}" exec -T backend printenv ASPNETCORE_ENVIRONMENT)"
 [[ "$environment_name" = Production ]] || fatal "backend 未运行在 Production 环境"
+local_device_fallback="$("${COMPOSE[@]}" exec -T edgegateway printenv Gateway__UseLocalDeviceConfigFallback)"
+[[ "$local_device_fallback" = false ]] \
+  || fatal "Production edgegateway 不得启用本地示例设备配置回退"
 
 wait_for_http "http://127.0.0.1:$BACKEND_PORT/health/startup" ""
 wait_for_http "http://127.0.0.1:$BACKEND_PORT/health" ""
@@ -414,6 +425,39 @@ edge_container_id="$("${COMPOSE[@]}" ps -q edgegateway)"
 docker exec "$edge_container_id" test -f /data/buffer.db \
   || fatal "边缘网关 SQLite 缓冲未写入 /data/buffer.db 持久化卷"
 
+# 完成生产 E2E 前置账户初始化。生产种子账户首次登录必须改密，
+# 先执行真实 MFA/改密流程，再进入业务 API 验收，避免测试脚本绕过安全门禁。
+if [[ "$SMOKE_RUN_E2E" = true ]]; then
+  mfa_bootstrap_result="$(
+    MFA_BOOTSTRAP_BASE_URL="http://127.0.0.1:$BACKEND_PORT" \
+    MFA_BOOTSTRAP_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" \
+    MFA_BOOTSTRAP_ADMIN_PASSWORD="$SEED_ADMIN_PASSWORD" \
+    MFA_BOOTSTRAP_LEAD_PASSWORD="$SEED_LEAD_PASSWORD" \
+    MFA_BOOTSTRAP_TECH_PASSWORD="$SEED_TECH_PASSWORD" \
+    MFA_BOOTSTRAP_OPERATOR_PASSWORD="$SEED_OPERATOR_PASSWORD" \
+    MFA_BOOTSTRAP_VIEWER_PASSWORD="$SEED_VIEWER_PASSWORD" \
+    MFA_BOOTSTRAP_TENANT2_PASSWORD="$SEED_TENANT2_PASSWORD" \
+    node "$PROJECT_ROOT/tests/scripts/production-e2e-mfa-bootstrap.mjs"
+  )" || fatal "Production E2E 高权限账户 MFA 初始化失败"
+  e2e_admin_totp_secret="$(jq -r '.adminTotpSecret // empty' <<<"$mfa_bootstrap_result")"
+  e2e_lead_totp_secret="$(jq -r '.leadTotpSecret // empty' <<<"$mfa_bootstrap_result")"
+  e2e_tenant2_totp_secret="$(jq -r '.tenant2TotpSecret // empty' <<<"$mfa_bootstrap_result")"
+  e2e_admin_password="$(jq -r '.adminPassword // empty' <<<"$mfa_bootstrap_result")"
+  e2e_lead_password="$(jq -r '.leadPassword // empty' <<<"$mfa_bootstrap_result")"
+  e2e_tech_password="$(jq -r '.techPassword // empty' <<<"$mfa_bootstrap_result")"
+  e2e_operator_password="$(jq -r '.operatorPassword // empty' <<<"$mfa_bootstrap_result")"
+  e2e_viewer_password="$(jq -r '.viewerPassword // empty' <<<"$mfa_bootstrap_result")"
+  e2e_tenant2_password="$(jq -r '.tenant2Password // empty' <<<"$mfa_bootstrap_result")"
+  [[ -n "$e2e_admin_totp_secret" && -n "$e2e_lead_totp_secret" && -n "$e2e_tenant2_totp_secret" ]] \
+    || fatal "Production E2E MFA 初始化未返回完整临时密钥"
+  [[ -n "$e2e_admin_password" && -n "$e2e_lead_password" && -n "$e2e_tech_password" \
+    && -n "$e2e_operator_password" && -n "$e2e_viewer_password" && -n "$e2e_tenant2_password" ]] \
+    || fatal "Production E2E 强制改密初始化未返回完整临时密码"
+  viewer_login_password="$e2e_viewer_password"
+else
+  viewer_login_password="$SEED_VIEWER_PASSWORD"
+fi
+
 # 使用本次临时环境创建的观察者账户完成一次真实认证闭环；观察者不要求 MFA，
 # 可以验证种子数据、密码哈希、JWT 签发和受保护 API 均在 Production 镜像中可用。
 login_response="$(curl --fail --silent --show-error --max-time 10 \
@@ -421,11 +465,29 @@ login_response="$(curl --fail --silent --show-error --max-time 10 \
   -H "X-API-Key: $AUTH_MACHINE_API_KEY" \
   --data-binary @- \
   "http://127.0.0.1:$BACKEND_PORT/api/v1/auth/login" <<JSON
-{"username":"viewer","password":"$SEED_VIEWER_PASSWORD"}
+{"username":"viewer","password":"$viewer_login_password"}
 JSON
 )" || fatal "Production 种子观察者账户登录失败"
 viewer_access_token="$(jq -r '.accessToken // empty' <<<"$login_response")"
 [[ -n "$viewer_access_token" ]] || fatal "登录响应缺少访问令牌"
+
+# 非 E2E smoke 也必须先完成一次真实改密，才能用同一套 Production 业务门禁
+# 验证受保护 API；E2E 模式已由上面的隔离账户初始化完成。
+if [[ "$SMOKE_RUN_E2E" != true ]]; then
+  smoke_viewer_password="$(random_secret)"
+  change_password_response="$(curl --fail --silent --show-error --max-time 10 \
+    -H 'Content-Type: application/json' \
+    -H "X-API-Key: $AUTH_MACHINE_API_KEY" \
+    -H "Authorization: Bearer $viewer_access_token" \
+    --data-binary @- \
+    "http://127.0.0.1:$BACKEND_PORT/api/v1/auth/change-password" <<JSON
+{"currentPassword":"$viewer_login_password","newPassword":"$smoke_viewer_password"}
+JSON
+  )" || fatal "Production 观察者强制改密失败"
+  viewer_access_token="$(jq -r '.accessToken // empty' <<<"$change_password_response")"
+  [[ -n "$viewer_access_token" ]] || fatal "强制改密响应缺少新的访问令牌"
+fi
+
 curl --fail --silent --show-error --max-time 10 \
   -H "Authorization: Bearer $viewer_access_token" \
   "http://127.0.0.1:$BACKEND_PORT/api/v1/auth/me" >/dev/null \
@@ -453,20 +515,6 @@ case "$proxy_status" in
 esac
 
 if [[ "$SMOKE_RUN_E2E" = true ]]; then
-  mfa_bootstrap_result="$(
-    MFA_BOOTSTRAP_BASE_URL="http://127.0.0.1:$BACKEND_PORT" \
-    MFA_BOOTSTRAP_MACHINE_API_KEY="$AUTH_MACHINE_API_KEY" \
-    MFA_BOOTSTRAP_ADMIN_PASSWORD="$SEED_ADMIN_PASSWORD" \
-    MFA_BOOTSTRAP_LEAD_PASSWORD="$SEED_LEAD_PASSWORD" \
-    MFA_BOOTSTRAP_TENANT2_PASSWORD="$SEED_TENANT2_PASSWORD" \
-    node "$PROJECT_ROOT/tests/scripts/production-e2e-mfa-bootstrap.mjs"
-  )" || fatal "Production E2E 高权限账户 MFA 初始化失败"
-  e2e_admin_totp_secret="$(jq -r '.adminTotpSecret // empty' <<<"$mfa_bootstrap_result")"
-  e2e_lead_totp_secret="$(jq -r '.leadTotpSecret // empty' <<<"$mfa_bootstrap_result")"
-  e2e_tenant2_totp_secret="$(jq -r '.tenant2TotpSecret // empty' <<<"$mfa_bootstrap_result")"
-  [[ -n "$e2e_admin_totp_secret" && -n "$e2e_lead_totp_secret" && -n "$e2e_tenant2_totp_secret" ]] \
-    || fatal "Production E2E MFA 初始化未返回完整临时密钥"
-
   printf '运行 Production 镜像完整业务 E2E……\n'
   (
     cd "$PROJECT_ROOT/frontend"
@@ -476,15 +524,15 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
       "PLAYWRIGHT_MACHINE_API_KEY=$AUTH_MACHINE_API_KEY"
       "E2E_PRODUCTION=1"
       "E2E_FAST_LOGIN=1"
-      "E2E_ADMIN_PASSWORD=$SEED_ADMIN_PASSWORD"
-      "E2E_LEAD_PASSWORD=$SEED_LEAD_PASSWORD"
+      "E2E_ADMIN_PASSWORD=$e2e_admin_password"
+      "E2E_LEAD_PASSWORD=$e2e_lead_password"
       "E2E_ADMIN_TOTP_SECRET=$e2e_admin_totp_secret"
       "E2E_LEAD_TOTP_SECRET=$e2e_lead_totp_secret"
       "E2E_TENANT2_TOTP_SECRET=$e2e_tenant2_totp_secret"
-      "E2E_TECH_PASSWORD=$SEED_TECH_PASSWORD"
-      "E2E_OPERATOR_PASSWORD=$SEED_OPERATOR_PASSWORD"
-      "E2E_VIEWER_PASSWORD=$SEED_VIEWER_PASSWORD"
-      "E2E_TENANT2_PASSWORD=$SEED_TENANT2_PASSWORD"
+      "E2E_TECH_PASSWORD=$e2e_tech_password"
+      "E2E_OPERATOR_PASSWORD=$e2e_operator_password"
+      "E2E_VIEWER_PASSWORD=$e2e_viewer_password"
+      "E2E_TENANT2_PASSWORD=$e2e_tenant2_password"
     )
     if ((${#SMOKE_E2E_ARGS[@]} > 0)); then
       env "${e2e_environment[@]}" npx --no-install playwright test e2e-comprehensive --reporter=list "${SMOKE_E2E_ARGS[@]}"

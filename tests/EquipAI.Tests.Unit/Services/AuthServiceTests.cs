@@ -1,4 +1,5 @@
 using AutoMapper;
+using System.IdentityModel.Tokens.Jwt;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.Mapping;
 using EquipAI.Application.Security;
@@ -981,6 +982,39 @@ public class AuthServiceTests : IAsyncDisposable
         // Assert：密码修改成功后应清除强制改密标记
         var updatedUser = await db.Users.FindAsync(user.Id);
         updatedUser!.MustChangePassword.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_成功后应签发已清除强制改密声明的新会话()
+    {
+        // Arrange：强制改密用户完成改密后，不能继续使用带有旧声明的会话访问业务 API。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        const string currentPassword = "OldPassword123";
+        var user = CreateTestUser("chgpwd-session-user", _tenantId, currentPassword);
+        user.MustChangePassword = true;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        // Act
+        var result = await service.ChangePasswordAsync(user.Id, new ChangePasswordRequest
+        {
+            CurrentPassword = currentPassword,
+            NewPassword = "NewPassword456",
+        });
+
+        // Assert：服务端返回新会话，前端可继续使用而无需落回登录页。
+        result.AccessToken.Should().NotBeNullOrWhiteSpace();
+        result.RefreshToken.Should().NotBeNullOrWhiteSpace();
+        result.UserInfo.MustChangePassword.Should().BeFalse();
+
+        var claims = new JwtSecurityTokenHandler()
+            .ReadJwtToken(result.AccessToken)
+            .Claims
+            .ToDictionary(claim => claim.Type, claim => claim.Value);
+        claims["must_change_password"].Should().Be("false");
     }
 
     [Fact]

@@ -110,9 +110,11 @@ try
         adapterFactory,
         sp.GetRequiredService<ILogger<DeviceManager>>()));
 
-    // 加载初始设备配置 — 优先从后端 API 拉取，fallback 到本地 appsettings.json
+    // 加载初始设备配置 — 优先从后端 API 拉取；本地 appsettings 回退仅供开发环境使用。
     var devicesSection = builder.Configuration.GetSection("Devices");
-    var localDevices = devicesSection.Get<DeviceConfig[]>() ?? [];
+    var localDevices = gatewayOpts.UseLocalDeviceConfigFallback
+        ? devicesSection.Get<DeviceConfig[]>() ?? []
+        : [];
     DeviceConfig[] devices;
 
     try
@@ -142,25 +144,41 @@ try
                 else
                 {
                     devices = localDevices;
-                    Log.Information("后端 API 无设备配置，使用本地配置（{Count} 个）", devices.Length);
+                    Log.Information(
+                        gatewayOpts.UseLocalDeviceConfigFallback
+                            ? "后端 API 无设备配置，使用本地配置（{Count} 个）"
+                            : "后端 API 无设备配置，生产环境不回退本地示例配置",
+                        devices.Length);
                 }
             }
             else
             {
                 devices = localDevices;
-                Log.Warning("后端 API 返回 {StatusCode}，使用本地配置", response.StatusCode);
+                Log.Warning(
+                    gatewayOpts.UseLocalDeviceConfigFallback
+                        ? "后端 API 返回 {StatusCode}，使用本地配置"
+                        : "后端 API 返回 {StatusCode}，生产环境不回退本地示例配置",
+                    response.StatusCode);
             }
         }
         else
         {
             devices = localDevices;
-            Log.Information("未配置后端 API 地址或认证密钥，使用本地配置（{Count} 个）", devices.Length);
+            Log.Information(
+                gatewayOpts.UseLocalDeviceConfigFallback
+                    ? "未配置后端 API 地址或认证密钥，使用本地配置（{Count} 个）"
+                    : "未配置后端 API 地址或认证密钥，生产环境不加载本地示例配置",
+                devices.Length);
         }
     }
     catch (Exception ex)
     {
         devices = localDevices;
-        Log.Warning(ex, "无法连接后端 API，使用本地配置");
+        Log.Warning(
+            ex,
+            gatewayOpts.UseLocalDeviceConfigFallback
+                ? "无法连接后端 API，使用本地配置"
+                : "无法连接后端 API，生产环境不回退本地示例配置");
     }
 
     Log.Information("已加载 {Count} 个设备配置", devices.Length);
@@ -200,18 +218,19 @@ try
     builder.Services.AddSingleton<IHostedService>(sp => new ConfigRefreshService(
         sp.GetRequiredService<DeviceManager>(),
         sp.GetRequiredService<GatewayOptions>(),
+        builder.Environment.EnvironmentName,
         sp.GetRequiredService<IHttpClientFactory>(),
         sp.GetRequiredService<ILogger<ConfigRefreshService>>()));
 
     var host = builder.Build();
     Log.Information("边缘网关启动中...");
 
-    // OPC UA 安全模式告警：生产环境 None/Sign 模式记录显著警告（不阻断，因部分老旧 PLC 不支持安全模式）
-    // validator 返回 (Level, Message)? —— Core 层不依赖日志框架，由宿主记录
+    // OPC UA 安全模式门禁：生产环境 None/未知模式默认阻止启动，Sign 记录风险警告。
+    // 旧设备兼容必须通过 Gateway:AllowInsecureOpcUa 显式 break-glass；Core 层不依赖日志框架，由宿主记录。
     var enabledProtocols = devices.Select(d => d.Protocol).Distinct().ToArray();
-    var opcUaAlert = OpcUaSecurityConfigurationValidator.Validate(
+    var opcUaAlert = GatewayConfigurationValidator.ValidateOpcUaSecurity(
         environmentName: builder.Environment.EnvironmentName,
-        securityMode: gatewayOpts.OpcUaSecurityMode,
+        options: gatewayOpts,
         enabledProtocols: enabledProtocols);
     if (opcUaAlert is { } alert)
     {

@@ -151,10 +151,55 @@ public class SeedCredentialValidatorTests
         var act = () => SeedCredentialValidator.Validate(
             isProduction: true,
             credentials,
-            includeTenant2Account: true);
+            includeTenant2Account: true,
+            allowTenant2AccountInProduction: true);
 
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*SEED_TENANT2_PASSWORD*");
+    }
+
+    [Fact]
+    public void 生产环境禁止开启第二租户测试账户()
+    {
+        var credentials = new Dictionary<string, string?>
+        {
+            ["SEED_ADMIN_PASSWORD"] = "admin-secret-strong",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong",
+            ["SEED_TENANT2_PASSWORD"] = "tenant2-secret-strong"
+        };
+
+        var act = () => SeedCredentialValidator.Validate(
+            isProduction: true,
+            credentials,
+            includeTenant2Account: true);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*生产环境禁止开启 SEED_TENANT2_ACCOUNT*");
+    }
+
+    [Fact]
+    public void 隔离Production验收显式授权时允许第二租户测试账户()
+    {
+        var credentials = new Dictionary<string, string?>
+        {
+            ["SEED_ADMIN_PASSWORD"] = "admin-secret-strong",
+            ["SEED_LEAD_PASSWORD"] = "lead-secret-strong",
+            ["SEED_TECH_PASSWORD"] = "tech-secret-strong",
+            ["SEED_OPERATOR_PASSWORD"] = "operator-secret-strong",
+            ["SEED_VIEWER_PASSWORD"] = "viewer-secret-strong",
+            ["SEED_TENANT2_PASSWORD"] = "tenant2-secret-strong"
+        };
+
+        var act = () => SeedCredentialValidator.Validate(
+            isProduction: true,
+            credentials,
+            includeTenant2Account: true,
+            allowTenant2AccountInProduction: true);
+
+        act.Should().NotThrow();
     }
 
     [Fact]

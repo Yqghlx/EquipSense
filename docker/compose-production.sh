@@ -104,6 +104,7 @@ prepare_recovery_env() {
       safe["RABBITMQ_MGMT_PORT"] = 1
       safe["GATEWAY_ID"] = 1
       safe["GATEWAY_BUFFER_PATH"] = 1
+      safe["GATEWAY_USE_LOCAL_DEVICE_CONFIG_FALLBACK"] = 1
       safe["GATEWAY_BACKEND_URL"] = 1
       safe["GATEWAY_ALLOWED_HOSTS"] = 1
       safe["GATEWAY_UPLOAD_INTERVAL"] = 1

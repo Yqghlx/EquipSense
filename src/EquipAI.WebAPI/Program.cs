@@ -454,6 +454,8 @@ try
     // 3.5 JWT 认证 — 必须先于全局限流，才能让限流器读取 tenant_id，
     // 否则所有已认证请求都会错误地退化为按代理 IP 共用一个限流桶。
     app.UseAuthentication();
+    // 3.55 强制改密门禁 — 认证成功后先限制业务 API，避免客户端绕过前端直接访问数据。
+    app.UseMiddleware<PasswordChangeRequiredMiddleware>();
     // 3.6 租户解析 — 从 JWT Claims 中提取租户信息，存入 HttpContext.Items（认证之后）
     app.UseMiddleware<TenantResolutionMiddleware>();
     // 3.7 IP/租户限流 — 未认证请求按真实客户端 IP，已认证请求按 tenant_id

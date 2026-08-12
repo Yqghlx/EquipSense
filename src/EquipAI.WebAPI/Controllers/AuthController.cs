@@ -145,12 +145,12 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// 修改密码，验证当前密码后设置新密码
+    /// 修改密码，验证当前密码后设置新密码并刷新当前浏览器会话
     /// </summary>
     /// <param name="request">修改密码请求（当前密码 + 新密码）</param>
     [HttpPost("change-password")]
     [Audit("ChangePassword", "User")]    [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
     {
@@ -163,8 +163,11 @@ public class AuthController : ControllerBase
             return Unauthorized(new { code = 401, message = "无法识别用户身份" });
         }
 
-        await _authService.ChangePasswordAsync(userId, request);
-        return Ok(new { message = "密码修改成功" });
+        var response = await _authService.ChangePasswordAsync(userId, request);
+        // 密码修改会吊销旧刷新令牌；为避免用户完成改密后被迫再次登录，
+        // 服务端为当前会话签发了新的令牌对并同步更新 HttpOnly Cookie。
+        SetAuthCookies(response.AccessToken, response.RefreshToken, response.ExpiresIn);
+        return Ok(PrepareAuthResponse(response));
     }
 
     /// <summary>

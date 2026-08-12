@@ -275,6 +275,7 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `Gateway__TenantId` | 所属租户 ID | — | 是 |
 | `Gateway__BackendUrl` | 后端 API 地址 | `http://localhost:8080` | 是 |
 | `Gateway__BufferPath` | SQLite 断网缓冲数据库路径；Docker 生产必须指向 `/data` 持久化卷 | `data/buffer.db`（开发） | 生产环境必须为绝对路径 |
+| `Gateway__UseLocalDeviceConfigFallback` | 后端配置不可达时是否回退到镜像内 `appsettings.json` 设备列表 | `true`（开发）/ `false`（生产） | 生产环境必须为 `false` |
 | `Gateway__RequireHttps` | 强制后端 API 走 HTTPS（AuthKey 经 `X-Gateway-Auth-Key` 头明文传输，HTTP 下会泄露密钥） | `false` | 网关独立部署（跨网络访问后端）时必填 `true`；Docker Compose 内网（容器间通信）可保持 `false` |
 | `Gateway__MqttBroker` | MQTT Broker 地址（`host[:port]`；Production 端口必须为 1-65535 的数字） | `localhost:1883` | 否 |
 | `Gateway__MqttUseTls` | 是否启用 MQTT TLS | `false` | 生产环境必填为 `true` |
@@ -285,6 +286,7 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `Gateway__UploadIntervalSeconds` | 数据上传间隔（秒） | `5` | 否 |
 | `Gateway__BufferSize` | 内存队列容量 | `10000` | 否 |
 | `Gateway__OpcUaSecurityMode` | OPC UA 安全模式（None/Sign/SignAndEncrypt） | `None` | 否 |
+| `Gateway__AllowInsecureOpcUa` | 是否显式允许 OPC UA None 明文模式；仅供完成网络隔离和风险评估后的旧设备兼容 | `true`（开发）/ `false`（生产） | 生产环境默认必须为 `false` |
 | `Gateway__OpcUaClientCertificatePath` | OPC UA 客户端证书路径（PFX） | — | 否 |
 | `Gateway__OpcUaClientCertificatePassword` | 客户端证书密码 | — | 否 |
 | `Gateway__OpcUaTrustedCertificatesPath` | 受信任服务器证书目录 | `certificates/trusted` | 否 |

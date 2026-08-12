@@ -174,6 +174,23 @@ public class JwtTokenServiceTests
         claims["token_version"].Should().Be(user.TokenVersion.ToString());
     }
 
+    [Theory]
+    [InlineData(true, "true")]
+    [InlineData(false, "false")]
+    public void GenerateAccessToken_应包含强制改密声明(bool mustChangePassword, string expected)
+    {
+        // Arrange：强制改密状态必须进入签名令牌，后端才能阻止绕过前端的业务请求。
+        var user = MakeUser();
+        user.MustChangePassword = mustChangePassword;
+
+        // Act
+        var claims = ParseClaims(_sut.GenerateAccessToken(user));
+
+        // Assert
+        claims.Should().ContainKey("must_change_password");
+        claims["must_change_password"].Should().Be(expected);
+    }
+
     // ========================================================================
     // 访问令牌有效期测试（默认 15 分钟，可配置，钳制 [10,1440]）
     // 安全回归：原实现硬编码 24h，登出/改密后旧令牌仍可用 24h，泄漏暴露面过大

@@ -4,8 +4,14 @@ using System.Net.Http.Json;
 using System.Text;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Users;
+using EquipAI.Core.Entities;
+using EquipAI.Core.Enums;
+using EquipAI.Infrastructure.Data;
+using EquipAI.Infrastructure.Identity;
 using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace EquipAI.Tests.Integration.Controllers;
 
@@ -69,6 +75,83 @@ public class AuthControllerTests
         user!.TenantId.Should().Be(loginResult.UserInfo.TenantId);
         user.MustChangePassword.Should().Be(loginResult.UserInfo.MustChangePassword);
         user.MfaEnabled.Should().Be(loginResult.UserInfo.MfaEnabled);
+    }
+
+    /// <summary>
+    /// 强制改密状态必须在后端管线生效，不能只依赖前端 AuthGuard。
+    /// 认证闭环接口仍可访问，业务 API 应返回带标记的 403。
+    /// </summary>
+    [Fact]
+    public async Task MustChangePassword_业务接口应被门禁拦截而认证接口仍可用()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+        var username = $"forced-gate-{Guid.NewGuid():N}";
+        const string password = "ForcedGate@123";
+        var userId = Guid.NewGuid();
+
+        try
+        {
+            using (var scope = _factory.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.Users.Add(new User
+                {
+                    Id = userId,
+                    TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    Username = username,
+                    PasswordHash = PasswordHasher.HashPassword(password),
+                    DisplayName = username,
+                    Role = UserRole.Technician,
+                    IsActive = true,
+                    MustChangePassword = true,
+                    Language = "zh-CN",
+                });
+                await db.SaveChangesAsync();
+            }
+
+            var login = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest
+            {
+                Username = username,
+                Password = password,
+            });
+            login.StatusCode.Should().Be(HttpStatusCode.OK);
+            var loginResult = await login.Content.ReadFromJsonAsync<AuthResponse>();
+            loginResult.Should().NotBeNull();
+            loginResult!.UserInfo.MustChangePassword.Should().BeTrue();
+
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", loginResult.AccessToken);
+
+            var businessResponse = await client.GetAsync("/api/v1/devices");
+            businessResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            businessResponse.Headers.TryGetValues(
+                    "X-Password-Change-Required",
+                    out var passwordChangeHeaders)
+                .Should().BeTrue();
+            passwordChangeHeaders!.Single().Should().Be("true");
+
+            var mfaManagementResponse = await client.PostAsync("/api/v1/auth/mfa/disable", content: null);
+            mfaManagementResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            mfaManagementResponse.Headers.TryGetValues(
+                    "X-Password-Change-Required",
+                    out var mfaPasswordChangeHeaders)
+                .Should().BeTrue();
+            mfaPasswordChangeHeaders!.Single().Should().Be("true");
+
+            var meResponse = await client.GetAsync("/api/v1/auth/me");
+            meResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var user = await db.Users.IgnoreQueryFilters().SingleOrDefaultAsync(candidate => candidate.Id == userId);
+            if (user is not null)
+            {
+                db.Users.Remove(user);
+                await db.SaveChangesAsync();
+            }
+        }
     }
 
     /// <summary>

@@ -310,6 +310,10 @@ services:
       Gateway__TenantId: "${GATEWAY_TENANT_ID:?请在 .env 中设置 GATEWAY_TENANT_ID（UUID）}"
       # 必须落在 edgegateway_data 命名卷中，保障断网缓冲跨容器重建保留。
       Gateway__BufferPath: "${GATEWAY_BUFFER_PATH:-/data/buffer.db}"
+      # 生产设备配置必须来自后端登记数据，禁止加载镜像内开发示例设备。
+      Gateway__UseLocalDeviceConfigFallback: "${GATEWAY_USE_LOCAL_DEVICE_CONFIG_FALLBACK:-false}"
+      # OPC UA 明文仅允许在完成现场风险评估和网络隔离后显式 break-glass。
+      Gateway__AllowInsecureOpcUa: "${GATEWAY_ALLOW_INSECURE_OPCUA:-false}"
       Gateway__MqttBroker: "mosquitto:8883"
       Gateway__MqttUseTls: "true"
       Gateway__MqttAllowUntrustedCertificates: "false"
