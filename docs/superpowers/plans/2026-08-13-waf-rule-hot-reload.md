@@ -40,7 +40,7 @@
 - WafRuleLoader.Load(string path, WafRuleOptions options, bool isProduction) 返回 WafRuleSnapshot；所有错误统一抛出中文 InvalidOperationException，异常不得包含 pattern。
 - WafRuleCatalog.CreateBuiltInRules() 返回四类内置规则；WafMiddleware.IsMalicious(string) 委托给 WafRuleCatalog，保持已有调用语义。
 
-- [ ] Step 1: 写 loader 和内置基线的失败测试
+- [x] Step 1: 写 loader 和内置基线的失败测试
 
 在 WafRuleLoaderTests.cs 建立临时普通文件和 JSON fixture，至少覆盖合法文件返回 revision、64 位小写 SHA-256、外部规则和 builtin-sql-injection；覆盖生产缺失文件、开发缺失文件、符号链接、危险权限、64KiB 上限、128 条上限、重复 ID、内置 ID 碰撞、非法 schema/category/matchType、未知 JSON 字段、超长字段、控制字符、非法正则、lookaround、反向引用、contains 大小写不敏感命中。测试确认错误信息不包含 secret-pattern。
 
@@ -52,7 +52,7 @@
     snapshot.Rules.Should().Contain(rule => rule.Id == "custom-sqli-load-function");
     snapshot.Rules.Should().Contain(rule => rule.Id == "builtin-sql-injection");
 
-- [ ] Step 2: 运行测试确认缺少实现时失败
+- [x] Step 2: 运行测试确认缺少实现时失败
 
 运行：
     
@@ -60,7 +60,7 @@
 
 预期：loader 类型或方法不存在导致失败，失败输出不得含生产秘密。
 
-- [ ] Step 3: 实现规则模型、内置目录和 loader
+- [x] Step 3: 实现规则模型、内置目录和 loader
 
 使用 JsonSerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow 拒绝未知字段；先读字节并检查 64KiB，再用同一字节数组计算 SHA-256 和反序列化。生产模式在解析前检查绝对路径、普通文件、非符号链接和 Unix 文件/目录权限。
 
@@ -73,7 +73,7 @@ regex 使用以下边界编译：
 
 捕获编译异常并转换成不泄漏 pattern 的中文错误。内置规则迁移到 WafRuleCatalog，保留现有 payload 语义并分配固定 ID；loader 将内置和外部规则合并为不可变数组，外部规则只能追加。
 
-- [ ] Step 4: 运行 loader 和 WAF 基线测试
+- [x] Step 4: 运行 loader 和 WAF 基线测试
 
 运行：
     
@@ -81,7 +81,7 @@ regex 使用以下边界编译：
 
 预期：loader 合法/拒绝路径和既有 SQLi、路径遍历、命令注入、XSS、误报、请求体测试全部通过。
 
-- [ ] Step 5: 提交 loader 子任务
+- [x] Step 5: 提交 loader 子任务
 
     git add src/EquipAI.Infrastructure/Middleware/WafRuleOptions.cs src/EquipAI.Infrastructure/Middleware/WafRuleModels.cs src/EquipAI.Infrastructure/Middleware/WafRuleCatalog.cs src/EquipAI.Infrastructure/Middleware/WafRuleLoader.cs src/EquipAI.Infrastructure/Middleware/WafMiddleware.cs tests/EquipAI.Tests.Unit/Middleware/WafRuleLoaderTests.cs tests/EquipAI.Tests.Unit/Middleware/WafMiddlewareTests.cs
     git commit -m "feat(security): add validated waf rule loader"
