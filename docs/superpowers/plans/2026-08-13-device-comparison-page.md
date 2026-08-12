@@ -28,7 +28,7 @@
 - Read: `src/EquipAI.Application/Analysis/DeviceComparisonService.cs`
 - Read: `src/EquipAI.WebAPI/Controllers/DeviceComparisonController.cs`
 
-- [ ] **Step 1: 增加服务层失败测试**
+- [x] **Step 1: 增加服务层失败测试**
 
 覆盖：传入 2 个选定设备只返回选定设备；传入同类型之外的设备不会进入结果；空/1 个/6 个 ID 被拒绝或得到明确参数异常；不传 ID 保留现有全类型行为。先运行聚焦测试，确认新契约因生产实现尚未支持而失败。
 
@@ -44,7 +44,7 @@ Task<DeviceComparisonResult> CompareAsync(
     CancellationToken ct = default);
 ```
 
-- [ ] **Step 2: 增加控制器参数校验测试**
+- [x] **Step 2: 增加控制器参数校验测试**
 
 验证重复 `deviceIds` 参数的最小/最大边界、非法 GUID 和超限返回 400；保留无认证 401 以及既有旧参数成功测试。
 
