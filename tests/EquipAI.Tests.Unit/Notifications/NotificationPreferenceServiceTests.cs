@@ -19,6 +19,7 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly Guid _otherTenantId = Guid.NewGuid();
     private readonly AppDbContext _db;
+    private readonly TestTenantContext _tenantContext;
     private readonly NotificationPreferenceService _service;
 
     public NotificationPreferenceServiceTests()
@@ -27,9 +28,10 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
             .UseInMemoryDatabase($"TestNotificationPreference_{Guid.NewGuid()}")
             .Options;
 
-        _db = new AppDbContext(options, new TestTenantContext(_tenantId));
+        _tenantContext = new TestTenantContext(_tenantId);
+        _db = new AppDbContext(options, _tenantContext);
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<NotificationPreferenceService>();
-        _service = new NotificationPreferenceService(_db, logger);
+        _service = new NotificationPreferenceService(_db, _tenantContext, logger);
     }
 
     /// <summary>
@@ -115,6 +117,7 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
     {
         var user = CreateUser(_tenantId, "corrupted", "{not-json");
         await SeedAsync(user);
+        _tenantContext.UserId = user.Id;
 
         (await _service.IsEnabledAsync(user.Id, "alert", "signalr")).Should().BeTrue();
         (await _service.IsEnabledAsync(user.Id, "alert", "push")).Should().BeTrue();
@@ -129,6 +132,7 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
     {
         var user = CreateUser(_tenantId, "update-user", "{}");
         await SeedAsync(user);
+        _tenantContext.UserId = user.Id;
 
         var result = await _service.UpdateAsync(
             user.Id,
@@ -149,6 +153,50 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
         persisted.WorkOrder.Push.Should().BeFalse();
         persisted.WorkOrder.Email.Should().BeFalse();
         persisted.System.Email.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// 安全边界：当前用户不能读取同租户其他用户的通知偏好。
+    /// </summary>
+    [Fact]
+    public async Task GetAsync_同租户其他用户不得读取偏好()
+    {
+        var currentUser = CreateUser(_tenantId, "current-user", "{}");
+        var targetUser = CreateUser(
+            _tenantId,
+            "target-user",
+            "{\"alert\":{\"signalr\":false}}");
+        await SeedAsync(currentUser, targetUser);
+        _tenantContext.UserId = currentUser.Id;
+
+        var act = () => _service.GetAsync(targetUser.Id);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    /// <summary>
+    /// 安全边界：当前用户不能修改同租户其他用户的通知偏好。
+    /// </summary>
+    [Fact]
+    public async Task UpdateAsync_同租户其他用户不得修改偏好()
+    {
+        var currentUser = CreateUser(_tenantId, "current-user", "{}");
+        var targetUser = CreateUser(_tenantId, "target-user", "{}");
+        await SeedAsync(currentUser, targetUser);
+        _tenantContext.UserId = currentUser.Id;
+
+        var act = () => _service.UpdateAsync(
+            targetUser.Id,
+            new NotificationPreferences
+            {
+                Alert = new ChannelPreference { SignalR = false, Push = false },
+            });
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        var unchanged = await _db.Users
+            .IgnoreQueryFilters()
+            .SingleAsync(user => user.Id == targetUser.Id);
+        unchanged.NotificationPrefs.Should().Be("{}");
     }
 
     private User CreateUser(Guid tenantId, string username, string notificationPrefs, bool isActive = true)
@@ -177,6 +225,6 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
         public Guid TenantId { get; } = tenantId;
         public string IsolationMode { get; } = "shared";
         public bool IsSystemAdmin { get; } = false;
-        public Guid UserId { get; } = Guid.NewGuid();
+        public Guid UserId { get; set; }
     }
 }

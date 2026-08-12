@@ -89,7 +89,10 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
             pushMock.Object,
             _db,
             Mock.Of<ILogger<SignalRNotificationService>>(),
-            new NotificationPreferenceService(_db, Mock.Of<ILogger<NotificationPreferenceService>>()));
+            new NotificationPreferenceService(
+                _db,
+                new TestTenantContext(_tenantId),
+                Mock.Of<ILogger<NotificationPreferenceService>>()));
 
     /// <summary>为通知收件人测试创建指定租户的用户。</summary>
     private async Task<List<User>> SeedUsersAsync(params (UserRole Role, bool IsActive)[] definitions)

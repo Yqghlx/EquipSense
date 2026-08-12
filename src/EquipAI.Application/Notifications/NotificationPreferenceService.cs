@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using EquipAI.Core.Entities;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -72,6 +73,7 @@ public class ChannelPreference
 public class NotificationPreferenceService
 {
     private readonly AppDbContext _db;
+    private readonly ITenantContext _tenantContext;
     private readonly ILogger<NotificationPreferenceService> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -80,9 +82,13 @@ public class NotificationPreferenceService
         WriteIndented = false,
     };
 
-    public NotificationPreferenceService(AppDbContext db, ILogger<NotificationPreferenceService> logger)
+    public NotificationPreferenceService(
+        AppDbContext db,
+        ITenantContext tenantContext,
+        ILogger<NotificationPreferenceService> logger)
     {
         _db = db;
+        _tenantContext = tenantContext;
         _logger = logger;
     }
 
@@ -91,7 +97,12 @@ public class NotificationPreferenceService
     /// </summary>
     public async Task<NotificationPreferences> GetAsync(Guid userId, CancellationToken ct = default)
     {
-        var user = await _db.Users.FindAsync(new object[] { userId }, ct);
+        EnsureSelfServiceScope(userId);
+
+        var user = await _db.Users
+            .FirstOrDefaultAsync(
+                candidate => candidate.Id == userId && candidate.TenantId == _tenantContext.TenantId,
+                ct);
         if (user == null) return new NotificationPreferences();
 
         return Normalize(ParsePrefs(user.NotificationPrefs));
@@ -102,7 +113,12 @@ public class NotificationPreferenceService
     /// </summary>
     public async Task<NotificationPreferences> UpdateAsync(Guid userId, NotificationPreferences prefs, CancellationToken ct = default)
     {
-        var user = await _db.Users.FindAsync(new object[] { userId }, ct);
+        EnsureSelfServiceScope(userId);
+
+        var user = await _db.Users
+            .FirstOrDefaultAsync(
+                candidate => candidate.Id == userId && candidate.TenantId == _tenantContext.TenantId,
+                ct);
         if (user == null) throw new KeyNotFoundException("用户不存在");
 
         var normalized = Normalize(prefs);
@@ -111,6 +127,29 @@ public class NotificationPreferenceService
 
         _logger.LogInformation("用户 {UserId} 更新了通知偏好", userId);
         return normalized;
+    }
+
+    /// <summary>
+    /// 校验自助偏好设置只能操作当前认证用户所在租户的账号。
+    ///
+    /// 为什么：控制器当前从租户上下文传入 userId，但应用服务可能被其他入口复用；
+    /// 在服务边界再次绑定身份，可避免错误参数让一个用户读取或修改同租户其他用户的偏好。
+    /// 后台通知分发使用 GetEnabledUserIdsAsync 的显式租户/候选用户路径，不复用此校验。
+    /// </summary>
+    private void EnsureSelfServiceScope(Guid userId)
+    {
+        if (_tenantContext.TenantId == Guid.Empty
+            || _tenantContext.UserId == Guid.Empty
+            || userId == Guid.Empty
+            || userId != _tenantContext.UserId)
+        {
+            _logger.LogWarning(
+                "通知偏好操作被拒绝：用户上下文不匹配，RequestedUserId={RequestedUserId}, CurrentUserId={CurrentUserId}, CurrentTenantId={CurrentTenantId}",
+                userId,
+                _tenantContext.UserId,
+                _tenantContext.TenantId);
+            throw new UnauthorizedAccessException("只能操作当前用户的通知偏好");
+        }
     }
 
     /// <summary>
