@@ -90,6 +90,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "devices": "Devices",
+    "deviceComparison": "Device Comparison",
     "gateway": "Gateway Status",
     "gatewayDevices": "Gateway Devices",
     "alerts": "Alerts",
@@ -110,6 +111,58 @@
   "sidebar": {
     "expand": "Expand Sidebar",
     "collapse": "Collapse Sidebar"
+  },
+  "deviceComparison": {
+    "title": "Device Comparison",
+    "description": "Compare 2 to 5 devices of the same type within one tenant.",
+    "filters": {
+      "deviceType": "Device type",
+      "metric": "Metric",
+      "metricPlaceholder": "Enter a metric such as temperature",
+      "window": "Window",
+      "search": "Search devices",
+      "searchPlaceholder": "Search by device code or name",
+      "selectHint": "Select 2 to 5 devices",
+      "metricSuggestions": "Suggested metrics"
+    },
+    "window": {
+      "24h": "24 hours",
+      "72h": "72 hours",
+      "7d": "7 days",
+      "30d": "30 days"
+    },
+    "list": {
+      "title": "Candidate devices",
+      "tooMany": "Too many devices. Narrow the list with a search keyword."
+    },
+    "state": {
+      "loading": "Loading comparison",
+      "loadFailed": "Failed to load comparison",
+      "retry": "Retry comparison",
+      "rulesFailed": "Metric suggestions are unavailable. You can still type a metric.",
+      "noPermission": "You do not have permission to view device comparison.",
+      "noCandidates": "No devices match the selected type.",
+      "notEnoughDevices": "Select at least 2 devices to compare.",
+      "insufficientData": "Not enough telemetry samples in the selected window.",
+      "refreshFailed": "Failed to refresh comparison. Showing cached results."
+    },
+    "result": {
+      "summary": "Group summary",
+      "groupMean": "Group mean",
+      "groupStdDev": "Standard deviation",
+      "table": {
+        "device": "Device",
+        "code": "Code",
+        "average": "Average",
+        "latest": "Latest",
+        "minimum": "Minimum",
+        "maximum": "Maximum",
+        "samples": "Samples",
+        "zScore": "Z-Score",
+        "outlier": "Outlier"
+      },
+      "outlierBadge": "Outlier"
+    }
   },
   "app": {
     "pageLoading": "Loading page...",

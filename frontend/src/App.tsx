@@ -27,6 +27,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DeviceListPage = lazy(() => import('./pages/DeviceListPage'));
 const DeviceDetailPage = lazy(() => import('./pages/DeviceDetailPage'));
+const DeviceComparisonPage = lazy(() => import('./pages/DeviceComparisonPage'));
 const DeviceSetupPage = lazy(() => import('./pages/DeviceSetupPage'));
 const GatewayDevicesPage = lazy(() => import('./pages/GatewayDevicesPage'));
 const GatewayMonitorPage = lazy(() => import('./pages/GatewayMonitorPage'));
@@ -140,6 +141,7 @@ function AppRoutes() {
             <Route path="/dashboard" element={<Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>} />
             <Route path="/devices" element={<Suspense fallback={<PageFallback />}><DeviceListPage /></Suspense>} />
             <Route path="/devices/:id" element={<Suspense fallback={<PageFallback />}><DeviceDetailPage /></Suspense>} />
+            <Route path="/device-comparison" element={<Suspense fallback={<PageFallback />}><DeviceComparisonPage /></Suspense>} />
             <Route path="/device-setup" element={<Suspense fallback={<PageFallback />}><DeviceSetupPage /></Suspense>} />
             <Route path="/gateway/devices" element={<Suspense fallback={<PageFallback />}><GatewayDevicesPage /></Suspense>} />
             <Route path="/gateways" element={<Suspense fallback={<PageFallback />}><GatewayListPage /></Suspense>} />

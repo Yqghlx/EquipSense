@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard,
   Wrench,
+  GitCompareArrows,
   AlertTriangle,
   Bell,
   ClipboardList,
@@ -28,6 +29,7 @@ import { useUnreadCount } from '../../hooks/useNotifications';
 const baseNavItems = [
   { path: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { path: '/devices', icon: Wrench, labelKey: 'nav.devices' },
+  { path: '/device-comparison', icon: GitCompareArrows, labelKey: 'nav.deviceComparison' },
   { path: '/gateways', icon: Network, labelKey: 'nav.gateway' },
   { path: '/gateway/devices', icon: Network, labelKey: 'nav.gatewayDevices' },
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },

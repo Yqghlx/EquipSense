@@ -12,7 +12,10 @@ import type {
  * 支持分页、排序以及按状态/设备类型过滤。
  * queryKey 包含完整查询参数，确保参数变化时自动重新请求。
  */
-export function useDevices(query: PagedQuery & { status?: string; deviceType?: string }) {
+export function useDevices(
+  query: PagedQuery & { status?: string; deviceType?: string; keyword?: string },
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: ['devices', query],
     queryFn: async () => {
@@ -23,10 +26,12 @@ export function useDevices(query: PagedQuery & { status?: string; deviceType?: s
       if (query.sort) params.set('sort', query.sort);
       if (query.order) params.set('order', query.order);
       if (query.status) params.set('status', query.status);
-      if (query.deviceType) params.set('deviceType', query.deviceType);
+      if (query.deviceType) params.set('type', query.deviceType);
+      if (query.keyword) params.set('keyword', query.keyword);
       const { data } = await api.get<PagedResult<Device>>('/devices?' + params);
       return data;
     },
+    enabled: options?.enabled ?? true,
   });
 }
 

@@ -90,6 +90,7 @@
   "nav": {
     "dashboard": "仪表盘",
     "devices": "设备管理",
+    "deviceComparison": "设备对比",
     "gateway": "网关状态",
     "gatewayDevices": "网关设备",
     "alerts": "告警中心",
@@ -110,6 +111,58 @@
   "sidebar": {
     "expand": "展开侧边栏",
     "collapse": "收起侧边栏"
+  },
+  "deviceComparison": {
+    "title": "设备对比",
+    "description": "在同一租户内对比 2 到 5 台同类型设备的指标表现。",
+    "filters": {
+      "deviceType": "设备类型",
+      "metric": "指标",
+      "metricPlaceholder": "请输入 temperature 等指标名称",
+      "window": "时间窗口",
+      "search": "搜索设备",
+      "searchPlaceholder": "按设备编码或名称搜索",
+      "selectHint": "请选择 2 到 5 台设备",
+      "metricSuggestions": "建议指标"
+    },
+    "window": {
+      "24h": "24 小时",
+      "72h": "72 小时",
+      "7d": "7 天",
+      "30d": "30 天"
+    },
+    "list": {
+      "title": "候选设备",
+      "tooMany": "候选设备过多，请先输入关键字缩小范围。"
+    },
+    "state": {
+      "loading": "正在加载对比结果",
+      "loadFailed": "加载对比结果失败",
+      "retry": "重试对比",
+      "rulesFailed": "暂时无法加载指标建议，您仍可手动输入指标。",
+      "noPermission": "您没有查看设备对比的权限。",
+      "noCandidates": "所选类型下暂无匹配设备。",
+      "notEnoughDevices": "请至少选择 2 台设备进行对比。",
+      "insufficientData": "所选时间窗口内的遥测样本不足。",
+      "refreshFailed": "刷新对比结果失败，当前展示的是缓存数据。"
+    },
+    "result": {
+      "summary": "群组摘要",
+      "groupMean": "群组均值",
+      "groupStdDev": "标准差",
+      "table": {
+        "device": "设备",
+        "code": "编码",
+        "average": "平均值",
+        "latest": "最新值",
+        "minimum": "最小值",
+        "maximum": "最大值",
+        "samples": "样本数",
+        "zScore": "Z-Score",
+        "outlier": "异常"
+      },
+      "outlierBadge": "异常"
+    }
   },
   "app": {
     "pageLoading": "加载中...",

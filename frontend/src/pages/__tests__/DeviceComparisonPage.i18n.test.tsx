@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { Device, DeviceTypeTemplate, PagedResult, AlertRule } from '../../types';
 import type { DeviceComparisonResult } from '../../hooks/useDeviceComparison';
@@ -444,8 +444,8 @@ describe('DeviceComparisonPage 英文契约', () => {
     const listId = metricInput.getAttribute('list')!;
     const suggestionList = document.getElementById(listId);
     expect(suggestionList).not.toBeNull();
-    expect(within(suggestionList!).getByDisplayValue('temperature')).toBeInTheDocument();
-    expect(within(suggestionList!).getByDisplayValue('vibration')).toBeInTheDocument();
+    expect(suggestionList!.querySelector('option[value="temperature"]')).not.toBeNull();
+    expect(suggestionList!.querySelector('option[value="vibration"]')).not.toBeNull();
   });
 
   it('对比查询加载中时应显示状态提示', async () => {

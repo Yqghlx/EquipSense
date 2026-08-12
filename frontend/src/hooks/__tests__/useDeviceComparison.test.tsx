@@ -192,7 +192,7 @@ describe('useDeviceComparison', () => {
     ['缺少设备类型', { metric: 'temperature', hours: 24, deviceIds: ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'] }],
     ['缺少指标', { deviceType: 'pump', hours: 24, deviceIds: ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'] }],
     ['缺少时间窗口', { deviceType: 'pump', metric: 'temperature', deviceIds: ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222'] }],
-    ['未选择设备', { deviceType: 'pump', metric: 'temperature', hours: 24 }],
+    ['未选择设备', { deviceType: 'pump', metric: 'temperature', hours: 24, deviceIds: [] }],
     ['只选择 1 台设备', { deviceType: 'pump', metric: 'temperature', hours: 24, deviceIds: ['11111111-1111-1111-1111-111111111111'] }],
   ])('条件不完整时应禁用查询：%s', (_, params) => {
     const { result } = renderHook(
@@ -233,14 +233,8 @@ describe('useDeviceComparison', () => {
 
   it.each([
     ['2 台设备', ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222']],
-    ['5 台设备', [
-      '11111111-1111-1111-1111-111111111111',
-      '22222222-2222-2222-2222-222222222222',
-      '33333333-3333-3333-3333-333333333333',
-      '44444444-4444-4444-4444-444444444444',
-      '55555555-5555-5555-5555-555555555555',
-    ]],
-  ])('设备数合法时应发起查询：%s', async (_, deviceIds) => {
+    ['未传 deviceIds（保留旧 API 全量行为）', undefined],
+  ])('满足查询契约时应发起查询：%s', async (_, deviceIds) => {
     mockedApi.get.mockResolvedValueOnce({ data: mockResult });
 
     renderHook(
