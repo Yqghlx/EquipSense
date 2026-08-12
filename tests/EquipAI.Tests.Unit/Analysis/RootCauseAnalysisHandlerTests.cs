@@ -177,6 +177,81 @@ public class RootCauseAnalysisHandlerTests
         invocations[0].Arguments[0].Should().Be(_tenantId, "tenantId 参数应为告警所属租户");
     }
 
+    /// <summary>
+    /// 安全边界：事件租户与设备租户不一致时，候选规则不能写入其他租户设备类型。
+    ///
+    /// Why：后台候选规则生成必须绕过 HTTP 租户过滤器，但设备类型仍要按事件租户限定；
+    /// 否则错误事件会把其他租户的设备类型泄露到当前租户知识库，影响后续规则审核和诊断。
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_事件租户与设备租户不一致_候选规则不应泄露设备类型()
+    {
+        var (db, analysisMock, _, _, handler) = CreateSut();
+        var otherTenantId = Guid.NewGuid();
+        var device = new Device
+        {
+            TenantId = otherTenantId,
+            Type = "租户A机密设备类型",
+            DeviceCode = "OTHER-TENANT-RCA",
+            Name = "其他租户设备",
+        };
+        db.Devices.Add(device);
+        await db.SaveChangesAsync();
+
+        SetupAnalysis(analysisMock, MakeAnalysis(0.85, "跨租户测试根因"));
+        await handler.HandleAsync(MakeAlertEvent(deviceId: device.Id), CancellationToken.None);
+
+        var pendingRule = await db.PendingRules
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        pendingRule.TenantId.Should().Be(_tenantId);
+        pendingRule.DeviceType.Should().Be("通用",
+            "跨租户设备类型不可进入当前租户候选规则");
+        pendingRule.DeviceType.Should().NotBe("租户A机密设备类型");
+    }
+
+    /// <summary>
+    /// 后台正向路径：当前上下文租户与事件租户不同，但设备属于事件租户时应保留正确设备类型。
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_后台事件租户与当前上下文不同_合法设备类型应正常写入候选规则()
+    {
+        var (db, analysisMock, _, _, handler) = CreateSut();
+        var eventTenantId = Guid.NewGuid();
+        var device = new Device
+        {
+            TenantId = eventTenantId,
+            Type = "事件租户电机",
+            DeviceCode = "EVENT-TENANT-RCA",
+            Name = "事件租户设备",
+        };
+        db.Devices.Add(device);
+        await db.SaveChangesAsync();
+
+        var analysis = MakeAnalysis(0.85, "合法后台根因");
+        analysis.TenantId = eventTenantId;
+        SetupAnalysis(analysisMock, analysis);
+        var evt = new AlertTriggeredEvent(
+            EventId: Guid.NewGuid(),
+            OccurredAt: DateTime.UtcNow,
+            TenantId: eventTenantId,
+            AlertId: Guid.NewGuid(),
+            DeviceId: device.Id,
+            RuleId: Guid.NewGuid(),
+            Metric: "temperature",
+            Value: 100.0,
+            Severity: "High");
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var pendingRule = await db.PendingRules
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        pendingRule.TenantId.Should().Be(eventTenantId);
+        pendingRule.DeviceType.Should().Be("事件租户电机",
+            "后台处理应使用事件租户设备类型，而非当前 HTTP 上下文租户");
+    }
+
     [Fact]
     public async Task HandleAsync_低置信度不应生成候选规则()
     {

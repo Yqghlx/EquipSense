@@ -163,7 +163,9 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
 
             var device = await db.Devices
                 .IgnoreQueryFilters()
-                .FirstOrDefaultAsync(d => d.Id == deviceId, ct);
+                .FirstOrDefaultAsync(
+                    d => d.Id == deviceId && d.TenantId == tenantId,
+                    ct);
             var deviceType = device?.Type ?? "通用";
 
             var conditions = System.Text.Json.JsonSerializer.Serialize(new
