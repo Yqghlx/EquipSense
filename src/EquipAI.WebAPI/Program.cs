@@ -15,6 +15,7 @@ using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.HealthChecks;
 using EquipAI.Infrastructure.Messaging;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using EquipAI.Infrastructure.Middleware;
 using EquipAI.Infrastructure.Seeding;
 using EquipAI.Infrastructure.Services;
@@ -64,6 +65,12 @@ try
         builder.Environment.EnvironmentName);
     PiiProtectionValidator.ValidateForEnvironment(
         builder.Configuration,
+        builder.Environment.EnvironmentName);
+    var certificateMonitoringOptions = builder.Configuration
+        .GetSection(CertificateMonitoringOptions.SectionName)
+        .Get<CertificateMonitoringOptions>() ?? new CertificateMonitoringOptions();
+    CertificateMonitoringOptionsValidator.ValidateForEnvironment(
+        certificateMonitoringOptions,
         builder.Environment.EnvironmentName);
     EventBusConfiguration.ValidateForEnvironment(
         builder.Configuration,
@@ -231,6 +238,19 @@ try
 
     // 业务指标采集后台服务 — 每 30 秒从数据库采集 Gauge 指标
     builder.Services.AddHostedService<BusinessMetricsCollector>();
+    // 生产证书生命周期监控 — 只读公钥证书并周期性暴露到 Prometheus
+    builder.Services.Configure<CertificateMonitoringOptions>(
+        builder.Configuration.GetSection(CertificateMonitoringOptions.SectionName));
+    builder.Services.AddSingleton<CertificateMetricsReader>();
+    builder.Services.AddSingleton<ICertificateMetricsSink, PrometheusCertificateMetricsSink>();
+    builder.Services.AddSingleton<CertificateMetricsCollector>(serviceProvider =>
+        new CertificateMetricsCollector(
+            serviceProvider.GetRequiredService<IOptions<CertificateMonitoringOptions>>().Value,
+            serviceProvider.GetRequiredService<CertificateMetricsReader>(),
+            serviceProvider.GetRequiredService<ICertificateMetricsSink>(),
+            serviceProvider.GetRequiredService<ILogger<CertificateMetricsCollector>>()));
+    builder.Services.AddHostedService(serviceProvider =>
+        serviceProvider.GetRequiredService<CertificateMetricsCollector>());
     // 网关心跳监控 — 每 30 秒检查超时网关并标记 offline
     builder.Services.AddHostedService<EquipAI.WebAPI.Services.GatewayHeartbeatMonitor>();
     // 设备状态监控 — 每 30 秒扫描 LastSeenAt 超时设备标记 offline（配合 TelemetryEventHandler 的上线逻辑）

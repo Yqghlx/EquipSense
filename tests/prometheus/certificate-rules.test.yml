@@ -1,0 +1,66 @@
+rule_files:
+  - /tmp/rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 文件不可读时只触发监控不可用告警，不应伪造到期天数告警。
+  - interval: 1m
+    input_series:
+      - series: 'equipai_certificate_monitoring_status{job="equipai-backend",instance="backend:8080",certificate="nginx_tls"}'
+        values: '0+0x12'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CertificateMonitoringUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              category: infrastructure
+              job: equipai-backend
+              instance: backend:8080
+              certificate: nginx_tls
+            exp_annotations:
+              summary: "证书监控不可用"
+              description: "证书 nginx_tls 无法被后端读取，TLS/MQTT 证书状态无法确认，请检查挂载文件和权限"
+
+  # 证书剩余 6 天时触发 critical 到期告警。
+  - interval: 1m
+    input_series:
+      - series: 'equipai_certificate_monitoring_status{job="equipai-backend",instance="backend:8080",certificate="mqtt_server"}'
+        values: '1+0x18'
+      - series: 'equipai_certificate_days_until_expiry{job="equipai-backend",instance="backend:8080",certificate="mqtt_server"}'
+        values: '6+0x18'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: CertificateExpiresWithin7Days
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              category: infrastructure
+              job: equipai-backend
+              instance: backend:8080
+              certificate: mqtt_server
+            exp_annotations:
+              summary: "证书将在 7 天内到期或已过期"
+              description: "证书 mqtt_server 剩余 6 天，请立即完成轮换并重载服务"
+
+  # 证书剩余 15 天时触发 warning，不应提前升级为 7 天 critical。
+  - interval: 1m
+    input_series:
+      - series: 'equipai_certificate_monitoring_status{job="equipai-backend",instance="backend:8080",certificate="mqtt_ca"}'
+        values: '1+0x38'
+      - series: 'equipai_certificate_days_until_expiry{job="equipai-backend",instance="backend:8080",certificate="mqtt_ca"}'
+        values: '15+0x38'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: CertificateExpiresWithin30Days
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: infrastructure
+              job: equipai-backend
+              instance: backend:8080
+              certificate: mqtt_ca
+            exp_annotations:
+              summary: "证书将在 30 天内到期"
+              description: "证书 mqtt_ca 剩余 15 天，请安排证书轮换"

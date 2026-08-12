@@ -151,27 +151,40 @@ export function UserFormDialog({ open, onClose, user, onSubmit, submitting }: Us
           {/* 创建模式：用户名 */}
           {!isEdit && (
             <div className="space-y-2">
-              <Label>{t('settings.username')} *</Label>
-              <Input {...register('username')} placeholder={t('settings.user.usernamePlaceholder')} />
-              {errors.username && <p className="text-sm text-destructive">{errors.username.message}</p>}
+              <Label htmlFor="userFormUsername">{t('settings.username')} *</Label>
+              <Input
+                id="userFormUsername"
+                {...register('username')}
+                placeholder={t('settings.user.usernamePlaceholder')}
+                aria-invalid={errors.username ? 'true' : undefined}
+                aria-describedby={errors.username ? 'user-form-username-error' : undefined}
+              />
+              {errors.username && <p id="user-form-username-error" role="alert" className="text-sm text-destructive">{errors.username.message}</p>}
             </div>
           )}
 
           {/* 创建模式：密码 */}
           {!isEdit && (
             <div className="space-y-2">
-              <Label>{t('auth.password')} *</Label>
-              <Input type="password" {...register('password')} placeholder={t('settings.user.passwordPlaceholder')} />
-              {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
+              <Label htmlFor="userFormPassword">{t('auth.password')} *</Label>
+              <Input
+                id="userFormPassword"
+                type="password"
+                {...register('password')}
+                placeholder={t('settings.user.passwordPlaceholder')}
+                aria-invalid={errors.password ? 'true' : undefined}
+                aria-describedby={errors.password ? 'user-form-password-error' : undefined}
+              />
+              {errors.password && <p id="user-form-password-error" role="alert" className="text-sm text-destructive">{errors.password.message}</p>}
             </div>
           )}
 
           {/* 创建模式：角色选择 */}
           {!isEdit && (
             <div className="space-y-2">
-              <Label>{t('settings.roleLabel')}</Label>
+              <Label htmlFor="userFormRole">{t('settings.roleLabel')}</Label>
               <Select value={currentRole} onValueChange={(v) => { if (v) setValue('role', v); }}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="userFormRole"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {ROLE_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>{t(opt.labelKey)}</SelectItem>
@@ -183,21 +196,27 @@ export function UserFormDialog({ open, onClose, user, onSubmit, submitting }: Us
 
           {/* 显示名称 */}
           <div className="space-y-2">
-            <Label>{t('settings.user.displayName')}</Label>
-            <Input {...register('displayName')} placeholder={t('settings.user.displayNamePlaceholder')} />
+            <Label htmlFor="userFormDisplayName">{t('settings.user.displayName')}</Label>
+            <Input id="userFormDisplayName" {...register('displayName')} placeholder={t('settings.user.displayNamePlaceholder')} />
           </div>
 
           {/* 邮箱 */}
           <div className="space-y-2">
-            <Label>{t('settings.user.email')}</Label>
-            <Input {...register('email')} placeholder={t('settings.user.emailPlaceholder')} />
-            {errors.email && <p className="text-sm text-destructive">{errors.email.message}</p>}
+            <Label htmlFor="userFormEmail">{t('settings.user.email')}</Label>
+            <Input
+              id="userFormEmail"
+              {...register('email')}
+              placeholder={t('settings.user.emailPlaceholder')}
+              aria-invalid={errors.email ? 'true' : undefined}
+              aria-describedby={errors.email ? 'user-form-email-error' : undefined}
+            />
+            {errors.email && <p id="user-form-email-error" role="alert" className="text-sm text-destructive">{errors.email.message}</p>}
           </div>
 
           {/* 手机号 */}
           <div className="space-y-2">
-            <Label>{t('settings.user.phone')}</Label>
-            <Input {...register('phone')} placeholder={t('settings.user.phonePlaceholder')} />
+            <Label htmlFor="userFormPhone">{t('settings.user.phone')}</Label>
+            <Input id="userFormPhone" {...register('phone')} placeholder={t('settings.user.phonePlaceholder')} />
           </div>
 
           <DialogFooter className="gap-2 pt-2">

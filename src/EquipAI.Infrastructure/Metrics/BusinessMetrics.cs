@@ -153,6 +153,31 @@ public static class BusinessMetrics
         .CreateGauge("equipai_mqtt_connected", "MQTT 连接状态（1=已连接, 0=断开）");
 
     // ========================================================================
+    // 证书生命周期指标
+    // ========================================================================
+
+    /// <summary>证书到期时刻的 Unix 时间戳（秒），按固定证书名称维度。</summary>
+    public static readonly Gauge CertificateExpiryTimestamp = Prometheus.Metrics
+        .CreateGauge(
+            "equipai_certificate_expiry_timestamp_seconds",
+            "证书到期时刻的 Unix 时间戳（秒）",
+            new GaugeConfiguration { LabelNames = new[] { "certificate" } });
+
+    /// <summary>证书监控读取状态（1=可读取, 0=不可读取），按固定证书名称维度。</summary>
+    public static readonly Gauge CertificateMonitoringStatus = Prometheus.Metrics
+        .CreateGauge(
+            "equipai_certificate_monitoring_status",
+            "证书监控读取状态（1=可读取, 0=不可读取）",
+            new GaugeConfiguration { LabelNames = new[] { "certificate" } });
+
+    /// <summary>证书距离到期的天数，允许负数表示证书已经过期。</summary>
+    public static readonly Gauge CertificateDaysUntilExpiry = Prometheus.Metrics
+        .CreateGauge(
+            "equipai_certificate_days_until_expiry",
+            "证书距离到期的天数",
+            new GaugeConfiguration { LabelNames = new[] { "certificate" } });
+
+    // ========================================================================
     // SignalR 连接指标
     // ========================================================================
 

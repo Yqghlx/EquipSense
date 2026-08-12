@@ -234,6 +234,9 @@ services:
       TRUSTED_PROXY_NETWORKS: "${TRUSTED_PROXY_NETWORKS:-172.16.0.0/12}"
       # Serilog 日志配置由 appsettings.Production.json 提供（Seq Warning+ / Console）
       # 无需通过环境变量覆盖，避免与 JSON 配置中的 WriteTo 索引冲突
+      # 证书生命周期监控默认开启；只读公钥证书，不挂载 Nginx 私钥。
+      Security__CertificateMonitoring__Enabled: "${CERTIFICATE_MONITORING_ENABLED:-true}"
+      Security__CertificateMonitoring__IntervalSeconds: "${CERTIFICATE_MONITORING_INTERVAL_SECONDS:-300}"
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
       # 限流参数：生产使用安全默认值；隔离 E2E 可提高窗口额度，但不能关闭限流中间件。
@@ -261,7 +264,10 @@ services:
       EventBus__Outbox__MaxBackoffSeconds: "${EVENTBUS_OUTBOX_MAX_BACKOFF_SECONDS:-300}"
       EventBus__Outbox__RetentionDays: "${EVENTBUS_OUTBOX_RETENTION_DAYS:-7}"
     volumes:
-      - ./mqtt-certs:/etc/equipai/mqtt-certs:ro
+      # 后端只需要 MQTT CA 校验链和服务端公钥的有效期，不挂载 MQTT 服务端私钥。
+      - ./mqtt-certs/ca.crt:/etc/equipai/mqtt-certs/ca.crt:ro
+      - ./mqtt-certs/server.crt:/etc/equipai/mqtt-certs/server.crt:ro
+      - ./ssl/cert.pem:/etc/equipai/tls/cert.pem:ro
       # 工单附件默认写入 /app/uploads；使用命名卷避免容器重建丢失文件。
       - attachments_data:/app/uploads
     depends_on:
@@ -329,7 +335,7 @@ services:
       Gateway__Version: "1.0.0"
     volumes:
       - edgegateway_data:/data
-      - ./mqtt-certs:/app/mqtt-certs:ro
+      - ./mqtt-certs/ca.crt:/app/mqtt-certs/ca.crt:ro
     depends_on:
       mosquitto:
         condition: service_started

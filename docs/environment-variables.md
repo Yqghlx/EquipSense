@@ -64,6 +64,17 @@ CIDR 网段；这样认证限流可以按真实客户端 IP 工作，同时不�
 | `BEHIND_PROXY` | 是否位于反向代理之后 | `true`（Docker） | 否 |
 | `TRUSTED_PROXY_NETWORKS` | 可信代理 CIDR 网段，多个网段用逗号分隔 | `172.16.0.0/12` | 使用反向代理时需按实际网络确认 |
 
+## 证书生命周期监控
+
+生产后端只读取公钥证书，并将 Nginx TLS、MQTT 服务端和 MQTT CA 的有效期暴露到 Prometheus。生产环境使用固定的三项容器内路径，不能通过配置覆盖到其他文件；读取器还会拒绝私钥/PFX 和符号链接。Compose 只把 Nginx `cert.pem` 单文件只读挂载到后端，不挂载私钥。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `CERTIFICATE_MONITORING_ENABLED` / `Security__CertificateMonitoring__Enabled` | 是否启用证书有效期监控；生产默认开启，关闭只允许开发/隔离测试 | `true`（Docker Production）/ `false`（本地开发） | 生产环境必须保持 `true` |
+| `CERTIFICATE_MONITORING_INTERVAL_SECONDS` / `Security__CertificateMonitoring__IntervalSeconds` | 证书文件扫描间隔，应用限制在 60 秒至 24 小时 | `300` | 否 |
+
+指标包括 `equipai_certificate_monitoring_status`、`equipai_certificate_expiry_timestamp_seconds` 和 `equipai_certificate_days_until_expiry`；监控不可用、7 天内到期和 30 天内到期分别由 Prometheus/Alertmanager 告警。运行时监控不替代部署前的 `bash docker/validate-env.sh docker/.env --check-runtime-files`。
+
 ## 依赖许可证
 
 项目固定使用已修复递归拒绝服务漏洞的 AutoMapper 15.1.3。AutoMapper 15+ 的生产使用需要完成许可证治理，密钥必须由供应商控制台签发并通过密钥管理系统注入；不要把密钥写进镜像、仓库或日志。应用启动门禁与 `docker/validate-env.sh` 会拒绝缺失、占位或少于 32 个字符的值。

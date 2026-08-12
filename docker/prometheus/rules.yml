@@ -57,6 +57,52 @@ groups:
           description: "后端与 MQTT broker 已断开超过 2 分钟，所有遥测数据无法接收"
 
   # ============================================================
+  # 证书生命周期告警
+  # ============================================================
+  - name: certificate-lifecycle
+    rules:
+      # 证书文件缺失、损坏或无权限读取时，优先报告监控不可用，避免误报到期时间。
+      - alert: CertificateMonitoringUnavailable
+        expr: equipai_certificate_monitoring_status{job="equipai-backend"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "证书监控不可用"
+          description: "证书 {{ $labels.certificate }} 无法被后端读取，TLS/MQTT 证书状态无法确认，请检查挂载文件和权限"
+
+      # 7 天内到期或已经过期时立即升级，避免依赖人工查看证书文件。
+      - alert: CertificateExpiresWithin7Days
+        expr: |
+          equipai_certificate_days_until_expiry{job="equipai-backend"} < 7
+          and on (certificate, job, instance)
+          equipai_certificate_monitoring_status{job="equipai-backend"} == 1
+        for: 10m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "证书将在 7 天内到期或已过期"
+          description: "证书 {{ $labels.certificate }} 剩余 {{ $value | humanize }} 天，请立即完成轮换并重载服务"
+
+      # 30 天预警给运维留下申请、签发和灰度轮换窗口。
+      - alert: CertificateExpiresWithin30Days
+        expr: |
+          equipai_certificate_days_until_expiry{job="equipai-backend"} < 30
+          and on (certificate, job, instance)
+          equipai_certificate_days_until_expiry{job="equipai-backend"} >= 7
+          and on (certificate, job, instance)
+          equipai_certificate_monitoring_status{job="equipai-backend"} == 1
+        for: 30m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "证书将在 30 天内到期"
+          description: "证书 {{ $labels.certificate }} 剩余 {{ $value | humanize }} 天，请安排证书轮换"
+
+  # ============================================================
   # HTTP 应用健康告警（基于 prometheus-net.AspNetCore 默认指标）
   # ============================================================
   - name: http-health

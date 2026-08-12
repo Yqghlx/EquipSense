@@ -67,7 +67,7 @@ export default function ResetPasswordPage() {
           <CardTitle>{t('auth.resetPassword', '重置密码')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {t('auth.resetTokenMissing', '重置链接无效，缺少必要参数。请通过邮件中的链接进入。')}
           </p>
           <p className="text-center text-sm text-muted-foreground">
@@ -107,15 +107,29 @@ export default function ResetPasswordPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="newPassword">{t('auth.newPassword', '新密码')}</Label>
-            <Input id="newPassword" type="password" {...register('newPassword')} placeholder={t('auth.newPassword', '新密码')} />
-            {errors.newPassword && <p className="text-sm text-destructive">{errors.newPassword.message}</p>}
+            <Input
+              id="newPassword"
+              type="password"
+              {...register('newPassword')}
+              placeholder={t('auth.newPassword', '新密码')}
+              aria-invalid={errors.newPassword ? 'true' : undefined}
+              aria-describedby={errors.newPassword ? 'reset-password-new-error' : undefined}
+            />
+            {errors.newPassword && <p id="reset-password-new-error" role="alert" className="text-sm text-destructive">{errors.newPassword.message}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">{t('auth.confirmPassword', '确认新密码')}</Label>
-            <Input id="confirmPassword" type="password" {...register('confirmPassword')} placeholder={t('auth.confirmPassword', '确认新密码')} />
-            {errors.confirmPassword && <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>}
+            <Input
+              id="confirmPassword"
+              type="password"
+              {...register('confirmPassword')}
+              placeholder={t('auth.confirmPassword', '确认新密码')}
+              aria-invalid={errors.confirmPassword ? 'true' : undefined}
+              aria-describedby={errors.confirmPassword ? 'reset-password-confirm-error' : undefined}
+            />
+            {errors.confirmPassword && <p id="reset-password-confirm-error" role="alert" className="text-sm text-destructive">{errors.confirmPassword.message}</p>}
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? t('common.loading', '加载中...') : t('auth.resetPassword', '重置密码')}
           </Button>

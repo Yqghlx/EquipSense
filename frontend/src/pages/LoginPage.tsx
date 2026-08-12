@@ -313,7 +313,7 @@ export default function LoginPage() {
               </Button>
             </>
           )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           {!mfaEnrollmentAuthenticated && (
             <Button type="button" variant="ghost" className="w-full" onClick={backFromMfaEnrollment} disabled={loading}>
               {t('mfa.enrollmentBack')}
@@ -351,10 +351,12 @@ export default function LoginPage() {
                 autoComplete="one-time-code"
                 inputMode="text"
                 autoFocus
+                aria-invalid={totpErrors.totpCode ? 'true' : undefined}
+                aria-describedby={totpErrors.totpCode ? 'mfa-code-error' : undefined}
               />
-              {totpErrors.totpCode && <p className="text-sm text-destructive">{totpErrors.totpCode.message}</p>}
+              {totpErrors.totpCode && <p id="mfa-code-error" role="alert" className="text-sm text-destructive">{totpErrors.totpCode.message}</p>}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? t('common.loading') : t('mfa.verify')}
             </Button>
@@ -378,15 +380,30 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="username">{t('auth.username')}</Label>
-            <Input id="username" autoComplete="username" {...register('username')} placeholder={t('auth.username')} />
-            {errors.username && <p className="text-sm text-destructive">{errors.username.message}</p>}
+            <Input
+              id="username"
+              autoComplete="username"
+              {...register('username')}
+              placeholder={t('auth.username')}
+              aria-invalid={errors.username ? 'true' : undefined}
+              aria-describedby={errors.username ? 'login-username-error' : undefined}
+            />
+            {errors.username && <p id="login-username-error" role="alert" className="text-sm text-destructive">{errors.username.message}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">{t('auth.password')}</Label>
-            <Input id="password" type="password" autoComplete="current-password" {...register('password')} placeholder={t('auth.password')} />
-            {errors.password && <p className="text-sm text-destructive">{errors.password.message}</p>}
+            <Input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              {...register('password')}
+              placeholder={t('auth.password')}
+              aria-invalid={errors.password ? 'true' : undefined}
+              aria-describedby={errors.password ? 'login-password-error' : undefined}
+            />
+            {errors.password && <p id="login-password-error" role="alert" className="text-sm text-destructive">{errors.password.message}</p>}
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? t('common.loading') : t('auth.login')}
           </Button>

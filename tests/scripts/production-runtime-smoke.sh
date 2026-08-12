@@ -502,6 +502,24 @@ jq -e --arg gateway_id "smoke-gateway" \
   <<<"$gateways_response" >/dev/null \
   || fatal "边缘网关未在后端注册为 online"
 
+# 证书生命周期监控必须在真实 Production 镜像中注册并读取三份公钥证书，
+# 防止只在单元测试中存在、但容器配置或文件挂载遗漏的回归。
+certificate_metrics="$(curl --fail --silent --show-error --max-time 10 \
+  "http://127.0.0.1:$BACKEND_PORT/metrics")" \
+  || fatal "后端 Prometheus 指标端点不可用"
+for certificate_metric in \
+  equipai_certificate_expiry_timestamp_seconds \
+  equipai_certificate_monitoring_status \
+  equipai_certificate_days_until_expiry; do
+  grep -q "^${certificate_metric}" <<<"$certificate_metrics" \
+    || fatal "后端缺少证书监控指标：$certificate_metric"
+done
+for certificate_name in nginx_tls mqtt_server mqtt_ca; do
+  grep -Eq "^equipai_certificate_monitoring_status\{certificate=\"${certificate_name}\"\} 1$" \
+    <<<"$certificate_metrics" \
+    || fatal "证书 ${certificate_name} 未被后端成功读取"
+done
+
 wait_for_http "https://127.0.0.1:$FRONTEND_PORT/health" "-k"
 wait_for_http "https://127.0.0.1:$FRONTEND_PORT/login" "-k"
 

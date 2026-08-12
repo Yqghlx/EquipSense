@@ -83,6 +83,18 @@ cd ..
 
 直接启动生产 Compose 时统一使用 `docker/compose-production.sh`：它会在 `up`、`start`、`restart`、`build`、`pull`、`create`、`run` 和 `scale` 前执行同一套生产门禁，校验失败时不会调用 Docker，避免只启动部分服务。`ps`、`logs`、`exec`、`stop` 和 `down` 等观察或故障处置命令仍可在门禁失败时使用；这些命令使用仅包含显式安全变量白名单的临时恢复环境，未知变量默认丢弃，避免把新增的 API Key、密码或带认证信息的 URL 复制到临时文件。CI/CD 的正式镜像发布继续使用 `deploy-production.sh`，不要用本地构建入口替代滚动发布脚本。
 
+上线前建议先执行只读自检入口。它不会启动、重启、构建或拉取任何服务；默认检查 `.env`、正式证书、Docker daemon 和最终 Compose 配置，服务启动后追加 `--runtime` 检查所有运行服务（一次性 `jaeger-init` 除外）及已有健康检查：
+
+```bash
+# 启动前静态检查；失败时按变量名、证书文件或 Compose 错误整改
+bash docker/production-readiness.sh --env-file docker/.env
+
+# 启动后运行态检查；不会修改容器
+bash docker/production-readiness.sh --env-file docker/.env --runtime
+```
+
+自检返回非零时不得继续发布；输出只包含变量名、文件名、服务名和错误类别，不包含 `.env` 的实际值。
+
 `bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；它通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
 
 > 注意：生产 Compose 操作请从仓库根目录使用 `docker/compose-production.sh`。该入口会自动加载 `docker/.env`；恢复脚本等需要自行接收环境文件的工具仍必须显式传入 `--env-file docker/.env`。
@@ -124,6 +136,9 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 ### 3. 启动服务
 
 ```bash
+# 启动前只读门禁
+bash docker/production-readiness.sh --env-file docker/.env
+
 docker/compose-production.sh up -d
 ```
 
@@ -132,6 +147,9 @@ docker/compose-production.sh up -d
 ### 4. 验证部署
 
 ```bash
+# 汇总检查所有生产服务状态和健康检查
+bash docker/production-readiness.sh --env-file docker/.env --runtime
+
 # 检查所有服务状态
 docker/compose-production.sh ps
 
@@ -469,8 +487,18 @@ sudo certbot renew
 # 更新 Docker 中的证书
 cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/cert.pem
 cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/key.pem
-docker/compose-production.sh restart frontend
+
+# 上线前重新执行证书、主机名、私钥匹配和 MQTT CA 链门禁
+bash docker/validate-env.sh docker/.env --check-runtime-files
+
+# 让 Nginx、Mosquitto 和边缘网关重新加载证书；后端会从只读公钥挂载中刷新有效期指标
+docker/compose-production.sh up -d --no-deps --force-recreate frontend mosquitto backend edgegateway
+
+# 确认 Prometheus 指标已出现且所有证书均可读取（状态值应为 1）
+curl --fail --silent "http://127.0.0.1:${BACKEND_PORT:-8080}/metrics" | grep -E '^equipai_certificate_(monitoring_status|expiry_timestamp_seconds|days_until_expiry)'
 ```
+
+生产后端只挂载 `docker/ssl/cert.pem` 公钥和已有 MQTT 公钥证书，不挂载 Nginx 或 MQTT 私钥；后端会拒绝私钥/PFX、符号链接以及偏离固定容器路径的证书配置。Prometheus 会对 `nginx_tls`、`mqtt_server` 和 `mqtt_ca` 分别产生 30 天 warning、7 天 critical，以及文件缺失/损坏时的 `CertificateMonitoringUnavailable` critical 告警；该监控不能替代上线前的 `validate-env.sh` 校验。证书轮换应纳入证书供应商的自动续期任务，并在续期后执行上述校验和重载流程。
 
 ---
 

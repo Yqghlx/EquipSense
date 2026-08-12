@@ -567,6 +567,30 @@ test_setup_validates_production_compose_wrapper() {
   assert_contains "$setup_content" '"compose-production.sh"'
 }
 
+test_production_readiness_entrypoint_is_wired_and_read_only() {
+  local setup_content
+  local deploy_content
+  local runbook_content
+  local readiness_content
+  setup_content="$(cat "$PROJECT_ROOT/docker/setup.sh")"
+  deploy_content="$(cat "$PROJECT_ROOT/docs/DEPLOY.md")"
+  runbook_content="$(cat "$PROJECT_ROOT/docs/OPS_RUNBOOK.md")"
+  readiness_content="$(cat "$PROJECT_ROOT/docker/production-readiness.sh")"
+
+  assert_contains "$setup_content" "production-readiness.sh|生产上线只读自检入口"
+  assert_contains "$setup_content" '"production-readiness.sh"'
+  assert_contains "$deploy_content" 'bash docker/production-readiness.sh --env-file docker/.env'
+  assert_contains "$runbook_content" 'bash docker/production-readiness.sh --env-file docker/.env --runtime'
+  assert_contains "$readiness_content" 'config --quiet'
+  assert_contains "$readiness_content" 'ps --all --format'
+  [[ "$readiness_content" != *' compose up '* ]] \
+    || fail "只读 readiness 入口不得执行 compose up"
+  [[ "$readiness_content" != *' compose start '* ]] \
+    || fail "只读 readiness 入口不得执行 compose start"
+  [[ "$readiness_content" != *' compose restart '* ]] \
+    || fail "只读 readiness 入口不得执行 compose restart"
+}
+
 test_production_compose_supports_isolated_tenant2_e2e_credentials() {
   local compose_content
   compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
@@ -1084,6 +1108,202 @@ test_setup_rejects_symlink_environment_file() {
   assert_contains "$output" "符号链接"
   cmp -s "$case_dir/real.env.before" "$case_dir/real.env" \
     || fail "setup.sh 拒绝符号链接时不应修改目标文件"
+}
+
+copy_readiness_script_fixture() {
+  local case_dir="$1"
+  if [ -f "$PROJECT_ROOT/docker/production-readiness.sh" ]; then
+    cp "$PROJECT_ROOT/docker/production-readiness.sh" "$case_dir/production-readiness.sh"
+  else
+    # RED 阶段的占位脚本必须明确失败，避免测试在功能缺失时误报通过。
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 127' > "$case_dir/production-readiness.sh"
+  fi
+  chmod 700 "$case_dir/production-readiness.sh"
+}
+
+create_readiness_fixture() {
+  local case_dir="$1"
+  local validation_result="$2"
+  local runtime_state="${3:-healthy}"
+  mkdir -p "$case_dir/bin"
+  copy_readiness_script_fixture "$case_dir"
+  : > "$case_dir/docker-compose.yml"
+  printf '%s\n' 'PG_PASSWORD=READINESS_TEST_SECRET_DO_NOT_PRINT' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  if [ "$validation_result" = "pass" ]; then
+    printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$case_dir/validate-env.sh"
+  else
+    printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'printf "%s\\n" "  [✗] PII_ENCRYPTION_KEY 包含 READINESS_TEST_SECRET_DO_NOT_PRINT" >&2' \
+      'printf "%s\\n" "  [✗] JWT_SECRET 包含 READINESS_TEST_SECRET_DO_NOT_PRINT" >&2' \
+      'exit 1' > "$case_dir/validate-env.sh"
+  fi
+  chmod 700 "$case_dir/validate-env.sh"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "${DOCKER_CALL_LOG}"' \
+    'if [[ "${1:-}" = "info" ]]; then' \
+    '  [[ "${READINESS_DOCKER_UNAVAILABLE:-false}" != "true" ]] || exit 1' \
+    '  exit 0' \
+    'fi' \
+    'if [[ "${1:-}" = "compose" && "${*: -1}" = "version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "$*" == *"config --quiet"* ]]; then' \
+    '  if [[ "${READINESS_COMPOSE_FAILURE:-false}" = "true" ]]; then' \
+    '    printf "%s\\n" "Compose 展开值 FUTURE_SECRET_DO_NOT_PRINT 无法解析" >&2' \
+    '    exit 1' \
+    '  fi' \
+    '  exit 0' \
+    'fi' \
+    'if [[ "${1:-}" = "compose" && "$*" == *"config --services"* ]]; then' \
+    '  printf "%s\\n" postgres redis mosquitto rabbitmq backend edgegateway frontend seq prometheus alertmanager grafana jaeger jaeger-init' \
+    '  exit 0' \
+    'fi' \
+    'if [[ "${1:-}" = "compose" && "$*" == *"ps --all"* ]]; then' \
+    '  printf "%s\\t%s\\t%s\\n" postgres running healthy' \
+    '  printf "%s\\t%s\\t%s\\n" redis running healthy' \
+    '  printf "%s\\t%s\\t%s\\n" mosquitto running ""' \
+    '  printf "%s\\t%s\\t%s\\n" rabbitmq running healthy' \
+    '  if [[ "${READINESS_RUNTIME_STATE}" = "unhealthy" ]]; then' \
+    '    printf "%s\\t%s\\t%s\\n" backend running unhealthy' \
+    '  else' \
+    '    printf "%s\\t%s\\t%s\\n" backend running healthy' \
+    '  fi' \
+    '  printf "%s\\t%s\\t%s\\n" edgegateway running healthy' \
+    '  printf "%s\\t%s\\t%s\\n" frontend running healthy' \
+    '  printf "%s\\t%s\\t%s\\n" seq running ""' \
+    '  printf "%s\\t%s\\t%s\\n" prometheus running ""' \
+    '  printf "%s\\t%s\\t%s\\n" alertmanager running healthy' \
+    '  printf "%s\\t%s\\t%s\\n" grafana running ""' \
+    '  printf "%s\\t%s\\t%s\\n" jaeger running ""' \
+    '  printf "%s\\t%s\\t%s\\n" jaeger-init exited ""' \
+    '  exit 0' \
+    'fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod 700 "$case_dir/bin/docker"
+}
+
+test_production_readiness_requires_static_gate() {
+  local case_dir="$TEST_ROOT/production-readiness-static-gate"
+  create_readiness_fixture "$case_dir" fail
+
+  local output
+  local result_code
+  set +e
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+      bash ./production-readiness.sh 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "静态生产门禁失败时 readiness 不应返回成功"
+  assert_contains "$output" "PII_ENCRYPTION_KEY"
+  assert_contains "$output" "生产只读自检失败：发现 2 项问题"
+  [[ "$output" != *"READINESS_TEST_SECRET_DO_NOT_PRINT"* ]] \
+    || fail "readiness 输出不应泄露校验器意外回显的凭据值"
+  [[ ! -s "$case_dir/docker.calls" ]] \
+    || fail "静态生产门禁失败时应先返回，不应访问 Docker"
+}
+
+test_production_readiness_accepts_healthy_runtime() {
+  local case_dir="$TEST_ROOT/production-readiness-healthy-runtime"
+  create_readiness_fixture "$case_dir" pass
+
+  local output
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+      READINESS_RUNTIME_STATE=healthy \
+      bash ./production-readiness.sh --runtime 2>&1
+  )" || fail "健康运行态 readiness 应返回成功"
+
+  assert_contains "$output" "静态生产门禁通过"
+  assert_contains "$output" "运行态服务检查通过"
+  [[ "$output" != *"READINESS_TEST_SECRET_DO_NOT_PRINT"* ]] \
+    || fail "健康运行态输出不应泄露环境变量值"
+}
+
+test_production_readiness_rejects_unhealthy_runtime() {
+  local case_dir="$TEST_ROOT/production-readiness-unhealthy-runtime"
+  create_readiness_fixture "$case_dir" pass unhealthy
+
+  local output
+  local result_code
+  set +e
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+      READINESS_RUNTIME_STATE=unhealthy \
+      bash ./production-readiness.sh --runtime 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "服务 unhealthy 时 readiness 不应返回成功"
+  assert_contains "$output" "backend"
+  assert_contains "$output" "unhealthy"
+}
+
+test_production_readiness_rejects_unavailable_docker() {
+  local case_dir="$TEST_ROOT/production-readiness-unavailable-docker"
+  create_readiness_fixture "$case_dir" pass
+
+  local output
+  local result_code
+  set +e
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+      READINESS_DOCKER_UNAVAILABLE=true \
+      bash ./production-readiness.sh 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "Docker daemon 不可用时 readiness 不应返回成功"
+  assert_contains "$output" "Docker daemon"
+}
+
+test_production_readiness_suppresses_unknown_compose_secret_details() {
+  local case_dir="$TEST_ROOT/production-readiness-compose-secret"
+  create_readiness_fixture "$case_dir" pass
+
+  local output
+  local result_code
+  set +e
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+      READINESS_COMPOSE_FAILURE=true \
+      bash ./production-readiness.sh 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "Compose 解析失败时 readiness 不应返回成功"
+  assert_contains "$output" "Compose 配置解析失败"
+  [[ "$output" != *"FUTURE_SECRET_DO_NOT_PRINT"* ]] \
+    || fail "Compose 错误详情不应泄露未知环境变量值"
 }
 
 test_bootstrap_production_secrets_generates_only_local_values() {
@@ -2868,6 +3088,46 @@ test_frontend_runtime_rejects_self_signed_certificate_in_production() {
   assert_contains "$entrypoint_content" 'exit 1'
 }
 
+test_backend_certificate_monitoring_contract() {
+  local compose_content production_config rules_content dashboard_content ci_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  production_config="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/appsettings.Production.json")"
+  rules_content="$(cat "$PROJECT_ROOT/docker/prometheus/rules.yml")"
+  dashboard_content="$(cat "$PROJECT_ROOT/docker/grafana/provisioning/dashboards/infrastructure.json")"
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+
+  assert_contains "$compose_content" 'Security__CertificateMonitoring__Enabled: "${CERTIFICATE_MONITORING_ENABLED:-true}"'
+  assert_contains "$compose_content" './ssl/cert.pem:/etc/equipai/tls/cert.pem:ro'
+  assert_contains "$compose_content" './mqtt-certs/ca.crt:/etc/equipai/mqtt-certs/ca.crt:ro'
+  assert_contains "$compose_content" './mqtt-certs/server.crt:/etc/equipai/mqtt-certs/server.crt:ro'
+  assert_contains "$compose_content" './mqtt-certs/ca.crt:/app/mqtt-certs/ca.crt:ro'
+  [[ "$compose_content" != *'./ssl/key.pem:/etc/equipai/tls'* ]] \
+    || fail "后端证书监控不得挂载 Nginx TLS 私钥"
+  [[ "$compose_content" != *'./mqtt-certs/server.key:/etc/equipai'* ]] \
+    || fail "后端不应挂载 MQTT 服务端私钥"
+  [[ "$compose_content" != *'./mqtt-certs/server.key:/app'* ]] \
+    || fail "边缘网关不应挂载 MQTT 服务端私钥"
+
+  assert_contains "$production_config" '"nginx_tls": "/etc/equipai/tls/cert.pem"'
+  assert_contains "$production_config" '"mqtt_server": "/etc/equipai/mqtt-certs/server.crt"'
+  assert_contains "$production_config" '"mqtt_ca": "/etc/equipai/mqtt-certs/ca.crt"'
+  assert_contains "$rules_content" 'CertificateMonitoringUnavailable'
+  assert_contains "$rules_content" 'CertificateExpiresWithin7Days'
+  assert_contains "$rules_content" 'CertificateExpiresWithin30Days'
+  assert_contains "$rules_content" 'equipai_certificate_monitoring_status'
+  assert_contains "$dashboard_content" 'equipai_certificate_days_until_expiry'
+  assert_contains "$dashboard_content" 'equipai_certificate_monitoring_status'
+  assert_contains "$ci_content" 'tests/prometheus/certificate-rules.test.yml'
+  jq -e '
+    [.panels[]
+      | select(.title == "证书剩余天数")
+      | .fieldConfig.defaults.thresholds.steps[]
+      | [.color, .value]]
+    == [["red", null], ["orange", 7], ["green", 30]]
+  ' >/dev/null <<<"$dashboard_content" \
+    || fail "Grafana 证书剩余天数阈值必须与 Prometheus 告警分级一致"
+}
+
 test_docker_edgegateway_build_is_reproducible() {
   local dockerfile_content
   dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.edgegateway")"
@@ -3274,6 +3534,7 @@ case "${1:-all}" in
     test_production_compose_wrapper_blocks_start_when_preflight_fails
     test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection
     test_setup_validates_production_compose_wrapper
+    test_production_readiness_entrypoint_is_wired_and_read_only
     test_production_compose_supports_isolated_tenant2_e2e_credentials
     test_production_smoke_exposes_optional_full_e2e_gate
     test_production_e2e_preserves_mfa_policy
@@ -3297,6 +3558,13 @@ case "${1:-all}" in
     test_setup_rejects_generating_self_signed_certificates_in_production
     test_setup_mosquitto_does_not_expose_password_in_process_arguments
     test_setup_mosquitto_rejects_password_file_symlink
+    ;;
+  readiness)
+    test_production_readiness_requires_static_gate
+    test_production_readiness_accepts_healthy_runtime
+    test_production_readiness_rejects_unhealthy_runtime
+    test_production_readiness_rejects_unavailable_docker
+    test_production_readiness_suppresses_unknown_compose_secret_details
     ;;
   backup)
     test_postgres_custom_archive_reads_from_stdin
@@ -3352,6 +3620,7 @@ case "${1:-all}" in
     test_nginx_does_not_log_signalr_query_tokens
     test_frontend_runtime_installs_certificate_check_dependency
     test_frontend_runtime_rejects_self_signed_certificate_in_production
+    test_backend_certificate_monitoring_contract
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
@@ -3384,6 +3653,12 @@ case "${1:-all}" in
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
     test_validate_env_rejects_symlink_environment_file
+    test_production_readiness_requires_static_gate
+    test_production_readiness_accepts_healthy_runtime
+    test_production_readiness_rejects_unhealthy_runtime
+    test_production_readiness_rejects_unavailable_docker
+    test_production_readiness_suppresses_unknown_compose_secret_details
+    test_production_readiness_entrypoint_is_wired_and_read_only
     test_production_env_template_uses_https_default
     test_production_compose_wrapper_runs_preflight_before_start
     test_production_compose_wrapper_blocks_start_when_preflight_fails
@@ -3481,7 +3756,7 @@ case "${1:-all}" in
     test_development_internal_ports_bind_loopback_by_default
     ;;
   *)
-    fail "用法：$0 [setup|backup|restore|deploy|ci|all]"
+    fail "用法：$0 [setup|readiness|backup|restore|deploy|ci|all]"
     ;;
 esac
 echo "生产脚本测试通过"

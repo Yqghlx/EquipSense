@@ -4,6 +4,18 @@
 > 部署相关请参考 [DEPLOY.md](./DEPLOY.md)，架构设计请参考 [FINAL_TECHNICAL_DESIGN.md](./FINAL_TECHNICAL_DESIGN.md)。
 > 生产 Compose 配置位于 `docker/.env`；从仓库根目录执行本手册中的生产 Compose 命令统一使用 `docker/compose-production.sh`，它会自动加载该文件并在启动/重启前执行生产门禁。
 
+上线或故障恢复前可使用只读总检查：
+
+```bash
+# 不启动、不重启、不构建服务，只检查配置、证书和 Compose 解析
+bash docker/production-readiness.sh --env-file docker/.env
+
+# 服务已启动时，额外检查所有运行服务及其健康状态
+bash docker/production-readiness.sh --env-file docker/.env --runtime
+```
+
+该入口失败时只会报告变量名、证书文件、服务名和错误类别，不会打印密钥；修复后必须重新执行，不能用 `--runtime` 失败时的旧状态替代检查。
+
 ---
 
 ## 一、告警处理决策树
@@ -93,6 +105,31 @@ docker/compose-production.sh ps alertmanager
 ```
 
 `alertmanager` 应显示 `healthy`。未配置 Webhook 时，外部通知会明确降级为 `dev-null`，告警仍可在 Alertmanager/Grafana 中查询。
+
+#### CertificateMonitoringUnavailable / CertificateExpiresWithin7Days / CertificateExpiresWithin30Days
+
+证书监控覆盖 Nginx TLS、MQTT 服务端证书和 MQTT CA。先确认告警对象、后端状态和证书文件，再决定是否轮换：
+
+```bash
+# 1. 查看后端和 MQTT/Nginx 服务状态
+docker/compose-production.sh ps backend frontend mosquitto edgegateway
+
+# 2. 确认部署门禁没有发现缺失、过期、主机名不匹配或证书链错误
+bash docker/validate-env.sh docker/.env --check-runtime-files
+
+# 3. 查看证书监控指标；status=1 表示后端成功读取对应公钥证书
+curl --fail --silent "http://127.0.0.1:${BACKEND_PORT:-8080}/metrics" | grep -E '^equipai_certificate_(monitoring_status|expiry_timestamp_seconds|days_until_expiry)'
+```
+
+轮换步骤：
+
+1. 从证书供应商取得新 Nginx `fullchain.pem` 和 `privkey.pem`，原子替换 `docker/ssl/cert.pem`、`docker/ssl/key.pem`；私钥权限保持 `600`，不要把私钥写入日志或工单。
+2. 如 MQTT CA 或服务端证书同时轮换，先更新 `docker/mqtt-certs/ca.crt`、`server.crt`、`server.key` 和 Mosquitto 配置要求的密码文件，确认服务端 SAN 包含 `mosquitto` 实际主机名。
+3. 执行 `bash docker/validate-env.sh docker/.env --check-runtime-files`；失败时不要重载服务，按输出的变量名或证书文件修复。
+4. 执行 `docker/compose-production.sh up -d --no-deps --force-recreate frontend mosquitto backend edgegateway`，然后再次检查 `/metrics`、`/health/ready` 和边缘网关 `/health`。
+5. 确认 Alertmanager 中对应告警恢复；保留轮换时间、证书序列号和验证结果，但不要记录私钥、密码或恢复码。
+
+如果只是 `CertificateMonitoringUnavailable` 而证书文件确实存在，优先检查后端容器内只读挂载和文件权限；同时确认挂载的是公开证书而不是 PFX、私钥或符号链接。不要通过关闭 `CERTIFICATE_MONITORING_ENABLED` 来消除生产告警。该开关仅用于开发或隔离测试。
 
 ---
 
@@ -340,7 +377,7 @@ bash tests/backup-restore-rehearsal.sh
 
 - [ ] 漏洞扫描报告审查（CI 里的 Trivy + NuGet 检查结果）
 - [ ] 容量趋势分析（设备数/遥测量/告警量增长）
-- [ ] 证书过期检查（mTLS / TLS）
+- [ ] 检查证书生命周期告警已接入外部通知，并抽查 `nginx_tls`、`mqtt_server`、`mqtt_ca` 的 `status=1` 和剩余天数
 - [ ] 依赖更新评估（NuGet / npm 包）
 
 ---

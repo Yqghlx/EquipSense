@@ -61,6 +61,53 @@ vi.mock('../../components/auth/ChangePasswordDialog', () => ({
 const mockedPost = vi.mocked(api.post);
 
 describe('登录页 MFA 英文错误提示', () => {
+  it('密码登录必填校验错误应关联到对应输入框', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Login' }));
+
+    expect(screen.getByLabelText('Username')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Username')).toHaveAttribute('aria-describedby', 'login-username-error');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('aria-describedby', 'login-password-error');
+    expect(screen.getByText('Username is required')).toHaveAttribute('id', 'login-username-error');
+    expect(screen.getByText('Username is required')).toHaveAttribute('role', 'alert');
+    expect(screen.getByText('Password is required')).toHaveAttribute('id', 'login-password-error');
+    expect(screen.getByText('Password is required')).toHaveAttribute('role', 'alert');
+  });
+
+  it('MFA 验证码校验错误应关联到对应输入框', async () => {
+    mockedPost.mockResolvedValueOnce({
+      data: {
+        mfaRequired: true,
+        mfaChallengeToken: 'challenge-001',
+        userInfo: { username: 'operator', displayName: 'Operator' },
+      },
+    } as never);
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+
+    await user.type(screen.getByLabelText('Username'), 'operator');
+    await user.type(screen.getByLabelText('Password'), 'password');
+    await user.click(screen.getByRole('button', { name: 'Login' }));
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
+
+    const codeInput = screen.getByLabelText('Verification or recovery code');
+    expect(codeInput).toHaveAttribute('aria-invalid', 'true');
+    expect(codeInput).toHaveAttribute('aria-describedby', 'mfa-code-error');
+    expect(screen.getByText('Enter a valid code')).toHaveAttribute('id', 'mfa-code-error');
+    expect(screen.getByText('Enter a valid code')).toHaveAttribute('role', 'alert');
+  });
+
   it('MFA 验证失败时应使用翻译资源而不是硬编码中文', async () => {
     mockedPost
       .mockResolvedValueOnce({

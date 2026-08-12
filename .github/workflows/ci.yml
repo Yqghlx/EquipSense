@@ -81,6 +81,15 @@ jobs:
       - name: 运行生产脚本回归测试
         run: bash tests/scripts/production-scripts-test.sh
 
+      - name: 校验 Prometheus 证书告警规则语义
+        run: |
+          docker run --rm \
+            -v "$PWD/docker/prometheus/rules.yml:/tmp/rules.yml:ro" \
+            -v "$PWD/tests/prometheus/certificate-rules.test.yml:/tmp/certificate-rules.test.yml:ro" \
+            --entrypoint promtool \
+            prom/prometheus:latest@sha256:69f5241418838263316593f7274a304b095c40bcf22e57272865da91bd60a8ac \
+            test rules /tmp/certificate-rules.test.yml
+
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
         uses: actions/setup-dotnet@v4
         with:

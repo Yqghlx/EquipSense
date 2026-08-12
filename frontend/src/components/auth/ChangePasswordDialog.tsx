@@ -99,21 +99,39 @@ export function ChangePasswordDialog({ forced = false, onSuccess }: ChangePasswo
         </DialogHeader>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
-            <Label>{t('auth.currentPassword')}</Label>
-            <Input type="password" {...register('currentPassword')} />
-            {errors.currentPassword && <p className="text-sm text-destructive">{errors.currentPassword.message}</p>}
+            <Label htmlFor="changePasswordCurrent">{t('auth.currentPassword')}</Label>
+            <Input
+              id="changePasswordCurrent"
+              type="password"
+              {...register('currentPassword')}
+              aria-invalid={errors.currentPassword ? 'true' : undefined}
+              aria-describedby={errors.currentPassword ? 'change-password-current-error' : undefined}
+            />
+            {errors.currentPassword && <p id="change-password-current-error" role="alert" className="text-sm text-destructive">{errors.currentPassword.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label>{t('auth.newPassword')}</Label>
-            <Input type="password" {...register('newPassword')} />
-            {errors.newPassword && <p className="text-sm text-destructive">{errors.newPassword.message}</p>}
+            <Label htmlFor="changePasswordNew">{t('auth.newPassword')}</Label>
+            <Input
+              id="changePasswordNew"
+              type="password"
+              {...register('newPassword')}
+              aria-invalid={errors.newPassword ? 'true' : undefined}
+              aria-describedby={errors.newPassword ? 'change-password-new-error' : undefined}
+            />
+            {errors.newPassword && <p id="change-password-new-error" role="alert" className="text-sm text-destructive">{errors.newPassword.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label>{t('auth.confirmPassword')}</Label>
-            <Input type="password" {...register('confirmPassword')} />
-            {errors.confirmPassword && <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>}
+            <Label htmlFor="changePasswordConfirm">{t('auth.confirmPassword')}</Label>
+            <Input
+              id="changePasswordConfirm"
+              type="password"
+              {...register('confirmPassword')}
+              aria-invalid={errors.confirmPassword ? 'true' : undefined}
+              aria-describedby={errors.confirmPassword ? 'change-password-confirm-error' : undefined}
+            />
+            {errors.confirmPassword && <p id="change-password-confirm-error" role="alert" className="text-sm text-destructive">{errors.confirmPassword.message}</p>}
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button type="submit" disabled={loading}>
               {loading ? t('common.loading') : t('common.save')}
