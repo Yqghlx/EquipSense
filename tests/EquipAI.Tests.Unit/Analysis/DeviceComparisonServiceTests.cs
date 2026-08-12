@@ -271,6 +271,30 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
             .BeEquivalentTo([d1, d2], "不同类型设备即使被传入也不应进入 air_compressor 的对比结果");
     }
 
+    /// <summary>重复 ID 去重后仍有 2 台可见设备时应接受请求并只返回去重后的设备。</summary>
+    [Fact]
+    public async Task CompareAsync_重复DeviceIds去重后有两台设备_接受筛选()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        var d1 = await SeedDeviceAsync(db, _tenantId, "AC-001", "air_compressor", "1#");
+        var d2 = await SeedDeviceAsync(db, _tenantId, "AC-002", "air_compressor", "2#");
+        await SeedConstantTelemetryAsync(db, _tenantId, d1, "temperature", 4, 60.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, d2, "temperature", 4, 61.0);
+
+        var result = await CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [d1, d1, d2]);
+
+        result.Message.Should().BeNull("去重后仍有两台可见设备，应正常完成对比");
+        result.Devices.Select(device => device.DeviceId)
+            .Should()
+            .BeEquivalentTo([d1, d2]);
+    }
+
     /// <summary>
     /// 显式设备筛选也必须继续执行租户隔离，不能因为调用方传入了其他租户的同类型设备 ID 就越权读取。
     /// </summary>
@@ -304,6 +328,76 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
             .Should()
             .BeEquivalentTo([currentDevice, currentDevice2], "显式筛选结果只能包含当前租户选中的设备")
             .And.NotContain(otherTenantDevice, "显式筛选不能读取其他租户的同类型设备");
+    }
+
+    /// <summary>重复 ID 去重后不足 2 台时应拒绝请求，避免绕过最小样本边界。</summary>
+    [Fact]
+    public async Task CompareAsync_重复DeviceIds去重后不足两台_应抛出明确参数异常()
+    {
+        var service = CreateService(GetDb());
+        var deviceId = Guid.NewGuid();
+
+        var act = () => CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [deviceId, deviceId]);
+
+        var exception = await act.Should().ThrowAsync<ArgumentException>();
+        exception.Which.ParamName.Should().Be("deviceIds");
+        exception.Which.Message.Should().Contain("2 到 5");
+    }
+
+    /// <summary>空 GUID 不能作为显式设备筛选条件进入服务层。</summary>
+    [Fact]
+    public async Task CompareAsync_显式DeviceIds包含空Guid_应抛出明确参数异常()
+    {
+        var service = CreateService(GetDb());
+
+        var act = () => CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [Guid.Empty, Guid.NewGuid()]);
+
+        var exception = await act.Should().ThrowAsync<ArgumentException>();
+        exception.Which.ParamName.Should().Be("deviceIds");
+        exception.Which.Message.Should().Contain("空 GUID");
+    }
+
+    /// <summary>
+    /// 显式 ID 经过租户和类型过滤后不足 2 台时，只返回既有业务空态，不暴露被过滤设备。
+    /// </summary>
+    [Fact]
+    public async Task CompareAsync_显式DeviceIds过滤后可见设备不足两台_返回现有业务消息()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        var visibleDevice = await SeedDeviceAsync(db, _tenantId, "AC-001", "air_compressor", "当前租户-1#");
+        var otherTypeDevice = await SeedDeviceAsync(db, _tenantId, "PM-001", "pump", "当前租户泵-1#");
+        var otherTenant = Guid.NewGuid();
+        var otherTenantDevice = await SeedDeviceAsync(
+            db,
+            otherTenant,
+            "AC-X1",
+            "air_compressor",
+            "其他租户-1#");
+
+        await SeedConstantTelemetryAsync(db, _tenantId, visibleDevice, "temperature", 4, 60.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, otherTypeDevice, "temperature", 4, 90.0);
+        await SeedConstantTelemetryAsync(db, otherTenant, otherTenantDevice, "temperature", 4, 200.0);
+
+        var result = await CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [visibleDevice, otherTypeDevice, otherTenantDevice]);
+
+        result.Message.Should().Be("同类设备不足 2 台，无法对比");
+        result.Devices.Should().BeEmpty();
+        result.Devices.Should().NotContain(device =>
+            device.DeviceId == otherTypeDevice || device.DeviceId == otherTenantDevice);
     }
 
     /// <summary>

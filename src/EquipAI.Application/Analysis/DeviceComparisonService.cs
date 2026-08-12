@@ -64,7 +64,8 @@ public class DeviceComparisonService
                 throw new ArgumentException("deviceIds 去重后数量必须在 2 到 5 之间", nameof(deviceIds));
         }
 
-        // 查询该类型所有设备最近 N 小时的遥测数据
+        // 先限定当前租户和设备类型，显式 deviceIds 只在这个可见范围内进一步收窄候选。
+        // 不传 deviceIds 时条件恒为真，保留同类型全量对比的旧语义。
         var visibleDevices = await _db.Devices
             .Where(d => d.TenantId == tenantId
                         && d.Type == deviceType
@@ -83,7 +84,7 @@ public class DeviceComparisonService
             };
         }
 
-        // 一次性拉取当前租户、目标指标和时间窗口内的遥测，再在内存中按设备聚合。
+        // 候选设备至少两台后，一次性拉取这些可见设备的目标指标和时间窗口内遥测，再在内存中按设备聚合。
         // 设备数量由租户规模决定，逐设备查询会产生 N+1 往返并放大数据库连接池压力。
         var deviceLookup = visibleDevices.ToDictionary(d => d.Id);
         var telemetry = await _db.DeviceTelemetry

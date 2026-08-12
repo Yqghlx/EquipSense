@@ -1,181 +1,104 @@
-# Task 2 后端可选设备筛选实现报告
+# Task 2 后端可选设备筛选修复报告
 
 ## 状态
 
-DONE（后端可选 `deviceIds` 筛选与控制器边界校验已实现并通过聚焦验证）
+DONE。本轮审查修复已完成，后端聚焦测试和 Release 构建均通过。
 
-## 基线
+## 执行信息
 
-- 执行日期：2026-08-12
-- 基线提交：`171b966`
-- 任务目录命名：`2026-08-13-device-comparison-page`（按既有任务路径保留，实际执行日为 2026-08-12）
+- 任务目录：`2026-08-13-device-comparison-page`
+- 本轮审查修复日期：2026-08-13
+- 审查修复前提交：`abebe061279ca7aec226fb5bd3ec8534295272b1`
+- 范围：仅修改 Task 2 后端服务、控制器、Task 1 后端测试和本报告。
+- 未修改前端、路线文档、真实环境配置或凭据。
 
-## 变更范围
-
-- 修改 `src/EquipAI.Application/Analysis/DeviceComparisonService.cs`
-- 修改 `src/EquipAI.WebAPI/Controllers/DeviceComparisonController.cs`
-- 修改 `tests/EquipAI.Tests.Unit/Analysis/DeviceComparisonServiceTests.cs`
-- 新增 `.superpowers/sdd/2026-08-13-device-comparison-page/task-2-report.md`
-
-未修改前端、路线文档或其他无关文件。
-
-## 实现摘要
+## 变更内容
 
 ### 服务层
 
-- 为 `DeviceComparisonService.CompareAsync` 增加可选参数  
-  `IReadOnlyCollection<Guid>? deviceIds = null`
-- 保持 `deviceIds == null` 时的旧行为：继续对比当前租户、当前设备类型下的全部设备
-- 显式传入 `deviceIds` 时：
-  - 拒绝空集合
-  - 拒绝包含 `Guid.Empty` 的输入
-  - 对设备 ID 去重
-  - 要求去重后数量必须在 2–5 之间
-- 设备候选查询显式叠加三层条件：
-  - `TenantId == tenantId`
-  - `Type == deviceType`
-  - `deviceIds.Contains(d.Id)`（仅在显式筛选时启用）
-- 若最终可见设备不足 2 台，继续返回既有业务消息，不泄露被过滤设备是否存在
-- 遥测查询仍保持“设备列表一次 + 遥测一次”的批量读取语义，没有退化为逐设备查询
+- `DeviceComparisonService.CompareAsync` 保持可选 `IReadOnlyCollection<Guid>? deviceIds = null` 签名。
+- 未传 `deviceIds` 时，设备候选仍限定当前租户和设备类型，并保持同类型全量对比的旧行为。
+- 显式传入 ID 时，先在当前租户和设备类型范围内收窄候选，再应用 ID 集合；跨租户和跨类型 ID 不进入结果。
+- 显式 ID 先去重，去重后必须为 2 到 5 个；空集合、空 GUID 和数量越界均抛出 `ArgumentException`。
+- 可见设备不足 2 台时返回既有业务消息“同类设备不足 2 台，无法对比”，不泄露被过滤对象。
+- 保持设备列表一次查询、遥测一次批量查询的语义，没有引入逐设备 N+1 查询。
+- 修正查询注释，明确旧全量语义与显式 ID 收窄语义。
 
 ### 控制器
 
-- 将对比接口签名扩展为：
+- 保持重复 `deviceIds` query 参数绑定到 `Guid[]?`。
+- 在控制器文件内使用受控模型绑定：非法 GUID 不进入默认模型绑定文案，也不回显原始输入。
+- 空数组返回统一数量边界错误。
+- 空 GUID 返回明确的“不能包含空 GUID”错误，并包含 2 到 5 的允许范围语义。
+- 非法 GUID 返回明确的“必须是有效 GUID”错误，并包含 2 到 5 的允许范围语义。
+- 数量、重复 ID 去重后的边界错误统一返回仅含 `code` 和 `message` 的安全响应，不包含租户或设备存在性信息。
 
-```csharp
-public async Task<ActionResult<DeviceComparisonResult>> Compare(
-    [FromQuery] string deviceType,
-    [FromQuery] string metric,
-    [FromQuery] int hours = 24,
-    [FromQuery] Guid[]? deviceIds = null,
-    CancellationToken ct = default)
-```
+### 回归测试
 
-- 新增重复 `deviceIds` 查询参数绑定
-- 控制器在进入服务层前做 fail-fast 校验：
-  - 空数组返回 400
-  - `Guid.Empty` 返回 400
-  - 去重后数量不在 2–5 之间返回 400
-- 继续保留 `deviceType`、`metric`、`hours` 的原有边界校验
+- 服务测试新增并真实断言：空 GUID、`[A,A,B]` 去重后接受、`[A,A]` 去重后拒绝、租户/类型过滤后可见设备不足 2 台的既有业务消息和空结果。
+- 控制器集成测试新增并真实断言：空数组 query、重复 ID 的接受/拒绝边界、空 GUID 和非法 GUID 的 400 响应体字段、范围语义和安全信息边界。
+- 保留并补强原有 1 个和 6 个 ID 的 400 响应体断言。
 
-### 测试契约修正
+## TDD 验证记录
 
-- 由于服务方法签名已经从旧版五参扩展为六参，修正了  
-  `tests/EquipAI.Tests.Unit/Analysis/DeviceComparisonServiceTests.cs`  
-  中的辅助调用，使 `deviceIds == null` 时显式传入 `null`，避免测试代码本身因旧调用签名而编译失败。
-- 这属于 Task 2 允许范围内对 Task 1 后端测试的必要修正，不改变测试意图。
+### 本轮红灯
 
-## TDD 过程记录
-
-### 红灯
-
-#### 1. 服务层聚焦测试
-
-命令：
+先写入本轮回归测试，再运行：
 
 ```bash
-dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests" -p:UseAppHost=false
+dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests" -p:UseAppHost=false --no-restore
 ```
 
-初始结果：
+- 结果：退出码 0，22/22 通过。
+- 新增服务边界测试在审查前实现中已覆盖既有正确行为，因此直接为绿灯。
 
-- 退出码：1
-- 总数：18
-- 通过：12
-- 失败：6
-
-核心失败原因：
-
-- 服务尚未提供 `deviceIds` 新签名，依赖显式设备筛选契约的测试都失败在同一明确断言：
-  `DeviceComparisonService.CompareAsync 尚未提供 deviceIds 参数签名，无法验证显式设备筛选契约。`
-
-#### 2. 控制器聚焦测试
-
-命令：
+随后运行控制器集成测试：
 
 ```bash
-dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests" -p:UseAppHost=false
+dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests" -p:UseAppHost=false --no-restore
 ```
 
-初始结果：
+- 结果：退出码 1，12 项中 9 项通过、3 项失败。
+- 失败原因准确对应待修复行为：非法 GUID 和空数组仍返回默认 `ValidationProblemDetails`，空 GUID 仍返回“deviceIds 不能为空”。
 
-- 退出码：1
-- 总数：8
-- 通过：5
-- 失败：3
+### 本轮绿灯
 
-核心失败原因：
-
-- `仅传 1 个 deviceIds`
-- `传入 6 个 deviceIds`
-- `包含非法 GUID`
-
-三种情况都错误返回了 `200 OK`，说明控制器当时尚未绑定/校验 `deviceIds` 参数。
-
-### 绿灯
-
-#### 1. 服务层聚焦测试
-
-命令：
+修复模型绑定和错误语义后重新运行：
 
 ```bash
-dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests" -p:UseAppHost=false
+dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests" -p:UseAppHost=false --no-restore
 ```
 
-结果：
-
-- 退出码：0
-- 总数：18
-- 通过：18
-- 失败：0
-
-备注：
-
-- 本次通过输出中出现过一次 `MSB3026` 重试警告：`EquipAI.Application.dll` 被其他进程短暂占用后自动重试成功。
-- 该噪声不影响测试最终结论。
-
-#### 2. 控制器聚焦测试
-
-命令：
+- 结果：退出码 0，22/22 通过，0 失败。
 
 ```bash
-dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests" -p:UseAppHost=false
+dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests" -p:UseAppHost=false --no-restore
 ```
 
-结果：
+- 结果：退出码 0，12/12 通过，0 失败。
 
-- 退出码：0
-- 总数：8
-- 通过：8
-- 失败：0
-
-## 构建验证
-
-命令：
+## Release 构建
 
 ```bash
 dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers
 ```
 
-结果：
-
-- 退出码：0
+- 结果：退出码 0。
 - `Build succeeded.`
-- `0 Warning(s)`
-- `0 Error(s)`
+- 0 Warning(s)，0 Error(s)。
+
+## 前次 Task 2 实现验证记录
+
+为保留原任务的 TDD 证据，前次实现阶段的聚焦红灯为：服务测试 18 项中 12 项通过、6 项失败；控制器测试 8 项中 5 项通过、3 项失败。失败分别由缺少 `deviceIds` 服务签名、控制器绑定/边界校验缺失触发。前次实现后的绿灯为服务 18/18、控制器 8/8，Release 构建 0 Warning、0 Error。
 
 ## 已知基础设施噪声
 
-1. 仓库的 git/fsmonitor 在若干 `git` 命令期间持续输出：
+- 多次执行 Git 命令时出现 `fsmonitor_ipc__send_query: unspecified error on '.git/fsmonitor--daemon.ipc'`。该消息来自本地 Git fsmonitor，不影响差异检查、测试、构建或提交。
+- 本轮并行启动红灯测试时出现过一次 `MSB3026` 文件占用自动重试警告；随后串行绿灯测试成功，未影响结果。
+- 更早的聚焦测试曾出现本地 apphost 缺失复制和重复签名噪声，因此聚焦测试统一使用 `-p:UseAppHost=false`；本轮指定的 Release 构建未出现该问题。
 
-   - `fsmonitor_ipc__send_query: unspecified error on '.git/fsmonitor--daemon.ipc'`
+## 报告检查
 
-   该噪声不影响本次代码修改、测试和提交。
-
-2. 在第一次尝试不带 `-p:UseAppHost=false` 的聚焦测试时，曾遇到本地 `apphost` 相关构建噪声（缺失复制/重复签名）。
-   为了让验证真正落到设备对比契约本身，本次聚焦测试统一显式附加了 `-p:UseAppHost=false`。
-
-## 提交说明
-
-- 本报告文件位于被忽略目录下，提交时需要显式 `git add -f`
-- 本报告不写入自引用的最终提交哈希；最终提交哈希以提交完成后的 `git rev-parse HEAD` 为准
+- 已用 `git diff --check` 检查代码差异。
+- 本报告使用简体中文，且已清理 Markdown 行尾空格。
+- 报告不写入自引用的最终提交哈希；最终提交以 Git 提交结果为准。
