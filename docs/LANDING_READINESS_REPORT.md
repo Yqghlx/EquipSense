@@ -1,11 +1,11 @@
 # EquipSense 落地就绪检查报告
 
-> 基线生成时间：2026-06-14
+> 基线生成时间：2026-06-14（历史基线）
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-12）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）。按仓库命令实测，本轮设备对比聚焦后端单测 22/22、聚焦集成测试 12/12、全量后端单测 1505/1505、默认后端集成 177 通过/6 跳过、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1105 个键完全对齐，Vitest 85 个测试文件/489 个测试全部通过，生产构建 precache 133 entries，并额外暴露 1 条 PWA `inlineDynamicImports` 弃用 warning。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
+> **当前状态说明（2026-08-13）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）。按仓库命令实测，本轮设备对比聚焦后端单测 22/22、聚焦集成测试 12/12、全量后端单测 1505/1505、默认后端集成 183 总数（177 通过、6 跳过、0 失败）、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1105 个键完全对齐，Vitest 85 个测试文件/489 个测试全部通过，生产构建 precache 133 entries，并额外暴露 1 条 PWA `inlineDynamicImports` 弃用 warning。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
 
-> **本轮发布门禁补充（2026-08-12）**：`production-readiness.sh` 已支持按顺序叠加基础 Compose 与生产 overlay，并接入 `deploy-production.sh` 的部署前静态检查、目标版本/同 tag/回滚后的全量运行态检查；目标版本只有在应用探针和全量 readiness 均通过后才写入版本记录，回滚 readiness 失败保持严重失败。`bash tests/scripts/production-scripts-test.sh readiness|deploy|setup|ci|all`、Shell 语法检查和差异检查均通过。真实工作区复核仍以非零退出报告 27 个问题，未修改 `docker/.env`。
+> **本轮发布门禁补充（2026-08-13）**：`production-readiness.sh` 已支持按顺序叠加基础 Compose 与生产 overlay，并接入 `deploy-production.sh` 的部署前静态检查、目标版本/同 tag/回滚后的全量运行态检查；目标版本只有在应用探针和全量 readiness 均通过后才写入版本记录，回滚 readiness 失败保持严重失败。`bash tests/scripts/production-scripts-test.sh readiness|deploy|setup|ci|all`、Shell 语法检查和差异检查均通过。真实工作区复核仍以非零退出报告 27 个问题，未修改 `docker/.env`。
 
 > 本轮新增验证：根因分析、知识沉淀、工单外部集成和告警通知的普通故障降级不会吞掉宿主停机/处理超时取消，取消会继续传播给消息总线；集成连接测试同样区分普通外部失败和宿主/请求取消，避免停机期间把未完成请求伪装成失败结果；外部工单创建接口返回 null/非 2xx 时不再被路由器误记为成功，会按指数退避重试并在最终失败时写入 Failed 日志；状态变更适配器返回 `false` 时同样进入重试并记录 Failed，状态路由复用最近一次成功创建推送的 ExternalId，EAM 等系统可以定位外部工单；告警钉钉/飞书机器人现在校验 HTTP 与业务响应，非 2xx 或明确业务错误最多重试 3 次，连续失败记录最终错误，避免告警静默丢失；OEE 遥测查询与 LLM 调用区分主动取消和内部超时；设备离线与网关心跳监控采用条件更新，避免状态快照之后刚恢复通信的对象被误标记离线或误发通知；RabbitMQ 启动阶段收到宿主取消时不再记录严重启动故障，正常停机连接关闭记录为信息日志，停机取消不会污染 Inbox 失败指标或失败状态；注册、设备、工单、登录/MFA、密码恢复和用户管理表单校验错误现在通过 `aria-invalid`、`aria-describedby` 和告警语义准确关联输入框，下拉框必填校验也复用中英文业务提示；新增证书生命周期监控，后端只读 Nginx/MQTT 公钥并暴露到期时间、剩余天数和读取状态，Prometheus 增加 30 天 warning、7 天 critical 与监控不可用告警；新增受隔离授权保护的 `SEED_DEMO_DATA=full` 完整演示模式，可幂等生成固定 10 台设备、24 小时遥测、5 条告警和 4 张工单；真实 PostgreSQL smoke 暴露并修复了完整演示事务未包裹 Npgsql 重试执行策略的问题，修复后 runtime smoke 与 433 个 Production E2E 均为 432 通过、1 个架构性条件跳过、0 失败；本轮通知中心收件人按活动用户展开、取消令牌贯穿 SignalR 与后台处理链的回归，以及最新后端 Release 构建、生产脚本和镜像运行时 smoke 均已复验通过。
 
@@ -16,10 +16,10 @@
 | 后端代码行（Core+Application+Infrastructure+WebAPI） | 51,534 行 |
 | 后端 API 端点 | 135 个（25 个 Controller） |
 | 前端页面 | 30 个 |
-| 单元测试 | 1505 个（后端）+ 489 个（前端） |
+| 单元测试 | 1505/1505 个（后端）+ 489/489 个（前端） |
 | 集成测试 | 183 个用例（34 个文件） |
-| E2E 测试 | 433 个用例（Playwright） |
-| 压力测试 | 13 个脚本文件（load + stress） |
+| E2E 测试 | 433 个用例（Playwright，历史隔离 Production 基线） |
+| 压力测试 | 13 个 JS/TS 文件（11 个 K6 场景 + 2 个共享 config） |
 
 ## 二、功能完备性核验（对照行业产品）
 
@@ -138,7 +138,7 @@
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
 | 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
 | 后端单元测试 | ✅ 全量 1505/1505 通过；设备对比聚焦 22/22 通过 |
-| 后端集成测试 | ✅ 默认 177 通过、6 条件跳过、0 失败；设备对比聚焦 12/12 通过 |
+| 后端集成测试 | ✅ 默认 183 总数：177 通过、6 条件跳过、0 失败；设备对比聚焦 12/12 通过 |
 | 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
 | 前端单元测试 | ✅ 85 个测试文件、489/489 通过 |
@@ -149,7 +149,7 @@
 | 依赖审计 | ✅ NuGet 全解决方案无已知漏洞；npm 全量审计 0 漏洞；审计服务失败会阻断 |
 | 生产脚本/启动门禁 | ✅ 三镜像发布/滚动回滚/蓝绿切换、环境校验、独立凭据与 TLS/MQTT 证书 fail-closed 检查、证书生命周期指标/告警契约、应用种子账户启动校验、边缘网关租户/持久化路径校验、Production runtime smoke 与默认全量 E2E 门禁、备份、恢复和 CI 契约行为测试通过；本轮新增有序 Compose overlay、部署前静态 readiness、目标版本/同 tag/回滚后全量运行态 readiness 及失败保留旧版本记录的行为测试；本机隔离 smoke 已用当前提交本地构建的三镜像和固定 digest 基础层通过，固定 digest 的 CI runner 仍需按发布流水线验证 |
 
-> 2026-08-12 Task 5 分层验证摘要：`dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests"` 22/22；`dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests"` 12/12；`dotnet test tests/EquipAI.Tests.Unit` 1505/1505；`dotnet test tests/EquipAI.Tests.Integration` 177 通过/6 跳过；`dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers` 0 warning；`bash tests/scripts/production-scripts-test.sh all` 0 退出；前端 `check:i18n`、TypeScript、ESLint、全量 Vitest 和生产构建全部 0 退出。
+> 2026-08-13 Task 5 分层验证摘要：`dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests"` 22/22；`dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests"` 12/12；`dotnet test tests/EquipAI.Tests.Unit` 1505/1505；`dotnet test tests/EquipAI.Tests.Integration` 177 通过/6 跳过/0 失败，共 183；`dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers` 0 warning；`bash tests/scripts/production-scripts-test.sh all` 0 退出；前端 `check:i18n`、TypeScript、ESLint、全量 Vitest 和生产构建全部 0 退出。E2E 433 条为历史隔离 Production 基线，本轮未重跑。
 
 ## 七、部署前检查清单
 
