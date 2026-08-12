@@ -202,7 +202,7 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
             var notificationService = scope.ServiceProvider.GetService<ISignalRNotificationService>();
             if (notificationService is not null)
             {
-                await notificationService.SendPendingRuleCreatedAsync(tenantId);
+                await notificationService.SendPendingRuleCreatedAsync(tenantId, ct);
             }
 
             _logger.LogInformation(

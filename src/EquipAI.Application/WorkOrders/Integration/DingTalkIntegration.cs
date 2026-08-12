@@ -70,13 +70,13 @@ public class DingTalkIntegration : IWorkOrderIntegration
     /// 推送工单状态变更通知
     /// 使用 ActionCard 消息格式，支持在钉钉内直接跳转查看工单详情
     /// </summary>
-    public async Task PushStatusChangedAsync(
+    public async Task<bool> PushStatusChangedAsync(
         Guid tenantId, Guid workOrderId, string status, string? externalId,
         string config, CancellationToken ct = default)
     {
         var dingConfig = DeserializeConfig(config);
         if (dingConfig == null || string.IsNullOrEmpty(dingConfig.WebhookUrl))
-            return;
+            return false;
 
         var url = BuildSignedUrl(dingConfig);
         var now = DateTime.UtcNow.ToString(DateFormat);
@@ -103,7 +103,8 @@ public class DingTalkIntegration : IWorkOrderIntegration
             workOrderId,
             dingConfig.AtMobiles);
 
-        await SendDingTalkAsync(url, message, ct);
+        var responseBody = await SendDingTalkAsync(url, message, ct);
+        return responseBody is not null;
     }
 
     /// <summary>

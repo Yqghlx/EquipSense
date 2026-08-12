@@ -79,7 +79,8 @@ public class GatewayHeartbeatMonitor : LockedTimerService
             // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强）。
             try
             {
-                await signalR.SendGatewayOfflineAsync(gateway.TenantId, gateway.Id, gateway.GatewayId, gateway.Name);
+                await signalR.SendGatewayOfflineAsync(
+                    gateway.TenantId, gateway.Id, gateway.GatewayId, gateway.Name, ct);
             }
             catch (Exception ex)
             {

@@ -198,6 +198,8 @@ services:
       SEED_TECH_PASSWORD: "${SEED_TECH_PASSWORD:?请在 .env 中设置 SEED_TECH_PASSWORD}"
       SEED_OPERATOR_PASSWORD: "${SEED_OPERATOR_PASSWORD:?请在 .env 中设置 SEED_OPERATOR_PASSWORD}"
       SEED_VIEWER_PASSWORD: "${SEED_VIEWER_PASSWORD:?请在 .env 中设置 SEED_VIEWER_PASSWORD}"
+      # 生产默认不创建测试租户和示例设备；隔离验收 Compose 会显式覆盖为 true。
+      SEED_DEMO_DATA: "${SEED_DEMO_DATA:-false}"
       # 仅隔离 E2E/验收环境可显式开启第二租户账户；生产默认关闭且不需要该密码。
       SEED_TENANT2_ACCOUNT: "${SEED_TENANT2_ACCOUNT:-false}"
       SEED_TENANT2_PASSWORD: "${SEED_TENANT2_PASSWORD:-}"

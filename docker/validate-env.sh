@@ -399,6 +399,21 @@ else
     error "RABBITMQ_IMAGE 必须使用带 digest 的固定镜像引用"
   fi
 
+  demo_data="$(read_env_value SEED_DEMO_DATA)"
+  demo_data_normalized="$(printf '%s' "$demo_data" | tr '[:upper:]' '[:lower:]')"
+  case "$demo_data_normalized" in
+    ""|false|0)
+      ;;
+    true|1|full)
+      if [ "${aspnet_environment:-Production}" = "Production" ] && [ "$ALLOW_ISOLATED_E2E" != true ]; then
+        error "生产环境禁止开启 SEED_DEMO_DATA；演示数据只能在隔离验收环境中显式授权"
+      fi
+      ;;
+    *)
+      error "SEED_DEMO_DATA 仅支持 true、false、1 或 0；完整演示模式使用 full"
+      ;;
+  esac
+
   tenant2_account="$(read_env_value SEED_TENANT2_ACCOUNT)"
   if [[ "$tenant2_account" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
     if [ "${aspnet_environment:-Production}" = "Production" ] && [ "$ALLOW_ISOLATED_E2E" != true ]; then

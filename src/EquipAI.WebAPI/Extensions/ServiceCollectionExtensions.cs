@@ -255,6 +255,7 @@ public static class ServiceCollectionExtensions
 
         // TimescaleDB 初始化服务
         services.AddScoped<TimescaleDbSetup>();
+        services.AddScoped<FullDemoDataSeeder>();
         services.AddScoped<DataSeeder>();
 
         // 多租户分层限流（v1.5 安全加固）— 使用 ASP.NET Core 8 内置 RateLimiter

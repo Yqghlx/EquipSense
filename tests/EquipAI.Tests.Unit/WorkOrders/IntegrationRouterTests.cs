@@ -265,6 +265,79 @@ public class IntegrationRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task RouteCreatedAsync_外部集成返回空响应后恢复_应重试并记录Success日志()
+    {
+        // Arrange — 外部集成用 null 表示 HTTP 非成功响应，第二次调用恢复成功
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.SetupSequence(d => d.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null)
+            .ReturnsAsync("external-id-after-retry");
+
+        var router = CreateRouter([dingTalkMock.Object]);
+
+        // Act
+        await router.RouteCreatedAsync(_tenantId, _workOrderId, CancellationToken.None);
+
+        // Assert — null 不能被当成成功；恢复后应保留重试次数和外部 ID
+        dingTalkMock.Verify(d => d.PushCreatedAsync(
+            _tenantId, _workOrderId,
+            "测试工单标题", "High",
+            It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pushLog = await db.Set<IntegrationPushLog>()
+            .IgnoreQueryFilters()
+            .SingleAsync(log => log.TenantId == _tenantId && log.WorkOrderId == _workOrderId);
+
+        pushLog.Status.Should().Be("Success");
+        pushLog.RetryCount.Should().Be(1);
+        pushLog.ExternalId.Should().Be("external-id-after-retry");
+        pushLog.ErrorMessage.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RouteCreatedAsync_外部集成持续返回空响应_应重试3次并记录Failed日志()
+    {
+        // Arrange — 模拟钉钉、飞书或 Webhook 在 HTTP 非 2xx 时的 null 返回约定
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.Setup(d => d.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+
+        var router = CreateRouter([dingTalkMock.Object]);
+
+        // Act
+        await router.RouteCreatedAsync(_tenantId, _workOrderId, CancellationToken.None);
+
+        // Assert — 最终失败必须可观测，不能留下伪成功日志
+        dingTalkMock.Verify(d => d.PushCreatedAsync(
+            _tenantId, _workOrderId,
+            "测试工单标题", "High",
+            It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3));
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pushLog = await db.Set<IntegrationPushLog>()
+            .IgnoreQueryFilters()
+            .SingleAsync(log => log.TenantId == _tenantId && log.WorkOrderId == _workOrderId);
+
+        pushLog.Status.Should().Be("Failed");
+        pushLog.RetryCount.Should().Be(3);
+        pushLog.ErrorMessage.Should().Be("外部集成未返回成功响应");
+        pushLog.ExternalId.Should().BeNull();
+    }
+
+    [Fact]
     public async Task RouteStatusChangedAsync_应传递新状态给集成()
     {
         // Arrange
@@ -274,7 +347,7 @@ public class IntegrationRouterTests : IDisposable
                 It.IsAny<Guid>(), It.IsAny<Guid>(),
                 It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
 
         var router = CreateRouter([dingTalkMock.Object]);
         var newStatus = "Assigned";
@@ -288,6 +361,83 @@ public class IntegrationRouterTests : IDisposable
             newStatus, null,
             It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task RouteStatusChangedAsync_应复用最近成功创建推送的ExternalId()
+    {
+        // Arrange — EAM 等外部系统必须依赖创建响应中的外部工单号更新状态
+        using (var seedScope = _scopeFactory.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            seedDb.Set<IntegrationPushLog>().Add(new IntegrationPushLog
+            {
+                TenantId = _tenantId,
+                WorkOrderId = _workOrderId,
+                IntegrationType = "dingtalk",
+                Direction = "Created",
+                Status = "Success",
+                ExternalId = "external-work-order-001"
+            });
+            await seedDb.SaveChangesAsync();
+        }
+
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.Setup(d => d.PushStatusChangedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var router = CreateRouter([dingTalkMock.Object]);
+
+        // Act
+        await router.RouteStatusChangedAsync(
+            _tenantId, _workOrderId, "InProgress", CancellationToken.None);
+
+        // Assert — 状态推送应携带创建阶段保存的外部 ID
+        dingTalkMock.Verify(d => d.PushStatusChangedAsync(
+            _tenantId, _workOrderId,
+            "InProgress", "external-work-order-001",
+            It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RouteStatusChangedAsync_外部集成返回失败标志时_应重试3次并记录Failed日志()
+    {
+        // Arrange — 模拟适配器收到非 2xx 后返回 false
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.Setup(d => d.PushStatusChangedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        var router = CreateRouter([dingTalkMock.Object]);
+
+        // Act
+        await router.RouteStatusChangedAsync(
+            _tenantId, _workOrderId, "InProgress", CancellationToken.None);
+
+        // Assert — 状态同步失败不能留下伪成功日志
+        dingTalkMock.Verify(d => d.PushStatusChangedAsync(
+            _tenantId, _workOrderId,
+            "InProgress", null,
+            It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3));
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pushLog = await db.Set<IntegrationPushLog>()
+            .IgnoreQueryFilters()
+            .SingleAsync(log => log.TenantId == _tenantId && log.WorkOrderId == _workOrderId);
+
+        pushLog.Status.Should().Be("Failed");
+        pushLog.RetryCount.Should().Be(3);
+        pushLog.ErrorMessage.Should().Be("外部集成未返回成功响应");
     }
 
     [Fact]

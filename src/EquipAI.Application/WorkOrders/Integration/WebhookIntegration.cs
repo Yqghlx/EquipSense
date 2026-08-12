@@ -80,10 +80,10 @@ public class WebhookIntegration : IWorkOrderIntegration
         return await SendWebhookAsync(webhookConfig, body, ct);
     }
 
-    public async Task PushStatusChangedAsync(Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default)
+    public async Task<bool> PushStatusChangedAsync(Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default)
     {
         var webhookConfig = DeserializeConfig<WebhookConfig>(config);
-        if (webhookConfig == null || string.IsNullOrEmpty(webhookConfig.Url)) return;
+        if (webhookConfig == null || string.IsNullOrEmpty(webhookConfig.Url)) return false;
 
         var payload = new
         {
@@ -95,7 +95,8 @@ public class WebhookIntegration : IWorkOrderIntegration
         };
 
         var body = JsonSerializer.Serialize(payload);
-        await SendWebhookAsync(webhookConfig, body, ct);
+        var responseBody = await SendWebhookAsync(webhookConfig, body, ct);
+        return responseBody is not null;
     }
 
     /// <summary>

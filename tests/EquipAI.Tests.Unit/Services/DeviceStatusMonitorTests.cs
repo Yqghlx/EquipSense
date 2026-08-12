@@ -163,10 +163,12 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
 
         // 验证：超时设备被标记 Offline 后，应按租户推送离线通知（含设备标识），阈值内设备不通知
         _notifications.Verify(
-            n => n.SendDeviceOfflineAsync(tenantA, deviceOffline, It.IsAny<string>(), It.IsAny<string>()),
+            n => n.SendDeviceOfflineAsync(tenantA, deviceOffline, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Once, "设备离线必须推送通知给运维，否则通信中断无人知晓（设备离线不触发阈值告警）");
         _notifications.Verify(
-            n => n.SendDeviceOfflineAsync(tenantA, deviceOnline, It.IsAny<string>(), It.IsAny<string>()),
+            n => n.SendDeviceOfflineAsync(tenantA, deviceOnline, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Never, "阈值内的在线设备不应被误判离线，不应推送离线通知");
     }
 
@@ -210,7 +212,8 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
 
         affected.Should().Be(0, "设备已在更新前恢复上报，不能把竞态中的过期快照算作实际离线");
         _notifications.Verify(
-            n => n.SendDeviceOfflineAsync(tenantId, deviceId, It.IsAny<string>(), It.IsAny<string>()),
+            n => n.SendDeviceOfflineAsync(tenantId, deviceId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Never,
             "恢复上报的设备不应收到错误的离线通知");
 

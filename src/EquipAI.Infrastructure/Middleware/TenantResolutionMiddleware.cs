@@ -57,8 +57,10 @@ public class TenantResolutionMiddleware
         // 检查是否为系统管理员角色
         var roleClaim = context.User.FindFirst("role");
 
-        // 从 JWT Claims 中提取用户 ID
-        var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier);
+        // 从 JWT Claims 中提取用户 ID。JwtBearer 的声明映射配置可能被宿主关闭，
+        // 因此不能只依赖映射后的 NameIdentifier，必须兼容 JWT 标准 sub 声明。
+        var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)
+            ?? context.User.FindFirst("sub");
         if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var parsedUserId))
         {
             userId = parsedUserId;

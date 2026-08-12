@@ -103,15 +103,18 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
         // 升级后应通知主管（每个活跃租户一条）
         _notifyMock.Verify(
             n => n.SendWorkOrderEscalatedAsync(tenantA, woA.Id, woA.WorkOrderCode, woA.Title,
-                WorkOrderPriority.Medium.ToString(), WorkOrderPriority.High.ToString()),
+                WorkOrderPriority.Medium.ToString(), WorkOrderPriority.High.ToString(),
+                It.IsAny<CancellationToken>()),
             Times.Once, "租户 A 的升级应通知主管");
         _notifyMock.Verify(
             n => n.SendWorkOrderEscalatedAsync(tenantB, woB.Id, woB.WorkOrderCode, woB.Title,
-                WorkOrderPriority.Medium.ToString(), WorkOrderPriority.High.ToString()),
+                WorkOrderPriority.Medium.ToString(), WorkOrderPriority.High.ToString(),
+                It.IsAny<CancellationToken>()),
             Times.Once, "租户 B 的升级应通知主管");
         _notifyMock.Verify(
             n => n.SendWorkOrderEscalatedAsync(It.Is<Guid>(g => g == tenantC), It.IsAny<Guid>(),
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
             Times.Never, "Expired 租户被跳过，不应发送升级通知");
     }
 
@@ -130,7 +133,7 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
         _notifyMock
             .Setup(n => n.SendWorkOrderEscalatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 cancellation.Cancel();

@@ -183,7 +183,8 @@
         "push": "浏览器推送",
         "pushDescription": "浏览器未打开时推送通知",
         "email": "邮件通知",
-        "emailDescription": "发送到注册邮箱（需配置 SMTP）"
+        "emailDescription": "邮件告警投递暂未开放",
+        "emailUnavailable": "邮件告警投递暂未开放"
       },
       "push": {
         "unsupported": "当前浏览器不支持推送通知，浏览器推送渠道不可用",

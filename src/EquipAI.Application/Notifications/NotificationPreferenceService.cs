@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using EquipAI.Core.Entities;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -93,7 +94,7 @@ public class NotificationPreferenceService
         var user = await _db.Users.FindAsync(new object[] { userId }, ct);
         if (user == null) return new NotificationPreferences();
 
-        return ParsePrefs(user.NotificationPrefs);
+        return Normalize(ParsePrefs(user.NotificationPrefs));
     }
 
     /// <summary>
@@ -104,11 +105,47 @@ public class NotificationPreferenceService
         var user = await _db.Users.FindAsync(new object[] { userId }, ct);
         if (user == null) throw new KeyNotFoundException("用户不存在");
 
-        user.NotificationPrefs = JsonSerializer.Serialize(prefs, JsonOptions);
+        var normalized = Normalize(prefs);
+        user.NotificationPrefs = JsonSerializer.Serialize(normalized, JsonOptions);
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation("用户 {UserId} 更新了通知偏好", userId);
-        return prefs;
+        return normalized;
+    }
+
+    /// <summary>
+    /// 从候选用户中筛选出已启用指定通知类型和渠道的活动用户。
+    /// 查询显式携带租户和候选 ID，避免后台通知分发依赖当前请求的全局租户过滤器。
+    /// </summary>
+    public async Task<IReadOnlySet<Guid>> GetEnabledUserIdsAsync(
+        Guid tenantId,
+        IReadOnlyCollection<Guid> candidateUserIds,
+        string notificationType,
+        string channel,
+        CancellationToken ct = default)
+    {
+        var candidateIds = candidateUserIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        if (tenantId == Guid.Empty || candidateIds.Length == 0)
+            return new HashSet<Guid>();
+
+        var users = await _db.UnfilteredSet<User>()
+            .Where(user => user.TenantId == tenantId
+                && user.IsActive
+                && candidateIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.NotificationPrefs })
+            .ToListAsync(ct);
+
+        return users
+            .Where(user => IsEnabled(
+                Normalize(ParsePrefs(user.NotificationPrefs)),
+                notificationType,
+                channel))
+            .Select(user => user.Id)
+            .ToHashSet();
     }
 
     /// <summary>
@@ -117,6 +154,14 @@ public class NotificationPreferenceService
     public async Task<bool> IsEnabledAsync(Guid userId, string notificationType, string channel, CancellationToken ct = default)
     {
         var prefs = await GetAsync(userId, ct);
+        return IsEnabled(prefs, notificationType, channel);
+    }
+
+    /// <summary>
+    /// 统一判断单个偏好对象的渠道状态。
+    /// </summary>
+    private static bool IsEnabled(NotificationPreferences prefs, string notificationType, string channel)
+    {
         var channelPrefs = prefs.GetByType(notificationType);
 
         return channel.ToLowerInvariant() switch
@@ -144,5 +189,32 @@ public class NotificationPreferenceService
         {
             return new NotificationPreferences();
         }
+    }
+
+    /// <summary>
+    /// 规范化持久化配置，邮件告警尚未接入投递链路，因此始终标记为不可用。
+    /// 创建新对象而不是修改调用方对象，避免 API 层复用请求对象时产生隐式副作用。
+    /// </summary>
+    private static NotificationPreferences Normalize(NotificationPreferences prefs)
+    {
+        return new NotificationPreferences
+        {
+            Alert = NormalizeChannel(prefs.Alert),
+            WorkOrder = NormalizeChannel(prefs.WorkOrder),
+            System = NormalizeChannel(prefs.System),
+        };
+    }
+
+    /// <summary>
+    /// 复制单个渠道配置并关闭邮件选项。
+    /// </summary>
+    private static ChannelPreference NormalizeChannel(ChannelPreference prefs)
+    {
+        return new ChannelPreference
+        {
+            SignalR = prefs.SignalR,
+            Push = prefs.Push,
+            Email = false,
+        };
     }
 }

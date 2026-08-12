@@ -183,7 +183,8 @@
         "push": "Browser push",
         "pushDescription": "Push notifications when the browser is closed",
         "email": "Email notifications",
-        "emailDescription": "Send to the registered email (SMTP required)"
+        "emailDescription": "Email alert delivery is not available yet",
+        "emailUnavailable": "Email alert delivery is not available yet"
       },
       "push": {
         "unsupported": "This browser does not support push notifications. The browser push channel is unavailable.",

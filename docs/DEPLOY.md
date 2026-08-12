@@ -1,5 +1,7 @@
 # EquipSense 部署指南
 
+> 需要打印或交付给实施工程师时，使用[生产安装与验收指南](INSTALLATION_GUIDE.md)和生成的 [PDF 版本](../output/pdf/equipsense-production-installation-guide.pdf)。PDF 源文档和生成脚本分别位于 `docs/INSTALLATION_GUIDE.md` 与 `docs/scripts/build-installation-guide-pdf.py`。
+
 ## 系统要求
 
 | 组件 | 最低版本 | 推荐配置 |
@@ -51,6 +53,9 @@ SEED_LEAD_PASSWORD=<主管初始密码>
 SEED_TECH_PASSWORD=<技术员初始密码>
 SEED_OPERATOR_PASSWORD=<操作员初始密码>
 SEED_VIEWER_PASSWORD=<观察者初始密码>
+# 普通 Production 保持 false；隔离 smoke Compose 会显式覆盖为 full
+# true/1 为兼容的最小验收种子；full 为完整演示数据集，只能用于隔离环境
+SEED_DEMO_DATA=false
 VAPID__PUBLICKEY=<由 web-push 生成的公钥>
 VAPID__PRIVATEKEY=<由 web-push 生成的私钥>
 REDIS_PASSWORD=<Redis强密码>
@@ -142,7 +147,7 @@ bash docker/production-readiness.sh --env-file docker/.env
 docker/compose-production.sh up -d
 ```
 
-首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 用户 PII 历史数据加密回填 + 种子数据）。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。正式部署前必须使用 `bash docker/validate-env.sh docker/.env --check-runtime-files`，不能只检查文件路径是否存在。应用启动会用 PostgreSQL advisory lock 串行保护迁移、PII 回填、种子和 TimescaleDB 初始化；PII 回填或密文校验失败会阻止服务继续启动，蓝绿发布时不需要人工暂停旧实例。镜像构建使用仓库根目录 `.dockerignore` 排除 `node_modules`、编译产物、测试报告、备份、证书和 `.env`，不要用 `-f` 指向其他上下文，否则可能导致构建缓慢或把敏感文件发送给 Docker daemon。
+首次启动约需 2-3 分钟（构建镜像 + 数据库迁移 + 用户 PII 历史数据加密回填 + 基础种子数据）。Production 默认只创建系统租户、引导租户、生产种子账户、行业模板和诊断知识，不创建测试租户或 `AC-001` 示例设备；`SEED_DEMO_DATA=true`/`1` 仅保留最小隔离验收兼容模式，`SEED_DEMO_DATA=full` 才会在临时隔离数据库创建固定的 10 台演示设备、24 小时遥测、告警和工单，三者都不允许进入普通生产库，普通生产校验会拒绝显式开启。生产 Compose 的 MQTT 连接使用 8883/TLS；CA 文件来自 `docker/mqtt-certs/ca.crt`。正式部署前必须使用 `bash docker/validate-env.sh docker/.env --check-runtime-files`，不能只检查文件路径是否存在。应用启动会用 PostgreSQL advisory lock 串行保护迁移、PII 回填、种子和 TimescaleDB 初始化；PII 回填或密文校验失败会阻止服务继续启动，蓝绿发布时不需要人工暂停旧实例。镜像构建使用仓库根目录 `.dockerignore` 排除 `node_modules`、编译产物、测试报告、备份、证书和 `.env`，不要用 `-f` 指向其他上下文，否则可能导致构建缓慢或把敏感文件发送给 Docker daemon。
 
 ### 4. 验证部署
 
@@ -202,6 +207,7 @@ curl http://localhost:8080/api/v1/system/info
 | `FILE_STORAGE_S3_BUCKET` 等 | S3 桶、区域、可选自定义端点、访问凭据、路径风格和对象键前缀；自定义端点生产必须 HTTPS | - | Provider=S3 时按端点类型必填 |
 | `OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS` | 是否允许 Webhook/EAM 等租户集成访问 RFC1918 私网地址，开启前需完成网络隔离评审 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` 等五项 | 种子账户初始密码（每项至少 16 个字符，不得使用占位值或公开默认值） | - | 生产环境必填 |
+| `SEED_DEMO_DATA` | 演示数据模式：`false`/`0` 关闭，`true`/`1` 保留最小隔离验收种子，`full` 创建 10 台设备、遥测、告警和工单；普通 Production 必须关闭 | `false` | 否 |
 | `JWT_SECRET` | JWT 签名密钥 | - | 是 |
 | `TOTP_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256 TOTP 密钥，必须由外部密钥管理系统保存 | - | 生产环境必填 |
 | `PII_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256-GCM 用户邮箱/手机号密钥，必须与 TOTP 密钥独立并由外部密钥管理系统保存 | - | 生产环境必填 |
@@ -222,7 +228,10 @@ curl http://localhost:8080/api/v1/system/info
 系统首次启动时会自动：
 1. 创建数据库表（EF Core 迁移）
 2. 创建 TimescaleDB 超级表和连续聚合
-3. 种子数据（角色、权限、系统管理员）
+3. 基础种子数据（角色、权限、生产初始账户、行业模板和知识库）
+4. 仅在隔离验收显式开启 `SEED_DEMO_DATA=true`/`1` 或 `full` 时创建验收数据；`full` 额外创建固定的 10 台演示设备、遥测、告警和工单
+
+升级已有数据库时不会自动删除历史示例设备、测试租户或测试账户；如生产库曾误开启演示数据，先完成备份和审计，再按租户/设备/账户关系执行经审批的人工清理。
 
 工单附件默认写入 `attachments_data` 命名卷，容器重建不会丢失文件；单机多实例共享该卷。跨主机、多副本或 Kubernetes 部署时应配置 `FILE_STORAGE_PROVIDER=S3` 使用共享对象存储。应用会在生产启动时校验桶、端点、凭据和安全对象键前缀；项目不会自动启动 MinIO，切换前必须完成历史附件迁移、最小权限配置和隔离恢复演练。
 
@@ -274,6 +283,7 @@ backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compo
 版本 tag 还会在同一组 Production 镜像中执行默认 433 个业务 E2E；当前仅保留 1 个有明确架构原因的条件跳过点，本次隔离 Production smoke 实际为 432 通过、1 跳过、0 失败。Smoke Compose
 会清除固定容器名、移除基础设施宿主端口绑定，并为应用探针分配独立端口，可与本机已有基础设施
 或并发 smoke 任务并行运行。
+Smoke Compose 仅在临时隔离数据库中显式设置 `SEED_DEMO_DATA=full`，用于提供固定的 10 台演示设备、遥测、告警、工单以及跨租户验收所需的测试租户；该开关不会进入生产 Compose。
 全量验收在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户测试账户的 TOTP，
 再执行登录与业务流程，不会通过关闭 MFA 来绕过生产安全策略；第二租户账户只在该隔离验收中临时开启。
 

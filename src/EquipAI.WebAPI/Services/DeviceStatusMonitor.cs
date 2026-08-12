@@ -108,7 +108,7 @@ public class DeviceStatusMonitor : LockedTimerService
             try
             {
                 await notifications.SendDeviceOfflineAsync(
-                    device.TenantId, device.Id, device.DeviceCode, device.Name ?? device.DeviceCode);
+                    device.TenantId, device.Id, device.DeviceCode, device.Name ?? device.DeviceCode, ct);
             }
             catch (Exception ex)
             {

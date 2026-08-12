@@ -93,13 +93,32 @@ public class PushNotificationService : IPushNotificationService
     public async Task SendToUserAsync(Guid tenantId, Guid userId,
         string title, string body, string? url = null)
     {
+        await SendToUsersAsync(tenantId, [userId], title, body, url);
+    }
+
+    /// <inheritdoc />
+    public async Task SendToUsersAsync(Guid tenantId, IReadOnlyCollection<Guid> userIds,
+        string title, string body, string? url = null, CancellationToken cancellationToken = default)
+    {
+        var selectedUserIds = userIds
+            .Where(userId => userId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        if (tenantId == Guid.Empty || selectedUserIds.Length == 0)
+            return;
+
+        cancellationToken.ThrowIfCancellationRequested();
+
         var subscriptions = await _dbContext.PushSubscriptions
             .IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenantId && s.UserId == userId && s.IsActive)
-            .ToListAsync();
+            .Where(subscription => subscription.TenantId == tenantId
+                && selectedUserIds.Contains(subscription.UserId)
+                && subscription.IsActive)
+            .ToListAsync(cancellationToken);
 
         var payload = JsonSerializer.Serialize(new { title, body, url });
-        await SendPayloadToSubscriptions(subscriptions, payload);
+        await SendPayloadToSubscriptions(subscriptions, payload, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -112,7 +131,7 @@ public class PushNotificationService : IPushNotificationService
             .ToListAsync();
 
         var payload = JsonSerializer.Serialize(new { title, body, url });
-        await SendPayloadToSubscriptions(subscriptions, payload);
+        await SendPayloadToSubscriptions(subscriptions, payload, CancellationToken.None);
     }
 
     /// <summary>
@@ -120,8 +139,12 @@ public class PushNotificationService : IPushNotificationService
     /// 自动清理无效订阅（410 Gone 响应）
     /// </summary>
     private async Task SendPayloadToSubscriptions(
-        List<Core.Entities.PushSubscription> subscriptions, string payload)
+        List<Core.Entities.PushSubscription> subscriptions,
+        string payload,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         // VAPID 未配置时降级：订阅管理仍可用，仅发送功能跳过
         if (string.IsNullOrEmpty(_vapidPublicKey) || string.IsNullOrEmpty(_vapidPrivateKey))
         {
@@ -134,6 +157,8 @@ public class PushNotificationService : IPushNotificationService
 
         foreach (var sub in subscriptions)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             try
             {
                 var pushSubscription = new WebPush.PushSubscription(
@@ -147,12 +172,16 @@ public class PushNotificationService : IPushNotificationService
                 {
                     _logger.LogWarning("推送订阅已过期，自动清理: Endpoint={Endpoint}", sub.Endpoint);
                     _dbContext.PushSubscriptions.Remove(sub);
-                    await _dbContext.SaveChangesAsync();
+                    await _dbContext.SaveChangesAsync(cancellationToken);
                 }
                 else
                 {
                     _logger.LogError(ex, "推送通知发送失败: Endpoint={Endpoint}", sub.Endpoint);
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

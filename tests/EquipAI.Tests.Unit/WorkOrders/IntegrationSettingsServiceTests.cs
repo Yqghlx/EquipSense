@@ -20,6 +20,7 @@ public class IntegrationSettingsServiceTests : IAsyncDisposable
 {
     private readonly Guid _tenantId = Guid.NewGuid();
     private readonly AppDbContext _db;
+    private readonly Mock<IWorkOrderIntegration> _integration;
     private readonly IntegrationSettingsService _sut;
 
     public IntegrationSettingsServiceTests()
@@ -30,9 +31,9 @@ public class IntegrationSettingsServiceTests : IAsyncDisposable
         var tenantContext = new TestTenantContext(_tenantId);
         _db = new AppDbContext(options, tenantContext);
 
-        var integration = new Mock<IWorkOrderIntegration>();
-        integration.SetupGet(item => item.IntegrationType).Returns("webhook");
-        integration.Setup(item => item.PushCreatedAsync(
+        _integration = new Mock<IWorkOrderIntegration>();
+        _integration.SetupGet(item => item.IntegrationType).Returns("webhook");
+        _integration.Setup(item => item.PushCreatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
@@ -47,7 +48,7 @@ public class IntegrationSettingsServiceTests : IAsyncDisposable
         _sut = new IntegrationSettingsService(
             _db,
             tenantContext,
-            [integration.Object],
+            [_integration.Object],
             new OutboundEndpointPolicy(configuration),
             NullLogger<IntegrationSettingsService>.Instance);
     }
@@ -76,6 +77,39 @@ public class IntegrationSettingsServiceTests : IAsyncDisposable
         result.Should().NotBeNull();
         result!.Success.Should().BeFalse();
         result.Message.Should().Contain("失败");
+    }
+
+    [Fact]
+    public async Task TestAsync_请求取消时_应传播取消而不是转换为失败结果()
+    {
+        _db.Tenants.Add(new Tenant
+        {
+            Id = _tenantId,
+            Name = "测试租户",
+            Slug = $"tenant-{Guid.NewGuid():N}",
+            Settings = JsonSerializer.Serialize(new
+            {
+                integrations = new
+                {
+                    webhook = new { enabled = true, url = "https://example.com/webhook" },
+                },
+            }),
+        });
+        await _db.SaveChangesAsync();
+
+        using var cancellation = new CancellationTokenSource();
+        _integration.Setup(item => item.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid _, Guid _, string _, string _, string _, CancellationToken _) =>
+            {
+                cancellation.Cancel();
+                return Task.FromCanceled<string?>(cancellation.Token);
+            });
+
+        var act = () => _sut.TestAsync("webhook", cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]

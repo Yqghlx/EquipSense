@@ -23,6 +23,12 @@ public interface IPushNotificationService
     Task SendToUserAsync(Guid tenantId, Guid userId, string title, string body, string? url = null);
 
     /// <summary>
+    /// 向指定租户内多个用户的所有活动订阅发送推送通知
+    /// </summary>
+    Task SendToUsersAsync(Guid tenantId, IReadOnlyCollection<Guid> userIds,
+        string title, string body, string? url = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// 向指定租户的所有订阅发送推送通知（广播）
     /// </summary>
     Task SendToTenantAsync(Guid tenantId, string title, string body, string? url = null);

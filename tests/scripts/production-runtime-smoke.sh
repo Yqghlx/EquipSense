@@ -236,6 +236,7 @@ runtime_env=(
   "SEED_TECH_PASSWORD=$SEED_TECH_PASSWORD"
   "SEED_OPERATOR_PASSWORD=$SEED_OPERATOR_PASSWORD"
   "SEED_VIEWER_PASSWORD=$SEED_VIEWER_PASSWORD"
+  "SEED_DEMO_DATA=full"
   "SEED_TENANT2_ACCOUNT=$SEED_TENANT2_ACCOUNT"
   "SEED_TENANT2_PASSWORD=$SEED_TENANT2_PASSWORD"
   "SEQ_ADMIN_PASSWORD=$SEQ_ADMIN_PASSWORD"
@@ -335,11 +336,8 @@ printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
     mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
 
-validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files")
-if [[ "$SMOKE_RUN_E2E" = true ]]; then
-  # 跨租户 E2E 需要临时测试账户；只有隔离 smoke 才能显式授予该校验例外。
-  validation_args+=("--allow-isolated-e2e")
-fi
+# 整个 runtime smoke 都运行在临时隔离 Compose 项目中，演示数据开关只服务于该验收环境。
+validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files" "--allow-isolated-e2e")
 bash "$RUNTIME_DOCKER/validate-env.sh" "${validation_args[@]}" >/dev/null
 
 COMPOSE=(
@@ -493,6 +491,51 @@ curl --fail --silent --show-error --max-time 10 \
   "http://127.0.0.1:$BACKEND_PORT/api/v1/auth/me" >/dev/null \
   || fatal "Production 访问令牌无法访问受保护的 /auth/me"
 
+# 完整演示模式除了要能启动，还必须通过真实 API 暴露完整且可读的业务闭环。
+# 这里校验固定编码集合而不是只校验数量，避免基础种子或历史残留恰好凑出相同数量。
+demo_devices_response="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Bearer $viewer_access_token" \
+  "http://127.0.0.1:$BACKEND_PORT/api/v1/devices?page=1&pageSize=100")" \
+  || fatal "完整演示设备列表 API 读取失败"
+expected_demo_device_codes='["AC-001","DEMO-002","DEMO-003","DEMO-004","DEMO-005","DEMO-006","DEMO-007","DEMO-008","DEMO-009","DEMO-010"]'
+jq -e --argjson expected_codes "$expected_demo_device_codes" \
+  '(.total == 10) and (([.items[].deviceCode] | sort) == ($expected_codes | sort))' \
+  <<<"$demo_devices_response" >/dev/null \
+  || fatal "完整演示设备数据不完整（期望 10 个固定设备编码）"
+
+demo_device_id="$(jq -r '.items[] | select(.deviceCode == "AC-001") | .id' <<<"$demo_devices_response")"
+[[ "$demo_device_id" =~ ^[0-9a-fA-F-]{36}$ ]] \
+  || fatal "完整演示设备 AC-001 缺少有效设备 ID"
+
+# 查询一台代表设备的最新值，确认演示遥测确实已写入时序库并经过读路径返回。
+demo_telemetry_response="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Bearer $viewer_access_token" \
+  "http://127.0.0.1:$BACKEND_PORT/api/v1/telemetry/$demo_device_id")" \
+  || fatal "完整演示遥测查询 API 读取失败"
+jq -e '(.oil_temperature != null) and (.vibration != null) and (.motor_current != null)' \
+  <<<"$demo_telemetry_response" >/dev/null \
+  || fatal "完整演示遥测数据不完整（AC-001 缺少预期指标）"
+
+demo_alerts_response="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Bearer $viewer_access_token" \
+  "http://127.0.0.1:$BACKEND_PORT/api/v1/alerts?page=1&pageSize=100")" \
+  || fatal "完整演示告警列表 API 读取失败"
+expected_demo_alert_codes='["DEMO-ALERT-001","DEMO-ALERT-002","DEMO-ALERT-003","DEMO-ALERT-004","DEMO-ALERT-005"]'
+jq -e --argjson expected_codes "$expected_demo_alert_codes" \
+  '(.total == 5) and (([.items[].alertCode] | sort) == ($expected_codes | sort))' \
+  <<<"$demo_alerts_response" >/dev/null \
+  || fatal "完整演示告警数据不完整（期望 5 个固定告警编码）"
+
+demo_work_orders_response="$(curl --fail --silent --show-error --max-time 10 \
+  -H "Authorization: Bearer $viewer_access_token" \
+  "http://127.0.0.1:$BACKEND_PORT/api/v1/work-orders?page=1&pageSize=100")" \
+  || fatal "完整演示工单列表 API 读取失败"
+expected_demo_work_order_codes='["DEMO-WO-001","DEMO-WO-002","DEMO-WO-003","DEMO-WO-004"]'
+jq -e --argjson expected_codes "$expected_demo_work_order_codes" \
+  '(.total == 4) and (([.items[].workOrderCode] | sort) == ($expected_codes | sort))' \
+  <<<"$demo_work_orders_response" >/dev/null \
+  || fatal "完整演示工单数据不完整（期望 4 个固定工单编码）"
+
 gateways_response="$(curl --fail --silent --show-error --max-time 10 \
   -H "Authorization: Bearer $viewer_access_token" \
   "http://127.0.0.1:$BACKEND_PORT/api/v1/gateways")" \
@@ -561,4 +604,4 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
   printf 'Production 镜像完整业务 E2E 通过。\n'
 fi
 
-printf 'Production runtime smoke 通过：镜像、迁移、边缘网关缓存、健康探针、HTTPS 和 API 反向代理均正常。\n'
+printf 'Production runtime smoke 通过：镜像、迁移、完整演示数据、边缘网关缓存、健康探针、HTTPS 和 API 反向代理均正常。\n'

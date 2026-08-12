@@ -274,6 +274,11 @@ public class IntegrationSettingsService
         }
         catch (Exception ex)
         {
+            // 请求方或宿主正在取消时必须继续传播取消信号，不能伪装成普通集成失败，
+            // 否则停机期间会继续占用外部连接并让消息处理器误判为已完成。
+            if (ct.IsCancellationRequested && ex is OperationCanceledException)
+                throw;
+
             sw.Stop();
             _logger.LogWarning(ex, "集成连接测试失败: Type={Type}", type);
 

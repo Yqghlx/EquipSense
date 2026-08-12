@@ -23,7 +23,8 @@ const translations: Record<string, string> = {
   'notifications.preferences.channels.push': 'Browser push',
   'notifications.preferences.channels.pushDescription': 'Push notifications when the browser is closed',
   'notifications.preferences.channels.email': 'Email notifications',
-  'notifications.preferences.channels.emailDescription': 'Send to the registered email (SMTP required)',
+  'notifications.preferences.channels.emailDescription': 'Email alert delivery is not available yet',
+  'notifications.preferences.channels.emailUnavailable': 'Email alert delivery is not available yet',
   'notifications.preferences.push.unsupported': 'This browser does not support push notifications. The browser push channel is unavailable.',
   'notifications.preferences.push.title': 'Browser push subscription',
   'notifications.preferences.push.subscribed': 'Subscribed; browser push notifications are ready',
@@ -48,9 +49,9 @@ vi.mock('../../../hooks/useNotificationPreferences', () => ({
 }));
 
 const mockPreferences: NotificationPreferences = {
-  alert: { signalr: true, push: true, email: true },
-  workorder: { signalr: true, push: true, email: true },
-  system: { signalr: true, push: true, email: true },
+  alert: { signalr: true, push: true, email: false },
+  workorder: { signalr: true, push: true, email: false },
+  system: { signalr: true, push: true, email: false },
 };
 
 const mockUpdate = vi.fn();
@@ -96,6 +97,7 @@ describe('通知偏好设置英文界面', () => {
     expect(screen.getByRole('columnheader', { name: 'Realtime push' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Browser push' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Email notifications' })).toBeInTheDocument();
+    expect(screen.getAllByText('Email alert delivery is not available yet')).toHaveLength(3);
     expect(screen.getByText('Alert notifications')).toBeInTheDocument();
     expect(screen.getByText('Work order notifications')).toBeInTheDocument();
     expect(screen.getByText('System notifications')).toBeInTheDocument();
@@ -112,7 +114,26 @@ describe('通知偏好设置英文界面', () => {
     await user.click(screen.getByRole('switch', { name: 'Toggle Alert notifications via Realtime push' }));
 
     expect(mockUpdate).toHaveBeenCalledWith({
-      alert: { signalr: false, push: true, email: true },
+      alert: { signalr: false, push: true, email: false },
+      workorder: mockPreferences.workorder,
+      system: mockPreferences.system,
+    });
+  });
+
+  it('邮件渠道应明确禁用且整行开关不能开启邮件', async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    const emailSwitch = screen.getByRole('switch', {
+      name: 'Toggle Alert notifications via Email notifications',
+    });
+    expect(emailSwitch).toHaveAttribute('aria-disabled', 'true');
+    await user.click(emailSwitch);
+    expect(mockUpdate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('switch', { name: 'Toggle all Alert notifications channels' }));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      alert: { signalr: false, push: false, email: false },
       workorder: mockPreferences.workorder,
       system: mockPreferences.system,
     });

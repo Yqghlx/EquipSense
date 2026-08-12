@@ -1,4 +1,6 @@
+using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
+using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.WebAPI.Hubs;
@@ -52,16 +54,80 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
     /// <summary>装配 IHubContext → IHubClients.Group → IClientProxy 的 mock 链</summary>
     private static Mock<IHubContext<IndustrialHub>> BuildHub(Mock<IClientProxy> proxyMock)
     {
-        var clientsMock = new Mock<IHubClients>();
-        clientsMock.Setup(x => x.Group(It.IsAny<string>())).Returns(proxyMock.Object);
+        var clientsMock = BuildClients(proxyMock);
         var hubContextMock = new Mock<IHubContext<IndustrialHub>>();
         hubContextMock.Setup(x => x.Clients).Returns(clientsMock.Object);
         return hubContextMock;
     }
 
+    /// <summary>构造可检查租户内用户组调用的 Hub mock。</summary>
+    private static (
+        Mock<IHubContext<IndustrialHub>> Hub,
+        Mock<IClientProxy> Proxy,
+        Mock<IHubClients> Clients) CreateHealthyHubWithClients()
+    {
+        var proxyMock = new Mock<IClientProxy>();
+        var clientsMock = BuildClients(proxyMock);
+        var hubContextMock = new Mock<IHubContext<IndustrialHub>>();
+        hubContextMock.Setup(x => x.Clients).Returns(clientsMock.Object);
+        return (hubContextMock, proxyMock, clientsMock);
+    }
+
+    /// <summary>配置租户广播和租户内用户组两种 SignalR 客户端入口。</summary>
+    private static Mock<IHubClients> BuildClients(Mock<IClientProxy> proxyMock)
+    {
+        var clientsMock = new Mock<IHubClients>();
+        clientsMock.Setup(x => x.Group(It.IsAny<string>())).Returns(proxyMock.Object);
+        clientsMock.Setup(x => x.Groups(It.IsAny<IReadOnlyList<string>>())).Returns(proxyMock.Object);
+        return clientsMock;
+    }
+
     private SignalRNotificationService CreateService(
         Mock<IHubContext<IndustrialHub>> hubContext, Mock<IPushNotificationService> pushMock)
-        => new(hubContext.Object, pushMock.Object, _db, Mock.Of<ILogger<SignalRNotificationService>>());
+        => new(
+            hubContext.Object,
+            pushMock.Object,
+            _db,
+            Mock.Of<ILogger<SignalRNotificationService>>(),
+            new NotificationPreferenceService(_db, Mock.Of<ILogger<NotificationPreferenceService>>()));
+
+    /// <summary>为通知收件人测试创建指定租户的用户。</summary>
+    private async Task<List<User>> SeedUsersAsync(params (UserRole Role, bool IsActive)[] definitions)
+    {
+        var users = definitions.Select((definition, index) => new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            Username = $"notification-user-{index}-{Guid.NewGuid():N}",
+            PasswordHash = "test-hash",
+            Role = definition.Role,
+            IsActive = definition.IsActive,
+        }).ToList();
+
+        _db.Users.AddRange(users);
+        await _db.SaveChangesAsync();
+        return users;
+    }
+
+    /// <summary>为渠道偏好测试创建带有原始 JSON 配置的租户用户。</summary>
+    private async Task<List<User>> SeedUsersWithPreferencesAsync(
+        params (UserRole Role, bool IsActive, string NotificationPrefs)[] definitions)
+    {
+        var users = definitions.Select((definition, index) => new User
+        {
+            Id = Guid.NewGuid(),
+            TenantId = _tenantId,
+            Username = $"preference-user-{index}-{Guid.NewGuid():N}",
+            PasswordHash = "test-hash",
+            Role = definition.Role,
+            IsActive = definition.IsActive,
+            NotificationPrefs = definition.NotificationPrefs,
+        }).ToList();
+
+        _db.Users.AddRange(users);
+        await _db.SaveChangesAsync();
+        return users;
+    }
 
     [Fact]
     public async Task SendAlertTriggeredAsync_SignalR失败时_不应向上抛出异常()
@@ -79,10 +145,10 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task SendAlertTriggeredAsync_SignalR失败时_应仍持久化站内通知()
+    public async Task SendAlertTriggeredAsync_SignalR失败时_不应写入GuidEmpty孤儿通知()
     {
-        // SignalR 失败后，站内通知仍须持久化——离线用户登录后才能看到告警记录，
-        // 不能因实时推送通道故障就丢掉持久化通知（持久化是离线兜底，与实时推送正交）。
+        // 告警触发的角色分发由 AlertNotificationService 负责；SignalR 服务只负责实时推送和 Web Push，
+        // 不应再额外写入无法被任何用户查询到的 Guid.Empty 通知。
         var pushMock = new Mock<IPushNotificationService>();
         var (hub, _) = CreateFailingHub();
         var sut = CreateService(hub, pushMock);
@@ -90,11 +156,7 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         var alertId = Guid.NewGuid();
         await sut.SendAlertTriggeredAsync(_tenantId, alertId, "ALERT-001", Guid.NewGuid(), "temp", 95.0, "Critical");
 
-        var notification = await _db.Notifications.FirstOrDefaultAsync(n => n.RelatedId == alertId);
-        notification.Should().NotBeNull("SignalR 失败后站内通知仍应持久化，让离线用户登录后能看到告警");
-        notification!.Type.Should().Be("alert");
-        notification.RelatedId.Should().Be(alertId);
-        notification.TenantId.Should().Be(_tenantId);
+        (await _db.Notifications.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -105,22 +167,47 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         var pushMock = new Mock<IPushNotificationService>();
         var (hub, _) = CreateFailingHub();
         var sut = CreateService(hub, pushMock);
+        var user = (await SeedUsersAsync((UserRole.MaintenanceLead, true)))[0];
 
         await sut.SendAlertTriggeredAsync(_tenantId, Guid.NewGuid(), "ALERT-001", Guid.NewGuid(), "temp", 95.0, "Critical");
 
         pushMock.Verify(
-            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            x => x.SendToUsersAsync(
+                _tenantId,
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { user.Id })),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once,
             "Web Push 应独立于 SignalR 执行，SignalR 失败不得跳过 Web Push");
     }
 
     [Fact]
-    public async Task SendAlertTriggeredAsync_SignalR正常时_应推送并持久化()
+    public async Task SendAlertTriggeredAsync_底层SignalR取消时应继续传播取消信号()
     {
-        // 对照测试：SignalR 正常时所有通道都应工作（证明隔离逻辑不破坏正常路径）。
+        var proxyMock = new Mock<IClientProxy>();
+        proxyMock
+            .Setup(x => x.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+        var hub = BuildHub(proxyMock);
+        var sut = CreateService(hub, new Mock<IPushNotificationService>());
+        await SeedUsersAsync((UserRole.MaintenanceLead, true));
+
+        var act = () => sut.SendAlertTriggeredAsync(
+            _tenantId, Guid.NewGuid(), "ALERT-001", Guid.NewGuid(), "temp", 95.0, "Critical");
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task SendAlertTriggeredAsync_SignalR正常时_只推送实时事件()
+    {
+        // 对照测试：SignalR 正常时应推送实时事件，但不应重复创建告警站内通知。
         var pushMock = new Mock<IPushNotificationService>();
         var (hub, proxy) = CreateHealthyHub();
         var sut = CreateService(hub, pushMock);
+        await SeedUsersAsync((UserRole.MaintenanceLead, true));
 
         var alertId = Guid.NewGuid();
         await sut.SendAlertTriggeredAsync(_tenantId, alertId, "ALERT-001", Guid.NewGuid(), "temp", 95.0, "Critical");
@@ -130,9 +217,140 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
             Times.Once,
             "SignalR 正常时应推送告警到租户组");
         pushMock.Verify(
-            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            x => x.SendToUsersAsync(
+                _tenantId,
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once);
-        (await _db.Notifications.CountAsync(n => n.RelatedId == alertId)).Should().Be(1);
+        (await _db.Notifications.CountAsync(n => n.RelatedId == alertId)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SendTelemetryUpdateAsync_应把取消令牌传给SignalR()
+    {
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, proxy) = CreateHealthyHub();
+        var sut = CreateService(hub, pushMock);
+        using var cancellation = new CancellationTokenSource();
+
+        await sut.SendTelemetryUpdateAsync(
+            _tenantId, Guid.NewGuid(), "temperature", 42.0, cancellation.Token);
+
+        proxy.Verify(
+            x => x.SendCoreAsync(
+                "OnTelemetryUpdate",
+                It.IsAny<object[]>(),
+                cancellation.Token),
+            Times.Once,
+            "后台停机时 SignalR 推送必须接收同一个取消令牌");
+    }
+
+    [Fact]
+    public async Task SendAlertResolvedAsync_应只为活动运维角色创建用户通知()
+    {
+        var users = await SeedUsersAsync(
+            (UserRole.SystemAdmin, true),
+            (UserRole.MaintenanceLead, true),
+            (UserRole.Technician, true),
+            (UserRole.MaintenanceLead, false),
+            (UserRole.Operator, true),
+            (UserRole.Viewer, true));
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateHealthyHub();
+        var sut = CreateService(hub, pushMock);
+        var alertId = Guid.NewGuid();
+
+        await sut.SendAlertResolvedAsync(_tenantId, alertId);
+
+        var notifications = await _db.Notifications
+            .Where(n => n.RelatedId == alertId)
+            .ToListAsync();
+        notifications.Should().HaveCount(3);
+        notifications.Should().OnlyContain(n => n.UserId != Guid.Empty);
+        notifications.Select(n => n.UserId).Should().BeEquivalentTo(
+            users.Where(u => u.IsActive && u.Role is UserRole.SystemAdmin or UserRole.MaintenanceLead or UserRole.Technician)
+                .Select(u => u.Id));
+    }
+
+    [Fact]
+    public async Task SendWorkOrderEscalatedAsync_应只为活动主管创建用户通知()
+    {
+        var users = await SeedUsersAsync(
+            (UserRole.SystemAdmin, true),
+            (UserRole.MaintenanceLead, true),
+            (UserRole.MaintenanceLead, false),
+            (UserRole.Technician, true));
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateHealthyHub();
+        var sut = CreateService(hub, pushMock);
+        var workOrderId = Guid.NewGuid();
+
+        await sut.SendWorkOrderEscalatedAsync(
+            _tenantId, workOrderId, "WO-001", "空压机过热", "High", "Critical");
+
+        var notifications = await _db.Notifications
+            .Where(n => n.RelatedId == workOrderId)
+            .ToListAsync();
+        notifications.Should().HaveCount(2);
+        notifications.Should().OnlyContain(n => n.UserId != Guid.Empty);
+        notifications.Select(n => n.UserId).Should().BeEquivalentTo(
+            users.Where(u => u.IsActive && u.Role is UserRole.SystemAdmin or UserRole.MaintenanceLead)
+                .Select(u => u.Id));
+    }
+
+    [Fact]
+    public async Task SendDeviceOfflineAsync_应只为活动运维角色创建用户通知()
+    {
+        var users = await SeedUsersAsync(
+            (UserRole.SystemAdmin, true),
+            (UserRole.MaintenanceLead, true),
+            (UserRole.Technician, true),
+            (UserRole.Technician, false),
+            (UserRole.Operator, true));
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateHealthyHub();
+        var sut = CreateService(hub, pushMock);
+        var deviceId = Guid.NewGuid();
+
+        await sut.SendDeviceOfflineAsync(_tenantId, deviceId, "DEV-001", "1号空压机");
+
+        var notifications = await _db.Notifications
+            .Where(n => n.RelatedId == deviceId)
+            .ToListAsync();
+        notifications.Should().HaveCount(3);
+        notifications.Should().OnlyContain(n => n.UserId != Guid.Empty);
+        notifications.Select(n => n.UserId).Should().BeEquivalentTo(
+            users.Where(u => u.IsActive && u.Role is UserRole.SystemAdmin or UserRole.MaintenanceLead or UserRole.Technician)
+                .Select(u => u.Id));
+    }
+
+    [Fact]
+    public async Task SendGatewayOfflineAsync_应只为活动运维角色创建用户通知()
+    {
+        var users = await SeedUsersAsync(
+            (UserRole.SystemAdmin, true),
+            (UserRole.MaintenanceLead, true),
+            (UserRole.Technician, true),
+            (UserRole.SystemAdmin, false),
+            (UserRole.Operator, true));
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateHealthyHub();
+        var sut = CreateService(hub, pushMock);
+        var gatewayId = Guid.NewGuid();
+
+        await sut.SendGatewayOfflineAsync(_tenantId, gatewayId, "GW-001", "1号采集网关");
+
+        var notifications = await _db.Notifications
+            .Where(n => n.RelatedId == gatewayId)
+            .ToListAsync();
+        notifications.Should().HaveCount(3);
+        notifications.Should().OnlyContain(n => n.UserId != Guid.Empty);
+        notifications.Select(n => n.UserId).Should().BeEquivalentTo(
+            users.Where(u => u.IsActive && u.Role is UserRole.SystemAdmin or UserRole.MaintenanceLead or UserRole.Technician)
+                .Select(u => u.Id));
     }
 
     [Fact]
@@ -145,6 +363,7 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         var (hub, _) = CreateFailingHub();
         var sut = CreateService(hub, pushMock);
 
+        await SeedUsersAsync((UserRole.MaintenanceLead, true));
         var alertId = Guid.NewGuid();
         var act = async () => await sut.SendAlertResolvedAsync(_tenantId, alertId);
         await act.Should().NotThrowAsync("告警解除的 SignalR 单点失败不得拖垮持久化与 Web Push");
@@ -152,7 +371,13 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         var notification = await _db.Notifications.FirstOrDefaultAsync(n => n.RelatedId == alertId);
         notification.Should().NotBeNull("SignalR 失败后站内告警解除通知仍应持久化");
         pushMock.Verify(
-            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            x => x.SendToUsersAsync(
+                _tenantId,
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once, "Web Push 应独立于 SignalR 执行");
     }
 
@@ -165,6 +390,7 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         var (hub, _) = CreateFailingHub();
         var sut = CreateService(hub, pushMock);
 
+        await SeedUsersAsync((UserRole.MaintenanceLead, true));
         var workOrderId = Guid.NewGuid();
         var act = async () => await sut.SendWorkOrderEscalatedAsync(
             _tenantId, workOrderId, "WO-001", "空压机过热", "High", "Critical");
@@ -174,7 +400,13 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         notification.Should().NotBeNull("SignalR 失败后 SLA 升级站内通知仍应持久化，主管登录后能看到");
         notification!.Type.Should().Be("workorder_escalated");
         pushMock.Verify(
-            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            x => x.SendToUsersAsync(
+                _tenantId,
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -187,6 +419,7 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         var (hub, _) = CreateFailingHub();
         var sut = CreateService(hub, pushMock);
 
+        await SeedUsersAsync((UserRole.Technician, true));
         var deviceId = Guid.NewGuid();
         var act = async () => await sut.SendDeviceOfflineAsync(_tenantId, deviceId, "DEV-001", "1号空压机");
         await act.Should().NotThrowAsync("设备离线的 SignalR 单点失败不得拖垮持久化与 Web Push");
@@ -195,8 +428,86 @@ public class SignalRNotificationServiceTests : IAsyncDisposable
         notification.Should().NotBeNull("SignalR 失败后设备离线站内通知仍应持久化，运维登录后能看到");
         notification!.Type.Should().Be("device_offline");
         pushMock.Verify(
-            x => x.SendToTenantAsync(_tenantId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            x => x.SendToUsersAsync(
+                _tenantId,
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task SendAlertResolvedAsync_应只向开启告警实时通知的用户组发送()
+    {
+        var users = await SeedUsersWithPreferencesAsync(
+            (UserRole.MaintenanceLead, true, "{\"alert\":{\"signalr\":false}}"),
+            (UserRole.MaintenanceLead, true, "{}"));
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _, clients) = CreateHealthyHubWithClients();
+        var sut = CreateService(hub, pushMock);
+
+        await sut.SendAlertResolvedAsync(_tenantId, Guid.NewGuid());
+
+        var enabledUserId = users[1].Id;
+        clients.Verify(
+            x => x.Groups(It.Is<IReadOnlyList<string>>(groups =>
+                groups.SequenceEqual(new[] { $"tenant:{_tenantId}:user:{enabledUserId}" }))),
+            Times.Once,
+            "告警实时消息只能发送给开启告警 SignalR 的用户组");
+    }
+
+    [Fact]
+    public async Task SendWorkOrderEscalatedAsync_应只向开启工单推送的主管发送()
+    {
+        var users = await SeedUsersWithPreferencesAsync(
+            (UserRole.MaintenanceLead, true, "{\"workorder\":{\"push\":false}}"),
+            (UserRole.SystemAdmin, true, "{}"));
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _) = CreateHealthyHub();
+        var sut = CreateService(hub, pushMock);
+
+        await sut.SendWorkOrderEscalatedAsync(
+            _tenantId, Guid.NewGuid(), "WO-PREF-001", "空压机过热", "High", "Critical");
+
+        var enabledUserId = users[1].Id;
+        pushMock.Verify(
+            x => x.SendToUsersAsync(
+                _tenantId,
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.SequenceEqual(new[] { enabledUserId })),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "工单升级 Push 只能发送给开启工单 Push 的主管");
+    }
+
+    [Fact]
+    public async Task SendAlertResolvedAsync_无渠道收件人时仍应持久化站内历史()
+    {
+        var user = (await SeedUsersWithPreferencesAsync(
+            (UserRole.MaintenanceLead, true, "{\"alert\":{\"signalr\":false,\"push\":false}}")))[0];
+        var pushMock = new Mock<IPushNotificationService>();
+        var (hub, _, clients) = CreateHealthyHubWithClients();
+        var sut = CreateService(hub, pushMock);
+        var alertId = Guid.NewGuid();
+
+        await sut.SendAlertResolvedAsync(_tenantId, alertId);
+
+        clients.Verify(x => x.Groups(It.IsAny<IReadOnlyList<string>>()), Times.Never);
+        pushMock.Verify(
+            x => x.SendToUsersAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        var notification = await _db.Notifications.SingleAsync(n => n.RelatedId == alertId);
+        notification.UserId.Should().Be(user.Id);
     }
 
     public async ValueTask DisposeAsync() => await _db.DisposeAsync();

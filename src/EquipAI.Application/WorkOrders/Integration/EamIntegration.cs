@@ -106,18 +106,18 @@ public class EamIntegration : IWorkOrderIntegration
         }
     }
 
-    public async Task PushStatusChangedAsync(
+    public async Task<bool> PushStatusChangedAsync(
         Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default)
     {
         var eamConfig = DeserializeConfig(config);
-        if (eamConfig == null || !eamConfig.Enabled) return;
-        if (string.IsNullOrEmpty(eamConfig.Endpoint)) return;
+        if (eamConfig == null || !eamConfig.Enabled) return false;
+        if (string.IsNullOrEmpty(eamConfig.Endpoint)) return false;
 
         // 如果没有外部 ID，无法在 EAM 中定位工单
         if (string.IsNullOrEmpty(externalId))
         {
             _logger.LogWarning("EAM 状态同步跳过：缺少 ExternalId，WorkOrderId={WorkOrderId}", workOrderId);
-            return;
+            return false;
         }
 
         // 构建更新工单状态的 API 地址
@@ -150,11 +150,11 @@ public class EamIntegration : IWorkOrderIntegration
             {
                 _logger.LogInformation("EAM 工单状态更新成功: ExternalId={ExternalId}, Status={Status}",
                     externalId, eamStatus);
+                return true;
             }
-            else
-            {
-                _logger.LogWarning("EAM 工单状态更新失败: Status={StatusCode}", response.StatusCode);
-            }
+
+            _logger.LogWarning("EAM 工单状态更新失败: Status={StatusCode}", response.StatusCode);
+            return false;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -164,6 +164,7 @@ public class EamIntegration : IWorkOrderIntegration
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "EAM 工单状态更新异常: ExternalId={ExternalId}", externalId);
+            return false;
         }
     }
 

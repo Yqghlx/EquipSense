@@ -78,7 +78,8 @@ public class AlertStatusNotificationHandlerTests
     {
         var signalRMock = new Mock<ISignalRNotificationService>();
         signalRMock
-            .Setup(s => s.SendAlertAcknowledgedAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
+            .Setup(s => s.SendAlertAcknowledgedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("SignalR 连接异常"));
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<AlertStatusNotificationHandler>();
         var handler = new AlertStatusNotificationHandler(signalRMock.Object, logger);
@@ -89,5 +90,25 @@ public class AlertStatusNotificationHandlerTests
         // 推送失败仅记录日志，不得抛出——否则阻断同一事件链路上的其他处理器（根因分析、自动建单）
         var act = () => handler.HandleAsync(evt, CancellationToken.None);
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task HandleAsync_宿主取消时不应吞掉SignalR取消信号()
+    {
+        var signalRMock = new Mock<ISignalRNotificationService>();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        signalRMock
+            .Setup(s => s.SendAlertAcknowledgedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(cancellation.Token));
+        var logger = LoggerFactory.Create(_ => { }).CreateLogger<AlertStatusNotificationHandler>();
+        var handler = new AlertStatusNotificationHandler(signalRMock.Object, logger);
+
+        var evt = new AlertAcknowledgedEvent(
+            Guid.NewGuid(), DateTime.UtcNow, _tenantId, _alertId, Guid.NewGuid(), null);
+
+        var act = () => handler.HandleAsync(evt, cancellation.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 }

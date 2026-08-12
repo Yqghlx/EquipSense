@@ -128,6 +128,7 @@ prepare_recovery_env() {
       safe["RATE_LIMITING_AUTH_PERMIT_LIMIT"] = 1
       safe["RATE_LIMITING_TENANT_PERMIT_LIMIT"] = 1
       safe["RATE_LIMITING_WINDOW"] = 1
+      safe["SEED_DEMO_DATA"] = 1
       safe["SEED_TENANT2_ACCOUNT"] = 1
       safe["DOMAIN"] = 1
       safe["FRONTEND_URL"] = 1

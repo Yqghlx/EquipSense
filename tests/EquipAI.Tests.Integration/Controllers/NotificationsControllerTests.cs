@@ -1,8 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using EquipAI.Application.DTOs.Auth;
+using EquipAI.Core.Entities;
+using EquipAI.Infrastructure.Data;
 using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace EquipAI.Tests.Integration.Controllers;
 
@@ -90,6 +94,80 @@ public class NotificationsControllerTests
         var response = await client.GetAsync("/api/v1/notifications/preferences");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task GetNotifications_WithAuth_ReturnsOnlyCurrentUserAndTenantNotifications()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+        Guid adminUserId;
+        Guid adminTenantId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var admin = await db.UnfilteredSet<User>().SingleAsync(user => user.Username == "admin");
+            adminUserId = admin.Id;
+            adminTenantId = admin.TenantId;
+        }
+
+        var loginResponse = await client.PostAsJsonAsync("/api/v1/auth/login",
+            new LoginRequest { Username = "admin", Password = "Admin@123" });
+        loginResponse.EnsureSuccessStatusCode();
+        var loginData = await loginResponse.Content.ReadFromJsonAsync<AuthResponse>();
+        loginData.Should().NotBeNull();
+        loginData!.UserInfo.Id.Should().Be(adminUserId);
+        loginData.UserInfo.TenantId.Should().Be(adminTenantId);
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginData.AccessToken);
+        var marker = $"通知隔离回归-{Guid.NewGuid():N}";
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var users = await db.UnfilteredSet<User>()
+                .Where(user => user.Username == "admin"
+                    || user.Username == "lead")
+                .ToDictionaryAsync(user => user.Username);
+            var otherTenantId = Guid.NewGuid();
+            var otherTenantUserId = Guid.NewGuid();
+
+            db.Notifications.AddRange(
+                new Notification
+                {
+                    TenantId = adminTenantId,
+                    UserId = users["admin"].Id,
+                    Type = "system",
+                    Title = $"{marker}-当前用户",
+                    Content = "仅管理员本人可见",
+                },
+                new Notification
+                {
+                    TenantId = users["admin"].TenantId,
+                    UserId = users["lead"].Id,
+                    Type = "system",
+                    Title = $"{marker}-同租户其他用户",
+                    Content = "不应被管理员读取",
+                },
+                new Notification
+                {
+                    TenantId = otherTenantId,
+                    UserId = otherTenantUserId,
+                    Type = "system",
+                    Title = $"{marker}-其他租户",
+                    Content = "不应跨租户读取",
+                });
+            await db.SaveChangesAsync();
+            (await db.UnfilteredSet<Notification>().CountAsync(notification => notification.Title.StartsWith(marker)))
+                .Should().Be(3);
+        }
+
+        var response = await client.GetAsync("/api/v1/notifications?page=1&pageSize=100");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain($"{marker}-当前用户");
+        body.Should().NotContain($"{marker}-同租户其他用户");
+        body.Should().NotContain($"{marker}-其他租户");
     }
 
     [Fact]

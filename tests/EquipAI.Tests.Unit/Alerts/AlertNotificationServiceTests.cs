@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Net;
 
 namespace EquipAI.Tests.Unit.Alerts;
 
@@ -67,6 +68,33 @@ public class AlertNotificationServiceTests
         return (db, svc);
     }
 
+    private static (
+        AppDbContext db,
+        AlertNotificationService svc,
+        Mock<ILogger<AlertNotificationService>> logger) CreateWithHttpHandler(
+        HttpMessageHandler handler)
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddLogging();
+        services.AddScoped<ITenantContext>(_ => new TestTenantContext(Guid.Empty));
+        var sp = services.BuildServiceProvider();
+        var db = sp.GetRequiredService<AppDbContext>();
+
+        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        httpClientFactoryMock
+            .Setup(f => f.CreateClient("AlertIntegration"))
+            .Returns(new HttpClient(handler));
+
+        var logger = new Mock<ILogger<AlertNotificationService>>();
+        var svc = new AlertNotificationService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            httpClientFactoryMock.Object,
+            logger.Object);
+        return (db, svc, logger);
+    }
+
     private static AlertTriggeredEvent MakeEvent(Guid alertId, Guid tenantId, string severity = "Critical") => new(
         EventId: Guid.NewGuid(),
         OccurredAt: DateTime.UtcNow,
@@ -98,11 +126,12 @@ public class AlertNotificationServiceTests
         var alertId = Guid.NewGuid();
         var (db, svc) = await CreateAsync(async ctx =>
         {
-            // 3 个运维角色用户 + 1 个观察者（不应收到）
+            // 3 个活动运维角色用户 + 1 个停用运维用户 + 1 个观察者（后两者均不应收到）
             await ctx.Users.AddRangeAsync(
                 new User { Id = Guid.NewGuid(), TenantId = tenantId, Role = UserRole.SystemAdmin, Username = "a", DisplayName = "A", PasswordHash = "x" },
                 new User { Id = Guid.NewGuid(), TenantId = tenantId, Role = UserRole.MaintenanceLead, Username = "b", DisplayName = "B", PasswordHash = "x" },
                 new User { Id = Guid.NewGuid(), TenantId = tenantId, Role = UserRole.Technician, Username = "c", DisplayName = "C", PasswordHash = "x" },
+                new User { Id = Guid.NewGuid(), TenantId = tenantId, Role = UserRole.Technician, Username = "inactive", DisplayName = "Inactive", PasswordHash = "x", IsActive = false },
                 new User { Id = Guid.NewGuid(), TenantId = tenantId, Role = UserRole.Viewer, Username = "d", DisplayName = "D", PasswordHash = "x" }
             );
             await ctx.SaveChangesAsync();
@@ -249,6 +278,95 @@ public class AlertNotificationServiceTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    [Fact]
+    public async Task DispatchAsync_机器人返回非成功状态后恢复_应重试并停止在成功响应()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var handler = new SequenceResponseHandler(
+            "{\"errcode\":0,\"errmsg\":\"ok\"}",
+            HttpStatusCode.BadGateway,
+            HttpStatusCode.ServiceUnavailable,
+            HttpStatusCode.OK);
+        var (db, svc, _) = CreateWithHttpHandler(handler);
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "告警重试测试租户",
+            Slug = $"alert-retry-{Guid.NewGuid():N}",
+            Settings = "{\"integrations\":{\"dingtalk\":{\"enabled\":true,\"webhookUrl\":\"https://example.test/robot\"}}}",
+        });
+        await db.SaveChangesAsync();
+
+        await svc.DispatchAsync(
+            MakeEvent(alertId, tenantId),
+            MakeAlert(alertId, tenantId));
+
+        handler.RequestCount.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_机器人持续返回非成功状态_应重试3次并记录最终失败()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var handler = new SequenceResponseHandler(
+            "{\"errcode\":0,\"errmsg\":\"ok\"}",
+            HttpStatusCode.BadGateway,
+            HttpStatusCode.BadGateway,
+            HttpStatusCode.BadGateway);
+        var (db, svc, logger) = CreateWithHttpHandler(handler);
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "告警失败测试租户",
+            Slug = $"alert-failure-{Guid.NewGuid():N}",
+            Settings = "{\"integrations\":{\"dingtalk\":{\"enabled\":true,\"webhookUrl\":\"https://example.test/robot\"}}}",
+        });
+        await db.SaveChangesAsync();
+
+        await svc.DispatchAsync(
+            MakeEvent(alertId, tenantId),
+            MakeAlert(alertId, tenantId));
+
+        handler.RequestCount.Should().Be(3);
+        logger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("告警机器人推送最终失败")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_钉钉HTTP成功但业务错误码非零_应重试并记录失败()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var handler = new SequenceResponseHandler(
+            "{\"errcode\":310000,\"errmsg\":\"签名无效\"}",
+            HttpStatusCode.OK,
+            HttpStatusCode.OK,
+            HttpStatusCode.OK);
+        var (db, svc, _) = CreateWithHttpHandler(handler);
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "告警业务失败测试租户",
+            Slug = $"alert-business-failure-{Guid.NewGuid():N}",
+            Settings = "{\"integrations\":{\"dingtalk\":{\"enabled\":true,\"webhookUrl\":\"https://example.test/robot\"}}}",
+        });
+        await db.SaveChangesAsync();
+
+        await svc.DispatchAsync(
+            MakeEvent(alertId, tenantId),
+            MakeAlert(alertId, tenantId));
+
+        handler.RequestCount.Should().Be(3);
+    }
+
     /// <summary>
     /// 模拟外部机器人在请求过程中触发宿主取消，验证通知服务不会把取消当成普通推送故障吞掉。
     /// </summary>
@@ -266,6 +384,36 @@ public class AlertNotificationServiceTests
         {
             _cancellationSource.Cancel();
             throw new OperationCanceledException(_cancellationSource.Token);
+        }
+    }
+
+    /// <summary>
+    /// 按预设 HTTP 状态码序列响应，用于验证告警机器人重试和最终失败语义。
+    /// </summary>
+    private sealed class SequenceResponseHandler : HttpMessageHandler
+    {
+        private readonly Queue<HttpStatusCode> _statusCodes;
+        private readonly string _responseBody;
+
+        public SequenceResponseHandler(string responseBody, params HttpStatusCode[] statusCodes)
+        {
+            _statusCodes = new Queue<HttpStatusCode>(statusCodes);
+            _responseBody = responseBody;
+        }
+
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            var statusCode = _statusCodes.Count > 0
+                ? _statusCodes.Dequeue()
+                : HttpStatusCode.OK;
+            return Task.FromResult(new HttpResponseMessage(statusCode)
+            {
+                Content = new StringContent(_responseBody),
+            });
         }
     }
 

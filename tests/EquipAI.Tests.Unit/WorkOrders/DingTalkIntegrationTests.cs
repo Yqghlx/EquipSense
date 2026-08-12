@@ -129,6 +129,34 @@ public class DingTalkIntegrationTests
     }
 
     [Fact]
+    public async Task PushStatusChangedAsync_外部返回非成功状态时_应返回失败标志()
+    {
+        // Arrange — 状态同步也必须把 HTTP 非 2xx 反馈给路由器，才能触发重试
+        var (integration, handler) = CreateWithMockHttp(out _);
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.BadGateway)
+            {
+                Content = new StringContent("网关暂时不可用")
+            });
+
+        var config = JsonSerializer.Serialize(new DingTalkConfig
+        {
+            WebhookUrl = "https://oapi.dingtalk.com/robot/send?access_token=test123"
+        });
+
+        // Act
+        var result = await integration.PushStatusChangedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "InProgress", null, config);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task PushCreatedAsync_应发送ActionCard格式消息()
     {
         // Arrange

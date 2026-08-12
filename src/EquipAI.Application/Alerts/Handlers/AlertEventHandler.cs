@@ -62,8 +62,14 @@ public class AlertEventHandler : IEventHandler<AlertTriggeredEvent>
                     @event.DeviceId,
                     @event.Metric,
                     @event.Value,
-                    @event.Severity);
+                    @event.Severity,
+                    cancellationToken);
                 _logger.LogDebug("告警已通过 SignalR 推送: AlertId={AlertId}", @event.AlertId);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // 宿主停机或消息处理超时取消必须交回事件总线，不能继续执行后续通知副作用。
+                throw;
             }
             catch (Exception ex)
             {

@@ -160,6 +160,26 @@ public class TenantResolutionMiddlewareTests
             "因为 UserId 应从 JWT 的 NameIdentifier Claim 中解析");
     }
 
+    [Fact]
+    public async Task InvokeAsync_只有JWT标准subClaim时_仍应解析UserId()
+    {
+        var context = new DefaultHttpContext();
+        var claims = new[]
+        {
+            new Claim("tenant_id", TestTenantId.ToString()),
+            new Claim("sub", TestUserId.ToString()),
+            new Claim("role", UserRole.Operator.ToString()),
+        };
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuthType"));
+
+        var (processedContext, _) = await ExecuteMiddlewareAsync(context);
+
+        var tenantContext = processedContext.Items[TenantResolutionMiddleware.TenantContextKey] as ITenantContext;
+        tenantContext.Should().NotBeNull();
+        tenantContext!.UserId.Should().Be(TestUserId,
+            "JWT bearer 配置可能保留标准 sub Claim，不能只依赖框架映射后的 NameIdentifier");
+    }
+
     // =====================================================================
     // 测试：system_admin 角色应标记为管理员
     // =====================================================================

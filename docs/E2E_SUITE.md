@@ -105,6 +105,8 @@ npx playwright test e2e-comprehensive
 ```bash
 export E2E_TENANT2_PASSWORD='<隔离验收用的独立临时强密码>'
 
+EQUIPAI_ISOLATED_E2E=true \
+SEED_DEMO_DATA=true \
 SEED_TENANT2_ACCOUNT=true \
 SEED_TENANT2_PASSWORD="$E2E_TENANT2_PASSWORD" \
 dotnet run --project src/EquipAI.WebAPI
@@ -131,6 +133,7 @@ E2E_FAST_LOGIN=1 npx playwright test e2e-comprehensive
 `tests/scripts/production-runtime-smoke.sh` 使用当前提交实际构建的 backend/frontend/edgegateway
 镜像和 Production 配置启动 PostgreSQL、Redis、Mosquitto、RabbitMQ、backend、frontend，
 验证迁移/种子、观察者账户真实登录与 `/auth/me` 受保护接口、startup/liveness/ready 探针、HTTPS、Nginx `/health` 和 `/api/` 反向代理。
+该脚本运行在临时隔离 Compose 项目中，Smoke Compose 会显式设置 `SEED_DEMO_DATA=full`，因此固定演示设备、遥测、告警、工单和测试租户只存在于本次验收数据库；普通 Production Compose 默认使用 `false`，不会引入示例设备。
 PR 默认执行上述快速门禁；main 推送和版本 tag 额外设置 `SMOKE_RUN_E2E=true`，在同一组
 Production 镜像中执行默认 433 个业务 E2E；当前仅保留 1 个有明确架构原因的条件跳过点，本次隔离 Production smoke 实际为 432 通过、1 跳过、0 失败，确保发布镜像本身通过完整用户流程验收。
 完整验收会在隔离数据库中通过真实 MFA 注册接口初始化系统管理员、维保主管和跨租户隔离测试账户的 TOTP，

@@ -28,7 +28,7 @@ namespace EquipAI.Application.Alerts;
 /// }
 ///
 /// 设计要点：
-/// - 钉钉/飞书推送失败不影响主流程（仅日志记录）
+/// - 钉钉/飞书推送失败不影响主流程，但每个渠道最多重试 3 次并记录最终失败
 /// - 仅 Critical/High 级别告警推送机器人（避免低级别告警刷屏）
 /// - 站内通知始终持久化（所有级别）
 /// </summary>
@@ -39,6 +39,21 @@ public class AlertNotificationService
     private readonly ILogger<AlertNotificationService> _logger;
 
     private const string DateFormat = "yyyy-MM-dd HH:mm";
+
+    /// <summary>
+    /// 告警机器人单次通知的最大尝试次数。
+    /// 告警事件仍需快速交给消息总线确认，因此只做有限重试，不在事件处理器内无限等待。
+    /// </summary>
+    private const int MaxRobotPushAttempts = 3;
+
+    /// <summary>
+    /// 告警机器人失败后的退避间隔，避免短暂网络抖动时连续轰炸外部平台。
+    /// </summary>
+    private static readonly TimeSpan[] RobotRetryDelays =
+    [
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+    ];
 
     /// <summary>触发机器人推送的最低告警级别（Critical/High）</summary>
     private static readonly HashSet<string> BotPushSeverities = new(StringComparer.OrdinalIgnoreCase)
@@ -91,9 +106,19 @@ public class AlertNotificationService
             try
             {
                 if (type == "dingtalk")
-                    await PushDingTalkAsync(@event, alert, deviceLabel, config!, ct);
+                {
+                    await PushRobotWithRetryAsync(
+                        "钉钉", alert.Id,
+                        () => PushDingTalkAsync(@event, alert, deviceLabel, config!, ct),
+                        ct);
+                }
                 else if (type == "feishu")
-                    await PushFeishuAsync(@event, alert, deviceLabel, config!, ct);
+                {
+                    await PushRobotWithRetryAsync(
+                        "飞书", alert.Id,
+                        () => PushFeishuAsync(@event, alert, deviceLabel, config!, ct),
+                        ct);
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -105,6 +130,52 @@ public class AlertNotificationService
                 _logger.LogWarning(ex, "告警机器人推送失败: Type={Type}, AlertId={AlertId}", type, alert.Id);
             }
         }
+    }
+
+    /// <summary>
+    /// 执行告警机器人有限重试。
+    /// 适配器返回 false 表示外部平台明确返回失败；普通异常同样重试，取消信号则立即传播。
+    /// </summary>
+    private async Task PushRobotWithRetryAsync(
+        string integrationType,
+        Guid alertId,
+        Func<Task<bool>> pushFunc,
+        CancellationToken ct)
+    {
+        Exception? lastException = null;
+
+        for (var attempt = 0; attempt < MaxRobotPushAttempts; attempt++)
+        {
+            try
+            {
+                if (await pushFunc())
+                    return;
+
+                _logger.LogWarning(
+                    "告警机器人推送返回失败（第 {Attempt}/{Max} 次）: Type={Type}, AlertId={AlertId}",
+                    attempt + 1, MaxRobotPushAttempts, integrationType, alertId);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 宿主停机或消息处理超时取消必须交给消息总线处理，不能转换成普通推送失败。
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastException = ex;
+                _logger.LogWarning(ex,
+                    "告警机器人推送异常（第 {Attempt}/{Max} 次）: Type={Type}, AlertId={AlertId}",
+                    attempt + 1, MaxRobotPushAttempts, integrationType, alertId);
+            }
+
+            if (attempt < MaxRobotPushAttempts - 1)
+                await Task.Delay(RobotRetryDelays[attempt], ct);
+        }
+
+        _logger.LogError(
+            lastException,
+            "告警机器人推送最终失败: Type={Type}, AlertId={AlertId}, 重试 {Max} 次后仍失败",
+            integrationType, alertId, MaxRobotPushAttempts);
     }
 
     /// <summary>持久化站内通知记录到 notifications 表</summary>
@@ -128,6 +199,7 @@ public class AlertNotificationService
             // 给租户内所有运维相关用户发通知（维保主管 + 技术员 + 系统管理员）
             var recipientIds = await db.UnfilteredSet<User>()
                 .Where(u => u.TenantId == @event.TenantId
+                            && u.IsActive
                             && (u.Role == UserRole.SystemAdmin
                                 || u.Role == UserRole.MaintenanceLead
                                 || u.Role == UserRole.Technician))
@@ -162,11 +234,11 @@ public class AlertNotificationService
     }
 
     /// <summary>钉钉机器人推送（加签 + ActionCard）</summary>
-    private async Task PushDingTalkAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
+    private async Task<bool> PushDingTalkAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
     {
         var dingConfig = TryDeserialize<DingTalkConfig>(config);
         if (dingConfig is null || string.IsNullOrEmpty(dingConfig.WebhookUrl))
-            return;
+            return false;
 
         var url = BuildDingTalkSignedUrl(dingConfig);
         var now = DateTime.UtcNow.ToString(DateFormat);
@@ -197,7 +269,16 @@ public class AlertNotificationService
 
         var client = _httpClientFactory.CreateClient("AlertIntegration");
         var resp = await client.PostAsJsonAsync(url, message, ct);
+        var responseBody = await resp.Content.ReadAsStringAsync(ct);
+        if (!resp.IsSuccessStatusCode || !IsDingTalkSuccessResponse(responseBody))
+        {
+            _logger.LogWarning("告警钉钉推送失败: AlertId={AlertId}, Status={Status}",
+                alert.Id, resp.StatusCode);
+            return false;
+        }
+
         _logger.LogInformation("告警钉钉推送完成: AlertId={AlertId}, Status={Status}", alert.Id, resp.StatusCode);
+        return true;
     }
 
     /// <summary>飞书机器人推送（交互式卡片消息）</summary>
@@ -206,11 +287,11 @@ public class AlertNotificationService
     /// 1. 应用机器人：配置 appId + appSecret + chatId，走 im/v1/messages API（需开通 im:message 权限）
     /// 2. 自定义机器人 Webhook：配置 webhookUrl，直接 POST（更简单，无需应用审批）
     /// </remarks>
-    private async Task PushFeishuAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
+    private async Task<bool> PushFeishuAsync(AlertTriggeredEvent @event, Alert alert, string deviceLabel, string config, CancellationToken ct)
     {
         var feishuConfig = TryDeserialize<FeishuAlertConfig>(config);
         if (feishuConfig is null)
-            return;
+            return false;
 
         var severityText = @event.Severity.Equals("Critical", StringComparison.OrdinalIgnoreCase) ? "🔴 严重" : "🟠 高级";
         var now = DateTime.UtcNow.ToString(DateFormat);
@@ -242,8 +323,7 @@ public class AlertNotificationService
         // 方式一：应用机器人（appId + appSecret + chatId）
         if (!string.IsNullOrEmpty(feishuConfig.AppId) && !string.IsNullOrEmpty(feishuConfig.ChatId))
         {
-            await PushFeishuViaAppAsync(client, feishuConfig, card, alert.Id, ct);
-            return;
+            return await PushFeishuViaAppAsync(client, feishuConfig, card, alert.Id, ct);
         }
 
         // 方式二：自定义机器人 Webhook
@@ -251,13 +331,23 @@ public class AlertNotificationService
         {
             var message = new { msg_type = "interactive", card };
             var resp = await client.PostAsJsonAsync(feishuConfig.WebhookUrl, message, ct);
+            var responseBody = await resp.Content.ReadAsStringAsync(ct);
+            if (!resp.IsSuccessStatusCode || !IsFeishuSuccessResponse(responseBody))
+            {
+                _logger.LogWarning("告警飞书推送失败（Webhook）: AlertId={AlertId}, Status={Status}",
+                    alert.Id, resp.StatusCode);
+                return false;
+            }
+
             _logger.LogInformation("告警飞书推送完成（Webhook）: AlertId={AlertId}, Status={Status}", alert.Id, resp.StatusCode);
-            return;
+            return true;
         }
+
+        return false;
     }
 
     /// <summary>飞书应用机器人推送：先获取 tenant_access_token，再调 im/v1/messages 发送卡片</summary>
-    private async Task PushFeishuViaAppAsync(HttpClient client, FeishuAlertConfig config, object card, Guid alertId, CancellationToken ct)
+    private async Task<bool> PushFeishuViaAppAsync(HttpClient client, FeishuAlertConfig config, object card, Guid alertId, CancellationToken ct)
     {
         // 1. 获取 tenant_access_token
         var tokenReq = new
@@ -269,13 +359,14 @@ public class AlertNotificationService
         if (!tokenResp.IsSuccessStatusCode)
         {
             _logger.LogWarning("飞书应用 token 获取失败: Status={Status}", tokenResp.StatusCode);
-            return;
+            return false;
         }
 
         var tokenJson = await tokenResp.Content.ReadFromJsonAsync<JsonElement>(ct);
-        if (tokenJson.TryGetProperty("tenant_access_token", out var tokenEl))
+        if (tokenJson.TryGetProperty("tenant_access_token", out var tokenEl)
+            && !string.IsNullOrWhiteSpace(tokenEl.GetString()))
         {
-            var accessToken = tokenEl.GetString();
+            var accessToken = tokenEl.GetString()!;
             // 2. 发送交互卡片到指定群
             var messageReq = new
             {
@@ -290,13 +381,20 @@ public class AlertNotificationService
             };
             var msgResp = await client.SendAsync(msgReq, ct);
             var msgBody = await msgResp.Content.ReadAsStringAsync(ct);
+            if (!msgResp.IsSuccessStatusCode || !IsFeishuSuccessResponse(msgBody))
+            {
+                _logger.LogWarning("告警飞书推送失败（App）: AlertId={AlertId}, Status={Status}",
+                    alertId, msgResp.StatusCode);
+                return false;
+            }
+
             _logger.LogInformation("告警飞书推送完成（App）: AlertId={AlertId}, Status={Status}",
                 alertId, msgResp.StatusCode);
+            return true;
         }
-        else
-        {
-            _logger.LogWarning("飞书应用 token 响应异常，未继续发送消息");
-        }
+
+        _logger.LogWarning("飞书应用 token 响应异常，未继续发送消息");
+        return false;
     }
 
     /// <summary>读取租户的集成配置（复用工单集成的 tenant.Settings.integrations 格式）</summary>
@@ -351,6 +449,47 @@ public class AlertNotificationService
     {
         try { return JsonSerializer.Deserialize<T>(json, JsonOptions); }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// 判断钉钉响应是否真正成功。
+    /// 钉钉部分业务错误会以 HTTP 200 + errcode 非 0 返回，不能只看 HTTP 状态码。
+    /// </summary>
+    private static bool IsDingTalkSuccessResponse(string responseBody)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            return document.RootElement.TryGetProperty("errcode", out var errorCode)
+                && errorCode.TryGetInt32(out var code)
+                && code == 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 判断飞书响应是否包含明确的业务错误码。
+    /// 自定义 Webhook 可能返回纯文本，因此缺少 code 时沿用 HTTP 成功语义。
+    /// </summary>
+    private static bool IsFeishuSuccessResponse(string responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody))
+            return true;
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            if (!document.RootElement.TryGetProperty("code", out var code))
+                return true;
+            return code.TryGetInt32(out var value) && value == 0;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
     }
 
     // 嵌套配置类（告警推送用，与工单集成配置字段兼容）

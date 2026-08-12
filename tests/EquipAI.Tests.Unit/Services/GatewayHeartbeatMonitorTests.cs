@@ -35,7 +35,8 @@ public class GatewayHeartbeatMonitorTests : IAsyncLifetime
 
         _signalRMock = new Mock<ISignalRNotificationService>();
         _signalRMock.Setup(x => x.SendGatewayOfflineAsync(
-                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         var services = new ServiceCollection();
@@ -115,8 +116,10 @@ public class GatewayHeartbeatMonitorTests : IAsyncLifetime
         args[2].Should().Be("gw-1", "gatewayCode 参数");
         args[3].Should().Be("超时网关", "gatewayName 参数");
         // 健康网关与已离线网关不应触发通知
-        _signalRMock.Verify(x => x.SendGatewayOfflineAsync(It.IsAny<Guid>(), healthyId, It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-        _signalRMock.Verify(x => x.SendGatewayOfflineAsync(It.IsAny<Guid>(), alreadyOfflineId, It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        _signalRMock.Verify(x => x.SendGatewayOfflineAsync(
+            It.IsAny<Guid>(), healthyId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _signalRMock.Verify(x => x.SendGatewayOfflineAsync(
+            It.IsAny<Guid>(), alreadyOfflineId, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

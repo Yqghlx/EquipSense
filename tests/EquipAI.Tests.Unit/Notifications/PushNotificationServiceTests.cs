@@ -1,4 +1,5 @@
 using EquipAI.Application.Notifications;
+using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
@@ -30,8 +31,6 @@ public class PushNotificationServiceTests : IAsyncDisposable
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Vapid:Subject"] = "mailto:test@test.com",
-                ["Vapid:PublicKey"] = "BEl62iUYgUivxIkv69yViEuiBIa-IVkj8qCtlBm9zk4BFq7J--Lc4xJYflBFHNmPaCPACEBJ5TdGJKt8MHHlQY",
-                ["Vapid:PrivateKey"] = "U7OAC8LsS5nPfNnOGou66fHJrE6oPxNPHVxu8IeOxE"
             })
             .Build();
 
@@ -75,6 +74,99 @@ public class PushNotificationServiceTests : IAsyncDisposable
     public async Task SendToUserAsync_无订阅不应抛出异常()
     {
         var act = () => Service.SendToUserAsync(_tenantId, Guid.NewGuid(), "标题", "内容");
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task SendToUsersAsync_空用户集合不应查询数据库或发送()
+    {
+        var subscription = new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = Guid.NewGuid(),
+            Endpoint = "https://fcm.googleapis.com/fcm/send/empty-users",
+            P256dh = "p256dh",
+            Auth = "auth",
+        };
+        _db.PushSubscriptions.Add(subscription);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        await Service.SendToUsersAsync(_tenantId, Array.Empty<Guid>(), "标题", "内容");
+
+        _db.ChangeTracker.Entries<PushSubscription>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SendToUsersAsync_应只加载指定租户指定用户的活动订阅()
+    {
+        var selectedUserId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        var selectedSubscription = new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = selectedUserId,
+            Endpoint = "https://fcm.googleapis.com/fcm/send/selected",
+            P256dh = "p256dh",
+            Auth = "auth",
+        };
+        var otherUserSubscription = new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = otherUserId,
+            Endpoint = "https://fcm.googleapis.com/fcm/send/other-user",
+            P256dh = "p256dh",
+            Auth = "auth",
+        };
+        var inactiveSubscription = new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = selectedUserId,
+            Endpoint = "https://fcm.googleapis.com/fcm/send/inactive",
+            P256dh = "p256dh",
+            Auth = "auth",
+            IsActive = false,
+        };
+        var otherTenantSubscription = new PushSubscription
+        {
+            TenantId = otherTenantId,
+            UserId = selectedUserId,
+            Endpoint = "https://fcm.googleapis.com/fcm/send/other-tenant",
+            P256dh = "p256dh",
+            Auth = "auth",
+        };
+        _db.PushSubscriptions.AddRange(
+            selectedSubscription,
+            otherUserSubscription,
+            inactiveSubscription,
+            otherTenantSubscription);
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        await Service.SendToUsersAsync(_tenantId, [selectedUserId], "标题", "内容");
+
+        _db.ChangeTracker.Entries<PushSubscription>()
+            .Select(entry => entry.Entity.Id)
+            .Should().BeEquivalentTo([selectedSubscription.Id]);
+    }
+
+    [Fact]
+    public async Task SendToUsersAsync_未配置Vapid时应安全降级不抛出异常()
+    {
+        var userId = Guid.NewGuid();
+        _db.PushSubscriptions.Add(new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = userId,
+            Endpoint = "https://fcm.googleapis.com/fcm/send/no-vapid",
+            P256dh = "p256dh",
+            Auth = "auth",
+        });
+        await _db.SaveChangesAsync();
+
+        var act = () => Service.SendToUsersAsync(_tenantId, [userId], "标题", "内容");
+
         await act.Should().NotThrowAsync();
     }
 

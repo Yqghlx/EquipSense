@@ -97,6 +97,83 @@ test_validate_env_rejects_tenant2_account_in_production_without_isolated_flag() 
     || fail "隔离 E2E 显式授权后应允许临时第二租户账户"
 }
 
+test_validate_env_rejects_demo_data_in_production_without_isolated_flag() {
+  local env_file="$TEST_ROOT/demo-data-production.env"
+  printf '%s\n' \
+    'PG_PASSWORD=postgres-password-long' \
+    'REDIS_PASSWORD=redis-password-long' \
+    'RABBITMQ_IMAGE=rabbitmq:4.3.4-management-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'RABBITMQ_USER=equipai' \
+    'RABBITMQ_PASSWORD=rabbitmq-password-long' \
+    'JWT_SECRET=jwt-secret-that-is-longer-than-thirty-two-characters' \
+    'TOTP_ENCRYPTION_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=' \
+    'PII_ENCRYPTION_KEY=YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXphYmNkZWY=' \
+    'AUTOMAPPER_LICENSE_KEY=automapper-license-key-issued-for-test-only' \
+    'GATEWAY_AUTH_KEY=gateway-auth-key-that-is-longer-than-32' \
+    'GATEWAY_TENANT_ID=11111111-1111-1111-1111-111111111111' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=mqtt-password-long' \
+    'SEED_ADMIN_PASSWORD=admin-password-long' \
+    'SEED_LEAD_PASSWORD=lead-password-long' \
+    'SEED_TECH_PASSWORD=tech-password-long' \
+    'SEED_OPERATOR_PASSWORD=operator-password-long' \
+    'SEED_VIEWER_PASSWORD=viewer-password-long' \
+    'FRONTEND_URL=https://example.com' \
+    'SEQ_ADMIN_PASSWORD=seq-password-long' \
+    'GRAFANA_PASSWORD=grafana-password-long' \
+    'ASPNETCORE_ENVIRONMENT=Production' \
+    'SEED_DEMO_DATA=full' >> "$env_file"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "普通 Production 不应开启演示数据播种"
+  assert_contains "$output" "生产环境禁止开启 SEED_DEMO_DATA"
+
+  bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" --allow-isolated-e2e >/dev/null \
+    || fail "隔离 E2E 显式授权后应允许临时演示数据播种"
+
+  local invalid_env_file="$TEST_ROOT/demo-data-invalid.env"
+  sed 's/^SEED_DEMO_DATA=.*/SEED_DEMO_DATA=maybe/' "$env_file" > "$invalid_env_file"
+  chmod 600 "$invalid_env_file"
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$invalid_env_file" 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "非法 SEED_DEMO_DATA 值不应通过生产环境校验"
+  assert_contains "$output" "SEED_DEMO_DATA 仅支持 true、false、1 或 0"
+}
+
+test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit() {
+  local compose_content smoke_compose smoke_script seeder_content env_example
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  smoke_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.smoke.yml")"
+  smoke_script="$(cat "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh")"
+  seeder_content="$(cat "$PROJECT_ROOT/src/EquipAI.Infrastructure/Seeding/DataSeeder.cs")"
+  env_example="$(cat "$PROJECT_ROOT/docker/.env.example")"
+
+  assert_contains "$compose_content" 'SEED_DEMO_DATA: "${SEED_DEMO_DATA:-false}"'
+  assert_contains "$smoke_compose" 'SEED_DEMO_DATA: "full"'
+  assert_contains "$smoke_script" 'SEED_DEMO_DATA=full'
+  assert_contains "$smoke_script" 'expected_demo_device_codes'
+  assert_contains "$smoke_script" 'expected_demo_alert_codes'
+  assert_contains "$smoke_script" 'expected_demo_work_order_codes'
+  assert_contains "$smoke_script" 'api/v1/telemetry/$demo_device_id'
+  assert_contains "$smoke_script" '完整演示数据、边缘网关缓存'
+  assert_contains "$seeder_content" 'DemoDataSeedingPolicy.ShouldSeedDemoData'
+  assert_contains "$seeder_content" 'DemoDataSeedingPolicy.EnsureFullDemoDataAllowed'
+  assert_contains "$seeder_content" 'FullDemoDataSeeder'
+  assert_contains "$seeder_content" 'DemoDataSeedingPolicy.IsFullDemoData'
+  assert_contains "$seeder_content" 'await SeedTenantsAsync(seedDemoData);'
+  assert_contains "$seeder_content" 'await SeedSampleDeviceAndAlertRulesAsync(seedDemoData);'
+  assert_contains "$env_example" 'SEED_DEMO_DATA=false'
+}
+
 test_validate_env_rejects_missing_pii_encryption_key() {
   local env_file="$TEST_ROOT/missing-pii-key.env"
   sed '/^PII_ENCRYPTION_KEY=/d' "$TEST_ROOT/valid.env" > "$env_file"
@@ -3524,6 +3601,8 @@ case "${1:-all}" in
     test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
     test_validate_env_rejects_missing_automapper_license
+    test_validate_env_rejects_demo_data_in_production_without_isolated_flag
+    test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit
     test_validate_env_rejects_reused_production_credentials
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
@@ -3560,6 +3639,8 @@ case "${1:-all}" in
     test_setup_mosquitto_rejects_password_file_symlink
     ;;
   readiness)
+    test_validate_env_rejects_demo_data_in_production_without_isolated_flag
+    test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit
     test_production_readiness_requires_static_gate
     test_production_readiness_accepts_healthy_runtime
     test_production_readiness_rejects_unhealthy_runtime
@@ -3642,6 +3723,8 @@ case "${1:-all}" in
   all)
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_tenant2_account_in_production_without_isolated_flag
+    test_validate_env_rejects_demo_data_in_production_without_isolated_flag
+    test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
     test_validate_env_rejects_relative_local_attachment_path

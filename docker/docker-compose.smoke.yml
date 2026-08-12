@@ -27,6 +27,8 @@ services:
     build: !reset null
     pull_policy: never
     environment:
+      # smoke 使用临时隔离数据库，显式开启完整演示数据以覆盖设备→遥测→告警→工单链路。
+      SEED_DEMO_DATA: "full"
       # 仅允许隔离 Production smoke 创建跨租户验收账户；生产 Compose 不注入该变量。
       EQUIPAI_ISOLATED_E2E: "true"
 

@@ -66,7 +66,8 @@ public class WorkOrderAnalysisHandler : IEventHandler<AnalysisCompletedEvent>
         var notificationService = scope.ServiceProvider.GetService<ISignalRNotificationService>();
         if (notificationService is not null)
         {
-            await notificationService.SendWorkOrderAnalysisUpdatedAsync(@event.TenantId, workOrder.Id);
+            await notificationService.SendWorkOrderAnalysisUpdatedAsync(
+                @event.TenantId, workOrder.Id, cancellationToken);
         }
     }
 }

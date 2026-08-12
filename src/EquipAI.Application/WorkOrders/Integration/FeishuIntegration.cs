@@ -66,11 +66,11 @@ public class FeishuIntegration : IWorkOrderIntegration
         return await SendMessageAsync(feishuConfig, card, ct);
     }
 
-    public async Task PushStatusChangedAsync(
+    public async Task<bool> PushStatusChangedAsync(
         Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default)
     {
         var feishuConfig = DeserializeConfig(config);
-        if (feishuConfig == null || !feishuConfig.Enabled) return;
+        if (feishuConfig == null || !feishuConfig.Enabled) return false;
 
         var statusText = status switch
         {
@@ -87,7 +87,8 @@ public class FeishuIntegration : IWorkOrderIntegration
             $"工单状态变更：{statusText}",
             $"**工单编号**：{workOrderId}\n**当前状态**：{statusText}\n**更新时间**：{DateTime.UtcNow:yyyy-MM-dd HH:mm}");
 
-        await SendMessageAsync(feishuConfig, card, ct);
+        var responseBody = await SendMessageAsync(feishuConfig, card, ct);
+        return responseBody is not null;
     }
 
     /// <summary>

@@ -141,7 +141,7 @@ public class SlaManagementService
                     {
                         await _notifications.SendWorkOrderEscalatedAsync(
                             tenantId, wo.Id, wo.WorkOrderCode, wo.Title,
-                            oldPriority.ToString(), wo.Priority.ToString());
+                            oldPriority.ToString(), wo.Priority.ToString(), ct);
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested)
                     {

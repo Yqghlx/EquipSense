@@ -109,6 +109,7 @@ CIDR 网段；这样认证限流可以按真实客户端 IP 工作，同时不�
 
 | 变量名 | 说明 | 默认值 | 必填 |
 |--------|------|--------|------|
+| `SEED_DEMO_DATA` | 演示数据模式：`false`/`0` 关闭，`true`/`1` 为最小隔离验收种子，`full` 创建 10 台设备、遥测、告警和工单；普通 Production 必须关闭 | `false` | 否 |
 | `SEED_ADMIN_PASSWORD` | 系统管理员初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
 | `SEED_LEAD_PASSWORD` | 维保主管初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
 | `SEED_TECH_PASSWORD` | 技术员初始密码（至少 16 个字符，不得使用占位值或公开默认值） | — | 生产环境必填 |
@@ -120,6 +121,8 @@ CIDR 网段；这样认证限流可以按真实客户端 IP 工作，同时不�
 五个 `SEED_*_PASSWORD` 必须分别生成，不能在不同账户之间复用；同样不能与 PG、Redis、RabbitMQ、MQTT、Seq、Grafana、JWT、TOTP、PII 或网关认证密钥相同。`docker/validate-env.sh` 会在部署前执行这项 fail-closed 检查，并仅报告发生冲突的变量名。
 
 隔离验收或 CI 需要覆盖第二租户时，测试进程使用 `E2E_TENANT2_PASSWORD`，其值必须与 `SEED_TENANT2_PASSWORD` 一致；该变量只注入 Playwright，不应写入生产业务环境，也不应在生产业务数据库开启 `SEED_TENANT2_ACCOUNT`。
+
+Production 应保持 `SEED_DEMO_DATA=false`。应用对缺失、`false`、`0` 按关闭处理，`true`/`1` 和 `full` 只允许在显式隔离授权下使用；`full` 会按固定 ID 重建 10 台演示设备的最近 24 小时遥测、5 条告警和 4 张工单，重复启动不会累积数据。升级既有数据库不会自动删除历史演示数据。
 
 ## AI/LLM
 

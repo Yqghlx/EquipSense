@@ -22,6 +22,7 @@ public class DataSeeder
     private readonly AppDbContext _dbContext;
     private readonly ILogger<DataSeeder> _logger;
     private readonly IHostEnvironment _hostEnvironment;
+    private readonly FullDemoDataSeeder _fullDemoDataSeeder;
 
     /// <summary>
     /// 初始化数据种子器
@@ -32,11 +33,13 @@ public class DataSeeder
     public DataSeeder(
         AppDbContext dbContext,
         ILogger<DataSeeder> logger,
-        IHostEnvironment hostEnvironment)
+        IHostEnvironment hostEnvironment,
+        FullDemoDataSeeder fullDemoDataSeeder)
     {
         _dbContext = dbContext;
         _logger = logger;
         _hostEnvironment = hostEnvironment;
+        _fullDemoDataSeeder = fullDemoDataSeeder;
     }
 
     /// <summary>
@@ -48,17 +51,38 @@ public class DataSeeder
     {
         _logger.LogInformation("开始执行数据库种子数据初始化...");
 
+        var configuredDemoData = Environment.GetEnvironmentVariable(
+            DemoDataSeedingPolicy.EnvironmentVariableName);
+        DemoDataSeedingPolicy.EnsureFullDemoDataAllowed(
+            _hostEnvironment.IsProduction(),
+            configuredDemoData,
+            Environment.GetEnvironmentVariable("EQUIPAI_ISOLATED_E2E"));
+
         // 数据修复：早期版本（v1.3.0 前）的种子告警规则硬编码 device_type='空压机'，
         // 导致非空压机设备永远不触发告警。已部署的旧库需要一次性迁移到通用规则（device_type=null）。
-        // 新部署的库不受影响（SeedSampleDeviceAndAlertRulesAsync 已用 null）
+        // 新部署的库不受影响（默认告警规则仍由 SeedSampleDeviceAndAlertRulesAsync 提取）
         await MigrateLegacyAirCompressorRulesToGenericAsync();
 
-        await SeedTenantsAsync();
-        await SeedAdminUserAsync();
+        var seedDemoData = DemoDataSeedingPolicy.ShouldSeedDemoData(
+            _hostEnvironment.IsProduction(),
+            configuredDemoData);
+
+        if (!seedDemoData)
+        {
+            _logger.LogInformation(
+                "生产环境未开启 {EnvironmentVariable}，跳过测试租户和示例设备播种",
+                DemoDataSeedingPolicy.EnvironmentVariableName);
+        }
+
+        await SeedTenantsAsync(seedDemoData);
+        await SeedAdminUserAsync(seedDemoData);
         await SeedDeviceTypeTemplatesAsync();
-        await SeedSampleDeviceAndAlertRulesAsync();
+        await SeedSampleDeviceAndAlertRulesAsync(seedDemoData);
         await SeedAirCompressorKnowledgeRulesAsync();
         await SeedFmeaLibraryAsync();
+
+        if (DemoDataSeedingPolicy.IsFullDemoData(configuredDemoData))
+            await _fullDemoDataSeeder.SeedAsync();
 
         _logger.LogInformation("数据库种子数据初始化完成");
     }
@@ -92,7 +116,7 @@ public class DataSeeder
     /// 系统租户（全零 GUID）用于存放行业预置模板和共享资源
     /// 默认租户（1111... GUID）用于开发和演示
     /// </summary>
-    private async Task SeedTenantsAsync()
+    private async Task SeedTenantsAsync(bool seedDemoData)
     {
         // 系统租户
         var systemTenantExists = await _dbContext.Tenants
@@ -153,7 +177,13 @@ public class DataSeeder
             _logger.LogInformation("已创建默认租户（ID: {TenantId}）", defaultTenantId);
         }
 
-        // 第二租户（用于 E2E 跨租户隔离测试）
+        // 第二租户（用于 E2E 跨租户隔离测试）只允许在演示/隔离验收环境创建。
+        if (!seedDemoData)
+        {
+            await _dbContext.SaveChangesAsync();
+            return;
+        }
+
         var secondTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var secondTenantExists = await _dbContext.Tenants
             .IgnoreQueryFilters()
@@ -197,7 +227,7 @@ public class DataSeeder
     ///
     /// 所有种子用户首次登录后必须修改密码（MustChangePassword = true），强制客户重置为强密码。
     /// </summary>
-    private async Task SeedAdminUserAsync()
+    private async Task SeedAdminUserAsync(bool seedDemoData)
     {
         var defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
@@ -212,8 +242,16 @@ public class DataSeeder
         };
 
         // 第二租户账户仅在显式开启时创建。生产环境若开启，也必须提供独立密码。
-        var seedTenant2Account = Environment.GetEnvironmentVariable("SEED_TENANT2_ACCOUNT")?
+        var requestedTenant2Account = Environment.GetEnvironmentVariable("SEED_TENANT2_ACCOUNT")?
             .Equals("true", StringComparison.OrdinalIgnoreCase) == true;
+
+        if (requestedTenant2Account && !seedDemoData)
+        {
+            throw new InvalidOperationException(
+                $"已开启 SEED_TENANT2_ACCOUNT，但未开启 {DemoDataSeedingPolicy.EnvironmentVariableName}；测试账户只能随演示/隔离验收数据一起创建。");
+        }
+
+        var seedTenant2Account = requestedTenant2Account;
 
         var seedCredentials = seedUsers.ToDictionary(
             seedUser => seedUser.EnvVar,
@@ -451,37 +489,41 @@ public class DataSeeder
     /// 创建示例空压机设备并提取模板告警规则到 alert_rules 表
     /// 模拟器和端到端测试依赖此设备 + 规则才能走通"采集→告警→AI 分析→工单"全链路
     /// </summary>
-    private async Task SeedSampleDeviceAndAlertRulesAsync()
+    private async Task SeedSampleDeviceAndAlertRulesAsync(bool seedDemoData)
     {
-        // 1. 创建种子空压机设备（若不存在）
-        var deviceExists = await _dbContext.Devices
-            .IgnoreQueryFilters()
-            .AnyAsync(d => d.Id == SeedAirCompressorId);
-
-        if (!deviceExists)
+        // 1. 创建种子空压机设备（若不存在）。生产默认关闭，避免真实租户出现未接入的假设备。
+        if (seedDemoData)
         {
-            _dbContext.Devices.Add(new Device
+            var deviceExists = await _dbContext.Devices
+                .IgnoreQueryFilters()
+                .AnyAsync(d => d.Id == SeedAirCompressorId);
+
+            if (!deviceExists)
             {
-                Id = SeedAirCompressorId,
-                TenantId = DefaultTenantId,
-                DeviceCode = "AC-001",
-                Name = "一号空压机",
-                Type = "空压机",
-                Status = DeviceStatus.Offline,
-                Criticality = DeviceCriticality.High,
-            });
+                _dbContext.Devices.Add(new Device
+                {
+                    Id = SeedAirCompressorId,
+                    TenantId = DefaultTenantId,
+                    DeviceCode = "AC-001",
+                    Name = "一号空压机",
+                    Type = "空压机",
+                    Status = DeviceStatus.Offline,
+                    Criticality = DeviceCriticality.High,
+                });
 
-            // 维护租户设备计数
-            var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
-                .FirstOrDefaultAsync(t => t.Id == DefaultTenantId);
-            if (tenant != null)
-                tenant.CurrentDeviceCount++;
+                // 维护租户设备计数
+                var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                    .FirstOrDefaultAsync(t => t.Id == DefaultTenantId);
+                if (tenant != null)
+                    tenant.CurrentDeviceCount++;
 
-            _logger.LogInformation("已创建种子空压机设备（ID: {DeviceId}, DeviceCode: AC-001）", SeedAirCompressorId);
-            await _dbContext.SaveChangesAsync();
+                _logger.LogInformation("已创建种子空压机设备（ID: {DeviceId}, DeviceCode: AC-001）", SeedAirCompressorId);
+                await _dbContext.SaveChangesAsync();
+            }
         }
 
-        // 2. 提取所有模板的 DefaultAlarmRules 到 alert_rules 表（若尚无通用告警规则）
+        // 2. 提取所有模板的 DefaultAlarmRules 到 alert_rules 表（若尚无通用告警规则）。
+        // 这些规则是新设备可用的基础配置，不随示例设备开关关闭。
         // 注意：种子规则 DeviceType=null（通用），按 metric 维度去重（同一 metric 只保留第一条）
         //
         // 关键修复：原代码只提取空压机模板，导致 CNC / 注塑机模板即使配了规则也不生效。

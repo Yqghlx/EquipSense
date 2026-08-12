@@ -31,7 +31,12 @@ public class WorkOrderNotificationHandler :
         {
             await _notificationService.SendWorkOrderCreatedAsync(
                 @event.TenantId, @event.WorkOrderId, @event.DeviceId,
-                @event.Title, @event.Priority);
+                @event.Title, @event.Priority, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机或消息处理超时取消必须交回事件总线，不能被故障隔离逻辑吞掉。
+            throw;
         }
         catch (Exception ex)
         {
@@ -47,7 +52,12 @@ public class WorkOrderNotificationHandler :
         {
             await _notificationService.SendWorkOrderStatusChangedAsync(
                 @event.TenantId, @event.WorkOrderId,
-                @event.OldStatus, @event.NewStatus);
+                @event.OldStatus, @event.NewStatus, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机或消息处理超时取消必须交回事件总线，不能被故障隔离逻辑吞掉。
+            throw;
         }
         catch (Exception ex)
         {

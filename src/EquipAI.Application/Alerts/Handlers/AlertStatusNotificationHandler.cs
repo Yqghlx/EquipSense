@@ -31,7 +31,13 @@ public class AlertStatusNotificationHandler :
         try
         {
             // 轻量推送（仅 SignalR）：让告警中心在线用户实时看到告警已被确认接管
-            await _notificationService.SendAlertAcknowledgedAsync(@event.TenantId, @event.AlertId);
+            await _notificationService.SendAlertAcknowledgedAsync(
+                @event.TenantId, @event.AlertId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机或消息处理超时取消必须交回事件总线，不能被故障隔离逻辑吞掉。
+            throw;
         }
         catch (Exception ex)
         {
@@ -47,7 +53,13 @@ public class AlertStatusNotificationHandler :
         {
             // 复活既有 SendAlertResolvedAsync（三路推送：SignalR + 持久化通知 + Web Push）——此前接口/实现/
             // 前端监听三者齐备但全仓零调用（死代码），告警解决对其他用户完全不可见
-            await _notificationService.SendAlertResolvedAsync(@event.TenantId, @event.AlertId);
+            await _notificationService.SendAlertResolvedAsync(
+                @event.TenantId, @event.AlertId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机或消息处理超时取消必须交回事件总线，不能被故障隔离逻辑吞掉。
+            throw;
         }
         catch (Exception ex)
         {

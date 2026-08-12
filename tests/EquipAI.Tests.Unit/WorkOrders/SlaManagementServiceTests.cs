@@ -336,7 +336,8 @@ public class SlaManagementServiceTests : IAsyncDisposable
                 low.WorkOrderCode,
                 low.Title,
                 WorkOrderPriority.Low.ToString(),     // 升级前优先级
-                WorkOrderPriority.Medium.ToString()), // 升级后优先级
+                WorkOrderPriority.Medium.ToString(),  // 升级后优先级
+                It.IsAny<CancellationToken>()),
             Times.Once,
             "升级后必须调用 SendWorkOrderEscalatedAsync，通知主管处理");
     }
@@ -365,7 +366,7 @@ public class SlaManagementServiceTests : IAsyncDisposable
         notifyMock.Verify(
             x => x.SendWorkOrderEscalatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>()),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3),
             "每个升级工单各发一条通知，不能合并");
     }
@@ -395,7 +396,7 @@ public class SlaManagementServiceTests : IAsyncDisposable
         notifyMock.Verify(
             x => x.SendWorkOrderEscalatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>()),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "没有升级发生时，不应触发通知");
     }
@@ -418,7 +419,7 @@ public class SlaManagementServiceTests : IAsyncDisposable
         notifyMock
             .Setup(x => x.SendWorkOrderEscalatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 callCount++;
@@ -448,7 +449,7 @@ public class SlaManagementServiceTests : IAsyncDisposable
         notifyMock.Verify(
             x => x.SendWorkOrderEscalatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>()),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2),
             "通知失败后仍应继续处理其他工单");
     }
@@ -468,7 +469,7 @@ public class SlaManagementServiceTests : IAsyncDisposable
         notifyMock
             .Setup(x => x.SendWorkOrderEscalatedAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<string>()))
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 cancellation.Cancel();

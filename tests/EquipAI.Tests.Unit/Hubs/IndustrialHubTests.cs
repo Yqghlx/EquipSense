@@ -9,8 +9,8 @@ namespace EquipAI.Tests.Unit.Hubs;
 /// <summary>
 /// IndustrialHub 单元测试
 /// 验证 SignalR Hub 的租户组管理逻辑：
-/// - 连接时自动加入 tenant:{tenantId} 组
-/// - 断开时自动从 tenant:{tenantId} 组移除
+/// - 连接时自动加入 tenant:{tenantId} 和 tenant:{tenantId}:user:{userId} 组
+/// - 断开时自动从上述两个组移除
 /// - 异常断开时也能正确移除
 /// </summary>
 public class IndustrialHubTests : IDisposable
@@ -51,13 +51,20 @@ public class IndustrialHubTests : IDisposable
     {
         // Arrange
         var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
         var connectionId = "connection-123";
+        using var cancellation = new CancellationTokenSource();
 
         _tenantContextMock.SetupGet(t => t.TenantId).Returns(tenantId);
+        _tenantContextMock.SetupGet(t => t.UserId).Returns(userId);
         _callerContextMock.SetupGet(c => c.ConnectionId).Returns(connectionId);
+        _callerContextMock.SetupGet(c => c.ConnectionAborted).Returns(cancellation.Token);
 
         _groupsMock
-            .Setup(g => g.AddToGroupAsync(connectionId, $"tenant:{tenantId}", default))
+            .Setup(g => g.AddToGroupAsync(connectionId, $"tenant:{tenantId}", cancellation.Token))
+            .Returns(Task.CompletedTask);
+        _groupsMock
+            .Setup(g => g.AddToGroupAsync(connectionId, $"tenant:{tenantId}:user:{userId}", cancellation.Token))
             .Returns(Task.CompletedTask);
 
         // Act
@@ -65,9 +72,13 @@ public class IndustrialHubTests : IDisposable
 
         // Assert
         _groupsMock.Verify(
-            g => g.AddToGroupAsync(connectionId, $"tenant:{tenantId}", default),
+            g => g.AddToGroupAsync(connectionId, $"tenant:{tenantId}", cancellation.Token),
             Times.Once,
             "连接时应将客户端加入对应的租户组");
+        _groupsMock.Verify(
+            g => g.AddToGroupAsync(connectionId, $"tenant:{tenantId}:user:{userId}", cancellation.Token),
+            Times.Once,
+            "连接时应将客户端加入租户内的用户组");
     }
 
     /// <summary>
@@ -98,13 +109,18 @@ public class IndustrialHubTests : IDisposable
     {
         // Arrange
         var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
         var connectionId = "connection-789";
 
         _tenantContextMock.SetupGet(t => t.TenantId).Returns(tenantId);
+        _tenantContextMock.SetupGet(t => t.UserId).Returns(userId);
         _callerContextMock.SetupGet(c => c.ConnectionId).Returns(connectionId);
 
         _groupsMock
             .Setup(g => g.RemoveFromGroupAsync(connectionId, $"tenant:{tenantId}", default))
+            .Returns(Task.CompletedTask);
+        _groupsMock
+            .Setup(g => g.RemoveFromGroupAsync(connectionId, $"tenant:{tenantId}:user:{userId}", default))
             .Returns(Task.CompletedTask);
 
         // Act
@@ -115,6 +131,10 @@ public class IndustrialHubTests : IDisposable
             g => g.RemoveFromGroupAsync(connectionId, $"tenant:{tenantId}", default),
             Times.Once,
             "断开连接时应将客户端从租户组中移除");
+        _groupsMock.Verify(
+            g => g.RemoveFromGroupAsync(connectionId, $"tenant:{tenantId}:user:{userId}", default),
+            Times.Once,
+            "断开连接时应将客户端从租户内的用户组中移除");
     }
 
     /// <summary>

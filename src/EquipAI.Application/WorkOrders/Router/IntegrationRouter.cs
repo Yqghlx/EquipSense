@@ -81,10 +81,14 @@ public class IntegrationRouter
 
             await PushWithRetryAsync(
                 db, tenantId, workOrderId, type, "Created",
-                async () => await integration.PushCreatedAsync(
-                    tenantId, workOrderId,
-                    workOrder.Title, workOrder.Priority.ToString(),
-                    config, ct),
+                async () =>
+                {
+                    var externalId = await integration.PushCreatedAsync(
+                        tenantId, workOrderId,
+                        workOrder.Title, workOrder.Priority.ToString(),
+                        config, ct);
+                    return new PushOutcome(externalId is not null, externalId);
+                },
                 ct);
         }
     }
@@ -120,14 +124,19 @@ public class IntegrationRouter
                 continue;
             }
 
+            // 状态同步（尤其是 EAM）需要创建阶段返回的外部工单号才能定位目标记录。
+            // 只取同租户、同工单、同集成最近一次成功的创建日志，避免跨租户或跨集成串号。
+            var externalId = await GetLatestCreatedExternalIdAsync(
+                db, tenantId, workOrderId, type, ct);
+
             await PushWithRetryAsync(
                 db, tenantId, workOrderId, type, "StatusChanged",
                 async () =>
                 {
-                    await integration.PushStatusChangedAsync(
-                        tenantId, workOrderId, newStatus, null, config, ct);
-                    // PushStatusChangedAsync 返回 void，无 ExternalId
-                    return (string?)null;
+                    var succeeded = await integration.PushStatusChangedAsync(
+                        tenantId, workOrderId, newStatus, externalId, config, ct);
+                    // 状态同步接口不产生新的 ExternalId，但会显式返回外部系统是否成功
+                    return new PushOutcome(succeeded, externalId);
                 },
                 ct);
         }
@@ -146,7 +155,7 @@ public class IntegrationRouter
         Guid workOrderId,
         string integrationType,
         string direction,
-        Func<Task<string?>> pushFunc,
+        Func<Task<PushOutcome>> pushFunc,
         CancellationToken ct)
     {
         // 创建推送日志（Pending 状态）
@@ -170,12 +179,30 @@ public class IntegrationRouter
             try
             {
                 stopwatch.Restart();
-                var externalId = await pushFunc();
+                var outcome = await pushFunc();
                 stopwatch.Stop();
+
+                // 创建推送通过 null 表示外部系统未返回成功响应。
+                // 必须把它当成失败进入重试，否则会留下伪成功日志并静默丢失通知。
+                if (!outcome.Succeeded)
+                {
+                    lastError = "外部集成未返回成功响应";
+                    _logger.LogWarning(
+                        "集成推送未成功（第 {Attempt}/{Max} 次）: Type={Type}, WorkOrderId={WorkOrderId}, 原因={Reason}",
+                        attempt + 1, MaxRetryCount, integrationType, workOrderId, lastError);
+
+                    if (attempt < MaxRetryCount - 1)
+                    {
+                        var delaySeconds = RetryDelaysSeconds[attempt];
+                        await Task.Delay(TimeSpan.FromSeconds(delaySeconds), ct);
+                    }
+
+                    continue;
+                }
 
                 // 推送成功：更新日志状态
                 pushLog.Status = "Success";
-                pushLog.ExternalId = externalId;
+                pushLog.ExternalId = outcome.ExternalId;
                 pushLog.DurationMs = stopwatch.ElapsedMilliseconds;
                 pushLog.RetryCount = attempt;
                 await db.SaveChangesAsync(ct);
@@ -184,6 +211,11 @@ public class IntegrationRouter
                     "集成推送成功: Type={Type}, WorkOrderId={WorkOrderId}, Direction={Direction}, 耗时={DurationMs}ms, 重试次数={RetryCount}",
                     integrationType, workOrderId, direction, stopwatch.ElapsedMilliseconds, attempt);
                 return;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 请求或宿主已取消时必须继续传播取消信号，不能把取消伪装成外部系统失败。
+                throw;
             }
             catch (Exception ex)
             {
@@ -214,6 +246,12 @@ public class IntegrationRouter
             "集成推送最终失败: Type={Type}, WorkOrderId={WorkOrderId}, Direction={Direction}, 重试 {MaxRetry} 次后仍失败",
             integrationType, workOrderId, direction, MaxRetryCount);
     }
+
+    /// <summary>
+    /// 外部集成推送结果。
+    /// 创建通知需要通过返回值判断 HTTP 调用是否成功，状态同步则以未抛异常作为成功标志。
+    /// </summary>
+    private readonly record struct PushOutcome(bool Succeeded, string? ExternalId);
 
     /// <summary>
     /// 从租户 Settings JSON 中解析集成配置
@@ -258,6 +296,30 @@ public class IntegrationRouter
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 查询某个集成最近一次成功创建推送返回的外部 ID。
+    /// </summary>
+    private static Task<string?> GetLatestCreatedExternalIdAsync(
+        AppDbContext db,
+        Guid tenantId,
+        Guid workOrderId,
+        string integrationType,
+        CancellationToken ct)
+    {
+        return db.UnfilteredSet<IntegrationPushLog>()
+            .Where(log =>
+                log.TenantId == tenantId
+                && log.WorkOrderId == workOrderId
+                && log.IntegrationType == integrationType
+                && log.Direction == "Created"
+                && log.Status == "Success"
+                && log.ExternalId != null)
+            .OrderByDescending(log => log.CreatedAt)
+            .ThenByDescending(log => log.Id)
+            .Select(log => log.ExternalId)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>

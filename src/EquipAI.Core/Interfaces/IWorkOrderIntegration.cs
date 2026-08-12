@@ -20,6 +20,7 @@ public interface IWorkOrderIntegration
 
     /// <summary>
     /// 推送工单状态变更到外部系统
+    /// 返回值表示外部系统是否返回成功响应；普通外部故障由适配器转换为 false，取消信号继续传播
     /// </summary>
-    Task PushStatusChangedAsync(Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default);
+    Task<bool> PushStatusChangedAsync(Guid tenantId, Guid workOrderId, string status, string? externalId, string config, CancellationToken ct = default);
 }

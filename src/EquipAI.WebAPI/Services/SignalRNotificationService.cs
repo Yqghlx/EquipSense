@@ -1,15 +1,18 @@
+using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
+using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 
 namespace EquipAI.WebAPI.Services;
 
 /// <summary>
 /// SignalR 实时推送服务实现
-/// 通过 IHubContext 向租户组推送告警和遥测数据更新
-/// 同时集成 Web Push 推送和数据库持久化，确保离线用户也能收到通知
-/// 租户隔离：每条消息仅推送到对应租户的 SignalR 组
+/// 通过 IHubContext 向租户组推送遥测数据，向租户内用户组推送业务事件。
+/// 同时集成 Web Push 推送和数据库持久化，确保离线用户也能收到通知。
+/// 租户隔离：每条消息仅推送到对应租户的广播组或用户组，并遵循活动状态与渠道偏好。
 /// </summary>
 public class SignalRNotificationService : ISignalRNotificationService
 {
@@ -17,361 +20,536 @@ public class SignalRNotificationService : ISignalRNotificationService
     private readonly IPushNotificationService _pushService;
     private readonly AppDbContext _db;
     private readonly ILogger<SignalRNotificationService> _logger;
+    private readonly NotificationPreferenceService _preferenceService;
+
+    /// <summary>
+    /// 能看到告警类站内通知的运维角色。角色展开必须发生在服务端，不能把租户广播
+    /// 写成 UserId=Guid.Empty，否则通知中心按用户查询时会产生用户永远看不到的孤儿记录。
+    /// </summary>
+    private static readonly UserRole[] OperationsNotificationRoles =
+    [
+        UserRole.SystemAdmin,
+        UserRole.MaintenanceLead,
+        UserRole.Technician,
+    ];
+
+    /// <summary>能接收 SLA 升级站内通知的管理角色。</summary>
+    private static readonly UserRole[] EscalationNotificationRoles =
+    [
+        UserRole.SystemAdmin,
+        UserRole.MaintenanceLead,
+    ];
 
     public SignalRNotificationService(
         IHubContext<Hubs.IndustrialHub> hubContext,
         IPushNotificationService pushService,
         AppDbContext db,
-        ILogger<SignalRNotificationService> logger)
+        ILogger<SignalRNotificationService> logger,
+        NotificationPreferenceService preferenceService)
     {
         _hubContext = hubContext;
         _pushService = pushService;
         _db = db;
         _logger = logger;
+        _preferenceService = preferenceService;
+    }
+
+    /// <summary>
+    /// 查询指定租户内符合角色条件的活动用户，并按渠道偏好进一步筛选。
+    /// 后台事件不依赖当前 HTTP 请求，因此租户和活动状态始终显式传入查询链路。
+    /// </summary>
+    private async Task<IReadOnlySet<Guid>> GetEnabledRecipientIdsAsync(
+        Guid tenantId,
+        IReadOnlyCollection<UserRole>? roles,
+        string notificationType,
+        string channel,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty)
+            return new HashSet<Guid>();
+
+        try
+        {
+            var query = _db.UnfilteredSet<User>()
+                .Where(user => user.TenantId == tenantId
+                    && user.IsActive
+                    && user.Id != Guid.Empty);
+
+            if (roles is not null)
+            {
+                var roleValues = roles.Distinct().ToArray();
+                query = query.Where(user => roleValues.Contains(user.Role));
+            }
+
+            var candidateIds = await query
+                .Select(user => user.Id)
+                .ToListAsync(cancellationToken);
+
+            return await _preferenceService.GetEnabledUserIdsAsync(
+                tenantId,
+                candidateIds,
+                notificationType,
+                channel,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 渠道筛选失败时返回空收件人，保护站内历史写入和其它通知渠道；异常必须留痕，
+            // 否则用户会误以为偏好生效但实际上只是静默丢弃了实时/推送消息。
+            _logger.LogWarning(
+                ex,
+                "通知偏好筛选失败，渠道将降级为空收件人: TenantId={TenantId}, Type={Type}, Channel={Channel}",
+                tenantId,
+                notificationType,
+                channel);
+            return new HashSet<Guid>();
+        }
+    }
+
+    /// <summary>
+    /// 向符合偏好的租户内用户组发送 SignalR 消息。
+    /// 组名同时包含租户和用户 ID，避免同一用户 ID 在不同租户间发生碰撞。
+    /// </summary>
+    private async Task SendToEnabledUserGroupsAsync(
+        Guid tenantId,
+        IReadOnlyCollection<UserRole>? roles,
+        string notificationType,
+        string method,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userIds = await GetEnabledRecipientIdsAsync(
+                tenantId,
+                roles,
+                notificationType,
+                "signalr",
+                cancellationToken);
+            if (userIds.Count == 0)
+                return;
+
+            var groups = userIds
+                .Select(userId => GetUserGroupName(tenantId, userId))
+                .ToArray();
+            await _hubContext.Clients.Groups(groups)
+                .SendAsync(method, payload, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "SignalR 用户定向通知失败: TenantId={TenantId}, Type={Type}, Method={Method}",
+                tenantId,
+                notificationType,
+                method);
+        }
+    }
+
+    /// <summary>
+    /// 向符合偏好的用户发送 Web Push；无收件人时不调用底层推送服务。
+    /// </summary>
+    private async Task SendPushToEnabledUsersAsync(
+        Guid tenantId,
+        IReadOnlyCollection<UserRole>? roles,
+        string notificationType,
+        string title,
+        string body,
+        string? url,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var userIds = await GetEnabledRecipientIdsAsync(
+                tenantId,
+                roles,
+                notificationType,
+                "push",
+                cancellationToken);
+            if (userIds.Count == 0)
+                return;
+
+            await _pushService.SendToUsersAsync(
+                tenantId,
+                userIds,
+                title,
+                body,
+                url,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Web Push 用户定向通知失败: TenantId={TenantId}, Type={Type}",
+                tenantId,
+                notificationType);
+        }
+    }
+
+    /// <summary>
+    /// 构造租户限定的用户组名称。
+    /// </summary>
+    private static string GetUserGroupName(Guid tenantId, Guid userId)
+        => $"tenant:{tenantId}:user:{userId}";
+
+    /// <summary>
+    /// 查询租户内活动收件人并为每个用户创建通知。
+    ///
+    /// 后台监控和事件处理器通常没有 HttpContext，不能依赖全局租户过滤器；这里始终
+    /// 使用显式 tenantId，并且只选择活动用户，避免停用账号继续收到旧租户的运维通知。
+    /// </summary>
+    private async Task AddUserNotificationsAsync(
+        Guid tenantId,
+        string type,
+        string title,
+        string content,
+        Guid relatedId,
+        string link,
+        IReadOnlyCollection<UserRole> roles,
+        CancellationToken cancellationToken)
+    {
+        var roleValues = roles.ToArray();
+        var recipientIds = await _db.UnfilteredSet<User>()
+            .Where(user => user.TenantId == tenantId
+                           && user.IsActive
+                           && user.Id != Guid.Empty
+                           && roleValues.Contains(user.Role))
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var userId in recipientIds)
+        {
+            _db.Notifications.Add(new Notification
+            {
+                TenantId = tenantId,
+                UserId = userId,
+                Type = type,
+                Title = title,
+                Content = content,
+                RelatedId = relatedId,
+                Link = link,
+            });
+        }
     }
 
     /// <inheritdoc />
     public async Task SendAlertTriggeredAsync(Guid tenantId, Guid alertId, string alertCode,
-        Guid deviceId, string metric, double value, string severity)
+        Guid deviceId, string metric, double value, string severity,
+        CancellationToken cancellationToken = default)
     {
-        // SignalR 推送用 try/catch 隔离：Hub 推送失败（连接/序列化/底层 WebSocket 错误）不得阻塞后续
-        // 站内通知持久化与 Web Push——告警多渠道冗余，SignalR 单点失败拖垮全部通知渠道会让客户完全
-        // 错过 Critical 故障（在线 Web、离线推送、乃至下游经 DispatchAsync 发的钉钉/飞书全丢）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnAlertTriggered", new
-                {
-                    alertId,
-                    alertCode,
-                    deviceId,
-                    metric,
-                    value,
-                    severity,
-                    occurredAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 告警推送失败，继续站内通知与 Web Push: AlertId={AlertId}", alertId);
-        }
+        // 告警是运维通知，只发给活动运维用户，并按用户自己的渠道偏好筛选。
+        // SignalR/Push 各自隔离，某一通道异常不能阻断另一通道。
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            "OnAlertTriggered",
+            new
+            {
+                alertId,
+                alertCode,
+                deviceId,
+                metric,
+                value,
+                severity,
+                occurredAt = DateTime.UtcNow,
+            },
+            cancellationToken);
 
-        // 持久化通知到数据库（租户级通知，不指定具体用户）
-        var title = $"告警触发: {metric}";
-        var content = $"指标 {metric} 达到 {value}，严重级别: {severity}";
+        await SendPushToEnabledUsersAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            $"告警触发: {metric}",
+            $"指标 {metric} 达到 {value}，严重级别: {severity}",
+            "/alerts",
+            cancellationToken);
 
-        _db.Notifications.Add(new Notification
-        {
-            TenantId = tenantId,
-            Type = "alert",
-            Title = title,
-            Content = content,
-            RelatedId = alertId,
-            Link = "/alerts",
-        });
-
-        // Web Push 推送通知 — 确保离线用户也能收到告警
-        try
-        {
-            await _pushService.SendToTenantAsync(tenantId, title, content, "/alerts");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Web Push 推送失败，告警 ID: {AlertId}", alertId);
-        }
-
-        await _db.SaveChangesAsync();
     }
 
     /// <inheritdoc />
-    public async Task SendTelemetryUpdateAsync(Guid tenantId, Guid deviceId, string metric, double value)
+    public async Task SendTelemetryUpdateAsync(Guid tenantId, Guid deviceId, string metric, double value,
+        CancellationToken cancellationToken = default)
     {
         await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnTelemetryUpdate", deviceId, metric, value);
+            .SendAsync("OnTelemetryUpdate", deviceId, metric, value, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task SendAlertResolvedAsync(Guid tenantId, Guid alertId)
+    public async Task SendAlertResolvedAsync(Guid tenantId, Guid alertId,
+        CancellationToken cancellationToken = default)
     {
-        // SignalR 推送用 try/catch 隔离（与 SendAlertTriggeredAsync 一致）：Hub 推送失败不得阻塞
-        // 后续站内通知持久化与 Web Push——告警解除通知同样多渠道冗余，SignalR 单点失败拖垮全部渠道
-        // 会让客户以为告警仍在处理（实际已解除），信息长期不同步。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnAlertResolved", alertId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 告警解除推送失败，继续站内通知与 Web Push: AlertId={AlertId}", alertId);
-        }
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            "OnAlertResolved",
+            alertId,
+            cancellationToken);
 
-        // 持久化告警解除通知
-        _db.Notifications.Add(new Notification
-        {
-            TenantId = tenantId,
-            Type = "alert",
-            Title = "告警解除",
-            Content = $"告警已解除",
-            RelatedId = alertId,
-            Link = "/alerts",
-        });
+        // 通知中心按用户查询，必须为每个活动运维用户展开通知，不能写租户级 Guid.Empty 记录。
+        await AddUserNotificationsAsync(
+            tenantId,
+            "alert",
+            "告警解除",
+            "告警已解除",
+            alertId,
+            "/alerts",
+            OperationsNotificationRoles,
+            cancellationToken);
 
-        // Web Push 推送告警解除通知
-        try
-        {
-            await _pushService.SendToTenantAsync(
-                tenantId, "告警解除",
-                $"告警 {alertId} 已解除",
-                "/alerts");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Web Push 推送失败（告警解除），告警 ID: {AlertId}", alertId);
-        }
+        await SendPushToEnabledUsersAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            "告警解除",
+            $"告警 {alertId} 已解除",
+            "/alerts",
+            cancellationToken);
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task SendAlertAcknowledgedAsync(Guid tenantId, Guid alertId)
+    public async Task SendAlertAcknowledgedAsync(Guid tenantId, Guid alertId,
+        CancellationToken cancellationToken = default)
     {
-        // 轻量推送（仅 SignalR）：告警确认是协作态变化（在线用户实时看到状态变更），非紧急打扰事项，
-        // 无需持久化通知/Web Push（与 SendWorkOrderAnalysisUpdatedAsync / SendPendingRuleCreatedAsync 一致；
-        // 避免每次确认都生成站内通知噪音淹没真正的故障告警）。
-        // try/catch 隔离：SignalR 推送失败仅记录警告，不影响已落库的告警状态变更（用户手动刷新仍可看到）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnAlertAcknowledged", new
-                {
-                    alertId,
-                    acknowledgedAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 告警确认推送失败: AlertId={AlertId}", alertId);
-        }
+        // 轻量推送（仅 SignalR）：告警确认是协作态变化，不产生站内通知/Web Push，
+        // 但仍按告警 SignalR 偏好发送，避免关闭实时通知的用户被强制打扰。
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            "OnAlertAcknowledged",
+            new
+            {
+                alertId,
+                acknowledgedAt = DateTime.UtcNow,
+            },
+            cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task SendWorkOrderCreatedAsync(Guid tenantId, Guid workOrderId,
-        Guid deviceId, string title, string priority)
+        Guid deviceId, string title, string priority,
+        CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnWorkOrderCreated", new
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            null,
+            "workorder",
+            "OnWorkOrderCreated",
+            new
             {
                 workOrderId,
                 deviceId,
                 title,
                 priority,
-                createdAt = DateTime.UtcNow
-            });
+                createdAt = DateTime.UtcNow,
+            },
+            cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task SendWorkOrderStatusChangedAsync(Guid tenantId, Guid workOrderId,
-        string oldStatus, string newStatus)
+        string oldStatus, string newStatus,
+        CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients.Group($"tenant:{tenantId}")
-            .SendAsync("OnWorkOrderStatusChanged", new
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            null,
+            "workorder",
+            "OnWorkOrderStatusChanged",
+            new
             {
                 workOrderId,
                 oldStatus,
                 newStatus,
-                changedAt = DateTime.UtcNow
-            });
+                changedAt = DateTime.UtcNow,
+            },
+            cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task SendWorkOrderAnalysisUpdatedAsync(Guid tenantId, Guid workOrderId)
+    public async Task SendWorkOrderAnalysisUpdatedAsync(Guid tenantId, Guid workOrderId,
+        CancellationToken cancellationToken = default)
     {
-        // 仅 SignalR 推送（轻量）：分析完成是工单详情页的实时更新，非紧急打扰事项，无需持久化通知/Web Push。
-        // SignalR 推送用 try/catch 隔离：推送失败仅记录警告，不影响已写入 DB 的分析结果（用户手动刷新仍可看到）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnWorkOrderAnalysisUpdated", new
-                {
-                    workOrderId,
-                    updatedAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 工单分析更新推送失败: WorkOrderId={WorkOrderId}", workOrderId);
-        }
+        // 仅 SignalR 推送（轻量）：分析完成是工单详情页的实时更新，非紧急打扰事项，
+        // 不持久化通知/不发 Web Push，但仍尊重工单实时通知偏好。
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            null,
+            "workorder",
+            "OnWorkOrderAnalysisUpdated",
+            new
+            {
+                workOrderId,
+                updatedAt = DateTime.UtcNow,
+            },
+            cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task SendPendingRuleCreatedAsync(Guid tenantId)
+    public async Task SendPendingRuleCreatedAsync(Guid tenantId,
+        CancellationToken cancellationToken = default)
     {
         // 仅 SignalR 推送（轻量）：候选规则产生是知识库审核列表的实时更新，非紧急打扰事项，
-        // 无需持久化通知/Web Push。try/catch 隔离：推送失败仅告警，不影响已写入 DB 的候选规则
-        //（专家手动刷新仍可看到）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnPendingRuleCreated", new { updatedAt = DateTime.UtcNow });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 候选规则产生推送失败: TenantId={TenantId}", tenantId);
-        }
+        // 不持久化通知/不发 Web Push，但仍尊重系统通知偏好。
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            null,
+            "system",
+            "OnPendingRuleCreated",
+            new { updatedAt = DateTime.UtcNow },
+            cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task SendWorkOrderEscalatedAsync(Guid tenantId, Guid workOrderId,
-        string workOrderCode, string title, string oldPriority, string newPriority)
+        string workOrderCode, string title, string oldPriority, string newPriority,
+        CancellationToken cancellationToken = default)
     {
-        // 关键修复：原 SLA 超时升级只更新数据库 Priority 字段，没有通知主管，
-        // 导致 Critical 工单超时后主管完全不知情。现在补齐 SignalR + 持久化 + Web Push 三路通知。
-        // SignalR 推送用 try/catch 隔离（与 SendAlertTriggeredAsync 一致）：SLA 超时升级须通知主管，
-        // 主管未必在线看 Web，恰恰依赖站内持久化 + Web Push 兜底，SignalR 单点失败拖垮它们会让
-        // 主管完全不知情（#184/#231 专门补的升级通知形同虚设）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnWorkOrderEscalated", new
-                {
-                    workOrderId,
-                    workOrderCode,
-                    title,
-                    oldPriority,
-                    newPriority,
-                    escalatedAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR SLA 升级推送失败，继续站内通知与 Web Push: WorkOrderId={WorkOrderId}", workOrderId);
-        }
+        // SLA 升级只通知活动主管，且 SignalR/Push 分别按工单偏好定向投递。
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            EscalationNotificationRoles,
+            "workorder",
+            "OnWorkOrderEscalated",
+            new
+            {
+                workOrderId,
+                workOrderCode,
+                title,
+                oldPriority,
+                newPriority,
+                escalatedAt = DateTime.UtcNow,
+            },
+            cancellationToken);
 
-        // 持久化通知（让主管登录后看到待处理事项）
+        // 持久化通知（让活动主管登录后看到待处理事项）；按用户展开，避免 Guid.Empty 孤儿记录。
         var notifyTitle = $"⚠️ SLA 超时升级: {workOrderCode}";
         var notifyContent = $"工单《{title}》SLA 已超时，优先级由 {oldPriority} 升级为 {newPriority}，请尽快处理";
 
-        _db.Notifications.Add(new Notification
-        {
-            TenantId = tenantId,
-            Type = "workorder_escalated",
-            Title = notifyTitle,
-            Content = notifyContent,
-            RelatedId = workOrderId,
-            Link = $"/work-orders/{workOrderId}",
-        });
+        await AddUserNotificationsAsync(
+            tenantId,
+            "workorder_escalated",
+            notifyTitle,
+            notifyContent,
+            workOrderId,
+            $"/work-orders/{workOrderId}",
+            EscalationNotificationRoles,
+            cancellationToken);
 
-        // Web Push 推送（离线主管也能收到）
-        try
-        {
-            await _pushService.SendToTenantAsync(tenantId, notifyTitle, notifyContent, $"/work-orders/{workOrderId}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Web Push 推送失败（SLA 升级），工单 ID: {WorkOrderId}", workOrderId);
-        }
+        // Web Push 推送（离线主管也能收到），按主管自己的工单 Push 偏好筛选。
+        await SendPushToEnabledUsersAsync(
+            tenantId,
+            EscalationNotificationRoles,
+            "workorder",
+            notifyTitle,
+            notifyContent,
+            $"/work-orders/{workOrderId}",
+            cancellationToken);
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task SendDeviceOfflineAsync(Guid tenantId, Guid deviceId, string deviceCode, string deviceName)
+    public async Task SendDeviceOfflineAsync(Guid tenantId, Guid deviceId, string deviceCode, string deviceName,
+        CancellationToken cancellationToken = default)
     {
-        // 设备离线（超阈值无遥测）是工业监控基本告警：通信中断可能源于设备故障/网络故障/网关故障。
-        // 原实现只更新状态不发通知，运维完全不知情；且设备离线不产生遥测，不触发阈值告警，
-        // 故必须有独立离线通知。补齐 SignalR + 持久化 + Web Push 三路通知。
-        // SignalR 推送用 try/catch 隔离（与 SendAlertTriggeredAsync 一致）：设备离线须通知运维，
-        // 运维未必在线看 Web，恰恰依赖站内持久化 + Web Push 兜底，SignalR 单点失败拖垮它们会让
-        // 运维完全错过通信中断（#232 专门补的离线通知形同虚设）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnDeviceStatusChanged", new
-                {
-                    deviceId,
-                    deviceCode,
-                    deviceName,
-                    status = "Offline",
-                    changedAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 设备离线推送失败，继续站内通知与 Web Push: DeviceId={DeviceId}", deviceId);
-        }
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            "OnDeviceStatusChanged",
+            new
+            {
+                deviceId,
+                deviceCode,
+                deviceName,
+                status = "Offline",
+                changedAt = DateTime.UtcNow,
+            },
+            cancellationToken);
 
         var notifyTitle = $"⚠️ 设备离线: {deviceCode}";
         var notifyContent = $"设备《{deviceName}》（{deviceCode}）已超过阈值无遥测，可能通信中断，请检查";
 
-        _db.Notifications.Add(new Notification
-        {
-            TenantId = tenantId,
-            Type = "device_offline",
-            Title = notifyTitle,
-            Content = notifyContent,
-            RelatedId = deviceId,
-            Link = "/devices",
-        });
+        await AddUserNotificationsAsync(
+            tenantId,
+            "device_offline",
+            notifyTitle,
+            notifyContent,
+            deviceId,
+            "/devices",
+            OperationsNotificationRoles,
+            cancellationToken);
 
-        try
-        {
-            await _pushService.SendToTenantAsync(tenantId, notifyTitle, notifyContent, "/devices");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Web Push 推送失败（设备离线），设备 ID: {DeviceId}", deviceId);
-        }
+        await SendPushToEnabledUsersAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            notifyTitle,
+            notifyContent,
+            "/devices",
+            cancellationToken);
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task SendGatewayOfflineAsync(Guid tenantId, Guid gatewayId, string gatewayCode, string gatewayName)
+    public async Task SendGatewayOfflineAsync(Guid tenantId, Guid gatewayId, string gatewayCode, string gatewayName,
+        CancellationToken cancellationToken = default)
     {
-        // 网关离线（心跳超时）是 P0 工业事件：网关是数据采集入口，离线=该网关下所有设备数据断，
-        // 影响整条产线/整个车间。原 GatewayHeartbeatMonitor 只改 Status+日志，运维完全不知情，直到手动查看
-        // 网关列表才发现。补齐 SignalR + 持久化 + Web Push 三路通知（与设备离线 #232 对称，网关离线更严重）。
-        // SignalR 推送用 try/catch 隔离：网关离线须通知运维，运维未必在线看 Web，依赖站内持久化 + Web Push 兜底，
-        // SignalR 单点失败不得拖垮它们（与 SendAlertTriggeredAsync 一致）。
-        try
-        {
-            await _hubContext.Clients.Group($"tenant:{tenantId}")
-                .SendAsync("OnGatewayOffline", new
-                {
-                    gatewayId,
-                    gatewayCode,
-                    gatewayName,
-                    changedAt = DateTime.UtcNow
-                });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "SignalR 网关离线推送失败，继续站内通知与 Web Push: GatewayId={GatewayId}", gatewayId);
-        }
+        await SendToEnabledUserGroupsAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            "OnGatewayOffline",
+            new
+            {
+                gatewayId,
+                gatewayCode,
+                gatewayName,
+                changedAt = DateTime.UtcNow,
+            },
+            cancellationToken);
 
         var notifyTitle = $"⚠️ 网关离线: {gatewayCode}";
         var notifyContent = $"网关《{gatewayName}》（{gatewayCode}）心跳超时，该网关下设备数据采集已中断，请立即检查";
 
-        _db.Notifications.Add(new Notification
-        {
-            TenantId = tenantId,
-            Type = "gateway_offline",
-            Title = notifyTitle,
-            Content = notifyContent,
-            RelatedId = gatewayId,
-            Link = "/gateways",
-        });
+        await AddUserNotificationsAsync(
+            tenantId,
+            "gateway_offline",
+            notifyTitle,
+            notifyContent,
+            gatewayId,
+            "/gateways",
+            OperationsNotificationRoles,
+            cancellationToken);
 
-        try
-        {
-            await _pushService.SendToTenantAsync(tenantId, notifyTitle, notifyContent, "/gateways");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Web Push 推送失败（网关离线），网关 ID: {GatewayId}", gatewayId);
-        }
+        await SendPushToEnabledUsersAsync(
+            tenantId,
+            OperationsNotificationRoles,
+            "alert",
+            notifyTitle,
+            notifyContent,
+            "/gateways",
+            cancellationToken);
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(cancellationToken);
     }
 }
