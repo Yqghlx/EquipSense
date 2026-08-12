@@ -3753,6 +3753,15 @@ test_development_internal_ports_bind_loopback_by_default() {
   assert_contains "$compose_content" '${DEV_BIND_ADDRESS:-127.0.0.1}:15672:15672'
 }
 
+test_user_guide_documents_template_onboarding() {
+  local guide_content
+  guide_content="$(cat "$PROJECT_ROOT/docs/USER_GUIDE.md")"
+  assert_contains "$guide_content" "模板快速注册"
+  assert_contains "$guide_content" "推荐告警"
+  assert_contains "$guide_content" "现场工艺确认"
+  assert_contains "$guide_content" "设备接入向导"
+}
+
 case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
@@ -3798,6 +3807,7 @@ case "${1:-all}" in
     test_setup_rejects_generating_self_signed_certificates_in_production
     test_setup_mosquitto_does_not_expose_password_in_process_arguments
     test_setup_mosquitto_rejects_password_file_symlink
+    test_user_guide_documents_template_onboarding
     ;;
   readiness)
     test_validate_env_rejects_demo_data_in_production_without_isolated_flag
@@ -4008,6 +4018,7 @@ case "${1:-all}" in
     test_frontend_service_worker_handles_owner_scoped_background_sync
     test_frontend_auth_session_clears_sensitive_state
     test_development_internal_ports_bind_loopback_by_default
+    test_user_guide_documents_template_onboarding
     ;;
   *)
     fail "用法：$0 [setup|readiness|backup|restore|deploy|ci|all]"

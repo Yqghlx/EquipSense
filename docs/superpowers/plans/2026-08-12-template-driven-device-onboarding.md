@@ -402,7 +402,7 @@ git commit -m "feat: add template-driven device quick registration"
 
 在设备管理章节新增操作步骤：进入设备列表 → 按模板添加 → 选择模板 → 核对指标和告警 → 输入编码/名称 → 可选启用推荐告警 → 注册后进入接入向导。明确系统租户模板对所有租户只读可见，推荐阈值不替代现场工程确认。
 
-- [ ] **Step 3: 运行完整相关回归**
+- [x] **Step 3: 运行完整相关回归**
 
 ```bash
 dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceConfigControllerTests|FullyQualifiedName~DeviceTemplateAlarmRuleParserTests"
@@ -418,7 +418,7 @@ git diff --check
 
 预期：相关后端/前端测试、类型检查、Lint、i18n、生产构建和 Shell 语法均通过；若出现既有失败必须先定位，不得删除或放宽断言。
 
-- [ ] **Step 4: 自审变更范围和真实环境不变量**
+- [x] **Step 4: 自审变更范围和真实环境不变量**
 
 运行：
 
@@ -430,7 +430,7 @@ git diff -- docker/.env
 
 确认没有修改 `.env`、证书、备份、容器卷、迁移数据库或生成未追踪构建产物；确认前端快速注册不绕过权限、后端模板查询不跨租户。
 
-- [ ] **Step 5: 提交 Task 5**
+- [x] **Step 5: 提交 Task 5**
 
 ```bash
 git add docs/USER_GUIDE.md docs/superpowers/plans/2026-08-12-template-driven-device-onboarding.md
@@ -439,7 +439,7 @@ git commit -m "docs: document template-driven device onboarding"
 
 ## 完成前验收清单
 
-- [ ] 服务端模板关联、规则完整映射、租户隔离、事务回滚和重复编码错误均有测试证据。
-- [ ] 前端模板选择、预览、默认关闭、显式启用、错误保留输入和无障碍反馈均有测试证据。
-- [ ] 中文/英文资源、用户手册、TypeScript、Lint、单测和生产构建均通过。
-- [ ] 既有高级设备表单、设备接入向导、生产 readiness 门禁和真实环境 27 项阻断均未被削弱。
+- [x] 服务端模板关联、规则完整映射、租户隔离、事务回滚和重复编码错误均有测试证据。
+- [x] 前端模板选择、预览、默认关闭、显式启用、错误保留输入和无障碍反馈均有测试证据。
+- [x] 中文/英文资源、用户手册、TypeScript、Lint、单测和生产构建均通过。
+- [x] 既有高级设备表单、设备接入向导、生产 readiness 门禁和真实环境 27 项阻断均未被削弱。
