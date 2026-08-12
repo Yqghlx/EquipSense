@@ -42,6 +42,9 @@ export default defineConfig({
         ],
       },
       injectManifest: {
+        // Vite 8 已弃用 ES Service Worker 构建内部使用的 inlineDynamicImports；
+        // IIFE 输出仍保持单文件 Service Worker，并避免生产构建产生弃用警告。
+        rollupFormat: 'iife',
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
       },
