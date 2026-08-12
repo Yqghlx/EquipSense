@@ -47,7 +47,6 @@
 
 **Files:**
 - Create: `src/EquipAI.Application/Devices/DeviceTemplateAlarmRuleParser.cs`
-- Modify: `src/EquipAI.Application/Devices/DeviceConfigService.cs`（仅为新 DTO/异常引用做最小调整）
 - Create: `tests/EquipAI.Tests.Unit/Devices/DeviceTemplateAlarmRuleParserTests.cs`
 
 **Interfaces:**
@@ -55,7 +54,7 @@
 - Produces `DeviceTemplateRulesException`，携带固定业务码 `TEMPLATE_RULES_INVALID`。
 - `DeviceTemplateAlarmRuleParser.Parse(string json)` 对有效模板返回不可变规则列表，对无效结构抛出上述异常。
 
-- [ ] **Step 1: 写失败的解析器测试**
+- [x] **Step 1: 写失败的解析器测试**
 
 创建测试类，先锁定真实种子 JSON 的字段和规则语义：
 
@@ -89,9 +88,9 @@ public void Parse_非法JSON或根节点_应抛出模板规则异常(string json
 }
 ```
 
-另加测试：缺少 `name`/`metric`、未知严重级别、负冷却时间、阈值规则缺少操作符或阈值、无效操作符均失败；合法的 `gt/gte/lt/lte/eq/ne` 均可规范化为告警评估器支持的操作符。
+另加测试：缺少 `name`/`metric`、未知严重级别、负冷却时间、阈值规则缺少操作符或阈值、无效操作符均失败；合法的 `gt/gte/lt/lte/eq` 及对应符号均可保留并交给现有阈值评估器正确处理；`ne` 必须拒绝，因为当前评估器不支持“不等于”语义。
 
-- [ ] **Step 2: 运行测试确认按预期失败**
+- [x] **Step 2: 运行测试确认按预期失败**
 
 运行：
 
@@ -101,7 +100,7 @@ dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceTemplate
 
 预期：编译或测试失败，原因是 `DeviceTemplateAlarmRuleParser` 和 `DeviceTemplateRulesException` 尚未存在；不要修改断言迎合当前实现。
 
-- [ ] **Step 3: 实现最小解析器**
+- [x] **Step 3: 实现最小解析器**
 
 在新文件中使用 `System.Text.Json.JsonDocument` 逐项解析，不使用动态反射或宽松 `JsonSerializer.Deserialize<object>`。实现以下固定边界：
 
@@ -123,7 +122,7 @@ public static IReadOnlyList<TemplateAlarmRuleDefinition> Parse(string? json)
 
 `ParseRule` 必须验证必填字段、规则类型、操作符、数值范围，并将严重级别大小写不敏感地转换为 `AlertSeverity`；无效项抛出带固定业务码的异常，不打印原始 JSON。
 
-- [ ] **Step 4: 运行解析器测试确认通过**
+- [x] **Step 4: 运行解析器测试确认通过**
 
 运行：
 
@@ -396,7 +395,7 @@ git commit -m "feat: add template-driven device quick registration"
 
 - [ ] **Step 1: 先写文档契约测试**
 
-在现有项目文档契约测试（若无合适现有测试则新增 `tests/scripts/production-scripts-test.sh` 的只读断言）中断言用户手册包含“模板快速注册”“推荐告警”“现场工艺确认”和“设备接入向导”四个关键说明，先运行并观察失败。
+在 `tests/scripts/production-scripts-test.sh` 新增 `test_user_guide_documents_template_onboarding`，读取 `docs/USER_GUIDE.md` 并断言包含“模板快速注册”“推荐告警”“现场工艺确认”和“设备接入向导”四个关键说明，先运行 `bash tests/scripts/production-scripts-test.sh setup` 并观察失败。
 
 - [ ] **Step 2: 更新用户手册**
 

@@ -414,7 +414,7 @@ public class DataSeeder
                     new { name = "主轴转速超限", metric = "spindle_speed", ruleType = "threshold", @operator = "gt", threshold = 14500.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
                     new { name = "冷却液温度过高", metric = "coolant_temperature", ruleType = "threshold", @operator = "gt", threshold = 50.0, severity = "High", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false },
                     new { name = "振动超标", metric = "vibration", ruleType = "threshold", @operator = "gt", threshold = 7.0, severity = "Critical", cooldownSeconds = 600, enabled = true, autoCreateWorkorder = true },
-                    new { name = "功率消耗过高", metric = "power_consumption", ruleType = "threshold", @operator = "gt", threshold = 28.0, severity = "Medium", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false }
+                    new { name = "功率消耗过高", metric = "power_consumption", ruleType = "threshold", @operator = "gt", threshold = 28.0, severity = "Normal", cooldownSeconds = 300, enabled = true, autoCreateWorkorder = false }
                 }),
                 DefaultDiagnosisRules = "[]"
             },

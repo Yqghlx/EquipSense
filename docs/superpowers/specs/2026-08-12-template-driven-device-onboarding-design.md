@@ -60,7 +60,7 @@ public record QuickRegisterRequest
 1. 使用 `IgnoreQueryFilters()` 查询模板，并限定 `TenantId == 当前租户 || TenantId == 系统租户`；找不到或不可见时返回统一的 `TEMPLATE_NOT_FOUND` 业务错误。
 2. 设置 `Device.TypeTemplateId = TemplateId`，设备类型默认使用模板名称；只有无模板调用才使用 `DeviceType` 或“通用设备”。
 3. 当 `ApplyDefaultAlarmRules=true` 时，服务端解析模板 `DefaultAlarmRules` 数组并映射完整字段；客户端不提交规则内容，避免客户端篡改系统推荐配置。
-4. 模板规则 JSON 无法解析、关键字段非法或规则类型不支持时，整个注册操作失败并返回 `TEMPLATE_RULES_INVALID`，不创建半成品设备。
+4. 模板规则 JSON 无法解析、关键字段非法或规则类型不支持时，整个注册操作失败并返回 `TEMPLATE_RULES_INVALID`，不创建半成品设备；操作符必须属于当前阈值评估器支持的 `gt/gte/lt/lte/eq`（或对应符号）集合。
 5. 设备、规则、租户设备数在同一个数据库事务中提交；失败时全部回滚。
 
 当 `TemplateId` 为空时，保留现有客户端兼容路径，但扩展 `DefaultAlertRuleRequest` 以承载名称、运算符、冷却时间、启用状态和自动建单设置；不再由服务端硬编码这些字段。请求体的 `TenantId` 继续忽略。
