@@ -18,6 +18,11 @@ vi.mock('../../lib/api', () => ({
 
 const mockedApi = vi.mocked(api);
 
+const useDevicesContract = useDevices as unknown as (
+  query: Parameters<typeof useDevices>[0] & { keyword?: string },
+  options?: { enabled?: boolean },
+) => ReturnType<typeof useDevices>;
+
 /** 创建 QueryClient 包装器，用于 hook 测试 */
 const createWrapper = () => {
   const qc = new QueryClient({
@@ -70,11 +75,11 @@ describe('useDevices', () => {
     );
   });
 
-  it('应正确传递状态和设备类型过滤参数', async () => {
+  it('应将 deviceType 映射为后端 type 参数，并保留状态过滤', async () => {
     mockedApi.get.mockResolvedValueOnce({ data: mockPagedResult });
 
     const { result } = renderHook(
-      () => useDevices({ page: 1, pageSize: 20, status: 'Online', deviceType: 'pump' }),
+      () => useDevicesContract({ page: 1, pageSize: 20, status: 'Online', deviceType: 'pump' }),
       { wrapper: createWrapper() },
     );
 
@@ -82,7 +87,23 @@ describe('useDevices', () => {
 
     const calledUrl = mockedApi.get.mock.calls[0][0] as string;
     expect(calledUrl).toContain('status=Online');
-    expect(calledUrl).toContain('deviceType=pump');
+    expect(calledUrl).toContain('type=pump');
+    expect(calledUrl).not.toContain('deviceType=pump');
+  });
+
+  it('应正确传递关键字搜索参数', async () => {
+    mockedApi.get.mockResolvedValueOnce({ data: mockPagedResult });
+
+    const { result } = renderHook(
+      () => useDevicesContract({ page: 1, pageSize: 20, deviceType: 'pump', keyword: 'P-001' }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calledUrl = mockedApi.get.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('type=pump');
+    expect(calledUrl).toContain('keyword=P-001');
   });
 
   it('应正确传递排序参数', async () => {
@@ -111,6 +132,28 @@ describe('useDevices', () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(result.current.error).toBeDefined();
+  });
+
+  it('enabled=false 时应禁用查询', () => {
+    const { result } = renderHook(
+      () => useDevicesContract({ page: 1, pageSize: 20, deviceType: 'pump' }, { enabled: false }),
+      { wrapper: createWrapper() },
+    );
+
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(mockedApi.get).not.toHaveBeenCalled();
+  });
+
+  it('未传 enabled 选项时应保持默认启用行为', async () => {
+    mockedApi.get.mockResolvedValueOnce({ data: mockPagedResult });
+
+    const { result } = renderHook(
+      () => useDevicesContract({ page: 1, pageSize: 20, deviceType: 'pump' }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockedApi.get).toHaveBeenCalledTimes(1);
   });
 });
 
