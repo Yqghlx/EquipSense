@@ -33,7 +33,8 @@ public class WorkOrderAttachmentService
     public async Task<List<WorkOrderAttachmentDto>> ListAsync(Guid workOrderId, CancellationToken ct = default)
     {
         return await _dbContext.WorkOrderAttachments
-            .Where(a => a.WorkOrderId == workOrderId)
+            .Where(a => a.WorkOrderId == workOrderId
+                && a.TenantId == _tenantContext.TenantId)
             .OrderByDescending(a => a.CreatedAt)
             .Select(a => new WorkOrderAttachmentDto
             {
@@ -51,7 +52,9 @@ public class WorkOrderAttachmentService
     /// 校验工单是否存在（上传前校验）。返回 false 表示工单不存在。
     /// </summary>
     public async Task<bool> WorkOrderExistsAsync(Guid workOrderId, CancellationToken ct = default)
-        => await _dbContext.WorkOrders.AnyAsync(w => w.Id == workOrderId, ct);
+        => await _dbContext.WorkOrders.AnyAsync(
+            w => w.Id == workOrderId && w.TenantId == _tenantContext.TenantId,
+            ct);
 
     /// <summary>
     /// 持久化附件元数据（物理文件已由 IFileStorageService 保存）。
@@ -59,6 +62,10 @@ public class WorkOrderAttachmentService
     public async Task<WorkOrderAttachmentDto> CreateAsync(
         Guid workOrderId, string fileName, string contentType, long fileSize, string storagePath, CancellationToken ct = default)
     {
+        // 附件记录保存前再次确认工单归属，避免绕过控制器直接制造跨租户关联。
+        if (!await WorkOrderExistsAsync(workOrderId, ct))
+            throw new KeyNotFoundException($"工单不存在: {workOrderId}");
+
         var attachment = new WorkOrderAttachment
         {
             TenantId = _tenantContext.TenantId,
@@ -92,13 +99,20 @@ public class WorkOrderAttachmentService
     /// </summary>
     public async Task<WorkOrderAttachment?> GetAsync(Guid workOrderId, Guid attachmentId, CancellationToken ct = default)
         => await _dbContext.WorkOrderAttachments
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.WorkOrderId == workOrderId, ct);
+            .FirstOrDefaultAsync(
+                a => a.Id == attachmentId
+                    && a.WorkOrderId == workOrderId
+                    && a.TenantId == _tenantContext.TenantId,
+                ct);
 
     /// <summary>
     /// 删除已通过 <see cref="GetAsync"/> 获取的附件记录（物理文件已由 IFileStorageService 删除）。
     /// </summary>
     public async Task DeleteTrackedAsync(WorkOrderAttachment attachment, CancellationToken ct = default)
     {
+        if (attachment.TenantId != _tenantContext.TenantId)
+            throw new KeyNotFoundException($"附件不存在: {attachment.Id}");
+
         _dbContext.WorkOrderAttachments.Remove(attachment);
         await _dbContext.SaveChangesAsync(ct);
 
