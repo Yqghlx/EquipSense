@@ -41,7 +41,7 @@ public class RbacService : IRbacService
             "audit:read"
         ],
 
-        // 维保主管：设备读写、告警配置、工单派工验收、知识库验证、报表和 AI 只读
+        // 维保主管：设备读写、告警配置、工单派工验收、知识库读写与验证、报表和 AI 只读
         ["MaintenanceLead"] =
         [
             // 设备管理（读 + 更新）
@@ -53,8 +53,8 @@ public class RbacService : IRbacService
             // 工单管理（创建 + 读 + 更新 + 派工 + 接受 + 管理）
             "workorder:create", "workorder:read", "workorder:update",
             "workorder:dispatch", "workorder:accept", "workorder:manage",
-            // 知识库管理（读 + 更新 + 验证）
-            "knowledge:read", "knowledge:update", "knowledge:verify",
+            // 知识库管理（读 + 创建 + 更新 + 验证）
+            "knowledge:read", "knowledge:create", "knowledge:update", "knowledge:verify",
             // 报表（只读）
             "report:read",
             // AI 分析（只读）

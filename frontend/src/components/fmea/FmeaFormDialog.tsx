@@ -49,6 +49,19 @@ interface FmeaFormValues {
 type FmeaFormField = keyof FmeaFormValues;
 type FmeaFormErrors = Partial<Record<FmeaFormField, string>>;
 
+/** 与后端 DTO StringLength 约束保持一致。 */
+const fmeaFieldMaxLengths = {
+  deviceType: 100,
+  failureMode: 200,
+  cause: 500,
+  effect: 500,
+  detection: 500,
+  recommendedAction: 1000,
+} as const;
+
+/** 与 .NET Guid 标准文本格式一致，避免把明显无效的关联 ID 送到服务端。 */
+const knowledgeRuleIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const emptyFormValues: FmeaFormValues = {
   deviceType: '',
   failureMode: '',
@@ -145,17 +158,27 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
   /** 校验必填文本和 1-10 的风险评分。 */
   const validate = (): FmeaFormErrors => {
     const nextErrors: FmeaFormErrors = {};
-    const requiredTextFields: Array<[keyof Pick<FmeaFormValues, 'deviceType' | 'failureMode' | 'cause' | 'effect' | 'detection' | 'recommendedAction'>, string]> = [
-      ['deviceType', 'fmea.deviceTypeRequired'],
-      ['failureMode', 'fmea.failureModeRequired'],
-      ['cause', 'fmea.causeRequired'],
-      ['effect', 'fmea.effectRequired'],
-      ['detection', 'fmea.detectionRequired'],
-      ['recommendedAction', 'fmea.recommendedActionRequired'],
+    const requiredTextFields: Array<[
+      keyof Pick<FmeaFormValues, 'deviceType' | 'failureMode' | 'cause' | 'effect' | 'detection' | 'recommendedAction'>,
+      string,
+      string,
+      number,
+    ]> = [
+      ['deviceType', 'fmea.deviceTypeRequired', 'fmea.deviceTypeTooLong', fmeaFieldMaxLengths.deviceType],
+      ['failureMode', 'fmea.failureModeRequired', 'fmea.failureModeTooLong', fmeaFieldMaxLengths.failureMode],
+      ['cause', 'fmea.causeRequired', 'fmea.causeTooLong', fmeaFieldMaxLengths.cause],
+      ['effect', 'fmea.effectRequired', 'fmea.effectTooLong', fmeaFieldMaxLengths.effect],
+      ['detection', 'fmea.detectionRequired', 'fmea.detectionTooLong', fmeaFieldMaxLengths.detection],
+      ['recommendedAction', 'fmea.recommendedActionRequired', 'fmea.recommendedActionTooLong', fmeaFieldMaxLengths.recommendedAction],
     ];
 
-    requiredTextFields.forEach(([field, messageKey]) => {
-      if (!values[field].trim()) nextErrors[field] = t(messageKey);
+    requiredTextFields.forEach(([field, requiredMessageKey, tooLongMessageKey, maxLength]) => {
+      const value = values[field].trim();
+      if (!value) {
+        nextErrors[field] = t(requiredMessageKey);
+      } else if (value.length > maxLength) {
+        nextErrors[field] = t(tooLongMessageKey);
+      }
     });
 
     const ratingFields: Array<[keyof Pick<FmeaFormValues, 'severity' | 'occurrence' | 'detectability'>, string]> = [
@@ -169,6 +192,11 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
         nextErrors[field] = values[field].trim() ? t('fmea.ratingInvalid') : t(requiredMessageKey);
       }
     });
+
+    const knowledgeRuleId = values.knowledgeRuleId.trim();
+    if (knowledgeRuleId && !knowledgeRuleIdPattern.test(knowledgeRuleId)) {
+      nextErrors.knowledgeRuleId = t('fmea.knowledgeRuleIdInvalid');
+    }
 
     return nextErrors;
   };
@@ -221,7 +249,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+      <DialogContent closeLabel={t('common.close')} className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ClipboardPenLine className="h-5 w-5" />
@@ -247,6 +275,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
                 <Label htmlFor="fmea-device-type">{t('fmea.deviceType')}</Label>
                 <Input
                   id="fmea-device-type"
+                  maxLength={fmeaFieldMaxLengths.deviceType}
                   value={values.deviceType}
                   onChange={(event) => updateField('deviceType', event.target.value)}
                   aria-invalid={errors.deviceType ? 'true' : undefined}
@@ -260,6 +289,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
                 <Label htmlFor="fmea-failure-mode">{t('fmea.failureMode')}</Label>
                 <Input
                   id="fmea-failure-mode"
+                  maxLength={fmeaFieldMaxLengths.failureMode}
                   value={values.failureMode}
                   onChange={(event) => updateField('failureMode', event.target.value)}
                   aria-invalid={errors.failureMode ? 'true' : undefined}
@@ -273,6 +303,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
                 <Label htmlFor="fmea-cause">{t('fmea.cause')}</Label>
                 <Textarea
                   id="fmea-cause"
+                  maxLength={fmeaFieldMaxLengths.cause}
                   rows={3}
                   value={values.cause}
                   onChange={(event) => updateField('cause', event.target.value)}
@@ -286,6 +317,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
                 <Label htmlFor="fmea-effect">{t('fmea.effect')}</Label>
                 <Textarea
                   id="fmea-effect"
+                  maxLength={fmeaFieldMaxLengths.effect}
                   rows={3}
                   value={values.effect}
                   onChange={(event) => updateField('effect', event.target.value)}
@@ -299,6 +331,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
                 <Label htmlFor="fmea-detection">{t('fmea.detection')}</Label>
                 <Textarea
                   id="fmea-detection"
+                  maxLength={fmeaFieldMaxLengths.detection}
                   rows={3}
                   value={values.detection}
                   onChange={(event) => updateField('detection', event.target.value)}
@@ -312,6 +345,7 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
                 <Label htmlFor="fmea-recommended-action">{t('fmea.recommendedAction')}</Label>
                 <Textarea
                   id="fmea-recommended-action"
+                  maxLength={fmeaFieldMaxLengths.recommendedAction}
                   rows={3}
                   value={values.recommendedAction}
                   onChange={(event) => updateField('recommendedAction', event.target.value)}
@@ -402,8 +436,12 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
               value={values.knowledgeRuleId}
               onChange={(event) => updateField('knowledgeRuleId', event.target.value)}
               placeholder={t('fmea.knowledgeRuleIdPlaceholder')}
+              maxLength={36}
+              aria-invalid={errors.knowledgeRuleId ? 'true' : undefined}
+              aria-describedby={errors.knowledgeRuleId ? 'fmea-knowledge-rule-id-error' : undefined}
               autoComplete="off"
             />
+            <FieldError id="fmea-knowledge-rule-id-error" message={errors.knowledgeRuleId} />
           </div>
 
           <DialogFooter>

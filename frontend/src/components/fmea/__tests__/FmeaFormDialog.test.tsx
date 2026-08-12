@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FmeaFormDialog from '../FmeaFormDialog';
 import type { FmeaEntry } from '../../../hooks/useFmea';
@@ -34,6 +34,8 @@ const translations: Record<string, string> = {
   'fmea.occurrenceRequired': '请输入发生频率 (1-10)',
   'fmea.detectabilityRequired': '请输入可检测性 (1-10)',
   'fmea.ratingInvalid': '评分必须是 1-10 的整数',
+  'fmea.deviceTypeTooLong': '设备类型长度不能超过 100 个字符',
+  'fmea.knowledgeRuleIdInvalid': '关联规则 ID 格式无效',
   'fmea.rpnPreview': 'RPN',
   'fmea.submitFailed': '保存失败，请检查后重试。',
   'common.cancel': '取消',
@@ -183,5 +185,24 @@ describe('FmeaFormDialog', () => {
 
     expect(await screen.findByText('保存失败，请检查后重试。')).toBeInTheDocument();
     expect(screen.getByLabelText('故障模式')).toHaveValue('轴承磨损');
+  });
+
+  it('同步后端字段长度并校验关联规则 ID', async () => {
+    const user = userEvent.setup();
+    render(<FmeaFormDialog open entry={null} onOpenChange={vi.fn()} />);
+
+    expect(screen.getByLabelText('设备类型')).toHaveProperty('maxLength', 100);
+    expect(screen.getByLabelText('建议措施')).toHaveProperty('maxLength', 1000);
+
+    await fillRequiredFields(user);
+    fireEvent.change(screen.getByLabelText('设备类型'), { target: { value: 'a'.repeat(101) } });
+    await user.type(screen.getByLabelText('关联规则'), 'not-a-guid');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByText('设备类型长度不能超过 100 个字符')).toHaveAttribute('role', 'alert');
+    expect(screen.getByLabelText('关联规则')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('关联规则')).toHaveAttribute('aria-describedby', 'fmea-knowledge-rule-id-error');
+    expect(screen.getByText('关联规则 ID 格式无效')).toHaveAttribute('role', 'alert');
+    expect(mocks.createMutateAsync).not.toHaveBeenCalled();
   });
 });

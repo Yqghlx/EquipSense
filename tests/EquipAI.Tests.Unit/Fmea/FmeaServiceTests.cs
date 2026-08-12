@@ -1,5 +1,7 @@
 using EquipAI.Application.Fmea;
 using EquipAI.Application.Fmea.DTOs;
+using EquipAI.Core.Constants;
+using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
@@ -64,6 +66,9 @@ public class FmeaServiceTests : IDisposable
     public async Task CreateAsync_Should_Save_KnowledgeRuleId()
     {
         var knowledgeRuleId = Guid.NewGuid();
+        _dbContext.KnowledgeRules.Add(CreateKnowledgeRule(knowledgeRuleId, _testTenantId));
+        await _dbContext.SaveChangesAsync();
+
         var request = new CreateFmeaEntryRequest
         {
             DeviceType = "Air Compressor",
@@ -79,6 +84,55 @@ public class FmeaServiceTests : IDisposable
         };
 
         var result = await _fmeaService.CreateAsync(request);
+        result.KnowledgeRuleId.Should().Be(knowledgeRuleId);
+    }
+
+    [Fact]
+    public async Task CreateAsync_Should_Reject_KnowledgeRule_From_AnotherTenant()
+    {
+        var knowledgeRuleId = Guid.NewGuid();
+        _dbContext.KnowledgeRules.Add(CreateKnowledgeRule(knowledgeRuleId, Guid.NewGuid()));
+        await _dbContext.SaveChangesAsync();
+
+        var act = () => _fmeaService.CreateAsync(new CreateFmeaEntryRequest
+        {
+            DeviceType = "Air Compressor",
+            FailureMode = "Motor Overload",
+            Cause = "Excessive Load",
+            Effect = "Equipment Shutdown",
+            Detection = "Current > 180A",
+            RecommendedAction = "Reduce Load",
+            Severity = 8,
+            Occurrence = 4,
+            Detectability = 2,
+            KnowledgeRuleId = knowledgeRuleId,
+        });
+
+        await act.Should().ThrowAsync<FmeaValidationException>()
+            .WithMessage("*不属于当前租户*");
+    }
+
+    [Fact]
+    public async Task CreateAsync_Should_Accept_SystemTenantKnowledgeRule()
+    {
+        var knowledgeRuleId = Guid.NewGuid();
+        _dbContext.KnowledgeRules.Add(CreateKnowledgeRule(knowledgeRuleId, SystemConstants.SystemTenantId));
+        await _dbContext.SaveChangesAsync();
+
+        var result = await _fmeaService.CreateAsync(new CreateFmeaEntryRequest
+        {
+            DeviceType = "Air Compressor",
+            FailureMode = "Motor Overload",
+            Cause = "Excessive Load",
+            Effect = "Equipment Shutdown",
+            Detection = "Current > 180A",
+            RecommendedAction = "Reduce Load",
+            Severity = 8,
+            Occurrence = 4,
+            Detectability = 2,
+            KnowledgeRuleId = knowledgeRuleId,
+        });
+
         result.KnowledgeRuleId.Should().Be(knowledgeRuleId);
     }
 
@@ -206,6 +260,35 @@ public class FmeaServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateAsync_Should_Reject_KnowledgeRule_From_AnotherTenant()
+    {
+        var created = await _fmeaService.CreateAsync(new CreateFmeaEntryRequest
+        {
+            DeviceType = "Original Equipment",
+            FailureMode = "Original Failure",
+            Cause = "Original Cause", Effect = "Original Effect",
+            Detection = "Original Detection", RecommendedAction = "Original Action",
+            Severity = 5, Occurrence = 5, Detectability = 5,
+        });
+        var knowledgeRuleId = Guid.NewGuid();
+        _dbContext.KnowledgeRules.Add(CreateKnowledgeRule(knowledgeRuleId, Guid.NewGuid()));
+        await _dbContext.SaveChangesAsync();
+
+        var act = () => _fmeaService.UpdateAsync(created.Id, new UpdateFmeaEntryRequest
+        {
+            DeviceType = "New Equipment",
+            FailureMode = "New Failure",
+            Cause = "New Cause", Effect = "New Effect",
+            Detection = "New Detection", RecommendedAction = "New Action",
+            Severity = 8, Occurrence = 6, Detectability = 4,
+            KnowledgeRuleId = knowledgeRuleId,
+        });
+
+        await act.Should().ThrowAsync<FmeaValidationException>()
+            .WithMessage("*不属于当前租户*");
+    }
+
+    [Fact]
     public async Task DeleteAsync_Should_Delete_FMEA_Entry()
     {
         var created = await _fmeaService.CreateAsync(new CreateFmeaEntryRequest
@@ -288,5 +371,18 @@ public class FmeaServiceTests : IDisposable
     public void Dispose()
     {
         _dbContext.Dispose();
+    }
+
+    private static KnowledgeRule CreateKnowledgeRule(Guid id, Guid tenantId)
+    {
+        return new KnowledgeRule
+        {
+            Id = id,
+            TenantId = tenantId,
+            DeviceType = "Air Compressor",
+            Name = "Motor overload rule",
+            Conditions = "[]",
+            Conclusion = "Motor overload",
+        };
     }
 }

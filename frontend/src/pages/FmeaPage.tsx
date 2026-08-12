@@ -24,9 +24,20 @@ export default function FmeaPage() {
   const [editingEntry, setEditingEntry] = useState<FmeaEntry | null>(null);
 
   const perm = usePermission('knowledge');
-  const { data, isLoading } = useFmeaEntries({ page, pageSize: 20, deviceType: deviceTypeFilter || undefined });
+  const { data, isLoading } = useFmeaEntries(
+    { page, pageSize: 20, deviceType: deviceTypeFilter || undefined },
+    { enabled: perm.canRead },
+  );
   const deleteMutation = useDeleteFmeaEntry();
   const toggleMutation = useToggleFmeaEntry();
+
+  if (!perm.canRead) {
+    return (
+      <div role="alert" className="flex min-h-48 items-center justify-center rounded-xl border border-border bg-card p-6 text-center text-muted-foreground">
+        {t('fmea.noReadPermission')}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

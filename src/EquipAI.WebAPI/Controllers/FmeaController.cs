@@ -57,8 +57,15 @@ public class FmeaController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var entry = await _fmeaService.CreateAsync(request);
-        return CreatedAtAction(nameof(GetById), new { id = entry.Id }, entry);
+        try
+        {
+            var entry = await _fmeaService.CreateAsync(request);
+            return CreatedAtAction(nameof(GetById), new { id = entry.Id }, entry);
+        }
+        catch (FmeaValidationException exception)
+        {
+            return BadRequest(new { code = exception.Code, message = exception.Message });
+        }
     }
 
     /// <summary>
@@ -86,9 +93,16 @@ public class FmeaController : ControllerBase
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
 
-        var entry = await _fmeaService.UpdateAsync(id, request);
-        if (entry is null) return NotFound();
-        return Ok(entry);
+        try
+        {
+            var entry = await _fmeaService.UpdateAsync(id, request);
+            if (entry is null) return NotFound();
+            return Ok(entry);
+        }
+        catch (FmeaValidationException exception)
+        {
+            return BadRequest(new { code = exception.Code, message = exception.Message });
+        }
     }
 
     /// <summary>

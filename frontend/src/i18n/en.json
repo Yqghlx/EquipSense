@@ -1337,6 +1337,7 @@
   "fmea": {
     "title": "FMEA Failure Mode Library",
     "description": "Failure Mode and Effects Analysis based on ISO 14224 standard for systematic equipment risk assessment",
+    "noReadPermission": "You do not have permission to view the FMEA library. Contact an administrator.",
     "create": "Create FMEA",
     "edit": "Edit FMEA",
     "formDescription": "Maintain failure modes, effects, and risk scores. Saving updates the risk priority number.",
@@ -1365,14 +1366,21 @@
     "disableAction": "Disable FMEA entry",
     "deleteAction": "Delete FMEA entry",
     "deviceTypeRequired": "Device type is required",
+    "deviceTypeTooLong": "Device type must be 100 characters or fewer",
     "failureModeRequired": "Failure mode is required",
+    "failureModeTooLong": "Failure mode must be 200 characters or fewer",
     "causeRequired": "Cause is required",
+    "causeTooLong": "Cause must be 500 characters or fewer",
     "effectRequired": "Effect is required",
+    "effectTooLong": "Effect must be 500 characters or fewer",
     "detectionRequired": "Detection method is required",
+    "detectionTooLong": "Detection method must be 500 characters or fewer",
     "recommendedActionRequired": "Recommended action is required",
+    "recommendedActionTooLong": "Recommended action must be 1000 characters or fewer",
     "severityRequired": "Severity is required (1-10)",
     "occurrenceRequired": "Occurrence is required (1-10)",
-    "detectabilityRequired": "Detectability is required (1-10)"
+    "detectabilityRequired": "Detectability is required (1-10)",
+    "knowledgeRuleIdInvalid": "Related rule ID is not a valid GUID"
   },
   "workOrders": {
     "reports": "Work Order Reports",

@@ -147,7 +147,7 @@ describe('usePermission', () => {
       expect(p.canConfigure).toBe(false);
     });
 
-    it('知识库模块：可创建/编辑/审批，但不能删除', () => {
+    it('知识库模块：可创建/编辑/审批但不能删除', () => {
       setMockUser('MaintenanceLead');
       const { result } = renderHook(() => usePermission('knowledge'));
       const p = result.current;
@@ -176,6 +176,13 @@ describe('usePermission', () => {
   });
 
   describe('操作员（Operator）', () => {
+    it('知识库模块：无读权限', () => {
+      setMockUser('Operator');
+      const { result } = renderHook(() => usePermission('knowledge'));
+      expect(result.current.canRead).toBe(false);
+      expect(result.current.canCreate).toBe(false);
+    });
+
     it('告警模块：只读 + 可确认（canExecute）', () => {
       setMockUser('Operator');
       const { result } = renderHook(() => usePermission('alert'));

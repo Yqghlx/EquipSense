@@ -25,11 +25,11 @@ public class FmeaControllerTests
         _factory = factory;
     }
 
-    private async Task<HttpClient> GetAuthenticatedClientAsync()
+    private async Task<HttpClient> GetAuthenticatedClientAsync(string username = "admin", string password = "Admin@123")
     {
         var client = await _factory.CreateClientWithSeedAsync();
         var loginResponse = await client.PostAsJsonAsync("/api/v1/auth/login",
-            new LoginRequest { Username = "admin", Password = "Admin@123" });
+            new LoginRequest { Username = username, Password = password });
         loginResponse.EnsureSuccessStatusCode();
         var loginData = await loginResponse.Content.ReadFromJsonAsync<AuthResponse>();
         loginData.Should().NotBeNull();
@@ -119,6 +119,80 @@ public class FmeaControllerTests
     }
 
     /// <summary>
+    /// FMEA 不能关联其他租户的知识规则，避免跨租户关系污染诊断链路。
+    /// </summary>
+    [Fact]
+    public async Task CreateFmea_WithOtherTenantKnowledgeRule_ReturnsBadRequest()
+    {
+        var client = await GetAuthenticatedClientAsync();
+        var knowledgeRuleId = Guid.NewGuid();
+        var otherTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.KnowledgeRules.Add(new KnowledgeRule
+            {
+                Id = knowledgeRuleId,
+                TenantId = otherTenantId,
+                DeviceType = "测试设备",
+                Name = "其他租户规则",
+                Conditions = "[]",
+                Conclusion = "测试结论",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            var response = await client.PostAsJsonAsync("/api/v1/fmea", CreateRequest(knowledgeRuleId));
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var body = await response.Content.ReadAsStringAsync();
+            body.Should().Contain("KNOWLEDGE_RULE_NOT_ACCESSIBLE");
+        }
+        finally
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rule = await db.KnowledgeRules
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(item => item.Id == knowledgeRuleId);
+            if (rule is not null)
+            {
+                db.KnowledgeRules.Remove(rule);
+                await db.SaveChangesAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 维保主管按产品 RBAC 矩阵拥有 FMEA 新建权限，前后端必须保持一致。
+    /// </summary>
+    [Fact]
+    public async Task CreateFmea_AsMaintenanceLead_ReturnsCreated()
+    {
+        var client = await GetAuthenticatedClientAsync("lead", "Lead@123");
+
+        var response = await client.PostAsJsonAsync("/api/v1/fmea", CreateRequest());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var entry = await response.Content.ReadFromJsonAsync<FmeaEntryResponse>();
+        entry.Should().NotBeNull();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var created = await db.FmeaLibrary
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(item => item.Id == entry!.Id);
+        if (created is not null)
+        {
+            db.FmeaLibrary.Remove(created);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>
     /// 构造最小 FMEA 测试条目，使用不同 RPN 稳定控制列表排序。
     /// </summary>
     private static FmeaEntry CreateEntry(Guid id, Guid tenantId, string failureMode, int rpn)
@@ -139,6 +213,26 @@ public class FmeaControllerTests
             Rpn = rpn,
             CreatedBy = Guid.Empty,
             IsEnabled = true,
+        };
+    }
+
+    /// <summary>
+    /// 构造最小有效 FMEA 请求，供控制器权限与引用校验测试复用。
+    /// </summary>
+    private static CreateFmeaEntryRequest CreateRequest(Guid? knowledgeRuleId = null)
+    {
+        return new CreateFmeaEntryRequest
+        {
+            DeviceType = "测试设备",
+            FailureMode = "测试故障",
+            Cause = "测试原因",
+            Effect = "测试影响",
+            Detection = "测试检测",
+            RecommendedAction = "测试措施",
+            Severity = 5,
+            Occurrence = 5,
+            Detectability = 5,
+            KnowledgeRuleId = knowledgeRuleId,
         };
     }
 }

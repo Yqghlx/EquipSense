@@ -114,4 +114,19 @@ describe('FmeaPage', () => {
     expect(screen.queryByRole('button', { name: 'fmea.create' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'fmea.editAction' })).not.toBeInTheDocument();
   });
+
+  it('无读权限时显示明确的无权限状态且不查询 FMEA', () => {
+    vi.mocked(usePermission).mockReturnValue({
+      ...allPermissions,
+      canRead: false,
+      canCreate: false,
+      canEdit: false,
+      canDelete: false,
+    });
+
+    render(<FmeaPage />);
+
+    expect(screen.getByText('fmea.noReadPermission')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'fmea.create' })).not.toBeInTheDocument();
+  });
 });

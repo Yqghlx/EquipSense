@@ -10,13 +10,14 @@
 
 ## Global Constraints
 
-- 不新增第三方依赖，不修改后端 FMEA API 或权限语义。
+- 不新增第三方依赖，不新增后端 FMEA 端点；关联规则校验必须遵循后端已有的租户权限语义。
 - 所有新增代码注释、测试说明、用户文案使用中文；英文界面文案必须同步维护。
 - 文本请求字段提交前去除首尾空白；S/O/D 必须是 1–10 的整数，RPN 由服务端最终计算。
-- 仅 usePermission('knowledge') 返回 canCreate/canEdit 时显示对应写操作入口；只读角色不获得新权限。
+- 仅 usePermission('knowledge') 返回 canCreate/canEdit 时显示对应写操作入口；前后端均遵循维保主管知识库 RW+验证、技术员/观察者只读、操作员无知识库访问的权限矩阵。
 - 表单字段错误必须使用 aria-invalid、aria-describedby 和 role="alert" 建立可访问关联。
 - 关闭弹窗或请求失败不能丢失用户仍可重试的草稿；成功后关闭并依赖 ['fmea'] 查询失效刷新列表。
 - 必须通过 npm run check:i18n、npx tsc -p tsconfig.json --noEmit、npx eslint src/ --max-warnings 1、Vitest 和 npm run build。
+- FMEA 关联规则只能属于当前租户或系统租户；前端必须同步后端 DTO 的字段长度和 GUID 约束。
 
 ---
 

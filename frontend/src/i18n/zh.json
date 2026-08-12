@@ -1337,6 +1337,7 @@
   "fmea": {
     "title": "FMEA 故障模式库",
     "description": "基于 ISO 14224 标准的故障模式与影响分析，用于系统化评估设备风险",
+    "noReadPermission": "你没有查看 FMEA 故障模式库的权限，请联系管理员。",
     "create": "新建 FMEA",
     "edit": "编辑 FMEA",
     "formDescription": "维护故障模式、影响和风险评分，保存后将更新风险优先数。",
@@ -1365,14 +1366,21 @@
     "disableAction": "停用 FMEA 条目",
     "deleteAction": "删除 FMEA 条目",
     "deviceTypeRequired": "请输入设备类型",
+    "deviceTypeTooLong": "设备类型长度不能超过 100 个字符",
     "failureModeRequired": "请输入故障模式",
+    "failureModeTooLong": "故障模式长度不能超过 200 个字符",
     "causeRequired": "请输入故障原因",
+    "causeTooLong": "故障原因长度不能超过 500 个字符",
     "effectRequired": "请输入故障影响",
+    "effectTooLong": "故障影响长度不能超过 500 个字符",
     "detectionRequired": "请输入检测方式",
+    "detectionTooLong": "检测方式长度不能超过 500 个字符",
     "recommendedActionRequired": "请输入建议措施",
+    "recommendedActionTooLong": "建议措施长度不能超过 1000 个字符",
     "severityRequired": "请输入严重度 (1-10)",
     "occurrenceRequired": "请输入发生频率 (1-10)",
-    "detectabilityRequired": "请输入可检测性 (1-10)"
+    "detectabilityRequired": "请输入可检测性 (1-10)",
+    "knowledgeRuleIdInvalid": "关联规则 ID 格式无效"
   },
   "workOrders": {
     "reports": "工单报表",

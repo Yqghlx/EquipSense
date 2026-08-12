@@ -4,7 +4,7 @@
  * 提供基于用户角色的权限检查功能，用于控制按钮/菜单的可见性和可用状态。
  * 权限矩阵：
  * - SystemAdmin: 所有 CRUD
- * - LeadTech: 设备 RW、告警 RW+配置、工单 RW+派工验收、知识库 RW+验证
+ * - MaintenanceLead: 设备 RW、告警 RW+配置、工单 RW+派工验收、知识库 RW+验证
  * - Technician: 设备 R、告警 R+确认、工单 R+执行、知识库 R
  * - Operator: 设备 R、告警 R+确认、工单 R
  * - Viewer: 所有只读
@@ -16,7 +16,7 @@ type UserRole = 'SystemAdmin' | 'MaintenanceLead' | 'Technician' | 'Operator' | 
 
 /** 权限检查结果 */
 export interface PermissionResult {
-  /** 是否可以查看（所有角色都有） */
+  /** 是否可以查看（由角色和模块共同决定） */
   canRead: boolean;
   /** 是否可以创建 */
   canCreate: boolean;
@@ -66,8 +66,11 @@ export function usePermission(module: Module): PermissionResult {
 
   if (!role) return defaultPermission;
 
-  // 所有角色都有读权限
-  const base: PermissionResult = { ...defaultPermission, canRead: true };
+  // 基础读权限按后端 RBAC 矩阵计算；Operator 不具备知识库读取权限，不能让页面先发起必然 403 的请求。
+  const base: PermissionResult = {
+    ...defaultPermission,
+    canRead: !(role === 'Operator' && module === 'knowledge'),
+  };
 
   switch (role) {
     case 'SystemAdmin':

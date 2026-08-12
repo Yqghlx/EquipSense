@@ -39,6 +39,14 @@ public class RbacServiceTests
     }
 
     [Fact]
+    public void MaintenanceLead_CanCreateAndUpdateKnowledgeButNotDelete()
+    {
+        _sut.HasPermission("MaintenanceLead", "knowledge:create").Should().BeTrue();
+        _sut.HasPermission("MaintenanceLead", "knowledge:update").Should().BeTrue();
+        _sut.HasPermission("MaintenanceLead", "knowledge:delete").Should().BeFalse();
+    }
+
+    [Fact]
     public void Operator_CanReadAndAcknowledgeAlerts()
     {
         _sut.HasPermission("Operator", "alert:read").Should().BeTrue();

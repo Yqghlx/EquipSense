@@ -52,13 +52,14 @@ export function useFmeaEntries(params: {
   pageSize?: number;
   deviceType?: string;
   isEnabled?: boolean;
-}) {
+}, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['fmea', params],
     queryFn: async () => {
       const { data } = await api.get<FmeaListResponse>('/fmea', { params });
       return data;
     },
+    enabled: options?.enabled ?? true,
   });
 }
 

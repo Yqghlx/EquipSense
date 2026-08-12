@@ -1,4 +1,5 @@
 using EquipAI.Application.Fmea.DTOs;
+using EquipAI.Core.Constants;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -89,6 +90,8 @@ public class FmeaService
     /// </summary>
     public async Task<FmeaEntryResponse> CreateAsync(CreateFmeaEntryRequest request)
     {
+        await EnsureKnowledgeRuleIsAccessibleAsync(request.KnowledgeRuleId);
+
         var entry = new FmeaEntry
         {
             TenantId = _tenantContext.TenantId,
@@ -123,6 +126,8 @@ public class FmeaService
 
         if (entry is null) return null;
 
+        await EnsureKnowledgeRuleIsAccessibleAsync(request.KnowledgeRuleId);
+
         entry.DeviceType = request.DeviceType;
         entry.FailureMode = request.FailureMode;
         entry.Cause = request.Cause;
@@ -138,6 +143,28 @@ public class FmeaService
 
         await _db.SaveChangesAsync();
         return MapToResponse(entry);
+    }
+
+    /// <summary>
+    /// 校验 FMEA 关联的知识规则属于当前租户或系统租户。
+    /// 关联字段本身是可选的，但不能接受任意租户的规则 ID，避免跨租户关系污染后续诊断链路。
+    /// </summary>
+    private async Task EnsureKnowledgeRuleIsAccessibleAsync(Guid? knowledgeRuleId)
+    {
+        if (!knowledgeRuleId.HasValue) return;
+
+        var isAccessible = await _db.KnowledgeRules
+            .IgnoreQueryFilters()
+            .AnyAsync(rule => rule.Id == knowledgeRuleId.Value
+                && (rule.TenantId == _tenantContext.TenantId
+                    || rule.TenantId == SystemConstants.SystemTenantId));
+
+        if (!isAccessible)
+        {
+            throw new FmeaValidationException(
+                "KNOWLEDGE_RULE_NOT_ACCESSIBLE",
+                "关联的知识规则不存在或不属于当前租户。");
+        }
     }
 
     /// <summary>
@@ -191,4 +218,19 @@ public class FmeaService
         CreatedAt = entry.CreatedAt,
         UpdatedAt = entry.UpdatedAt,
     };
+}
+
+/// <summary>
+/// FMEA 请求引用校验异常。
+/// </summary>
+public sealed class FmeaValidationException : InvalidOperationException
+{
+    public FmeaValidationException(string code, string message)
+        : base(message)
+    {
+        Code = code;
+    }
+
+    /// <summary>供 API 返回的稳定错误编码。</summary>
+    public string Code { get; }
 }
