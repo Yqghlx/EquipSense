@@ -289,7 +289,7 @@ git commit -m "docs: document full runtime readiness deployment gate"
 - Consumes: Task 1-4 的脚本、测试和文档。
 - Produces: 可复现的验证结果，区分代码闭环已通过与真实生产环境仍需人工完成的事项。
 
-- [ ] **Step 1: 执行脚本全量门禁**
+- [x] **Step 1: 执行脚本全量门禁**
 
 ```bash
 bash docker/production-readiness.sh --help
@@ -300,7 +300,7 @@ bash tests/scripts/production-scripts-test.sh ci
 bash tests/scripts/production-scripts-test.sh all
 ```
 
-- [ ] **Step 2: 执行 Shell 语法与差异检查**
+- [x] **Step 2: 执行 Shell 语法与差异检查**
 
 ```bash
 bash -n docker/production-readiness.sh docker/deploy-production.sh \
@@ -308,7 +308,7 @@ bash -n docker/production-readiness.sh docker/deploy-production.sh \
 git diff --check
 ```
 
-- [ ] **Step 3: 重新验证真实工作区门禁**
+- [x] **Step 3: 重新验证真实工作区门禁**
 
 ```bash
 bash docker/validate-env.sh docker/.env --check-runtime-files
@@ -316,7 +316,7 @@ bash docker/validate-env.sh docker/.env --check-runtime-files
 
 预期：命令仍以非零退出并只报告真实变量名、证书文件和错误类别；当前 27 项问题必须保持可见，不得修改 `docker/.env`。
 
-- [ ] **Step 4: 检查变更范围**
+- [x] **Step 4: 检查变更范围**
 
 ```bash
 git -c core.fsmonitor=false status --short --branch
@@ -325,7 +325,7 @@ git log -5 --oneline --decorate
 
 确认没有生成证书、备份、`.env`、容器卷或未追踪的构建产物。
 
-- [ ] **Step 5: 用实际验证结果更新生产就绪报告并提交**
+- [x] **Step 5: 用实际验证结果更新生产就绪报告并提交**
 
 ```bash
 git add docs/LANDING_READINESS_REPORT.md
