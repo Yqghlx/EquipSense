@@ -134,7 +134,7 @@ public class KnowledgeCaptureHandlerTests
 
         await handler.HandleAsync(CreateClosedEvent(wo.Id), CancellationToken.None);
 
-        tracker.Verify(t => t.RecordAsync(ruleId, true, It.IsAny<CancellationToken>()), Times.Once);
+        tracker.Verify(t => t.RecordAsync(_tenantId, ruleId, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public class KnowledgeCaptureHandlerTests
 
         await handler.HandleAsync(CreateClosedEvent(wo.Id), CancellationToken.None);
 
-        tracker.Verify(t => t.RecordAsync(ruleId, false, It.IsAny<CancellationToken>()), Times.Once);
+        tracker.Verify(t => t.RecordAsync(_tenantId, ruleId, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -215,7 +215,7 @@ public class KnowledgeCaptureHandlerTests
         await handler.HandleAsync(CreateClosedEvent(wo.Id), CancellationToken.None);
 
         tracker.Verify(
-            t => t.RecordAsync(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            t => t.RecordAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

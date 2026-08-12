@@ -18,11 +18,8 @@ namespace EquipAI.Tests.Unit.Knowledge;
 /// 生产链路：工单关闭 → <c>WorkOrderStatusChangedEvent</c> → <c>KnowledgeCaptureHandler</c>
 /// .TrackRuleAccuracyAsync（后台事件处理器，无 HttpContext）→ <c>RuleAccuracyTracker.RecordAsync</c>。
 /// 后台 scope 中 <c>ITenantContext</c> 走 DI 回退 → <c>TenantId == Guid.Empty</c>。
-/// RecordAsync 用 <c>db.KnowledgeRules.FindAsync([ruleId])</c> 沿用默认全局租户过滤器
-/// （已实测 FindAsync 对未追踪实体同样应用过滤器）→ 恒查不到真实租户规则 → 抛 KeyNotFoundException →
-/// 被外层 try/catch 吞掉 → 规则准确率追踪静默永久失效。
-///
-/// ruleId 为全局唯一 UUID 主键，应 <c>IgnoreQueryFilters</c> + 按 Id 直接定位（无需租户限定）。
+/// RecordAsync 运行在后台 scope 中，默认全局过滤器的租户上下文为 Guid.Empty；因此查询需要
+/// <c>IgnoreQueryFilters</c>，同时显式使用事件租户 + ruleId 定位，才能既支持后台处理又保持业务边界。
 /// InMemory provider 不强制过滤器，既有 RuleAccuracyTrackerTests 用 InMemory + 真实租户上下文掩盖了此 bug，
 /// 必须用 SQLite + Guid.Empty 上下文复刻生产后台路径。
 /// </summary>
@@ -84,8 +81,8 @@ public class RuleAccuracyTrackerBackgroundScopeTests : IAsyncLifetime
             var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
 
             // 修复前：FindAsync 受 Guid.Empty 过滤查不到真实租户规则 → 抛 KeyNotFoundException。
-            // 修复后：IgnoreQueryFilters 按 UUID 主键定位成功，更新准确率。
-            var act = async () => await tracker.RecordAsync(ruleId, wasAccurate: true);
+            // 修复后：IgnoreQueryFilters + 事件租户按规则 UUID 定位成功，更新准确率。
+            var act = async () => await tracker.RecordAsync(tenantId, ruleId, wasAccurate: true);
             await act.Should().NotThrowAsync("后台 scope 必须能按规则 UUID 主键定位并更新，不受 Guid.Empty 过滤影响");
         }
 

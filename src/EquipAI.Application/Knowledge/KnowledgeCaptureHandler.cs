@@ -90,7 +90,7 @@ public class KnowledgeCaptureHandler : IEventHandler<WorkOrderStatusChangedEvent
                                    && !string.IsNullOrEmpty(wo.Resolution);
 
                     var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
-                    await tracker.RecordAsync(analysis.RuleId.Value, wasAccurate, ct);
+                    await tracker.RecordAsync(tenantId, analysis.RuleId.Value, wasAccurate, ct);
                 }
             }
         }

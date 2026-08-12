@@ -24,18 +24,18 @@ public class RuleAccuracyTracker : IRuleAccuracyTracker
     }
 
     /// <inheritdoc />
-    public async Task RecordAsync(Guid ruleId, bool wasAccurate, CancellationToken ct = default)
+    public async Task RecordAsync(Guid tenantId, Guid ruleId, bool wasAccurate, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 本服务由后台事件处理器（KnowledgeCaptureHandler.TrackRuleAccuracyAsync）调用，运行在独立 scope 中、
         // 无 HttpContext，ITenantContext 走回退 → TenantId == Guid.Empty。FindAsync 沿用默认全局租户过滤器
-        // （已实测对未追踪实体同样应用）→ 恒查不到真实租户规则 → 抛 KeyNotFoundException 被外层吞掉 →
-        // 规则准确率追踪永久失效。ruleId 为全局唯一 UUID 主键，IgnoreQueryFilters + 按 Id 直接定位即可。
+        // （已实测对未追踪实体同样应用）→ 恒查不到真实租户规则 → 抛 KeyNotFoundException 被外层吞掉。
+        // 因此需要 IgnoreQueryFilters；但全局 UUID 不能替代业务租户边界，查询必须同时绑定 tenantId。
         var rule = await db.KnowledgeRules
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.Id == ruleId, ct);
+            .FirstOrDefaultAsync(r => r.Id == ruleId && r.TenantId == tenantId, ct);
         if (rule is null)
             throw new KeyNotFoundException($"规则不存在: {ruleId}");
 

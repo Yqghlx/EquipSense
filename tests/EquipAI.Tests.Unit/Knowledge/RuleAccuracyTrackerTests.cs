@@ -45,7 +45,7 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
-        await tracker.RecordAsync(ruleId, wasAccurate: true);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
 
         // tracker 内部通过独立 scope 的 DbContext 保存，需用 AsNoTracking 避免本地缓存
         var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
@@ -73,9 +73,9 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
-        await tracker.RecordAsync(ruleId, wasAccurate: true);
-        await tracker.RecordAsync(ruleId, wasAccurate: true);
-        await tracker.RecordAsync(ruleId, wasAccurate: false);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: false);
 
         // tracker 内部通过独立 scope 的 DbContext 保存，需用 AsNoTracking 避免本地缓存
         var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
@@ -90,9 +90,48 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         using var scope = _sp.CreateScope();
         var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
 
-        var act = () => tracker.RecordAsync(Guid.NewGuid(), wasAccurate: true);
+        var act = () => tracker.RecordAsync(_tenantId, Guid.NewGuid(), wasAccurate: true);
 
         await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    /// <summary>
+    /// 安全边界：当前租户不能更新其他租户同 ID 规则的准确率统计。
+    ///
+    /// Why：规则 UUID 虽然全局唯一，但后台事件中的 ruleId 仍必须和事件租户绑定；
+    /// 仅按 UUID 使用 IgnoreQueryFilters 会让错误事件修改其他租户的知识规则。
+    /// </summary>
+    [Fact]
+    public async Task RecordAsync_其他租户规则不应被当前租户更新()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var otherTenantId = Guid.NewGuid();
+        var ruleId = Guid.NewGuid();
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            Id = ruleId,
+            TenantId = otherTenantId,
+            Name = "其他租户规则",
+            DeviceType = "电机",
+            Conditions = "[]",
+            Conclusion = "测试",
+            SuccessCount = 0,
+        });
+        await db.SaveChangesAsync();
+
+        var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
+        var act = () => tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
+        await act.Should().ThrowAsync<KeyNotFoundException>(
+            "当前租户不能定位其他租户规则");
+
+        var rule = await db.KnowledgeRules
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(r => r.Id == ruleId);
+        rule.SuccessCount.Should().Be(0,
+            "当前租户不能更新其他租户规则的准确率");
+        rule.AccuracyRate.Should().BeNull();
     }
 
     [Fact]
@@ -110,9 +149,9 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
-        await tracker.RecordAsync(ruleId, wasAccurate: false);
-        await tracker.RecordAsync(ruleId, wasAccurate: false);
-        await tracker.RecordAsync(ruleId, wasAccurate: false);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: false);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: false);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: false);
 
         var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
         rule.SuccessCount.Should().Be(0);
@@ -135,7 +174,7 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
-        await tracker.RecordAsync(ruleId, wasAccurate: true);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
 
         var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
         // 原有 3次准确/0.75准确率 = 4次总计，再加1次准确 = 4次准确/5次总计 = 0.8
@@ -158,8 +197,8 @@ public class RuleAccuracyTrackerTests : IAsyncDisposable
         await db.SaveChangesAsync();
 
         var tracker = scope.ServiceProvider.GetRequiredService<IRuleAccuracyTracker>();
-        await tracker.RecordAsync(ruleId, wasAccurate: true);
-        await tracker.RecordAsync(ruleId, wasAccurate: true);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
+        await tracker.RecordAsync(_tenantId, ruleId, wasAccurate: true);
 
         var rule = await db.KnowledgeRules.AsNoTracking().FirstAsync(r => r.Id == ruleId);
         rule.AccuracyRate.Should().Be(1.0m);
