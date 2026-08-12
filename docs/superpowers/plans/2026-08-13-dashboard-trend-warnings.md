@@ -143,7 +143,7 @@ cd frontend && npm run build
 
 Expected: i18n 键完整，TypeScript 退出码为 0，ESLint 0 error 且最多 1 warning，Vitest 全部通过，生产构建退出码为 0。
 
-- [ ] **Step 3: 检查差异并提交**
+- [x] **Step 3: 检查差异并提交**
 
 Run: `git diff --check`、`git -c core.fsmonitor=false status --short`。
 
