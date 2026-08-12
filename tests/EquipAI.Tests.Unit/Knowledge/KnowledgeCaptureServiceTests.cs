@@ -411,7 +411,8 @@ public class KnowledgeCaptureServiceTests
         var reviewerId = Guid.NewGuid();
 
         // Act
-        await _sut.ApproveRuleAsync(pending.Id, reviewerId, "通过验证", CancellationToken.None);
+        await _sut.ApproveRuleAsync(
+            pending.Id, _tenantId, reviewerId, "通过验证", CancellationToken.None);
 
         // Assert
         var knowledgeRules = await _db.KnowledgeRules.IgnoreQueryFilters().ToListAsync();
@@ -430,6 +431,31 @@ public class KnowledgeCaptureServiceTests
         updatedPending.ReviewedBy.Should().Be(reviewerId);
         updatedPending.ReviewComment.Should().Be("通过验证");
         updatedPending.ReviewedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ApproveRuleAsync_其他租户候选规则_不应创建正式规则或修改状态()
+    {
+        var pending = new PendingRule
+        {
+            TenantId = _tenantId,
+            DeviceType = "电机",
+            Name = "当前租户候选规则",
+            Conditions = "[]",
+            Conclusion = "不应被批准",
+            ReviewStatus = ReviewStatus.Pending
+        };
+        _db.PendingRules.Add(pending);
+        await _db.SaveChangesAsync();
+
+        var otherTenantId = Guid.NewGuid();
+        var act = () => _sut.ApproveRuleAsync(
+            pending.Id, otherTenantId, Guid.NewGuid(), "越权批准", CancellationToken.None);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>(
+            "审批服务不得跨租户读取候选规则");
+        pending.ReviewStatus.Should().Be(ReviewStatus.Pending);
+        (await _db.KnowledgeRules.IgnoreQueryFilters().ToListAsync()).Should().BeEmpty();
     }
 
     /// <summary>
@@ -456,7 +482,8 @@ public class KnowledgeCaptureServiceTests
         await _db.SaveChangesAsync();
 
         // Act
-        await _sut.ApproveRuleAsync(pending.Id, Guid.NewGuid(), "通过验证", CancellationToken.None);
+        await _sut.ApproveRuleAsync(
+            pending.Id, _tenantId, Guid.NewGuid(), "通过验证", CancellationToken.None);
 
         // Assert
         var rule = await _db.KnowledgeRules.IgnoreQueryFilters().FirstAsync();
@@ -482,7 +509,8 @@ public class KnowledgeCaptureServiceTests
         await _db.SaveChangesAsync();
 
         // Act
-        var act = () => _sut.ApproveRuleAsync(pending.Id, Guid.NewGuid(), null, CancellationToken.None);
+        var act = () => _sut.ApproveRuleAsync(
+            pending.Id, _tenantId, Guid.NewGuid(), null, CancellationToken.None);
 
         // Assert
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -508,7 +536,8 @@ public class KnowledgeCaptureServiceTests
         var reviewerId = Guid.NewGuid();
 
         // Act
-        await _sut.RejectRuleAsync(pending.Id, reviewerId, "规则不准确", CancellationToken.None);
+        await _sut.RejectRuleAsync(
+            pending.Id, _tenantId, reviewerId, "规则不准确", CancellationToken.None);
 
         // Assert
         var updatedPending = await _db.PendingRules.IgnoreQueryFilters()
@@ -525,10 +554,34 @@ public class KnowledgeCaptureServiceTests
     }
 
     [Fact]
+    public async Task RejectRuleAsync_其他租户候选规则_不应修改状态()
+    {
+        var pending = new PendingRule
+        {
+            TenantId = _tenantId,
+            DeviceType = "压缩机",
+            Name = "当前租户候选规则",
+            Conditions = "[]",
+            Conclusion = "不应被驳回",
+            ReviewStatus = ReviewStatus.Pending
+        };
+        _db.PendingRules.Add(pending);
+        await _db.SaveChangesAsync();
+
+        var act = () => _sut.RejectRuleAsync(
+            pending.Id, Guid.NewGuid(), Guid.NewGuid(), "越权驳回", CancellationToken.None);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>(
+            "驳回服务不得跨租户读取候选规则");
+        pending.ReviewStatus.Should().Be(ReviewStatus.Pending);
+    }
+
+    [Fact]
     public async Task ApproveRuleAsync_不存在的候选规则应抛出异常()
     {
         // Act
-        var act = () => _sut.ApproveRuleAsync(Guid.NewGuid(), Guid.NewGuid(), null, CancellationToken.None);
+        var act = () => _sut.ApproveRuleAsync(
+            Guid.NewGuid(), _tenantId, Guid.NewGuid(), null, CancellationToken.None);
 
         // Assert
         await act.Should().ThrowAsync<KeyNotFoundException>();
@@ -687,7 +740,8 @@ public class KnowledgeCaptureServiceTests
     [Fact]
     public async Task RejectRuleAsync_不存在的候选规则应抛出异常()
     {
-        var act = () => _sut.RejectRuleAsync(Guid.NewGuid(), Guid.NewGuid(), "不存在", CancellationToken.None);
+        var act = () => _sut.RejectRuleAsync(
+            Guid.NewGuid(), _tenantId, Guid.NewGuid(), "不存在", CancellationToken.None);
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
@@ -712,7 +766,8 @@ public class KnowledgeCaptureServiceTests
 
         // Act
         var result = await _sut.BatchApproveAsync(
-            [pending1.Id, pending2.Id], reviewerId, "批量批准", CancellationToken.None);
+            [pending1.Id, pending2.Id], _tenantId, reviewerId,
+            "批量批准", CancellationToken.None);
 
         // Assert
         result.SuccessCount.Should().Be(2);
@@ -738,7 +793,7 @@ public class KnowledgeCaptureServiceTests
 
         // Act
         var result = await _sut.BatchApproveAsync(
-            [pending.Id, notExistId], Guid.NewGuid(), null, CancellationToken.None);
+            [pending.Id, notExistId], _tenantId, Guid.NewGuid(), null, CancellationToken.None);
 
         // Assert
         result.SuccessCount.Should().Be(1);
@@ -768,7 +823,8 @@ public class KnowledgeCaptureServiceTests
 
         // Act
         var result = await _sut.BatchRejectAsync(
-            [pending1.Id, pending2.Id], reviewerId, "批量驳回", CancellationToken.None);
+            [pending1.Id, pending2.Id], _tenantId, reviewerId,
+            "批量驳回", CancellationToken.None);
 
         // Assert
         result.SuccessCount.Should().Be(2);

@@ -53,7 +53,9 @@ public class PendingRulesController : ControllerBase
         [FromQuery] PagedQuery query,
         [FromQuery] ReviewStatus? reviewStatus = null)
     {
-        var pendingRules = _dbContext.PendingRules.AsQueryable();
+        // 全局过滤器之外再次绑定当前租户，防止候选规则列表越过请求租户边界。
+        var pendingRules = _dbContext.PendingRules
+            .Where(r => r.TenantId == _tenantContext.TenantId);
 
         if (reviewStatus.HasValue)
             pendingRules = pendingRules.Where(r => r.ReviewStatus == reviewStatus.Value);
@@ -114,7 +116,10 @@ public class PendingRulesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeletePendingRule(Guid id)
     {
-        var rule = await _dbContext.PendingRules.FindAsync([id]);
+        var rule = await _dbContext.PendingRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                HttpContext.RequestAborted);
         if (rule is null)
             return NotFound(new { code = 404, message = "候选规则不存在" });
 
@@ -140,7 +145,8 @@ public class PendingRulesController : ControllerBase
         try
         {
             await _captureService.ApproveRuleAsync(
-                id, _tenantContext.UserId, request?.Comment, HttpContext.RequestAborted);
+                id, _tenantContext.TenantId, _tenantContext.UserId,
+                request?.Comment, HttpContext.RequestAborted);
             return Ok(new { code = 200, message = "候选规则已批准并转为正式规则" });
         }
         catch (KeyNotFoundException)
@@ -171,7 +177,10 @@ public class PendingRulesController : ControllerBase
         {
             var reviewerId = _tenantContext.UserId;
 
-            var pending = await _dbContext.PendingRules.FindAsync([id]);
+            var pending = await _dbContext.PendingRules
+                .FirstOrDefaultAsync(
+                    r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                    HttpContext.RequestAborted);
             if (pending is null)
                 return NotFound(new { code = 404, message = "候选规则不存在" });
 
@@ -188,7 +197,9 @@ public class PendingRulesController : ControllerBase
 
             await _dbContext.SaveChangesAsync();
 
-            await _captureService.ApproveRuleAsync(id, reviewerId, request.Comment, HttpContext.RequestAborted);
+            await _captureService.ApproveRuleAsync(
+                id, _tenantContext.TenantId, reviewerId,
+                request.Comment, HttpContext.RequestAborted);
 
             return Ok(new { message = "规则已编辑并批准" });
         }
@@ -218,7 +229,8 @@ public class PendingRulesController : ControllerBase
         try
         {
             await _captureService.RejectRuleAsync(
-                id, _tenantContext.UserId, request?.Comment, HttpContext.RequestAborted);
+                id, _tenantContext.TenantId, _tenantContext.UserId,
+                request?.Comment, HttpContext.RequestAborted);
             return Ok(new { code = 200, message = "候选规则已驳回" });
         }
         catch (KeyNotFoundException)
@@ -244,7 +256,8 @@ public class PendingRulesController : ControllerBase
             return BadRequest(new { code = 400, message = "请选择至少一条候选规则" });
 
         var result = await _captureService.BatchApproveAsync(
-            request.Ids, _tenantContext.UserId, request.Comment, HttpContext.RequestAborted);
+            request.Ids, _tenantContext.TenantId, _tenantContext.UserId,
+            request.Comment, HttpContext.RequestAborted);
 
         return Ok(result);
     }
@@ -266,7 +279,8 @@ public class PendingRulesController : ControllerBase
             return BadRequest(new { code = 400, message = "请选择至少一条候选规则" });
 
         var result = await _captureService.BatchRejectAsync(
-            request.Ids, _tenantContext.UserId, request.Comment, HttpContext.RequestAborted);
+            request.Ids, _tenantContext.TenantId, _tenantContext.UserId,
+            request.Comment, HttpContext.RequestAborted);
 
         return Ok(result);
     }

@@ -249,16 +249,21 @@ public class KnowledgeCaptureService
     /// 批准候选规则：将候选规则转化为正式知识规则
     /// </summary>
     /// <param name="pendingRuleId">候选规则 ID</param>
+    /// <param name="tenantId">当前租户 ID</param>
     /// <param name="reviewerId">审核人 ID</param>
     /// <param name="comment">审核意见</param>
     /// <param name="ct">取消令牌</param>
     public async Task ApproveRuleAsync(
-        Guid pendingRuleId, Guid reviewerId, string? comment, CancellationToken ct)
+        Guid pendingRuleId, Guid tenantId, Guid reviewerId, string? comment, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var pending = await db.PendingRules.FindAsync([pendingRuleId], ct);
+        // 审批会创建正式规则并改变候选规则状态，资源定位必须显式绑定事件/请求租户。
+        var pending = await db.PendingRules
+            .FirstOrDefaultAsync(
+                p => p.Id == pendingRuleId && p.TenantId == tenantId,
+                ct);
         if (pending is null)
             throw new KeyNotFoundException($"候选规则不存在: {pendingRuleId}");
 
@@ -305,16 +310,20 @@ public class KnowledgeCaptureService
     /// 驳回候选规则
     /// </summary>
     /// <param name="pendingRuleId">候选规则 ID</param>
+    /// <param name="tenantId">当前租户 ID</param>
     /// <param name="reviewerId">审核人 ID</param>
     /// <param name="comment">驳回原因</param>
     /// <param name="ct">取消令牌</param>
     public async Task RejectRuleAsync(
-        Guid pendingRuleId, Guid reviewerId, string? comment, CancellationToken ct)
+        Guid pendingRuleId, Guid tenantId, Guid reviewerId, string? comment, CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var pending = await db.PendingRules.FindAsync([pendingRuleId], ct);
+        var pending = await db.PendingRules
+            .FirstOrDefaultAsync(
+                p => p.Id == pendingRuleId && p.TenantId == tenantId,
+                ct);
         if (pending is null)
             throw new KeyNotFoundException($"候选规则不存在: {pendingRuleId}");
 
@@ -337,12 +346,13 @@ public class KnowledgeCaptureService
     /// 逐条处理，跳过已审核的规则，返回成功/失败统计
     /// </summary>
     /// <param name="pendingRuleIds">候选规则 ID 列表</param>
+    /// <param name="tenantId">当前租户 ID</param>
     /// <param name="reviewerId">审核人 ID</param>
     /// <param name="comment">审核意见</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>批量审核结果</returns>
     public async Task<Application.Knowledge.DTOs.BatchReviewResult> BatchApproveAsync(
-        List<Guid> pendingRuleIds, Guid reviewerId, string? comment, CancellationToken ct)
+        List<Guid> pendingRuleIds, Guid tenantId, Guid reviewerId, string? comment, CancellationToken ct)
     {
         var result = new DTOs.BatchReviewResult();
 
@@ -350,7 +360,7 @@ public class KnowledgeCaptureService
         {
             try
             {
-                await ApproveRuleAsync(id, reviewerId, comment, ct);
+                await ApproveRuleAsync(id, tenantId, reviewerId, comment, ct);
                 result.SuccessCount++;
             }
             catch (KeyNotFoundException)
@@ -376,12 +386,13 @@ public class KnowledgeCaptureService
     /// 逐条处理，跳过不存在的规则，返回成功/失败统计
     /// </summary>
     /// <param name="pendingRuleIds">候选规则 ID 列表</param>
+    /// <param name="tenantId">当前租户 ID</param>
     /// <param name="reviewerId">审核人 ID</param>
     /// <param name="comment">驳回原因</param>
     /// <param name="ct">取消令牌</param>
     /// <returns>批量审核结果</returns>
     public async Task<DTOs.BatchReviewResult> BatchRejectAsync(
-        List<Guid> pendingRuleIds, Guid reviewerId, string? comment, CancellationToken ct)
+        List<Guid> pendingRuleIds, Guid tenantId, Guid reviewerId, string? comment, CancellationToken ct)
     {
         var result = new DTOs.BatchReviewResult();
 
@@ -389,7 +400,7 @@ public class KnowledgeCaptureService
         {
             try
             {
-                await RejectRuleAsync(id, reviewerId, comment, ct);
+                await RejectRuleAsync(id, tenantId, reviewerId, comment, ct);
                 result.SuccessCount++;
             }
             catch (KeyNotFoundException)

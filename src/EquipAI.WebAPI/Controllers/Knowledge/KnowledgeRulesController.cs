@@ -59,7 +59,9 @@ public class KnowledgeRulesController : ControllerBase
         [FromQuery] PagedQuery query,
         [FromQuery] string? deviceType = null)
     {
-        var rules = _dbContext.KnowledgeRules.AsQueryable();
+        // 全局过滤器之外再次绑定当前租户，避免跟踪实体或过滤器上下文异常导致越权读取。
+        var rules = _dbContext.KnowledgeRules
+            .Where(r => r.TenantId == _tenantContext.TenantId);
 
         if (!string.IsNullOrWhiteSpace(deviceType))
             rules = rules.Where(r => r.DeviceType == deviceType);
@@ -148,7 +150,10 @@ public class KnowledgeRulesController : ControllerBase
     public async Task<ActionResult<KnowledgeRuleResponse>> UpdateRule(
         Guid id, [FromBody] UpdateKnowledgeRuleRequest request)
     {
-        var rule = await _dbContext.KnowledgeRules.FindAsync([id], HttpContext.RequestAborted);
+        var rule = await _dbContext.KnowledgeRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                HttpContext.RequestAborted);
         if (rule is null)
             return NotFound(new { code = 404, message = "知识规则不存在" });
 
@@ -192,7 +197,10 @@ public class KnowledgeRulesController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<KnowledgeRuleResponse>> ToggleRule(Guid id)
     {
-        var rule = await _dbContext.KnowledgeRules.FindAsync([id], HttpContext.RequestAborted);
+        var rule = await _dbContext.KnowledgeRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                HttpContext.RequestAborted);
         if (rule is null)
             return NotFound(new { code = 404, message = "知识规则不存在" });
 
@@ -311,7 +319,9 @@ public class KnowledgeRulesController : ControllerBase
     public async Task<ActionResult<List<KnowledgeRuleVersionDto>>> GetRuleVersions(Guid id)
     {
         // 先检查规则是否存在
-        var exists = await _dbContext.KnowledgeRules.AnyAsync(r => r.Id == id, HttpContext.RequestAborted);
+        var exists = await _dbContext.KnowledgeRules.AnyAsync(
+            r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+            HttpContext.RequestAborted);
         if (!exists)
             return NotFound(new { code = 404, message = "知识规则不存在" });
 
