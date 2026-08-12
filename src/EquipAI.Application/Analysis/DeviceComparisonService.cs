@@ -31,8 +31,14 @@ public class DeviceComparisonService
     /// <param name="deviceType">设备类型（如"空压机"）</param>
     /// <param name="metric">指标名称（如"temperature"）</param>
     /// <param name="hours">时间窗口（小时，默认 24h）</param>
+    /// <param name="deviceIds">可选设备 ID 列表；为空时保持同类型全量对比</param>
     public async Task<DeviceComparisonResult> CompareAsync(
-        Guid tenantId, string deviceType, string metric, int hours = 24, CancellationToken ct = default)
+        Guid tenantId,
+        string deviceType,
+        string metric,
+        int hours = 24,
+        IReadOnlyCollection<Guid>? deviceIds = null,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(deviceType) || deviceType.Length > 50)
             throw new ArgumentException("设备类型不能为空且长度不能超过 50 个字符", nameof(deviceType));
@@ -41,18 +47,32 @@ public class DeviceComparisonService
         if (hours is < 1 or > MaxComparisonHours)
             throw new ArgumentOutOfRangeException(
                 nameof(hours), hours, $"时间窗口必须在 1 到 {MaxComparisonHours} 小时之间");
-
         deviceType = deviceType.Trim();
         metric = metric.Trim();
         var since = DateTime.UtcNow.AddHours(-hours);
+        Guid[]? normalizedDeviceIds = null;
+
+        if (deviceIds != null)
+        {
+            if (deviceIds.Count == 0)
+                throw new ArgumentException("deviceIds 去重后数量必须在 2 到 5 之间", nameof(deviceIds));
+            if (deviceIds.Any(id => id == Guid.Empty))
+                throw new ArgumentException("deviceIds 不能包含空 GUID", nameof(deviceIds));
+
+            normalizedDeviceIds = deviceIds.Distinct().ToArray();
+            if (normalizedDeviceIds.Length is < 2 or > 5)
+                throw new ArgumentException("deviceIds 去重后数量必须在 2 到 5 之间", nameof(deviceIds));
+        }
 
         // 查询该类型所有设备最近 N 小时的遥测数据
-        var deviceIds = await _db.Devices
-            .Where(d => d.TenantId == tenantId && d.Type == deviceType)
+        var visibleDevices = await _db.Devices
+            .Where(d => d.TenantId == tenantId
+                        && d.Type == deviceType
+                        && (normalizedDeviceIds == null || normalizedDeviceIds.Contains(d.Id)))
             .Select(d => new { d.Id, d.DeviceCode, d.Name })
             .ToListAsync(ct);
 
-        if (deviceIds.Count < 2)
+        if (visibleDevices.Count < 2)
         {
             return new DeviceComparisonResult
             {
@@ -65,7 +85,7 @@ public class DeviceComparisonService
 
         // 一次性拉取当前租户、目标指标和时间窗口内的遥测，再在内存中按设备聚合。
         // 设备数量由租户规模决定，逐设备查询会产生 N+1 往返并放大数据库连接池压力。
-        var deviceLookup = deviceIds.ToDictionary(d => d.Id);
+        var deviceLookup = visibleDevices.ToDictionary(d => d.Id);
         var telemetry = await _db.DeviceTelemetry
             .Where(t => t.TenantId == tenantId
                         && deviceLookup.Keys.Contains(t.DeviceId)

@@ -33,6 +33,7 @@ public class DeviceComparisonController : ControllerBase
         [FromQuery] string deviceType,
         [FromQuery] string metric,
         [FromQuery] int hours = 24,
+        [FromQuery] Guid[]? deviceIds = null,
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(deviceType) || string.IsNullOrWhiteSpace(metric))
@@ -46,8 +47,28 @@ public class DeviceComparisonController : ControllerBase
                 message = $"hours 必须在 1 到 {DeviceComparisonService.MaxComparisonHours} 之间"
             });
 
+        Guid[]? normalizedDeviceIds = null;
+        if (deviceIds != null)
+        {
+            if (deviceIds.Length == 0)
+            {
+                return BadRequest(new { code = 400, message = "deviceIds 去重后数量必须在 2 到 5 之间" });
+            }
+
+            if (deviceIds.Any(id => id == Guid.Empty))
+            {
+                return BadRequest(new { code = 400, message = "deviceIds 不能为空" });
+            }
+
+            normalizedDeviceIds = deviceIds.Distinct().ToArray();
+            if (normalizedDeviceIds.Length is < 2 or > 5)
+            {
+                return BadRequest(new { code = 400, message = "deviceIds 去重后数量必须在 2 到 5 之间" });
+            }
+        }
+
         var result = await _comparisonService.CompareAsync(
-            _tenantContext.TenantId, deviceType.Trim(), metric.Trim(), hours, ct);
+            _tenantContext.TenantId, deviceType.Trim(), metric.Trim(), hours, normalizedDeviceIds, ct);
         return Ok(result);
     }
 }

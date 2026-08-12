@@ -648,7 +648,7 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
         {
             if (deviceIds is null)
             {
-                return await service.CompareAsync(_tenantId, deviceType, metric, hours, ct);
+                return await service.CompareAsync(_tenantId, deviceType, metric, hours, deviceIds: null, ct);
             }
 
             throw new Xunit.Sdk.XunitException(
