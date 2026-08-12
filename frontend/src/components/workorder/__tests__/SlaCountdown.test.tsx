@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { SlaCountdown } from '../SlaCountdown';
 
 // Mock react-i18next — 返回的字符串带 key 和参数，便于断言
@@ -163,6 +163,10 @@ describe('SlaCountdown', () => {
       />,
     );
     // 快进 2 分钟 — 不抛错即表示 setInterval 工作正常
-    expect(() => vi.advanceTimersByTime(120_000)).not.toThrow();
+    expect(() => {
+      act(() => {
+        vi.advanceTimersByTime(120_000);
+      });
+    }).not.toThrow();
   });
 });

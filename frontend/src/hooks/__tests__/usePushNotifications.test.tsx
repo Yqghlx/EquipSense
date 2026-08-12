@@ -147,6 +147,7 @@ describe('usePushNotifications — subscribe', () => {
   it('权限已被拒绝时应返回 false', async () => {
     setupServiceWorkerMock();
     (globalThis.Notification as unknown as Record<string, string>).permission = 'denied';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const { result } = renderHook(() => usePushNotifications());
 
@@ -162,6 +163,8 @@ describe('usePushNotifications — subscribe', () => {
 
     expect(success!).toBe(false);
     expect(mockedRegister).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith('通知权限已被拒绝，请在浏览器设置中手动开启');
+    warnSpy.mockRestore();
   });
 
   it('注册成功时应更新订阅状态', async () => {

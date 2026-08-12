@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { OfflineSyncPanel } from '../OfflineSyncPanel';
 import type { PendingOperation, SyncResult } from '../../../types';
@@ -70,9 +70,11 @@ describe('OfflineSyncPanel', () => {
   // 显示/隐藏逻辑
   // ==========================================================================
 
-  it('在线且无待同步操作时不应渲染', () => {
+  it('在线且无待同步操作时不应渲染', async () => {
     const { container } = render(<OfflineSyncPanel />);
 
+    // 等待 useEffect 的异步加载完成，避免测试结束后仍有状态更新未被 act 捕获。
+    await waitFor(() => expect(mockGetPending).toHaveBeenCalledTimes(1));
     expect(container.innerHTML).toBe('');
   });
 
