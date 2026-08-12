@@ -66,7 +66,10 @@ public class GatewayDeviceConfigService
     /// </summary>
     public async Task<List<GatewayDeviceDto>> ListAsync(string? gatewayId = null, CancellationToken ct = default)
     {
-        var query = _dbContext.GatewayDevices.AsQueryable();
+        // 显式绑定当前租户；全局过滤器只作为第二层隔离，不能成为唯一边界。
+        var query = _dbContext.GatewayDevices
+            .Where(d => d.TenantId == _tenantContext.TenantId)
+            .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(gatewayId))
             query = query.Where(d => d.GatewayId == gatewayId);
@@ -212,7 +215,11 @@ public class GatewayDeviceConfigService
     /// </summary>
     public async Task<GatewayDeviceDto?> UpdateAsync(Guid id, UpdateGatewayDeviceRequest request, CancellationToken ct = default)
     {
-        var entity = await _dbContext.GatewayDevices.FindAsync(new object?[] { id }, ct);
+        // 配置包含连接串和点位等工业敏感信息，ID 查询必须同时匹配租户。
+        var entity = await _dbContext.GatewayDevices
+            .FirstOrDefaultAsync(
+                d => d.Id == id && d.TenantId == _tenantContext.TenantId,
+                ct);
         if (entity == null)
             return null;
 
@@ -233,7 +240,11 @@ public class GatewayDeviceConfigService
     /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await _dbContext.GatewayDevices.FindAsync(new object?[] { id }, ct);
+        // 删除配置是不可逆操作，必须显式绑定当前租户，不能依赖 FindAsync 或跟踪状态。
+        var entity = await _dbContext.GatewayDevices
+            .FirstOrDefaultAsync(
+                d => d.Id == id && d.TenantId == _tenantContext.TenantId,
+                ct);
         if (entity == null)
             return false;
 
