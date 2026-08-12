@@ -1,4 +1,5 @@
 using EquipAI.Core.Enums;
+using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -22,14 +23,19 @@ namespace EquipAI.Application.Analysis;
 public class DeviceHealthService
 {
     private readonly AppDbContext _db;
+    private readonly ITenantContext _tenantContext;
     private readonly ILogger<DeviceHealthService> _logger;
 
     private static readonly TimeSpan EvaluationWindow = TimeSpan.FromDays(7);
     private const int RecentTelemetrySampleSize = 100;
 
-    public DeviceHealthService(AppDbContext db, ILogger<DeviceHealthService> logger)
+    public DeviceHealthService(
+        AppDbContext db,
+        ITenantContext tenantContext,
+        ILogger<DeviceHealthService> logger)
     {
         _db = db;
+        _tenantContext = tenantContext;
         _logger = logger;
     }
 
@@ -41,12 +47,14 @@ public class DeviceHealthService
     /// <returns>0-100 的健康度评分；设备无数据时返回 null</returns>
     public async Task<double?> CalculateHealthScoreAsync(Guid deviceId, CancellationToken ct = default)
     {
+        var tenantId = _tenantContext.TenantId;
+
         // 维度一：状态分（30%）
-        // IgnoreQueryFilters：本方法可由后台 DeviceHealthRecalculationHostedService 调用（无 HttpContext，
-        // 全局过滤器解析为 Guid.Empty 会吞掉设备查询）。deviceId 是全局唯一 PK，按 Id 定位即安全。
+        // 后台重算场景没有 HttpContext，需要绕过全局租户过滤器；但单设备入口仍必须绑定当前租户，
+        // 不能因为设备 ID 全局唯一就允许当前用户读取其他租户设备。
         var device = await _db.Devices
             .IgnoreQueryFilters()
-            .Where(d => d.Id == deviceId)
+            .Where(d => d.Id == deviceId && d.TenantId == tenantId)
             .Select(d => new { d.Status })
             .FirstOrDefaultAsync(ct);
         if (device is null)
@@ -58,7 +66,9 @@ public class DeviceHealthService
         var since = DateTime.UtcNow - EvaluationWindow;
         var recentAlerts = await _db.Alerts
             .IgnoreQueryFilters()
-            .Where(a => a.DeviceId == deviceId && a.OccurredAt >= since)
+            .Where(a => a.TenantId == tenantId
+                     && a.DeviceId == deviceId
+                     && a.OccurredAt >= since)
             .Select(a => new { a.Severity, a.Status })
             .ToListAsync(ct);
 
@@ -67,7 +77,7 @@ public class DeviceHealthService
 
         // 维度三：遥测质量分（30%）— 最近 N 条遥测的 good 比例
         // 用原生 SQL 查 TimescaleDB 窄表（IgnoreQueryFilters 避免后台无 HttpContext）
-        var qualityScore = await CalculateTelemetryQualityScoreAsync(deviceId, ct);
+        var qualityScore = await CalculateTelemetryQualityScoreAsync(tenantId, deviceId, ct);
 
         // 加权汇总
         var rounded = CalculateTotalScore(statusScore, alertScore, qualityScore);
@@ -87,11 +97,12 @@ public class DeviceHealthService
         if (score is null)
             return null;
 
-        // IgnoreQueryFilters：同 CalculateHealthScoreAsync，后台 scope（Guid.Empty）下默认过滤器会吞掉查询。
-        // 安全性由 deviceId 全局唯一 PK 保证（定位到唯一设备），不依赖租户过滤器。
+        // 与计算路径使用同一租户边界：后台 scope 需要 IgnoreQueryFilters，但单设备更新不能越过当前租户。
         var device = await _db.Devices
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(d => d.Id == deviceId, ct);
+            .FirstOrDefaultAsync(
+                d => d.Id == deviceId && d.TenantId == _tenantContext.TenantId,
+                ct);
         if (device is null)
             return null;
 
@@ -172,14 +183,17 @@ public class DeviceHealthService
     /// 计算遥测质量分：最近 N 条遥测中 quality='good' 的比例 × 100
     /// 无遥测数据时返回中性分 70（不奖惩无数据设备）
     /// </summary>
-    private async Task<double> CalculateTelemetryQualityScoreAsync(Guid deviceId, CancellationToken ct)
+    private async Task<double> CalculateTelemetryQualityScoreAsync(
+        Guid tenantId,
+        Guid deviceId,
+        CancellationToken ct)
     {
         try
         {
-            // IgnoreQueryFilters：后台 scope 下 Guid.Empty 过滤器会吞掉全部遥测。deviceId 全局唯一，按其过滤即安全。
+            // 后台 scope 下需绕过全局过滤器，但遥测仍按租户和设备双重限定，避免质量分跨租户串线。
             var recent = await _db.DeviceTelemetry
                 .IgnoreQueryFilters()
-                .Where(t => t.DeviceId == deviceId)
+                .Where(t => t.TenantId == tenantId && t.DeviceId == deviceId)
                 .OrderByDescending(t => t.Time)
                 .Take(RecentTelemetrySampleSize)
                 .Select(t => t.Quality)

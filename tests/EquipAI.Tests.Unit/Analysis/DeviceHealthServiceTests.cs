@@ -24,20 +24,29 @@ public class DeviceHealthServiceTests
     /// <summary>构造 InMemory AppDbContext 并可选预填数据</summary>
     private static async Task<(AppDbContext db, DeviceHealthService svc)> CreateAsync(
         Func<AppDbContext, Task>? seed = null)
+        => await CreateAsync(Guid.Empty, seed);
+
+    /// <summary>构造指定当前租户的健康度服务，供跨租户边界测试使用。</summary>
+    private static async Task<(AppDbContext db, DeviceHealthService svc)> CreateAsync(
+        Guid tenantId,
+        Func<AppDbContext, Task>? seed = null)
     {
         var dbName = Guid.NewGuid().ToString();
         var services = new ServiceCollection();
         services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
         services.AddLogging();
         // AppDbContext 构造依赖 ITenantContext
-        services.AddScoped<ITenantContext>(_ => new TestTenantContext(Guid.Empty));
+        services.AddScoped<ITenantContext>(_ => new TestTenantContext(tenantId));
         var sp = services.BuildServiceProvider();
         var db = sp.GetRequiredService<AppDbContext>();
 
         if (seed is not null)
             await seed(db);
 
-        var svc = new DeviceHealthService(db, Mock.Of<ILogger<DeviceHealthService>>());
+        var svc = new DeviceHealthService(
+            db,
+            sp.GetRequiredService<ITenantContext>(),
+            Mock.Of<ILogger<DeviceHealthService>>());
         return (db, svc);
     }
 
@@ -176,6 +185,86 @@ public class DeviceHealthServiceTests
         var (db, svc) = await CreateAsync();
         var score = await svc.CalculateHealthScoreAsync(Guid.NewGuid());
         score.Should().BeNull();
+    }
+
+    /// <summary>
+    /// 安全边界：当前租户不能计算或更新其他租户设备的健康度。
+    ///
+    /// Why：单设备接口为了支持后台 scope 使用 IgnoreQueryFilters；如果不补回当前租户条件，
+    /// 设备详情页携带其他租户设备 ID 就能读取并写入对方的 health_score。
+    /// </summary>
+    [Fact]
+    public async Task CrossTenant_Device_Should_Not_Be_Read_Or_Updated()
+    {
+        var deviceId = Guid.NewGuid();
+        var currentTenantId = Guid.NewGuid();
+        var deviceTenantId = Guid.NewGuid();
+        var (db, svc) = await CreateAsync(currentTenantId, async ctx =>
+        {
+            await ctx.Devices.AddAsync(new Device
+            {
+                Id = deviceId,
+                TenantId = deviceTenantId,
+                DeviceCode = "OTHER-TENANT-DEVICE",
+                Name = "其他租户设备",
+                Type = "泵",
+                Status = DeviceStatus.Online,
+                HealthScore = 100m,
+            });
+            await ctx.SaveChangesAsync();
+        });
+
+        var calculated = await svc.CalculateHealthScoreAsync(deviceId);
+        var updated = await svc.UpdateHealthScoreAsync(deviceId);
+
+        calculated.Should().BeNull("当前租户不能读取其他租户设备健康度");
+        updated.Should().BeNull("当前租户不能更新其他租户设备健康度");
+        var stored = await db.Devices
+            .IgnoreQueryFilters()
+            .SingleAsync(d => d.Id == deviceId);
+        stored.HealthScore.Should().Be(100m, "跨租户请求不能改写设备健康度");
+    }
+
+    /// <summary>
+    /// 数据边界：设备属于当前租户时，错误租户的同设备告警也不能影响健康度评分。
+    /// </summary>
+    [Fact]
+    public async Task CrossTenant_Alert_Should_Not_Affect_Health_Score()
+    {
+        var currentTenantId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var (db, svc) = await CreateAsync(currentTenantId, async ctx =>
+        {
+            await ctx.Devices.AddAsync(new Device
+            {
+                Id = deviceId,
+                TenantId = currentTenantId,
+                DeviceCode = "CURRENT-TENANT-DEVICE",
+                Name = "当前租户设备",
+                Type = "泵",
+                Status = DeviceStatus.Online,
+            });
+            await ctx.Alerts.AddAsync(new Alert
+            {
+                Id = Guid.NewGuid(),
+                TenantId = otherTenantId,
+                DeviceId = deviceId,
+                Severity = AlertSeverity.Critical,
+                Status = AlertStatus.Active,
+                Metric = "temperature",
+                Message = "其他租户告警",
+                OccurredAt = DateTime.UtcNow,
+            });
+            await ctx.SaveChangesAsync();
+        });
+
+        var score = await svc.CalculateHealthScoreAsync(deviceId);
+
+        score.Should().BeApproximately(
+            91.0,
+            0.5,
+            "错误租户的 Critical 告警不能从 91 分基线扣分");
     }
 
     [Fact]
