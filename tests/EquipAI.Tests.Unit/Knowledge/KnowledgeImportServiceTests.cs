@@ -35,7 +35,7 @@ public class KnowledgeImportServiceTests
         _auditLogMock = new Mock<IAuditLogService>();
         var versionLogger = LoggerFactory.Create(_ => { }).CreateLogger<KnowledgeVersionService>();
         _versionServiceMock = new Mock<KnowledgeVersionService>(
-            _db, _auditLogMock.Object, versionLogger);
+            _db, _auditLogMock.Object, versionLogger, new TestTenantContext(_tenantId));
 
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<KnowledgeImportService>();
         _sut = new KnowledgeImportService(

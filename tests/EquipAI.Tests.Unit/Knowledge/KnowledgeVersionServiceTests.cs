@@ -31,8 +31,7 @@ public class KnowledgeVersionServiceTests
         _db = new AppDbContext(options, new TestTenantContext(_tenantId));
 
         _auditLogMock = new Mock<IAuditLogService>();
-        var logger = LoggerFactory.Create(_ => { }).CreateLogger<KnowledgeVersionService>();
-        _sut = new KnowledgeVersionService(_db, _auditLogMock.Object, logger);
+        _sut = CreateService(_tenantId);
     }
 
     [Fact]
@@ -112,6 +111,26 @@ public class KnowledgeVersionServiceTests
     }
 
     [Fact]
+    public async Task CreateVersionSnapshotAsync_其他租户规则_不应创建快照()
+    {
+        var rule = new KnowledgeRule
+        {
+            TenantId = Guid.NewGuid(),
+            DeviceType = "电机",
+            Name = "其他租户规则",
+            Conditions = "[]",
+            Conclusion = "不应被当前租户快照",
+            Version = 1
+        };
+
+        var act = () => _sut.CreateVersionSnapshotAsync(
+            rule, Guid.NewGuid(), "越权快照", CancellationToken.None);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>(
+            "版本服务不得为其他租户规则创建可持久化快照");
+    }
+
+    [Fact]
     public async Task GetVersionHistoryAsync_当规则有多个版本时_应按版本号降序返回()
     {
         // Arrange
@@ -149,6 +168,26 @@ public class KnowledgeVersionServiceTests
         result[0].ChangeSummary.Should().Be("添加条件");
         result[1].ChangeSummary.Should().Be("修改阈值");
         result[2].ChangeSummary.Should().Be("初始版本");
+    }
+
+    [Fact]
+    public async Task GetVersionHistoryAsync_其他租户规则_应返回空列表()
+    {
+        var ruleId = Guid.NewGuid();
+        _db.KnowledgeRuleVersions.Add(new KnowledgeRuleVersion
+        {
+            TenantId = _tenantId,
+            RuleId = ruleId,
+            Version = 1,
+            Snapshot = "{\"Name\":\"其他租户版本\"}",
+            ChangeSummary = "不应被读取"
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await CreateService(Guid.NewGuid())
+            .GetVersionHistoryAsync(ruleId, CancellationToken.None);
+
+        result.Should().BeEmpty("版本历史必须显式绑定当前租户");
     }
 
     [Fact]
@@ -326,6 +365,49 @@ public class KnowledgeVersionServiceTests
     }
 
     [Fact]
+    public async Task RollbackToVersionAsync_其他租户规则_不应修改规则()
+    {
+        var rule = new KnowledgeRule
+        {
+            TenantId = _tenantId,
+            DeviceType = "电机",
+            Name = "当前租户规则",
+            Conditions = "[]",
+            Conclusion = "当前结论",
+            Version = 2
+        };
+        _db.KnowledgeRules.Add(rule);
+        _db.KnowledgeRuleVersions.Add(new KnowledgeRuleVersion
+        {
+            TenantId = _tenantId,
+            RuleId = rule.Id,
+            Version = 1,
+            Snapshot = "{\"DeviceType\":\"电机\",\"Name\":\"历史规则\",\"Conditions\":[],\"Conclusion\":\"历史结论\",\"ConfidenceWeight\":0.5,\"Enabled\":true}",
+            ChangeSummary = "历史版本"
+        });
+        await _db.SaveChangesAsync();
+        var snapshotCountBefore = await _db.KnowledgeRuleVersions
+            .IgnoreQueryFilters()
+            .CountAsync();
+
+        var act = () => CreateService(Guid.NewGuid())
+            .RollbackToVersionAsync(rule.Id, 1, Guid.NewGuid(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>(
+            "回滚不得命中其他租户的规则或版本");
+        rule.Name.Should().Be("当前租户规则");
+        rule.Version.Should().Be(2);
+        (await _db.KnowledgeRuleVersions
+            .IgnoreQueryFilters()
+            .CountAsync()).Should().Be(snapshotCountBefore);
+        _auditLogMock.Verify(
+            a => a.LogFromContextAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task CreateVersionSnapshotAsync_生成的Snapshot应为合法JSON()
     {
         var rule = new KnowledgeRule
@@ -345,6 +427,16 @@ public class KnowledgeVersionServiceTests
     {
         var result = await _sut.GetVersionHistoryAsync(Guid.NewGuid(), CancellationToken.None);
         result.Should().BeEmpty();
+    }
+
+    private KnowledgeVersionService CreateService(Guid tenantId)
+    {
+        var logger = LoggerFactory.Create(_ => { }).CreateLogger<KnowledgeVersionService>();
+        return new KnowledgeVersionService(
+            _db,
+            _auditLogMock.Object,
+            logger,
+            new TestTenantContext(tenantId));
     }
 
     /// <summary>

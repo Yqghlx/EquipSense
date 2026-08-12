@@ -17,15 +17,18 @@ public class KnowledgeVersionService
     private readonly AppDbContext _dbContext;
     private readonly IAuditLogService _auditLogService;
     private readonly ILogger<KnowledgeVersionService> _logger;
+    private readonly ITenantContext _tenantContext;
 
     public KnowledgeVersionService(
         AppDbContext dbContext,
         IAuditLogService auditLogService,
-        ILogger<KnowledgeVersionService> logger)
+        ILogger<KnowledgeVersionService> logger,
+        ITenantContext tenantContext)
     {
         _dbContext = dbContext;
         _auditLogService = auditLogService;
         _logger = logger;
+        _tenantContext = tenantContext;
     }
 
     /// <summary>
@@ -35,6 +38,10 @@ public class KnowledgeVersionService
         KnowledgeRule rule, Guid? changedBy, string? changeSummary, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
+
+        // 快照会在后续回滚中恢复规则内容，不能接受调用方传入的其他租户实体。
+        if (rule.TenantId != _tenantContext.TenantId)
+            throw new KeyNotFoundException($"规则不存在: {rule.Id}");
 
         var snapshot = new KnowledgeRuleVersion
         {
@@ -59,7 +66,7 @@ public class KnowledgeVersionService
         Guid ruleId, CancellationToken ct)
     {
         return await _dbContext.KnowledgeRuleVersions
-            .Where(v => v.RuleId == ruleId)
+            .Where(v => v.RuleId == ruleId && v.TenantId == _tenantContext.TenantId)
             .OrderByDescending(v => v.Version)
             .Select(v => new KnowledgeRuleVersionDto
             {
@@ -80,13 +87,20 @@ public class KnowledgeVersionService
     public async Task<KnowledgeRule> RollbackToVersionAsync(
         Guid ruleId, int targetVersion, Guid? changedBy, CancellationToken ct)
     {
-        var rule = await _dbContext.KnowledgeRules.FindAsync([ruleId], ct);
+        // FindAsync 可能命中已跟踪的其他租户规则，因此使用带租户条件的查询定位可回滚实体。
+        var rule = await _dbContext.KnowledgeRules
+            .FirstOrDefaultAsync(
+                r => r.Id == ruleId && r.TenantId == _tenantContext.TenantId,
+                ct);
         if (rule is null)
             throw new KeyNotFoundException($"规则不存在: {ruleId}");
 
         var targetSnapshot = await _dbContext.KnowledgeRuleVersions
             .FirstOrDefaultAsync(
-                v => v.RuleId == ruleId && v.Version == targetVersion, ct);
+                v => v.RuleId == ruleId
+                    && v.Version == targetVersion
+                    && v.TenantId == _tenantContext.TenantId,
+                ct);
         if (targetSnapshot is null)
             throw new KeyNotFoundException($"版本不存在: RuleId={ruleId}, Version={targetVersion}");
 
