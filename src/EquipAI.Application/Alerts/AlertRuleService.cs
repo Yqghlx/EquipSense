@@ -12,7 +12,7 @@ namespace EquipAI.Application.Alerts;
 /// <summary>
 /// 告警规则管理服务。
 /// 封装规则的查询/创建/更新/删除/启停，使 Controller 不直接依赖 <c>AppDbContext</c>。
-/// 多租户隔离由 AppDbContext 全局查询过滤器自动处理；新建规则时显式写入 TenantId。
+/// 全局查询过滤器作为纵深防御；业务查询仍显式匹配当前租户，新建规则时显式写入 TenantId。
 /// </summary>
 public class AlertRuleService
 {
@@ -32,7 +32,10 @@ public class AlertRuleService
     /// </summary>
     public async Task<PagedResult<AlertRuleDto>> ListAsync(PagedQuery query, CancellationToken ct = default)
     {
-        var rules = _dbContext.AlertRules.AsQueryable();
+        // 规则决定告警覆盖范围，列表必须显式绑定当前租户，不能只依赖全局过滤器。
+        var rules = _dbContext.AlertRules
+            .Where(r => r.TenantId == _tenantContext.TenantId)
+            .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
@@ -56,7 +59,10 @@ public class AlertRuleService
     /// </summary>
     public async Task<AlertRuleDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var rule = await _dbContext.AlertRules.FindAsync(new object?[] { id }, ct);
+        var rule = await _dbContext.AlertRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                ct);
         return rule is null ? null : _mapper.Map<AlertRuleDto>(rule);
     }
 
@@ -79,7 +85,10 @@ public class AlertRuleService
     /// </summary>
     public async Task<AlertRuleDto> UpdateAsync(Guid id, UpdateAlertRuleRequest request, CancellationToken ct = default)
     {
-        var rule = await _dbContext.AlertRules.FindAsync(new object?[] { id }, ct)
+        var rule = await _dbContext.AlertRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                ct)
             ?? throw new KeyNotFoundException($"告警规则 {id} 不存在");
 
         _mapper.Map(request, rule);
@@ -93,7 +102,10 @@ public class AlertRuleService
     /// </summary>
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var rule = await _dbContext.AlertRules.FindAsync(new object?[] { id }, ct)
+        var rule = await _dbContext.AlertRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                ct)
             ?? throw new KeyNotFoundException($"告警规则 {id} 不存在");
 
         _dbContext.AlertRules.Remove(rule);
@@ -105,7 +117,10 @@ public class AlertRuleService
     /// </summary>
     public async Task<AlertRuleDto?> ToggleAsync(Guid id, CancellationToken ct = default)
     {
-        var rule = await _dbContext.AlertRules.FindAsync(new object?[] { id }, ct);
+        var rule = await _dbContext.AlertRules
+            .FirstOrDefaultAsync(
+                r => r.Id == id && r.TenantId == _tenantContext.TenantId,
+                ct);
         if (rule is null)
             return null;
 
