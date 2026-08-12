@@ -33,10 +33,10 @@
 | `tests/EquipAI.Tests.Integration/Controllers/DeviceConfigControllerTests.cs` | API 契约回归 | 扩展模板注册和业务错误 HTTP 断言 |
 | `frontend/src/types/index.ts` | 前端模板和请求类型 | 支持 JSON 字符串/对象与模板注册字段 |
 | `frontend/src/hooks/useDeviceConfig.ts` | 模板查询和快速注册 | 复用现有 query/mutation，暴露稳定请求类型 |
-| `frontend/src/lib/deviceTemplate.ts` | 模板预览数据归一化 | 新增安全 JSON 解析和指标/规则展示模型 |
+| `frontend/src/lib/deviceTemplatePreview.ts` | 模板预览数据归一化 | 新增安全 JSON 解析和指标/规则展示模型 |
 | `frontend/src/components/device/DeviceQuickRegisterDialog.tsx` | 快速注册交互 | 新增模板选择、预览、显式规则开关、错误和无障碍反馈 |
 | `frontend/src/pages/DeviceListPage.tsx` | 设备列表入口 | 新增快速添加按钮和对话框挂载，不改变高级表单 |
-| `frontend/src/lib/__tests__/deviceTemplate.test.ts` | 模板展示归一化回归 | 新增 JSON 容错和字段映射测试 |
+| `frontend/src/lib/__tests__/deviceTemplatePreview.test.ts` | 模板展示归一化回归 | 新增 JSON 容错和字段映射测试 |
 | `frontend/src/components/device/__tests__/DeviceQuickRegisterDialog.test.tsx` | 快速注册 UI 回归 | 新增加载、预览、校验、提交、错误和成功关闭测试 |
 | `frontend/src/i18n/zh.json` / `frontend/src/i18n/en.json` | 双语资源 | 新增快速接入、模板预览、错误和确认提示 |
 | `docs/USER_GUIDE.md` | 用户操作说明 | 增加模板快速注册与阈值确认边界 |
@@ -132,7 +132,7 @@ dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceTemplate
 
 预期：解析器测试全部通过，输出不包含模板 JSON 密钥或其他敏感配置。
 
-- [ ] **Step 5: 提交 Task 1**
+- [x] **Step 5: 提交 Task 1**
 
 ```bash
 git add src/EquipAI.Application/Devices/DeviceTemplateAlarmRuleParser.cs \
@@ -239,15 +239,15 @@ git commit -m "feat: register devices from tenant-safe templates"
 - Modify: `frontend/src/types/index.ts`
 - Modify: `frontend/src/hooks/useDeviceConfig.ts`
 - Modify: `frontend/src/hooks/__tests__/useDeviceConfig.test.tsx`
-- Create: `frontend/src/lib/deviceTemplate.ts`
-- Create: `frontend/src/lib/__tests__/deviceTemplate.test.ts`
+- Create: `frontend/src/lib/deviceTemplatePreview.ts`
+- Create: `frontend/src/lib/__tests__/deviceTemplatePreview.test.ts`
 
 **Interfaces:**
 - `DeviceTypeTemplate.defaultAlarmRules` 与 `parameters` 接受后端实际可能返回的 JSON 字符串或对象。
 - `QuickRegisterRequest` 新增 `templateId?: string`、`applyDefaultAlarmRules?: boolean`。
 - `parseTemplateArray(value, fieldName)` 返回安全的只读数组；无效 JSON 返回空数组并由 UI 显示“暂无可预览规则”，不抛出页面级异常。
 
-- [ ] **Step 1: 写失败的 TypeScript 工具与 hook 测试**
+- [x] **Step 1: 写失败的 TypeScript 工具与 hook 测试**
 
 新增测试先锁定后端实体返回字符串、测试夹具对象和非法 JSON 三种形态：
 
@@ -264,7 +264,7 @@ it('非法模板 JSON 应返回空数组而不是抛出页面异常', () => {
 
 更新 hook 测试，断言 `useQuickRegister` 能提交 `templateId` 和 `applyDefaultAlarmRules`，成功后继续失效 `['devices']`。
 
-- [ ] **Step 2: 运行测试确认按预期失败**
+- [x] **Step 2: 运行测试确认按预期失败**
 
 运行：
 
@@ -274,28 +274,28 @@ cd frontend && npm run test -- --run src/lib/__tests__/deviceTemplate.test.ts sr
 
 预期：新工具导入失败或类型断言失败；现有 hook 测试保留原有通过结果。
 
-- [ ] **Step 3: 实现类型和纯函数归一化**
+- [x] **Step 3: 实现类型和纯函数归一化**
 
-在 `deviceTemplate.ts` 中实现无副作用的解析函数：只接受数组根节点，解析异常记录开发可诊断的中文 `console.warn` 以外不输出原始 JSON；生产 UI 不因模板展示数据损坏而崩溃。将指标、规则字段转换为 `TemplateMetricPreview` / `TemplateAlarmRulePreview`，并保持数字 `0` 不被错误转换为空值。
+在 `deviceTemplatePreview.ts` 中实现无副作用的安全解析函数：支持后端 JSON 字符串、数组和包装对象，解析异常不输出原始 JSON；生产 UI 不因模板展示数据损坏而崩溃。预览组件只从归一化对象读取指标、范围和规则字段，并保持数字 `0` 不被错误转换为空值。
 
 更新 `DeviceTypeTemplate` 与 `QuickRegisterRequest` 类型，保持旧字段可选；更新 `useDeviceConfig.ts` 的 mutation 泛型和注释。
 
-- [ ] **Step 4: 运行工具和 hook 测试确认通过**
+- [x] **Step 4: 运行工具和 hook 测试确认通过**
 
 运行：
 
 ```bash
-cd frontend && npm run test -- --run src/lib/__tests__/deviceTemplate.test.ts src/hooks/__tests__/useDeviceConfig.test.tsx
+cd frontend && npm run test -- --run src/lib/__tests__/deviceTemplatePreview.test.ts src/hooks/__tests__/useDeviceConfig.test.tsx
 ```
 
 预期：所有工具和 hook 测试通过，模板非法 JSON 不造成未处理异常。
 
-- [ ] **Step 5: 提交 Task 3**
+- [x] **Step 5: 提交 Task 3**
 
 ```bash
 git add frontend/src/types/index.ts frontend/src/hooks/useDeviceConfig.ts \
   frontend/src/hooks/__tests__/useDeviceConfig.test.tsx \
-  frontend/src/lib/deviceTemplate.ts frontend/src/lib/__tests__/deviceTemplate.test.ts
+  frontend/src/lib/deviceTemplatePreview.ts frontend/src/lib/__tests__/deviceTemplatePreview.test.ts
 git commit -m "feat: normalize device template onboarding data"
 ```
 
@@ -313,7 +313,7 @@ git commit -m "feat: normalize device template onboarding data"
 - 组件内部使用 `useDeviceTemplates` 和 `useQuickRegister`；成功时由 hook 失效设备列表并关闭/清空表单。
 - 组件只提交 `{ templateId, deviceCode, name, applyDefaultAlarmRules }`，不从浏览器提交完整模板规则。
 
-- [ ] **Step 1: 写失败的 UI 测试**
+- [x] **Step 1: 写失败的 UI 测试**
 
 新增组件测试，mock API hook 返回模板、加载错误和 mutation：
 
@@ -337,7 +337,7 @@ it('填写必填字段并显式启用推荐规则后只提交模板 ID 和开关
 
 另加加载失败重试、字段错误 `aria-invalid/aria-describedby`、重复编码提示且保留输入、提交成功关闭四组测试。
 
-- [ ] **Step 2: 运行 UI 测试确认按预期失败**
+- [x] **Step 2: 运行 UI 测试确认按预期失败**
 
 运行：
 
@@ -347,7 +347,7 @@ cd frontend && npm run test -- --run src/components/device/__tests__/DeviceQuick
 
 预期：组件文件不存在或行为断言失败。
 
-- [ ] **Step 3: 实现最小可用快速注册体验**
+- [x] **Step 3: 实现最小可用快速注册体验**
 
 使用现有 `Dialog`、`Select`、`Input`、`Switch`、`Card` 和 `Button` 组件实现：
 
@@ -360,19 +360,19 @@ cd frontend && npm run test -- --run src/components/device/__tests__/DeviceQuick
 
 在 `DeviceListPage` 只增加 `quickRegisterOpen` 状态和 `perm.canCreate` 控制的“按模板添加”按钮；保留“新建”按钮打开原 `DeviceForm`，避免破坏高级档案编辑路径。
 
-- [ ] **Step 4: 运行 UI、类型和 i18n 测试确认通过**
+- [x] **Step 4: 运行 UI、类型和 i18n 测试确认通过**
 
 运行：
 
 ```bash
-cd frontend && npm run test -- --run src/components/device/__tests__/DeviceQuickRegisterDialog.test.tsx src/lib/__tests__/deviceTemplate.test.ts
+cd frontend && npm run test -- --run src/components/device/__tests__/DeviceQuickRegisterDialog.test.tsx src/lib/__tests__/deviceTemplatePreview.test.ts
 cd frontend && npx tsc -p tsconfig.json --noEmit
 cd frontend && npm run check:i18n
 ```
 
 预期：新增组件与工具测试通过，TypeScript 无错误，中英文资源键完全对齐。
 
-- [ ] **Step 5: 提交 Task 4**
+- [x] **Step 5: 提交 Task 4**
 
 ```bash
 git add frontend/src/components/device/DeviceQuickRegisterDialog.tsx \
@@ -394,11 +394,11 @@ git commit -m "feat: add template-driven device quick registration"
 - 用户手册说明模板阈值是推荐起点、启用前需结合现场工艺确认，协议接入仍需进入设备接入向导。
 - 本任务不修改真实生产 `.env` 或设备数据。
 
-- [ ] **Step 1: 先写文档契约测试**
+- [x] **Step 1: 先写文档契约测试**
 
 在 `tests/scripts/production-scripts-test.sh` 新增 `test_user_guide_documents_template_onboarding`，读取 `docs/USER_GUIDE.md` 并断言包含“模板快速注册”“推荐告警”“现场工艺确认”和“设备接入向导”四个关键说明，先运行 `bash tests/scripts/production-scripts-test.sh setup` 并观察失败。
 
-- [ ] **Step 2: 更新用户手册**
+- [x] **Step 2: 更新用户手册**
 
 在设备管理章节新增操作步骤：进入设备列表 → 按模板添加 → 选择模板 → 核对指标和告警 → 输入编码/名称 → 可选启用推荐告警 → 注册后进入接入向导。明确系统租户模板对所有租户只读可见，推荐阈值不替代现场工程确认。
 

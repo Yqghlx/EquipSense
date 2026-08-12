@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Pencil, Trash2, Eye, Upload, Download, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Eye, Upload, Download, RefreshCw, AlertTriangle, ScanLine } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { DeviceStatusBadge } from '../components/device/DeviceStatusBadge';
 import { DeviceForm } from '../components/device/DeviceForm';
+import { DeviceQuickRegisterDialog } from '../components/device/DeviceQuickRegisterDialog';
 import DeviceImportPreviewDialog from '../components/device/DeviceImportPreviewDialog';
 import { useDevices, useCreateDevice, useUpdateDevice, useDeleteDevice, exportDevicesCsv } from '../hooks/useDevices';
 import { usePermission } from '../hooks/usePermission';
@@ -30,6 +31,7 @@ export default function DeviceListPage() {
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | undefined>();
+  const [quickRegisterOpen, setQuickRegisterOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -93,6 +95,14 @@ export default function DeviceListPage() {
             title={t('common.exportTip', '最多导出 10000 条')}
           >
             <Download className="mr-2 h-4 w-4" />{t('common.export', '导出')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setQuickRegisterOpen(true)}
+            disabled={!perm.canCreate}
+          >
+            <ScanLine className="mr-2 h-4 w-4" />{t('device.quickRegister.open')}
           </Button>
           <Button onClick={() => { setEditingDevice(undefined); setDialogOpen(true); }} disabled={!perm.canCreate}>
             <Plus className="mr-2 h-4 w-4" />{t('common.create')}
@@ -214,6 +224,11 @@ export default function DeviceListPage() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* 模板驱动的设备快速注册对话框 */}
+      {quickRegisterOpen && (
+        <DeviceQuickRegisterDialog open onOpenChange={setQuickRegisterOpen} />
+      )}
 
       {/* 设备批量导入预览对话框 */}
       <DeviceImportPreviewDialog

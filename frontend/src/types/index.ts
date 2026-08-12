@@ -738,29 +738,43 @@ export interface DeviceTypeTemplate {
   /** 所属行业 */
   industry?: string;
   /** 默认告警规则（模板预置） */
-  defaultAlarmRules?: Record<string, unknown>;
+  defaultAlarmRules?: unknown;
   /** 设备参数模板（JSONB） */
-  parameters?: Record<string, unknown>;
+  parameters?: unknown;
 }
 
 /** 快速注册设备请求参数 */
 export interface QuickRegisterRequest {
-  /** 所属租户 ID */
-  tenantId: string;
+  /** 设备类型模板唯一标识；模板注册路径必填 */
+  templateId?: string;
+  /** 兼容旧客户端的租户字段；服务端以登录上下文租户为准 */
+  tenantId?: string;
   /** 设备编码（业务唯一） */
   deviceCode: string;
   /** 设备名称 */
   name?: string;
-  /** 设备类型 */
+  /** 是否显式应用模板中的推荐告警规则 */
+  applyDefaultAlarmRules?: boolean;
+  /** 兼容旧版无模板注册请求的设备类型 */
   deviceType?: string;
-  /** 默认告警规则列表 */
+  /** 兼容旧版无模板注册请求的默认告警规则列表 */
   defaultAlertRules?: {
+    /** 规则名称 */
+    name?: string;
     /** 监控指标名称 */
     metric: string;
+    /** 比较运算符 */
+    operator?: string;
     /** 告警阈值 */
     threshold: number;
     /** 告警严重级别（Critical / High / Normal / Low） */
     severity?: string;
+    /** 冷却时间（秒） */
+    cooldownSeconds?: number;
+    /** 是否启用 */
+    enabled?: boolean;
+    /** 是否自动创建工单 */
+    autoCreateWorkorder?: boolean;
   }[];
 }
 

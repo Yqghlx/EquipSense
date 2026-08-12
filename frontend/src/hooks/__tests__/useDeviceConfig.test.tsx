@@ -3,6 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import api from '../../lib/api';
+import type { QuickRegisterRequest } from '../../types';
 import { useDeviceTemplates, useQuickRegister } from '../useDeviceConfig';
 
 // Mock axios api 模块
@@ -90,11 +91,13 @@ describe('useDeviceTemplates', () => {
 describe('useQuickRegister', () => {
   it('应调用 POST 接口注册设备', async () => {
     const mockResponse = { id: 'device-new', deviceCode: 'PUMP-NEW' };
-    const registerRequest = {
+    const registerRequest: QuickRegisterRequest = {
       tenantId: 'tenant-001',
       deviceCode: 'PUMP-NEW',
       name: '新水泵',
       deviceType: 'pump',
+      templateId: 'template-001',
+      applyDefaultAlarmRules: true,
     };
 
     mockedApi.post.mockResolvedValueOnce({ data: mockResponse });
