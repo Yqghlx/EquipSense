@@ -88,7 +88,7 @@ public async Task<ActionResult<DeviceComparisonResult>> Compare(
 - Modify: `frontend/src/hooks/__tests__/useDevices.test.tsx`（若缺失则创建）
 - Read: `frontend/src/pages/DeviceComparisonPage.tsx`
 
-- [ ] **Step 1: 写 hook 契约测试**
+- [x] **Step 1: 写 hook 契约测试**
 
 验证 `deviceIds` 规范化排序、重复 ID 去重、查询字符串重复参数、条件不完整时禁用对比请求，以及设备列表 `deviceType` → `type`、`keyword` 映射。
 
@@ -109,7 +109,7 @@ export function useDevices(
 ) { /* ... */ }
 ```
 
-- [ ] **Step 2: 写页面行为测试并观察红灯**
+- [x] **Step 2: 写页面行为测试并观察红灯**
 
 Mock 设备、模板、告警规则和对比 hook，覆盖英文标题/表头、2–5 选择限制、设备类型筛选、指标 datalist、时间窗口、加载/失败/缓存错误/数据不足/成功结果和无权限状态；页面尚不存在时确认得到缺失模块或行为断言红灯。
 
