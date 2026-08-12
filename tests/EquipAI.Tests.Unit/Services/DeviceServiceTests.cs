@@ -21,6 +21,7 @@ namespace EquipAI.Tests.Unit.Services;
 public class DeviceServiceTests : IAsyncDisposable
 {
     private readonly Guid _tenantId = Guid.NewGuid();
+    private readonly string _databaseName = $"TestDevice_{Guid.NewGuid()}";
     private readonly AppDbContext _db;
     private readonly DeviceService _sut;
     private readonly StubAuditLogService _audit = new();
@@ -29,7 +30,7 @@ public class DeviceServiceTests : IAsyncDisposable
     {
         // 使用唯一数据库名称避免测试间相互干扰
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"TestDevice_{Guid.NewGuid()}")
+            .UseInMemoryDatabase(_databaseName)
             .Options;
         _db = new AppDbContext(options, new TestTenantContext(_tenantId));
 
@@ -194,6 +195,29 @@ public class DeviceServiceTests : IAsyncDisposable
         result.Should().BeNull();
     }
 
+    [Fact]
+    public async Task GetDeviceByIdAsync_租户不匹配_应返回null()
+    {
+        // Arrange：将其他租户设备写入当前上下文，模拟实体已被跟踪的路径。
+        var otherTenantId = Guid.NewGuid();
+        var device = new Device
+        {
+            Id = Guid.NewGuid(),
+            TenantId = otherTenantId,
+            DeviceCode = "DEV-OTHER-GET",
+            Name = "其他租户设备",
+            Type = "电机",
+        };
+        _db.Devices.Add(device);
+        await _db.SaveChangesAsync();
+
+        // Act
+        var result = await _sut.GetDeviceByIdAsync(device.Id, _tenantId);
+
+        // Assert：设备详情必须同时匹配设备 ID 和当前租户。
+        result.Should().BeNull("当前租户不得读取其他租户的设备详情");
+    }
+
     // ==================== CreateDeviceAsync 测试 ====================
 
     [Fact]
@@ -297,6 +321,55 @@ public class DeviceServiceTests : IAsyncDisposable
         tenant.CurrentDeviceCount.Should().Be(3);
     }
 
+    [Fact]
+    public async Task CreateDeviceAsync_显式租户与上下文不一致_唯一性检查应使用显式租户()
+    {
+        // Arrange：构造一个当前上下文属于其他租户的服务，验证服务层 tenantId 参数优先于上下文租户。
+        // HTTP 层仍必须保证二者来自同一个已认证租户，测试只锁定服务契约的显式边界。
+        var contextTenantId = Guid.NewGuid();
+        await SeedTenantAsync();
+
+        var contextOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(_databaseName)
+            .Options;
+        await using var contextDb = new AppDbContext(
+            contextOptions,
+            new TestTenantContext(contextTenantId));
+        contextDb.Devices.Add(new Device
+        {
+            Id = Guid.NewGuid(),
+            TenantId = contextTenantId,
+            DeviceCode = "DEV-CROSS-CREATE",
+            Name = "上下文租户设备",
+            Type = "电机",
+        });
+        await contextDb.SaveChangesAsync();
+
+        var mapperConfig = new MapperConfiguration(
+            cfg => cfg.AddProfile<MappingProfile>(),
+            Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+        var contextService = new DeviceService(
+            contextDb,
+            mapperConfig.CreateMapper(),
+            LoggerFactory.Create(_ => { }).CreateLogger<DeviceService>(),
+            _audit);
+
+        // Act：显式租户是 _tenantId；上下文租户故意设为其他租户。
+        var result = await contextService.CreateDeviceAsync(new CreateDeviceRequest
+        {
+            DeviceCode = "DEV-CROSS-CREATE",
+            Name = "显式租户新设备",
+            Type = "泵",
+        }, _tenantId);
+
+        // Assert：唯一性检查必须按显式 tenantId 识别边界，而不是错误地复用上下文租户。
+        result.DeviceCode.Should().Be("DEV-CROSS-CREATE");
+        var persisted = await _db.Devices.IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(d => d.Id == result.Id);
+        persisted.TenantId.Should().Be(_tenantId);
+    }
+
     // ==================== UpdateDeviceAsync 测试 ====================
 
     [Fact]
@@ -371,6 +444,37 @@ public class DeviceServiceTests : IAsyncDisposable
             .WithMessage($"设备 {notExistId} 不存在");
     }
 
+    [Fact]
+    public async Task UpdateDeviceAsync_租户不匹配_应视为不存在且保持原数据()
+    {
+        // Arrange：将其他租户设备写入当前上下文，避免测试只覆盖数据库查询路径。
+        var otherTenantId = Guid.NewGuid();
+        var device = new Device
+        {
+            Id = Guid.NewGuid(),
+            TenantId = otherTenantId,
+            DeviceCode = "DEV-OTHER-UPDATE",
+            Name = "不可被修改的设备",
+            Type = "电机",
+        };
+        _db.Devices.Add(device);
+        await _db.SaveChangesAsync();
+
+        // Act
+        var act = () => _sut.UpdateDeviceAsync(
+            device.Id,
+            _tenantId,
+            new UpdateDeviceRequest { Name = "越权修改" });
+
+        // Assert：越权资源必须按不存在处理，且原租户数据保持不变。
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+
+        var persisted = await _db.Devices.IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(d => d.Id == device.Id);
+        persisted.Name.Should().Be("不可被修改的设备");
+    }
+
     // ==================== DeleteDeviceAsync 测试 ====================
 
     [Fact]
@@ -414,6 +518,34 @@ public class DeviceServiceTests : IAsyncDisposable
         var act = () => _sut.DeleteDeviceAsync(notExistId, _tenantId);
         await act.Should().ThrowAsync<KeyNotFoundException>()
             .WithMessage($"设备 {notExistId} 不存在");
+    }
+
+    [Fact]
+    public async Task DeleteDeviceAsync_租户不匹配_应视为不存在且保留原数据()
+    {
+        // Arrange：将其他租户设备写入当前上下文，验证删除路径不会信任实体跟踪状态。
+        var otherTenantId = Guid.NewGuid();
+        var device = new Device
+        {
+            Id = Guid.NewGuid(),
+            TenantId = otherTenantId,
+            DeviceCode = "DEV-OTHER-DELETE",
+            Name = "不可被删除的设备",
+            Type = "电机",
+        };
+        _db.Devices.Add(device);
+        await _db.SaveChangesAsync();
+
+        // Act
+        var act = () => _sut.DeleteDeviceAsync(device.Id, _tenantId);
+
+        // Assert：当前租户不得删除其他租户的设备。
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+
+        var exists = await _db.Devices.IgnoreQueryFilters()
+            .AsNoTracking()
+            .AnyAsync(d => d.Id == device.Id && d.TenantId == otherTenantId);
+        exists.Should().BeTrue();
     }
 
     // ==================== 孤儿数据清理测试（关键修复 v1.5） ====================

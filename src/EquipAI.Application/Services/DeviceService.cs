@@ -13,7 +13,7 @@ namespace EquipAI.Application.Services;
 
 /// <summary>
 /// 设备管理服务实现，提供设备 CRUD 和筛选查询能力
-/// 所有操作均在指定租户范围内进行（依赖 AppDbContext 全局租户过滤器）
+/// 所有操作均在指定租户范围内进行；全局租户过滤器作为纵深防御，业务谓词仍显式匹配 TenantId
 /// </summary>
 public class DeviceService : IDeviceService
 {
@@ -39,7 +39,7 @@ public class DeviceService : IDeviceService
 
     /// <summary>
     /// 分页查询设备列表，支持按状态、类型和关键词筛选
-    /// 自动受租户全局过滤器约束
+    /// 显式按租户筛选，并由全局过滤器提供第二层隔离
     /// </summary>
     /// <param name="query">分页查询参数</param>
     /// <param name="tenantId">租户 ID</param>
@@ -49,7 +49,11 @@ public class DeviceService : IDeviceService
     public async Task<PagedResult<DeviceDto>> GetDevicesAsync(
         PagedQuery query, Guid tenantId, string? status = null, string? type = null)
     {
-        var devices = _dbContext.Devices.AsQueryable();
+        // tenantId 是服务契约的一部分，不能只依赖 DbContext 的全局过滤器。
+        // 这样即使调用方传入的上下文被复用，列表也不会脱离显式租户边界。
+        var devices = _dbContext.Devices
+            .Where(d => d.TenantId == tenantId)
+            .AsQueryable();
 
         // 按状态筛选
         if (!string.IsNullOrWhiteSpace(status) &&
@@ -93,7 +97,9 @@ public class DeviceService : IDeviceService
     /// <returns>设备信息，不存在则返回 null</returns>
     public async Task<DeviceDto?> GetDeviceByIdAsync(Guid deviceId, Guid tenantId)
     {
-        var device = await _dbContext.Devices.FindAsync(deviceId);
+        // 不使用 FindAsync：它可能从 ChangeTracker 返回实体，从而绕过查询过滤器。
+        var device = await _dbContext.Devices
+            .FirstOrDefaultAsync(d => d.Id == deviceId && d.TenantId == tenantId);
         return device == null ? null : _mapper.Map<DeviceDto>(device);
     }
 
@@ -108,9 +114,10 @@ public class DeviceService : IDeviceService
     /// <exception cref="InvalidOperationException">设备编码已存在</exception>
     public async Task<DeviceDto> CreateDeviceAsync(CreateDeviceRequest request, Guid tenantId)
     {
-        // 检查设备编码在当前租户内的唯一性（全局过滤器已自动限制租户范围）
+        // 显式按租户校验编码唯一性；全局过滤器只作为第二层隔离。
         var codeExists = await _dbContext.Devices
-            .AnyAsync(d => d.DeviceCode == request.DeviceCode);
+            .AnyAsync(d => d.TenantId == tenantId &&
+                           d.DeviceCode == request.DeviceCode);
 
         if (codeExists)
         {
@@ -155,7 +162,9 @@ public class DeviceService : IDeviceService
     /// <exception cref="KeyNotFoundException">设备不存在</exception>
     public async Task<DeviceDto> UpdateDeviceAsync(Guid deviceId, Guid tenantId, UpdateDeviceRequest request)
     {
-        var device = await _dbContext.Devices.FindAsync(deviceId)
+        // ID 和租户必须在同一个业务谓词中校验，跨租户资源按不存在处理。
+        var device = await _dbContext.Devices
+            .FirstOrDefaultAsync(d => d.Id == deviceId && d.TenantId == tenantId)
             ?? throw new KeyNotFoundException($"设备 {deviceId} 不存在");
 
         _mapper.Map(request, device);
@@ -197,14 +206,18 @@ public class DeviceService : IDeviceService
     /// <exception cref="KeyNotFoundException">设备不存在</exception>
     public async Task DeleteDeviceAsync(Guid deviceId, Guid tenantId)
     {
-        var device = await _dbContext.Devices.FindAsync(deviceId)
+        // 删除是不可逆操作，必须显式绑定租户，不能依赖 FindAsync 或跟踪状态。
+        var device = await _dbContext.Devices
+            .FirstOrDefaultAsync(d => d.Id == deviceId && d.TenantId == tenantId)
             ?? throw new KeyNotFoundException($"设备 {deviceId} 不存在");
 
         // 1. 归档该设备的活跃告警（标记 Resolved，避免孤儿告警污染 Dashboard）
         // 注意：用传统 foreach 而非 ExecuteUpdateAsync，兼容 InMemory 测试 provider
         // （ExecuteUpdate/ExecuteDelete 仅关系型数据库支持）。删设备是低频操作，性能不关键。
         var activeAlerts = await _dbContext.Alerts
-            .Where(a => a.DeviceId == deviceId && a.Status == Core.Enums.AlertStatus.Active)
+            .Where(a => a.TenantId == tenantId &&
+                        a.DeviceId == deviceId &&
+                        a.Status == Core.Enums.AlertStatus.Active)
             .ToListAsync();
 
         var now = DateTime.UtcNow;
@@ -217,7 +230,7 @@ public class DeviceService : IDeviceService
 
         // 2. 删除该设备的网关关联（停止向幽灵设备推送）
         var gatewayLinks = await _dbContext.GatewayDevices
-            .Where(gd => gd.DeviceId == deviceId)
+            .Where(gd => gd.TenantId == tenantId && gd.DeviceId == deviceId)
             .ToListAsync();
         _dbContext.GatewayDevices.RemoveRange(gatewayLinks);
 
@@ -229,7 +242,7 @@ public class DeviceService : IDeviceService
         // （温度/振动超限不告警）——告警评估按 r.DeviceId==当前遥测设备过滤，孤儿规则永不匹配（静默失效，不崩溃），
         // 工业设备返修后失去告警是安全盲区。与归档告警/移除网关关联同为"删设备必须清理的 DeviceId 绑定关联"。
         var deviceRules = await _dbContext.AlertRules
-            .Where(r => r.DeviceId == deviceId)
+            .Where(r => r.TenantId == tenantId && r.DeviceId == deviceId)
             .ToListAsync();
         _dbContext.AlertRules.RemoveRange(deviceRules);
 
