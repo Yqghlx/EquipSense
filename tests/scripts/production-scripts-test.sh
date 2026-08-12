@@ -469,9 +469,21 @@ test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection() {
 
   cp "$PROJECT_ROOT/docker/compose-production.sh" "$case_dir/compose-production.sh"
   printf '%s\n' \
-    'PLACEHOLDER_OPERATIONAL_VALUE=keep-for-inspection' \
+    'DOMAIN=inspection.example' \
     'RABBITMQ_IMAGE=' \
-    'PG_PASSWORD=must-not-be-copied' > "$case_dir/.env"
+    'PG_PASSWORD=must-not-be-copied' \
+    'FUTURE_SECRET_TOKEN=must-not-be-copied-future' \
+    'AUTH_MACHINE_API_KEY=must-not-be-copied-machine' \
+    'LLM_API_KEY=must-not-be-copied-llm' \
+    'FILE_STORAGE_S3_ACCESS_KEY=must-not-be-copied-s3-access' \
+    'FILE_STORAGE_S3_SECRET_KEY=must-not-be-copied-s3-secret' \
+    'SMTP_USERNAME=must-not-be-copied-smtp-user' \
+    'SMTP_PASSWORD=must-not-be-copied-smtp-password' \
+    'VAPID__PRIVATEKEY=must-not-be-copied-vapid' \
+    'EVALUATION_INGESTION_API_KEY=must-not-be-copied-evaluation' \
+    'ALERT_WEBHOOK_URL=https://example.invalid/must-not-be-copied-alert' \
+    'BACKUP_WEBHOOK=https://example.invalid/must-not-be-copied-backup' \
+    'SEED_TENANT2_PASSWORD=must-not-be-copied-tenant2' > "$case_dir/.env"
   : > "$case_dir/docker-compose.yml"
 
   cat > "$case_dir/validate-env.sh" <<'EOF'
@@ -502,10 +514,26 @@ EOF
 
   [[ -f "$env_snapshot" ]] || fail "观察命令应获得可解析 Compose 配置"
   assert_contains "$(cat "$trace_file")" "docker compose"
-  assert_contains "$(cat "$env_snapshot")" "PLACEHOLDER_OPERATIONAL_VALUE=keep-for-inspection"
+  assert_contains "$(cat "$env_snapshot")" "DOMAIN=inspection.example"
   assert_contains "$(cat "$env_snapshot")" "RABBITMQ_IMAGE=rabbitmq:recovery-placeholder"
-  [[ "$(cat "$env_snapshot")" != *"must-not-be-copied"* ]] \
-    || fail "恢复环境文件不得复制生产秘密"
+  local snapshot
+  snapshot="$(cat "$env_snapshot")"
+  for secret in \
+    "must-not-be-copied" \
+    "must-not-be-copied-future" \
+    "must-not-be-copied-machine" \
+    "must-not-be-copied-llm" \
+    "must-not-be-copied-s3-access" \
+    "must-not-be-copied-s3-secret" \
+    "must-not-be-copied-smtp-user" \
+    "must-not-be-copied-smtp-password" \
+    "must-not-be-copied-vapid" \
+    "must-not-be-copied-evaluation" \
+    "must-not-be-copied-alert" \
+    "must-not-be-copied-backup" \
+    "must-not-be-copied-tenant2"; do
+    [[ "$snapshot" != *"$secret"* ]] || fail "恢复环境文件不得复制生产秘密：$secret"
+  done
   [[ ! -e "$case_dir/.compose-recovery" ]] || fail "恢复环境临时文件不应遗留"
 }
 

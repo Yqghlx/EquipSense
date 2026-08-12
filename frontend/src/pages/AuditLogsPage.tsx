@@ -40,22 +40,22 @@ const actionVariant: Record<string, string> = {
  * 数据来源：grep -rn '\[Audit' src/EquipAI.WebAPI/Controllers/
  * 设计取舍：硬编码列表而非从 API 动态获取，因为后端 action 是有限集（业务定义的）
  */
-const ACTION_OPTIONS = [
+const ACTION_OPTIONS: { value: string; labelKey: string }[] = [
   // 认证类
-  { value: 'AuthLoginSuccess', label: 'AuthLoginSuccess（登录成功）' },
-  { value: 'AuthLoginFailed', label: 'AuthLoginFailed（登录失败）' },
-  { value: 'Login', label: 'Login' },
-  { value: 'Logout', label: 'Logout' },
+  { value: 'AuthLoginSuccess', labelKey: 'audit.actionOptions.authLoginSuccess' },
+  { value: 'AuthLoginFailed', labelKey: 'audit.actionOptions.authLoginFailed' },
+  { value: 'Login', labelKey: 'audit.actionOptions.login' },
+  { value: 'Logout', labelKey: 'audit.actionOptions.logout' },
   // CRUD 类（实际触发于设备/工单/告警/用户的增删改）
-  { value: 'Create', label: 'Create' },
-  { value: 'Update', label: 'Update' },
-  { value: 'Delete', label: 'Delete' },
+  { value: 'Create', labelKey: 'audit.actionOptions.create' },
+  { value: 'Update', labelKey: 'audit.actionOptions.update' },
+  { value: 'Delete', labelKey: 'audit.actionOptions.delete' },
   // 业务类
-  { value: 'Acknowledge', label: 'Acknowledge（确认告警）' },
-  { value: 'Resolve', label: 'Resolve（解决告警）' },
-  { value: 'RecalculateHealth', label: 'RecalculateHealth（重算健康度）' },
-  { value: 'SlaCheck', label: 'SlaCheck（SLA 检查）' },
-  { value: 'GenerateReport', label: 'GenerateReport（生成报表）' },
+  { value: 'Acknowledge', labelKey: 'audit.actionOptions.acknowledge' },
+  { value: 'Resolve', labelKey: 'audit.actionOptions.resolve' },
+  { value: 'RecalculateHealth', labelKey: 'audit.actionOptions.recalculateHealth' },
+  { value: 'SlaCheck', labelKey: 'audit.actionOptions.slaCheck' },
+  { value: 'GenerateReport', labelKey: 'audit.actionOptions.generateReport' },
 ];
 
 /**
@@ -117,7 +117,7 @@ export default function AuditLogsPage() {
           >
             <option value="">{t('audit.allActions', '全部动作')}</option>
             {ACTION_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+              <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
             ))}
           </select>
           <select

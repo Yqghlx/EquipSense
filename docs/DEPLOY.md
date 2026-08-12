@@ -81,7 +81,7 @@ cd ..
 
 `setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝符号链接形式的 `.env`、TLS 私钥和 Mosquitto 密码文件，避免仅打印 warning 后误报配置成功或把认证文件写入非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
 
-直接启动生产 Compose 时统一使用 `docker/compose-production.sh`：它会在 `up`、`start`、`restart`、`build`、`pull`、`create`、`run` 和 `scale` 前执行同一套生产门禁，校验失败时不会调用 Docker，避免只启动部分服务。`ps`、`logs`、`exec`、`stop` 和 `down` 等观察或故障处置命令仍可在门禁失败时使用。CI/CD 的正式镜像发布继续使用 `deploy-production.sh`，不要用本地构建入口替代滚动发布脚本。
+直接启动生产 Compose 时统一使用 `docker/compose-production.sh`：它会在 `up`、`start`、`restart`、`build`、`pull`、`create`、`run` 和 `scale` 前执行同一套生产门禁，校验失败时不会调用 Docker，避免只启动部分服务。`ps`、`logs`、`exec`、`stop` 和 `down` 等观察或故障处置命令仍可在门禁失败时使用；这些命令使用仅包含显式安全变量白名单的临时恢复环境，未知变量默认丢弃，避免把新增的 API Key、密码或带认证信息的 URL 复制到临时文件。CI/CD 的正式镜像发布继续使用 `deploy-production.sh`，不要用本地构建入口替代滚动发布脚本。
 
 `bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；它通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
 

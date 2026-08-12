@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import WorkOrderDetailPage from '../WorkOrderDetailPage';
 import * as workOrderHooks from '../../hooks/useWorkOrders';
@@ -19,7 +19,12 @@ vi.mock('react-router-dom', async () => {
 });
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => ({
+      'workorder.offlineSave': 'Save to offline queue',
+      'workorder.approvalProgressTitle': 'Approval progress',
+    }[key] ?? key),
+  }),
 }));
 
 vi.mock('sonner', () => ({
@@ -131,6 +136,10 @@ beforeEach(() => {
   } as unknown as ReturnType<typeof offlineQueueHooks.useOfflineQueue>);
 });
 
+afterEach(() => {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+});
+
 describe('WorkOrderDetailPage', () => {
   it('应展示可读派工人名称和真实流转时间线', () => {
     render(<WorkOrderDetailPage />);
@@ -151,5 +160,27 @@ describe('WorkOrderDetailPage', () => {
 
     expect(screen.getByText('workorder.unknownAssignee')).toBeInTheDocument();
     expect(screen.queryByText('user-001')).not.toBeInTheDocument();
+  });
+
+  it('英文工单详情应将离线保存和审批进度标题交给翻译资源', () => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    vi.spyOn(workOrderHooks, 'useWorkOrder').mockReturnValue({
+      data: { ...mockWorkOrder, status: 'InProgress', resolution: undefined },
+      isLoading: false,
+    } as unknown as ReturnType<typeof workOrderHooks.useWorkOrder>);
+    const { rerender } = render(<WorkOrderDetailPage />);
+
+    expect(screen.getByRole('button', { name: 'Save to offline queue' })).toBeInTheDocument();
+
+    vi.spyOn(workOrderHooks, 'useWorkOrder').mockReturnValue({
+      data: { ...mockWorkOrder, status: 'SubmittedForApproval' },
+      isLoading: false,
+    } as unknown as ReturnType<typeof workOrderHooks.useWorkOrder>);
+    vi.spyOn(approvalHooks, 'useWorkOrderApprovals').mockReturnValue({
+      data: [{ id: 'approval-001' }],
+    } as unknown as ReturnType<typeof approvalHooks.useWorkOrderApprovals>);
+    rerender(<WorkOrderDetailPage />);
+
+    expect(screen.getByText('Approval progress')).toBeInTheDocument();
   });
 });

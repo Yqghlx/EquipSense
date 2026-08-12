@@ -123,8 +123,8 @@
 - 隔离 Production 全量：433 个 E2E，431 通过、2 条件跳过、0 失败。
 - 设备接入向导定向：19/19 通过。
 - 工单创建定向：11/11 通过。
-- 前端 Vitest：387 个通过。
-- 前端 TypeScript、Lint、i18n 检查：通过；中英文共 865 个键完全对齐。
+- 前端 Vitest：416 个通过。
+- 前端 TypeScript、Lint、i18n 检查：通过；中英文共 1002 个键完全对齐。
 - 前端 Production Docker 镜像构建：通过。
 - `git diff --check`：通过。
 

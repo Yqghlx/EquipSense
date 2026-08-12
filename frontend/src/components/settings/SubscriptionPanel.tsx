@@ -6,10 +6,10 @@ import { Separator } from '../ui/separator';
 
 /** 可选计划列表 */
 const plans = [
-  { value: 'Trial', label: '试用版', devices: 5, users: 3, retention: 30 },
-  { value: 'Basic', label: '基础版', devices: 50, users: 20, retention: 90 },
-  { value: 'Professional', label: '专业版', devices: 200, users: 50, retention: 180 },
-  { value: 'Enterprise', label: '企业版', devices: 500, users: 200, retention: 365 },
+  { value: 'Trial', labelKey: 'subscription.plans.trial', devices: 5, users: 3, retention: 30 },
+  { value: 'Basic', labelKey: 'subscription.plans.basic', devices: 50, users: 20, retention: 90 },
+  { value: 'Professional', labelKey: 'subscription.plans.professional', devices: 200, users: 50, retention: 180 },
+  { value: 'Enterprise', labelKey: 'subscription.plans.enterprise', devices: 500, users: 200, retention: 365 },
 ];
 
 /**
@@ -78,7 +78,7 @@ export function SubscriptionPanel() {
               }}
             >
               <CardContent className="p-4">
-                <p className="font-medium">{plan.label}</p>
+                <p className="font-medium">{t(plan.labelKey)}</p>
                 <p className="text-xs text-muted-foreground">
                   {plan.devices} {t('subscription.devices')} / {plan.users} {t('subscription.users')}
                 </p>

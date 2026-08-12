@@ -14,6 +14,7 @@ import useTokenRefresh from './hooks/useTokenRefresh';
 import { restoreSessionFromCookie } from './lib/authSession';
 import { persistTokenExpiry } from './lib/tokenExpiry';
 import { clearLegacyApiCache } from './lib/serviceWorkerCache';
+import { shouldRenderLoginPage } from './lib/authRouting';
 import { PageFallback, RouteErrorFallback, SessionRestoreFallback } from './components/layout/AppFeedback';
 
 // 认证页面 — 首屏需要，直接导入
@@ -61,6 +62,7 @@ function AppRoutes() {
   const setAuth = useAuthStore((s) => s.setAuth);
   const finishSessionRestore = useAuthStore((s) => s.finishSessionRestore);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
   const isSessionReady = useAuthStore((s) => s.isSessionReady);
   const [sessionRestoreError, setSessionRestoreError] = useState(false);
 
@@ -118,11 +120,13 @@ function AppRoutes() {
     return <SessionRestoreFallback />;
   }
 
+  const renderLoginPage = shouldRenderLoginPage(isAuthenticated, user);
+
   return (
     <Routes>
       {/* 认证路由 */}
       <Route element={<AuthLayout />}>
-        <Route path="/login" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+        <Route path="/login" element={renderLoginPage ? <LoginPage /> : <Navigate to="/dashboard" replace />} />
         <Route path="/register" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
         <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <ForgotPasswordPage />} />
         <Route path="/reset-password" element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <ResetPasswordPage />} />

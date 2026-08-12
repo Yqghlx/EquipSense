@@ -63,7 +63,7 @@ export default function ModbusRtuConnectionForm({ value, onChange }: ModbusRtuCo
           placeholder="/dev/ttyUSB0"
         />
         <p className="text-xs text-muted-foreground">
-          Linux: /dev/ttyUSB0, /dev/ttyS0 | Windows: COM1, COM2
+          {t('gatewayWizard.rtuPortHint')}
         </p>
       </div>
 
@@ -112,7 +112,11 @@ export default function ModbusRtuConnectionForm({ value, onChange }: ModbusRtuCo
             <SelectContent>
               {PARITY_OPTIONS.map((p) => (
                 <SelectItem key={p} value={p}>
-                  {p === 'None' ? '无' : p === 'Even' ? '偶' : '奇'}
+                  {p === 'None'
+                    ? t('gatewayWizard.parityNone')
+                    : p === 'Even'
+                      ? t('gatewayWizard.parityEven')
+                      : t('gatewayWizard.parityOdd')}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -148,7 +152,7 @@ export default function ModbusRtuConnectionForm({ value, onChange }: ModbusRtuCo
           placeholder="1"
         />
         <p className="text-xs text-muted-foreground">
-          Modbus RTU 从站地址（1-247）
+          {t('gatewayWizard.rtuUnitHint')}
         </p>
       </div>
     </div>

@@ -245,7 +245,7 @@ export default function WorkOrderDetailPage() {
               }}
               disabled={!resolution || completeOrder.isPending}
             >
-              {navigator.onLine ? t('workorder.complete') : '保存到离线队列'}
+              {navigator.onLine ? t('workorder.complete') : t('workorder.offlineSave')}
             </Button>
           </CardContent>
         </Card>
@@ -254,7 +254,7 @@ export default function WorkOrderDetailPage() {
       {/* 待审批状态：审批进度面板 */}
       {workOrder.status === 'SubmittedForApproval' && approvals && approvals.length > 0 && (
         <Card>
-          <CardHeader><CardTitle className="text-base">审批进度</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="text-base">{t('workorder.approvalProgressTitle')}</CardTitle></CardHeader>
           <CardContent>
             <ApprovalProgressPanel
               workOrderId={workOrder.id}

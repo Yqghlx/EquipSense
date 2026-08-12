@@ -24,13 +24,13 @@ import {
 } from '../hooks/useUsers';
 import { formatDate } from '../lib/utils';
 
-/** 角色中文标签 */
-const roleLabels: Record<string, string> = {
-  SystemAdmin: '系统管理员',
-  MaintenanceLead: '维保主管',
-  Technician: '技术员',
-  Operator: '操作员',
-  Viewer: '观察者',
+/** 角色对应的翻译键 */
+const roleLabelKeys: Record<string, string> = {
+  SystemAdmin: 'users.roles.systemAdmin',
+  MaintenanceLead: 'users.roles.maintenanceLead',
+  Technician: 'users.roles.technician',
+  Operator: 'users.roles.operator',
+  Viewer: 'users.roles.viewer',
 };
 
 export default function UsersPage() {
@@ -184,8 +184,8 @@ function UserRow({
           onChange={(e) => onRoleChange(e.target.value)}
           title={t('users.changeRole', '变更角色')}
         >
-          {Object.entries(roleLabels).map(([key, label]) => (
-            <option key={key} value={key}>{label}</option>
+          {Object.entries(roleLabelKeys).map(([key, labelKey]) => (
+            <option key={key} value={key}>{t(labelKey)}</option>
           ))}
         </select>
       </TableCell>
@@ -256,8 +256,8 @@ function CreateUserDialog({
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}
             >
-              {Object.entries(roleLabels).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
+              {Object.entries(roleLabelKeys).map(([key, labelKey]) => (
+                <option key={key} value={key}>{t(labelKey)}</option>
               ))}
             </select>
           </div>

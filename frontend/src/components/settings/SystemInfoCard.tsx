@@ -43,10 +43,19 @@ export function SystemInfoCard() {
     const cleaned = timePart.split('.')[0];
     const [h, m, s] = cleaned.split(':').map(x => parseInt(x, 10) || 0);
 
-    if (days > 0) return `${days}天 ${h}小时 ${m}分钟`;
-    if (h > 0) return `${h}小时 ${m}分钟`;
-    if (m > 0) return `${m}分钟 ${s}秒`;
-    return `${s}秒`;
+    const formatUnit = (unit: 'day' | 'hour' | 'minute' | 'second', count: number) =>
+      t(`settings.uptimeUnits.${unit}`, { count });
+
+    if (days > 0) {
+      return [
+        formatUnit('day', days),
+        formatUnit('hour', h),
+        formatUnit('minute', m),
+      ].join(' ');
+    }
+    if (h > 0) return [formatUnit('hour', h), formatUnit('minute', m)].join(' ');
+    if (m > 0) return [formatUnit('minute', m), formatUnit('second', s)].join(' ');
+    return formatUnit('second', s);
   };
 
   return (

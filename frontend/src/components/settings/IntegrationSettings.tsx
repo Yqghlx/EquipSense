@@ -8,6 +8,7 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Separator } from '../ui/separator';
 import { useIntegrations, useUpdateIntegration, useTestIntegration } from '../../hooks/useIntegration';
+import type { IntegrationsMap } from '../../types/integration';
 
 /**
  * 外部集成配置面板
@@ -23,29 +24,58 @@ import { useIntegrations, useUpdateIntegration, useTestIntegration } from '../..
 export function IntegrationSettings() {
   const { t } = useTranslation();
   const { data: integrations, isLoading } = useIntegrations();
+  if (isLoading) {
+    return <p className="text-center text-muted-foreground py-8">{t('common.loading')}</p>;
+  }
+
+  // 配置摘要变化时重新挂载表单，避免切换租户后沿用上一个租户的非敏感草稿。
+  const integrationSnapshotKey = JSON.stringify(integrations ?? {});
+  return <IntegrationSettingsForm key={integrationSnapshotKey} integrations={integrations} />;
+}
+
+/**
+ * 外部集成配置表单。
+ *
+ * 将表单拆出加载壳层，使脱敏配置在表单首次挂载时初始化，避免在 effect 中同步
+ * setState 造成级联渲染，也避免把凭证占位符误当成可编辑的真实值。
+ */
+function IntegrationSettingsForm({ integrations }: { integrations?: IntegrationsMap }) {
+  const { t } = useTranslation();
   const updateMutation = useUpdateIntegration();
   const testMutation = useTestIntegration();
   const [activeTab, setActiveTab] = useState('dingtalk');
 
-  // 钉钉配置状态
-  const [dingtalk, setDingtalk] = useState({
-    webhookUrl: '', secret: '', messageType: 'actionCard', detailUrlTemplate: '',
-  });
+  // 钉钉配置状态：仅回填非敏感字段，凭证和 URL 由用户重新输入时才更新。
+  const [dingtalk, setDingtalk] = useState(() => ({
+    webhookUrl: '',
+    secret: '',
+    messageType: integrations?.dingtalk?.messageType ?? 'actionCard',
+    detailUrlTemplate: integrations?.dingtalk?.detailUrlTemplate ?? '',
+  }));
 
-  // 飞书配置状态
-  const [feishu, setFeishu] = useState({
-    webhookUrl: '', appId: '', appSecret: '', approvalCode: '',
-  });
+  // 飞书配置状态：App ID 和审批定义不是服务端凭证，可以安全回填。
+  const [feishu, setFeishu] = useState(() => ({
+    webhookUrl: '',
+    appId: integrations?.feishu?.appId ?? '',
+    appSecret: '',
+    approvalCode: integrations?.feishu?.approvalCode ?? '',
+  }));
 
-  // Webhook 配置状态
-  const [webhook, setWebhook] = useState({
-    url: '', secret: '', bodyTemplate: '',
-  });
+  // Webhook 配置状态：Body 模板不包含服务端凭证，可以安全回填。
+  const [webhook, setWebhook] = useState(() => ({
+    url: '',
+    secret: '',
+    bodyTemplate: integrations?.webhook?.bodyTemplate ?? '',
+  }));
 
-  // EAM 配置状态
-  const [eam, setEam] = useState({
-    type: 'maximo', endpoint: '', apiKey: '', username: '', password: '',
-  });
+  // EAM 配置状态：系统类型和用户名可以回填，端点与凭证保持空白。
+  const [eam, setEam] = useState(() => ({
+    type: integrations?.eam?.type ?? 'maximo',
+    endpoint: '',
+    apiKey: '',
+    username: integrations?.eam?.username ?? '',
+    password: '',
+  }));
 
   /** 保存集成配置 */
   const handleSave = (type: string, config: object, enabled: boolean) => {
@@ -61,10 +91,6 @@ export function IntegrationSettings() {
     testMutation.mutate(type);
   };
 
-  if (isLoading) {
-    return <p className="text-center text-muted-foreground py-8">{t('common.loading')}</p>;
-  }
-
   const dingtalkEnabled = integrations?.dingtalk?.enabled ?? false;
   const feishuEnabled = integrations?.feishu?.enabled ?? false;
   const webhookEnabled = integrations?.webhook?.enabled ?? false;
@@ -79,10 +105,10 @@ export function IntegrationSettings() {
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid grid-cols-4 w-full">
-            <TabsTrigger value="dingtalk">钉钉</TabsTrigger>
-            <TabsTrigger value="feishu">飞书</TabsTrigger>
-            <TabsTrigger value="webhook">Webhook</TabsTrigger>
-            <TabsTrigger value="eam">EAM</TabsTrigger>
+            <TabsTrigger value="dingtalk">{t('settings.integrations.tabs.dingtalk')}</TabsTrigger>
+            <TabsTrigger value="feishu">{t('settings.integrations.tabs.feishu')}</TabsTrigger>
+            <TabsTrigger value="webhook">{t('settings.integrations.tabs.webhook')}</TabsTrigger>
+            <TabsTrigger value="eam">{t('settings.integrations.tabs.eam')}</TabsTrigger>
           </TabsList>
 
           {/* 钉钉集成 */}
@@ -90,7 +116,7 @@ export function IntegrationSettings() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Badge variant={dingtalkEnabled ? "default" : "outline"}>
-                  {dingtalkEnabled ? '已启用' : '未启用'}
+                  {dingtalkEnabled ? t('settings.integrations.enabled') : t('settings.integrations.disabled')}
                 </Badge>
               </div>
               <div className="flex gap-2">
@@ -100,7 +126,7 @@ export function IntegrationSettings() {
                   onClick={() => handleTest('dingtalk')}
                   disabled={testMutation.isPending}
                 >
-                  {testMutation.isPending ? '测试中...' : '测试连接'}
+                  {testMutation.isPending ? t('settings.integrations.testing') : t('settings.integrations.testConnection')}
                 </Button>
                 <Button
                   size="sm"
@@ -108,13 +134,13 @@ export function IntegrationSettings() {
                   onClick={() => handleSave('dingtalk', dingtalk, !dingtalkEnabled)}
                   disabled={updateMutation.isPending}
                 >
-                  {dingtalkEnabled ? '禁用' : '启用并保存'}
+                  {dingtalkEnabled ? t('settings.integrations.disable') : t('settings.integrations.enableAndSave')}
                 </Button>
               </div>
             </div>
             <div className="grid gap-4">
               <div className="space-y-2">
-                <Label>Webhook URL *</Label>
+                <Label>{t('settings.integrations.dingtalk.webhookUrl')}</Label>
                 <Input
                   placeholder="https://oapi.dingtalk.com/robot/send?access_token=..."
                   value={dingtalk.webhookUrl}
@@ -122,7 +148,7 @@ export function IntegrationSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>加签密钥（可选）</Label>
+                <Label>{t('settings.integrations.dingtalk.secret')}</Label>
                 <Input
                   type="password"
                   placeholder="SEC..."
@@ -131,18 +157,21 @@ export function IntegrationSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>消息类型</Label>
+                <Label>{t('settings.integrations.dingtalk.messageType')}</Label>
                 <select
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                   value={dingtalk.messageType}
-                  onChange={(e) => setDingtalk({ ...dingtalk, messageType: e.target.value })}
+                  onChange={(e) => setDingtalk({
+                    ...dingtalk,
+                    messageType: e.target.value as 'actionCard' | 'markdown',
+                  })}
                 >
-                  <option value="actionCard">ActionCard（推荐）</option>
-                  <option value="markdown">Markdown</option>
+                  <option value="actionCard">{t('settings.integrations.dingtalk.actionCard')}</option>
+                  <option value="markdown">{t('settings.integrations.dingtalk.markdown')}</option>
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>工单详情页 URL 模板（可选）</Label>
+                <Label>{t('settings.integrations.dingtalk.detailUrl')}</Label>
                 <Input
                   placeholder="https://equipsense.app/work-orders/{{workOrderId}}"
                   value={dingtalk.detailUrlTemplate}
@@ -156,7 +185,7 @@ export function IntegrationSettings() {
           <TabsContent value="feishu" className="space-y-4 mt-4">
             <div className="flex items-center justify-between">
               <Badge variant={feishuEnabled ? "default" : "outline"}>
-                {feishuEnabled ? '已启用' : '未启用'}
+                {feishuEnabled ? t('settings.integrations.enabled') : t('settings.integrations.disabled')}
               </Badge>
               <div className="flex gap-2">
                 <Button
@@ -165,7 +194,7 @@ export function IntegrationSettings() {
                   onClick={() => handleTest('feishu')}
                   disabled={testMutation.isPending}
                 >
-                  {testMutation.isPending ? '测试中...' : '测试连接'}
+                  {testMutation.isPending ? t('settings.integrations.testing') : t('settings.integrations.testConnection')}
                 </Button>
                 <Button
                   size="sm"
@@ -173,13 +202,13 @@ export function IntegrationSettings() {
                   onClick={() => handleSave('feishu', feishu, !feishuEnabled)}
                   disabled={updateMutation.isPending}
                 >
-                  {feishuEnabled ? '禁用' : '启用并保存'}
+                  {feishuEnabled ? t('settings.integrations.disable') : t('settings.integrations.enableAndSave')}
                 </Button>
               </div>
             </div>
             <div className="grid gap-4">
               <div className="space-y-2">
-                <Label>机器人 Webhook URL（推荐，简单模式）</Label>
+                <Label>{t('settings.integrations.feishu.webhookUrl')}</Label>
                 <Input
                   placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
                   value={feishu.webhookUrl}
@@ -187,10 +216,10 @@ export function IntegrationSettings() {
                 />
               </div>
               <Separator />
-              <p className="text-sm text-muted-foreground">以下为 API 模式配置（如需审批实例则必填）：</p>
+              <p className="text-sm text-muted-foreground">{t('settings.integrations.feishu.apiModeNote')}</p>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>App ID</Label>
+                  <Label>{t('settings.integrations.feishu.appId')}</Label>
                   <Input
                     placeholder="cli_xxxxxxxx"
                     value={feishu.appId}
@@ -198,7 +227,7 @@ export function IntegrationSettings() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>App Secret</Label>
+                  <Label>{t('settings.integrations.feishu.appSecret')}</Label>
                   <Input
                     type="password"
                     value={feishu.appSecret}
@@ -207,9 +236,9 @@ export function IntegrationSettings() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>审批定义 Code（可选，用于创建审批实例）</Label>
+                <Label>{t('settings.integrations.feishu.approvalCode')}</Label>
                 <Input
-                  placeholder={t("settings.getFromFeishu", "从飞书审批管理中获取")}
+                  placeholder={t('settings.integrations.feishu.approvalPlaceholder')}
                   value={feishu.approvalCode}
                   onChange={(e) => setFeishu({ ...feishu, approvalCode: e.target.value })}
                 />
@@ -221,7 +250,7 @@ export function IntegrationSettings() {
           <TabsContent value="webhook" className="space-y-4 mt-4">
             <div className="flex items-center justify-between">
               <Badge variant={webhookEnabled ? "default" : "outline"}>
-                {webhookEnabled ? '已启用' : '未启用'}
+                {webhookEnabled ? t('settings.integrations.enabled') : t('settings.integrations.disabled')}
               </Badge>
               <div className="flex gap-2">
                 <Button
@@ -230,7 +259,7 @@ export function IntegrationSettings() {
                   onClick={() => handleTest('webhook')}
                   disabled={testMutation.isPending}
                 >
-                  {testMutation.isPending ? '测试中...' : '测试连接'}
+                  {testMutation.isPending ? t('settings.integrations.testing') : t('settings.integrations.testConnection')}
                 </Button>
                 <Button
                   size="sm"
@@ -238,13 +267,13 @@ export function IntegrationSettings() {
                   onClick={() => handleSave('webhook', webhook, !webhookEnabled)}
                   disabled={updateMutation.isPending}
                 >
-                  {webhookEnabled ? '禁用' : '启用并保存'}
+                  {webhookEnabled ? t('settings.integrations.disable') : t('settings.integrations.enableAndSave')}
                 </Button>
               </div>
             </div>
             <div className="grid gap-4">
               <div className="space-y-2">
-                <Label>Webhook URL *</Label>
+                <Label>{t('settings.integrations.webhook.url')}</Label>
                 <Input
                   placeholder="https://your-server.com/api/webhook"
                   value={webhook.url}
@@ -252,7 +281,7 @@ export function IntegrationSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>签名密钥（可选，设置后自动添加 X-EquipSense-Signature 头）</Label>
+                <Label>{t('settings.integrations.webhook.secret')}</Label>
                 <Input
                   type="password"
                   value={webhook.secret}
@@ -260,9 +289,9 @@ export function IntegrationSettings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Body 模板（可选，支持变量插值）</Label>
+                <Label>{t('settings.integrations.webhook.bodyTemplate')}</Label>
                 <p className="text-xs text-muted-foreground">
-                  可用变量: {'{{workOrder.code}}'}, {'{{workOrder.title}}'}, {'{{workOrder.priority}}'}, {'{{workOrder.status}}'}, {'{{timestamp}}'}
+                  {t('settings.integrations.webhook.variables')} {'{{workOrder.code}}'}, {'{{workOrder.title}}'}, {'{{workOrder.priority}}'}, {'{{workOrder.status}}'}, {'{{timestamp}}'}
                 </p>
                 <textarea
                   className="w-full min-h-[100px] rounded-md border bg-background px-3 py-2 text-sm font-mono"
@@ -278,7 +307,7 @@ export function IntegrationSettings() {
           <TabsContent value="eam" className="space-y-4 mt-4">
             <div className="flex items-center justify-between">
               <Badge variant={eamEnabled ? "default" : "outline"}>
-                {eamEnabled ? '已启用' : '未启用'}
+                {eamEnabled ? t('settings.integrations.enabled') : t('settings.integrations.disabled')}
               </Badge>
               <div className="flex gap-2">
                 <Button
@@ -287,7 +316,7 @@ export function IntegrationSettings() {
                   onClick={() => handleTest('eam')}
                   disabled={testMutation.isPending}
                 >
-                  {testMutation.isPending ? '测试中...' : '测试连接'}
+                  {testMutation.isPending ? t('settings.integrations.testing') : t('settings.integrations.testConnection')}
                 </Button>
                 <Button
                   size="sm"
@@ -295,25 +324,28 @@ export function IntegrationSettings() {
                   onClick={() => handleSave('eam', eam, !eamEnabled)}
                   disabled={updateMutation.isPending}
                 >
-                  {eamEnabled ? '禁用' : '启用并保存'}
+                  {eamEnabled ? t('settings.integrations.disable') : t('settings.integrations.enableAndSave')}
                 </Button>
               </div>
             </div>
             <div className="grid gap-4">
               <div className="space-y-2">
-                <Label>EAM 系统类型</Label>
+                <Label>{t('settings.integrations.eam.systemType')}</Label>
                 <select
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                   value={eam.type}
-                  onChange={(e) => setEam({ ...eam, type: e.target.value })}
+                  onChange={(e) => setEam({
+                    ...eam,
+                    type: e.target.value as 'maximo' | 'sap_pm' | 'custom',
+                  })}
                 >
-                  <option value="maximo">IBM Maximo</option>
-                  <option value="sap_pm">SAP PM</option>
-                  <option value="custom">自定义 REST API</option>
+                  <option value="maximo">{t('settings.integrations.eam.maximo')}</option>
+                  <option value="sap_pm">{t('settings.integrations.eam.sapPm')}</option>
+                  <option value="custom">{t('settings.integrations.eam.custom')}</option>
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>REST API 端点 *</Label>
+                <Label>{t('settings.integrations.eam.endpoint')}</Label>
                 <Input
                   placeholder="https://maximo.example.com/maximo/oslc"
                   value={eam.endpoint}
@@ -322,7 +354,7 @@ export function IntegrationSettings() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>API Key</Label>
+                  <Label>{t('settings.integrations.eam.apiKey')}</Label>
                   <Input
                     type="password"
                     value={eam.apiKey}
@@ -330,16 +362,16 @@ export function IntegrationSettings() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>或 Basic Auth</Label>
+                  <Label>{t('settings.integrations.eam.basicAuth')}</Label>
                   <div className="grid grid-cols-2 gap-2">
                     <Input
-                      placeholder={t("auth.username", "用户名")}
+                      placeholder={t('auth.username')}
                       value={eam.username}
                       onChange={(e) => setEam({ ...eam, username: e.target.value })}
                     />
                     <Input
                       type="password"
-                      placeholder={t("auth.password", "密码")}
+                      placeholder={t('auth.password')}
                       value={eam.password}
                       onChange={(e) => setEam({ ...eam, password: e.target.value })}
                     />
@@ -357,7 +389,7 @@ export function IntegrationSettings() {
               {testMutation.data.message}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              耗时: {testMutation.data.durationMs}ms
+              {t('settings.integrations.test.duration', { duration: testMutation.data.durationMs })}
             </p>
             {testMutation.data.details && (
               <pre className="mt-2 rounded bg-muted p-2 text-xs overflow-x-auto">
@@ -369,7 +401,11 @@ export function IntegrationSettings() {
 
         {testMutation.isError && (
           <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 p-3">
-            <p className="text-sm text-red-600">测试失败: {(testMutation.error as Error)?.message || '未知错误'}</p>
+            <p className="text-sm text-red-600">
+              {t('settings.integrations.test.failed', {
+                message: (testMutation.error as Error)?.message || t('settings.integrations.test.unknownError'),
+              })}
+            </p>
           </div>
         )}
       </CardContent>

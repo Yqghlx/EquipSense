@@ -10,7 +10,6 @@ import { test, expect } from '@playwright/test';
 import {
   BASE_URL, login, captureErrors, navigateViaSidebar, getToken,
 } from '../helpers';
-import api from '../helpers/api';
 
 test.describe('05-审计日志与用户管理', () => {
   test('1. 审计日志页面可访问并展示记录', async ({ page }) => {

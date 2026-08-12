@@ -47,10 +47,11 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const currentUser = useAuthStore((s) => s.user);
   const initialLocationState = (location.state ?? {}) as LoginLocationState;
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(() => currentUser?.mustChangePassword === true);
 
   // MFA 阶段状态
   const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
@@ -211,7 +212,7 @@ export default function LoginPage() {
       const from = (location.state as { from?: string })?.from || '/dashboard';
       navigate(from, { replace: true });
     } catch {
-      setError('验证码错误，请检查 authenticator 应用中的时间是否准确');
+      setError(t('mfa.codeError'));
     } finally {
       setLoading(false);
     }
@@ -339,7 +340,7 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmitTotp(onMfaSubmit)} className="space-y-4">
+          <form key="mfa-verification" onSubmit={handleSubmitTotp(onMfaSubmit)} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="totpCode">{t('mfa.loginCodeLabel')}</Label>
               <Input

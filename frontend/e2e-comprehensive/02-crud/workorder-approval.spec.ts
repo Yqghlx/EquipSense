@@ -259,35 +259,30 @@ test.describe('02-审批链', () => {
 
     // 切换到审批链配置标签
     const approvalTab = page.getByRole('tab', { name: /审批链/i });
-    if (await approvalTab.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await approvalTab.click();
-      await page.waitForTimeout(1000);
+    await expect(approvalTab).toBeVisible({ timeout: 5000 });
+    await approvalTab.click();
 
-      // 点击新增模板按钮
-      const createButton = page.getByRole('button', { name: /新增模板/i }).first();
-      if (await createButton.isVisible().catch(() => false)) {
-        await createButton.click();
-        await page.waitForTimeout(1000);
+    // 点击新增模板按钮
+    const createButton = page.getByRole('button', { name: /新增模板/i });
+    await expect(createButton).toBeVisible({ timeout: 5000 });
+    await createButton.click();
 
-        // 填写模板名称
-        const nameInput = page.getByPlaceholder(/高优先级|模板名称/i).first();
-        if (await nameInput.isVisible().catch(() => false)) {
-          const templateName = `E2E审批模板-${Date.now().toString(36)}`;
-          await nameInput.fill(templateName);
+    const dialog = page.getByRole('dialog', { name: /新增审批链模板|编辑审批链模板/i });
+    await expect(dialog).toBeVisible({ timeout: 5000 });
 
-          // 点击创建按钮
-          const createBtn = page.getByRole('button', { name: /创建/i }).first();
-          await createBtn.click();
-          await page.waitForTimeout(2000);
+    // 填写模板名称
+    const nameInput = dialog.getByPlaceholder(/高优先级|模板名称/i);
+    await expect(nameInput).toBeVisible({ timeout: 5000 });
+    const templateName = `E2E审批模板-${Date.now().toString(36)}`;
+    await nameInput.fill(templateName);
 
-          // 验证新模板出现在列表
-          const newTemplate = page.getByText(templateName).first();
-          if (await newTemplate.isVisible({ timeout: 3000 }).catch(() => false)) {
-            await expect(newTemplate).toBeVisible();
-          }
-        }
-      }
-    }
+    // 中文界面 common.create 的实际文案是“新建”，英文界面为“Create”。
+    const createBtn = dialog.getByRole('button', { name: /创建|新建|create/i });
+    await expect(createBtn).toBeVisible({ timeout: 5000 });
+    await createBtn.click();
+
+    // 验证新模板出现在列表
+    await expect(page.getByText(templateName, { exact: true })).toBeVisible({ timeout: 5000 });
 
     expect(errors).toEqual([]);
   });

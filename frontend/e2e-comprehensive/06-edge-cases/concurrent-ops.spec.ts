@@ -15,7 +15,6 @@ import { test, expect } from '@playwright/test';
 import {
   BASE_URL,
   login,
-  completeProductionMfaIfShown,
   captureErrors,
   getCurrentUserId,
   getToken,
@@ -25,7 +24,6 @@ import {
   createWorkOrderViaAPI,
   createThresholdRule,
   deleteAlertRuleViaAPI,
-  getE2EPassword,
 } from '../helpers';
 
 test.describe('并发操作', () => {
@@ -57,32 +55,12 @@ test.describe('并发操作', () => {
     const page2 = await context.newPage();
     const errors2 = captureErrors(page2);
 
-    // 第二个标签页导航（context 共享登录状态，可能自动登录）
-    await page2.goto(`${BASE_URL}/login`);
-    await page2.waitForLoadState('domcontentloaded');
-    await page2.waitForTimeout(2000);
-
-    // 检查是否自动继承登录状态
-    const currentUrl2 = page2.url();
-    const alreadyLoggedIn2 = /dashboard/.test(currentUrl2);
-
-    if (!alreadyLoggedIn2) {
-      // 如果未自动登录，手动登录
-      const usernameInput2 = page2.locator('input[type="text"], input:not([type="password"], [type="checkbox"])').first();
-      await usernameInput2.waitFor({ state: 'visible', timeout: 10000 });
-      await usernameInput2.fill('admin');
-
-      const passwordInput2 = page2.locator('input[type="password"]').first();
-      await passwordInput2.waitFor({ state: 'visible', timeout: 5000 });
-      await passwordInput2.fill(getE2EPassword('admin'));
-
-      await page2.getByRole('button', { name: /登录|login/i }).click();
-      await completeProductionMfaIfShown(page2, 'admin');
-      await page2.waitForURL(/dashboard/, { timeout: 15000 });
-    }
-
-    await page2.waitForLoadState('networkidle');
-    await page2.waitForTimeout(1500);
+    // 第二个标签页直接访问受保护路由，让应用通过共享 HttpOnly Cookie 恢复会话。
+    // 不能先访问 /login：Production 种子账户的 MustChangePassword 状态会在该路由
+    // 正确展示强制改密对话框，而不是登录表单。
+    await page2.goto(`${BASE_URL}/devices`, { waitUntil: 'domcontentloaded' });
+    await page2.waitForURL(/\/devices(?:\?|$)/, { timeout: 15000 });
+    await page2.getByRole('heading', { name: /设备管理/i }).waitFor({ state: 'visible', timeout: 15000 });
 
     await navigateViaSidebar(page2, /设备/i);
     await page2.waitForTimeout(2000);

@@ -47,7 +47,7 @@ export default function ModbusTcpConnectionForm({ value, onChange }: ModbusTcpCo
           placeholder="192.168.1.100"
         />
         <p className="text-xs text-muted-foreground">
-          Modbus TCP 设备的 IP 地址
+          {t('gatewayWizard.modbusHostHint')}
         </p>
       </div>
 
@@ -63,7 +63,7 @@ export default function ModbusTcpConnectionForm({ value, onChange }: ModbusTcpCo
           placeholder="502"
         />
         <p className="text-xs text-muted-foreground">
-          Modbus TCP 默认端口 502
+          {t('gatewayWizard.modbusPortHint')}
         </p>
       </div>
 
@@ -79,7 +79,7 @@ export default function ModbusTcpConnectionForm({ value, onChange }: ModbusTcpCo
           placeholder="1"
         />
         <p className="text-xs text-muted-foreground">
-          Modbus 从站单元标识符（0-255）
+          {t('gatewayWizard.modbusUnitHint')}
         </p>
       </div>
     </div>

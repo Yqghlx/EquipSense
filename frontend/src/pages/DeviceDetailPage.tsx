@@ -609,7 +609,7 @@ function CreateConnectionPanel({ deviceId, deviceName, createMutation, testConnM
             <Label>{t('device.connection.gatewayId')}</Label>
             <Select value={form.gatewayId || undefined} onValueChange={(v) => setForm({ ...form, gatewayId: v ?? '' })}>
               <SelectTrigger>
-                <SelectValue placeholder="选择网关（可选）" />
+                <SelectValue placeholder={t('device.connection.gatewayPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 {gateways?.filter((g) => g.status === 'online').map((g) => (
@@ -618,11 +618,11 @@ function CreateConnectionPanel({ deviceId, deviceName, createMutation, testConnM
                   </SelectItem>
                 ))}
                 {(!gateways || gateways.filter((g) => g.status === 'online').length === 0) && (
-                  <SelectItem value="_none" disabled>暂无在线网关</SelectItem>
+                  <SelectItem value="_none" disabled>{t('device.connection.noOnlineGateway')}</SelectItem>
                 )}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">选择负责采集该设备数据的边缘网关，不选则使用默认网关</p>
+            <p className="text-xs text-muted-foreground">{t('device.connection.gatewayHint')}</p>
           </div>
 
           {/* 采集间隔 */}

@@ -1,4 +1,5 @@
 import { CloudOff, Wifi } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { Badge } from '../ui/badge';
 import { useOfflineStatus } from '../../hooks/useOfflineStatus';
 import { useOfflineQueue } from '../../hooks/useOfflineQueue';
@@ -11,6 +12,7 @@ import { useOfflineQueue } from '../../hooks/useOfflineQueue';
  * 待同步数据时显示蓝色提示。
  */
 export function OfflineStatusBadge() {
+  const { t } = useTranslation();
   const { isOffline } = useOfflineStatus();
   const { pendingCount } = useOfflineQueue();
 
@@ -21,7 +23,8 @@ export function OfflineStatusBadge() {
     return (
       <Badge variant="outline" className="gap-1 border-orange-300 text-orange-600">
         <CloudOff className="h-3 w-3" />
-        离线 {pendingCount > 0 && `(${pendingCount} 待同步)`}
+        {t('workorder.offline')}
+        {pendingCount > 0 && ` (${t('workorder.pendingSync', { count: pendingCount })})`}
       </Badge>
     );
   }
@@ -29,7 +32,7 @@ export function OfflineStatusBadge() {
   return (
     <Badge variant="outline" className="gap-1 border-blue-300 text-blue-600">
       <Wifi className="h-3 w-3" />
-      {pendingCount} 待同步
+      {t('workorder.pendingSync', { count: pendingCount })}
     </Badge>
   );
 }

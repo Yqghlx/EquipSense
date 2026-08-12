@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Switch } from '../ui/switch';
 import { Separator } from '../ui/separator';
+import { useTranslation } from 'react-i18next';
 import {
   useNotificationPreferences,
   useUpdateNotificationPreferences,
@@ -11,17 +12,17 @@ import {
 
 /** 通知类型定义 */
 const notifTypes = [
-  { key: 'alert' as const, label: '告警通知', desc: '设备告警触发、告警状态变更' },
-  { key: 'workorder' as const, label: '工单通知', desc: '工单创建、派工、状态变更' },
-  { key: 'system' as const, label: '系统通知', desc: '系统配置变更、订阅到期提醒' },
-];
+  { key: 'alert' as const, labelKey: 'notifications.preferences.types.alert', descKey: 'notifications.preferences.types.alertDescription' },
+  { key: 'workorder' as const, labelKey: 'notifications.preferences.types.workorder', descKey: 'notifications.preferences.types.workorderDescription' },
+  { key: 'system' as const, labelKey: 'notifications.preferences.types.system', descKey: 'notifications.preferences.types.systemDescription' },
+] as const;
 
 /** 通知渠道定义 */
 const channels = [
-  { key: 'signalr' as const, label: '实时推送', desc: '页面内即时弹出通知' },
-  { key: 'push' as const, label: '浏览器推送', desc: '浏览器未打开时推送通知' },
-  { key: 'email' as const, label: '邮件通知', desc: '发送到注册邮箱（需配置 SMTP）' },
-];
+  { key: 'signalr' as const, labelKey: 'notifications.preferences.channels.signalr', descKey: 'notifications.preferences.channels.signalrDescription' },
+  { key: 'push' as const, labelKey: 'notifications.preferences.channels.push', descKey: 'notifications.preferences.channels.pushDescription' },
+  { key: 'email' as const, labelKey: 'notifications.preferences.channels.email', descKey: 'notifications.preferences.channels.emailDescription' },
+] as const;
 
 /**
  * 通知偏好设置卡片
@@ -43,6 +44,7 @@ export function NotificationPreferenceCard({
   onSubscribe: () => Promise<unknown>;
   onUnsubscribe: () => Promise<unknown>;
 }) {
+  const { t } = useTranslation();
   const { data: prefs, isLoading } = useNotificationPreferences();
   const updateMutation = useUpdateNotificationPreferences();
 
@@ -67,21 +69,21 @@ export function NotificationPreferenceCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">通知偏好设置</CardTitle>
-        <CardDescription>按通知类型和渠道自定义接收方式</CardDescription>
+        <CardTitle className="text-base">{t('notifications.preferences.title')}</CardTitle>
+        <CardDescription>{t('notifications.preferences.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">加载中...</p>
+          <p className="text-sm text-muted-foreground py-4 text-center">{t('notifications.preferences.loading')}</p>
         ) : prefs ? (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[200px]">通知类型</TableHead>
+                <TableHead className="w-[200px]">{t('notifications.preferences.table.type')}</TableHead>
                 {channels.map((ch) => (
-                  <TableHead key={ch.key} className="text-center">{ch.label}</TableHead>
+                  <TableHead key={ch.key} className="text-center">{t(ch.labelKey)}</TableHead>
                 ))}
-                <TableHead className="w-[80px] text-center">全部</TableHead>
+                <TableHead className="w-[80px] text-center">{t('notifications.preferences.table.all')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -92,8 +94,8 @@ export function NotificationPreferenceCard({
                   <TableRow key={nt.key}>
                     <TableCell>
                       <div>
-                        <p className="text-sm font-medium">{nt.label}</p>
-                        <p className="text-xs text-muted-foreground">{nt.desc}</p>
+                        <p className="text-sm font-medium">{t(nt.labelKey)}</p>
+                        <p className="text-xs text-muted-foreground">{t(nt.descKey)}</p>
                       </div>
                     </TableCell>
                     {channels.map((ch) => {
@@ -104,6 +106,10 @@ export function NotificationPreferenceCard({
                           <Switch
                             checked={rowPrefs[ch.key]}
                             disabled={disabled || updateMutation.isPending}
+                            aria-label={t('notifications.preferences.toggleChannel', {
+                              type: t(nt.labelKey),
+                              channel: t(ch.labelKey),
+                            })}
                             onCheckedChange={() => toggleChannel(nt.key, ch.key)}
                           />
                         </TableCell>
@@ -113,6 +119,7 @@ export function NotificationPreferenceCard({
                       <Switch
                         checked={allOn}
                         disabled={updateMutation.isPending}
+                        aria-label={t('notifications.preferences.toggleAll', { type: t(nt.labelKey) })}
                         onCheckedChange={() => toggleRow(nt.key)}
                       />
                     </TableCell>
@@ -128,18 +135,21 @@ export function NotificationPreferenceCard({
         {/* 浏览器推送订阅状态 */}
         <div>
           {!pushSupported ? (
-            <p className="text-sm text-muted-foreground">当前浏览器不支持推送通知，浏览器推送渠道不可用</p>
+            <p className="text-sm text-muted-foreground">{t('notifications.preferences.push.unsupported')}</p>
           ) : (
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">浏览器推送订阅</p>
+                <p className="text-sm font-medium">{t('notifications.preferences.push.title')}</p>
                 <p className="text-xs text-muted-foreground">
-                  {isSubscribed ? '已订阅，浏览器推送渠道可正常工作' : '未订阅，请开启以启用浏览器推送'}
+                  {isSubscribed
+                    ? t('notifications.preferences.push.subscribed')
+                    : t('notifications.preferences.push.notSubscribed')}
                 </p>
               </div>
               <Switch
                 checked={isSubscribed}
                 disabled={permission === 'denied'}
+                aria-label={t('notifications.preferences.push.title')}
                 onCheckedChange={async (checked) => {
                   if (checked) {
                     await onSubscribe();
@@ -152,7 +162,7 @@ export function NotificationPreferenceCard({
           )}
           {permission === 'denied' && (
             <p className="text-xs text-orange-600 mt-1">
-              通知权限已被拒绝，请在浏览器设置中手动开启
+              {t('notifications.preferences.push.permissionDenied')}
             </p>
           )}
         </div>

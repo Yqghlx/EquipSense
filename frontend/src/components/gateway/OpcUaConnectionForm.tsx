@@ -60,7 +60,7 @@ export default function OpcUaConnectionForm({ value, onChange }: OpcUaConnection
           placeholder="opc.tcp://192.168.1.100:4840"
         />
         <p className="text-xs text-muted-foreground">
-          OPC UA 服务器端点地址，格式：opc.tcp://host:port
+          {t('gatewayWizard.opcuaEndpointHint')}
         </p>
       </div>
 

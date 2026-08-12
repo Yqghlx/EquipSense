@@ -152,7 +152,7 @@ describe('审批链配置英文界面', () => {
     expect(screen.getByRole('columnheader', { name: 'Required' })).toBeInTheDocument();
     expect(screen.getByText('Maintenance lead')).toBeInTheDocument();
     expect(screen.getByText('Technician')).toBeInTheDocument();
-    expect(screen.getByText('Required')).toBeInTheDocument();
+    expect(screen.getAllByText('Required').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Optional')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/[\u3400-\u9fff]/);
   });

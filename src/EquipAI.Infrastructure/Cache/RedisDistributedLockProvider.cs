@@ -11,7 +11,8 @@ namespace EquipAI.Infrastructure.Cache;
 /// 1. 加锁：SET NX PX 原子操作，value 为随机 token（Guid），用于解锁时识别持有者，避免误删他人持有的锁。
 /// 2. 解锁：Lua 脚本比较 value 等于 token 后 DEL，保证"检查+删除"原子，防止 TTL 到期后被他人抢占的锁被误删。
 /// 3. 等待：未获取到时按短间隔轮询，直到 waitTime 耗尽或获取成功。
-/// 4. TTL：必须大于单次任务最长执行时间；若任务超时，锁自动释放允许其他实例接管（宁可重复执行也不死锁）。
+/// 4. TTL：作为宕机兜底；长任务由锁句柄按 token 原子续租，续租失败时由后台服务取消本轮任务，
+///    避免锁失效后继续执行副作用操作。
 ///
 /// 单实例/单 Redis 节点足够；无需 RedLock（多节点多数派），后者仅在多 Redis 集群容灾时才需要。
 /// </summary>
@@ -30,6 +31,16 @@ public class RedisDistributedLockProvider : IDistributedLockProvider
     private const string ReleaseScript = @"
 if redis.call('get', KEYS[1]) == ARGV[1] then
     return redis.call('del', KEYS[1])
+else
+    return 0
+end";
+
+    /// <summary>
+    /// 原子续租 Lua 脚本：仅当 value 仍等于当前持有者 token 时才更新 TTL。
+    /// </summary>
+    private const string RenewScript = @"
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('pexpire', KEYS[1], ARGV[2])
 else
     return 0
 end";
@@ -83,7 +94,7 @@ end";
     /// <summary>
     /// Redis 锁句柄。释放时执行 Lua 脚本，仅当 token 匹配才删除。
     /// </summary>
-    private sealed class RedisDistributedLockHandle : IDistributedLockHandle
+    private sealed class RedisDistributedLockHandle : IRenewableDistributedLockHandle
     {
         private readonly IDatabase _database;
         private readonly string _key;
@@ -102,6 +113,35 @@ end";
         }
 
         public bool IsAcquired => _acquired;
+
+        /// <summary>
+        /// 使用 token 条件原子续租，避免 TTL 到期后误延长其他实例已经取得的锁。
+        /// </summary>
+        public async Task<bool> RenewAsync(TimeSpan expiry, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (!_acquired || expiry <= TimeSpan.Zero || Volatile.Read(ref _disposed) != 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                var milliseconds = Math.Max(1L, (long)expiry.TotalMilliseconds);
+                var result = (int?)await _database.ScriptEvaluateAsync(
+                    RenewScript,
+                    new RedisKey[] { _key },
+                    new RedisValue[] { _token, milliseconds });
+                return result == 1;
+            }
+            catch (Exception ex)
+            {
+                // 续租失败时由上层停止本轮任务，避免租约已失效后继续执行副作用操作。
+                _logger.LogError(ex, "分布式锁 {Key} 续租失败", _key);
+                return false;
+            }
+        }
 
         public async ValueTask DisposeAsync()
         {

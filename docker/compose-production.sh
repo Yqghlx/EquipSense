@@ -89,21 +89,74 @@ prepare_recovery_env() {
   RECOVERY_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/equipsense-compose-recovery.XXXXXX")"
   chmod 600 "$RECOVERY_ENV_FILE"
 
+  # 只复制显式列出的非敏感运行参数，而不是维护一个容易漏项的“秘密黑名单”。
+  # 新增环境变量默认不会进入恢复文件；需要加入时必须先判断它不包含凭据、令牌或
+  # 可嵌入认证信息的 URL，避免故障处置命令把未来新增秘密写入临时文件。
   awk -F= '
-    /^[A-Za-z_][A-Za-z0-9_]*=/ {
-      key = $1
-      if (key == "PG_PASSWORD" || key == "REDIS_PASSWORD" || key == "RABBITMQ_PASSWORD" \
-        || key == "MQTT_USERNAME" || key == "MQTT_PASSWORD" \
-        || key == "JWT_SECRET" || key == "TOTP_ENCRYPTION_KEY" || key == "PII_ENCRYPTION_KEY" \
-        || key == "AUTOMAPPER_LICENSE_KEY" || key == "GATEWAY_AUTH_KEY" \
-        || key == "GATEWAY_TENANT_ID" || key == "SEED_ADMIN_PASSWORD" \
-        || key == "SEED_LEAD_PASSWORD" || key == "SEED_TECH_PASSWORD" \
-        || key == "SEED_OPERATOR_PASSWORD" || key == "SEED_VIEWER_PASSWORD" \
-        || key == "SEQ_ADMIN_PASSWORD" || key == "GRAFANA_PASSWORD") {
-        next
-      }
+    BEGIN {
+      safe["PG_DB"] = 1
+      safe["PG_USER"] = 1
+      safe["PG_PORT"] = 1
+      safe["REDIS_PORT"] = 1
+      safe["MQTT_PORT"] = 1
+      safe["RABBITMQ_USER"] = 1
+      safe["RABBITMQ_PORT"] = 1
+      safe["RABBITMQ_MGMT_PORT"] = 1
+      safe["GATEWAY_ID"] = 1
+      safe["GATEWAY_BUFFER_PATH"] = 1
+      safe["GATEWAY_BACKEND_URL"] = 1
+      safe["GATEWAY_ALLOWED_HOSTS"] = 1
+      safe["GATEWAY_UPLOAD_INTERVAL"] = 1
+      safe["EDGE_PORT"] = 1
+      safe["EDGE_BLUEGREEN_PORT"] = 1
+      safe["INTERNAL_BIND_ADDRESS"] = 1
+      safe["PUBLIC_BIND_ADDRESS"] = 1
+      safe["BACKEND_PORT"] = 1
+      safe["FRONTEND_PORT"] = 1
+      safe["ASPNETCORE_ENVIRONMENT"] = 1
+      safe["DISABLE_RATE_LIMITING"] = 1
+      safe["FILE_STORAGE_PROVIDER"] = 1
+      safe["FILE_STORAGE_BASE_PATH"] = 1
+      safe["LLM_MODEL"] = 1
+      safe["VAPID__SUBJECT"] = 1
+      safe["SMTP_PORT"] = 1
+      safe["SMTP_ENABLE_SSL"] = 1
+      safe["BEHIND_PROXY"] = 1
+      safe["TRUSTED_PROXY_NETWORKS"] = 1
+      safe["RATE_LIMITING_PERMIT_LIMIT"] = 1
+      safe["RATE_LIMITING_AUTH_PERMIT_LIMIT"] = 1
+      safe["RATE_LIMITING_TENANT_PERMIT_LIMIT"] = 1
+      safe["RATE_LIMITING_WINDOW"] = 1
+      safe["SEED_TENANT2_ACCOUNT"] = 1
+      safe["DOMAIN"] = 1
+      safe["FRONTEND_URL"] = 1
+      safe["EVALUATION_ALLOW_GROUND_TRUTH_INGESTION"] = 1
+      safe["EVALUATION_TENANT_ID"] = 1
+      safe["OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS"] = 1
+      safe["EVENTBUS_PROVIDER"] = 1
+      safe["ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION"] = 1
+      safe["EVENTBUS_OUTBOX_ENABLED"] = 1
+      safe["EVENTBUS_OUTBOX_POLL_INTERVAL_SECONDS"] = 1
+      safe["EVENTBUS_OUTBOX_BATCH_SIZE"] = 1
+      safe["EVENTBUS_OUTBOX_LEASE_SECONDS"] = 1
+      safe["EVENTBUS_OUTBOX_MAX_BACKOFF_SECONDS"] = 1
+      safe["EVENTBUS_OUTBOX_RETENTION_DAYS"] = 1
+      safe["SEQ_PORT"] = 1
+      safe["SEQ_RETENTION_TIME"] = 1
+      safe["PROMETHEUS_PORT"] = 1
+      safe["GRAFANA_PORT"] = 1
+      safe["GRAFANA_USER"] = 1
+      safe["ALERTMANAGER_PORT"] = 1
+      safe["JAEGER_SPAN_STORAGE_TYPE"] = 1
+      safe["JAEGER_BADGER_EPHEMERAL"] = 1
+      safe["SSL_CERT_PATH"] = 1
+      safe["SSL_KEY_PATH"] = 1
+      safe["READONLY_DB_HOST"] = 1
+      safe["READONLY_DB_PORT"] = 1
     }
-    { print }
+    /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      if ($1 in safe) print
+    }
   ' "$ENV_FILE" > "$RECOVERY_ENV_FILE"
 
   local recovery_entry

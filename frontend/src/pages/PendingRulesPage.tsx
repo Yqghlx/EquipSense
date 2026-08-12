@@ -340,7 +340,7 @@ function PendingRuleCard({ rule, selected, onSelect }: PendingRuleCardProps) {
           {rule.sourceAlertId && (
             <Badge variant="secondary" className="text-xs">
               <Brain className="mr-1 h-3 w-3" />
-              AI 分析推荐
+              {t('pendingRules.aiRecommendation')}
             </Badge>
           )}
         </div>
@@ -414,9 +414,9 @@ function PendingRuleCard({ rule, selected, onSelect }: PendingRuleCardProps) {
                 }}
                 disabled={approveWithEditRule.isPending}
                 className="flex-1"
-              >
-                <Pencil className="mr-1.5 h-4 w-4" />
-                编辑后批准
+                >
+                  <Pencil className="mr-1.5 h-4 w-4" />
+                {t('pendingRules.approveWithEdit')}
               </Button>
               <Button
                 size="sm"
@@ -497,7 +497,7 @@ function PendingRuleCard({ rule, selected, onSelect }: PendingRuleCardProps) {
                     disabled={approveWithEditRule.isPending}
                   >
                     <CheckCircle2 className="mr-1.5 h-4 w-4" />
-                    {approveWithEditRule.isPending ? t('common.loading') : '确认批准'}
+                    {approveWithEditRule.isPending ? t('common.loading') : t('pendingRules.confirmApprove')}
                   </Button>
                 </div>
               </div>

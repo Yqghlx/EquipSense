@@ -11,6 +11,7 @@
  * - 已驳回 → 红色圆点 + ✗ 图标
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, X, Clock } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -26,13 +27,13 @@ interface ApprovalProgressPanelProps {
   approvals: WorkOrderApprovalDto[];
 }
 
-/** 角色对应的中文标签映射 */
-const roleLabels: Record<string, string> = {
-  system_admin: '系统管理员',
-  maintenance_lead: '维修主管',
-  technician: '技术员',
-  operator: '操作员',
-  viewer: '查看者',
+/** 角色对应的翻译键 */
+const roleLabelKeys: Record<string, string> = {
+  system_admin: 'workorder.approval.roles.system_admin',
+  maintenance_lead: 'workorder.approval.roles.maintenance_lead',
+  technician: 'workorder.approval.roles.technician',
+  operator: 'workorder.approval.roles.operator',
+  viewer: 'workorder.approval.roles.viewer',
 };
 
 /**
@@ -40,20 +41,20 @@ const roleLabels: Record<string, string> = {
  *
  * 根据审批状态返回圆点样式、图标和状态文本。
  */
-function getStepDisplay(action: string, isCurrent: boolean) {
+function getStepDisplay(action: string, isCurrent: boolean, t: (key: string) => string) {
   switch (action) {
     case 'Approved':
       return {
         dotClass: 'bg-green-500 border-green-500 text-white',
         icon: <Check className="h-3 w-3" />,
-        statusText: '已通过',
+        statusText: t('workorder.approval.status.approved'),
         statusClass: 'text-green-600',
       };
     case 'Rejected':
       return {
         dotClass: 'bg-red-500 border-red-500 text-white',
         icon: <X className="h-3 w-3" />,
-        statusText: '已驳回',
+        statusText: t('workorder.approval.status.rejected'),
         statusClass: 'text-red-600',
       };
     case 'Pending':
@@ -61,21 +62,21 @@ function getStepDisplay(action: string, isCurrent: boolean) {
         return {
           dotClass: 'bg-blue-500 border-blue-500 text-white animate-pulse',
           icon: <Clock className="h-3 w-3" />,
-          statusText: '待审批',
+          statusText: t('workorder.approval.status.pending'),
           statusClass: 'text-blue-600',
         };
       }
       return {
         dotClass: 'bg-muted border-muted-foreground/30 text-muted-foreground',
         icon: <Clock className="h-3 w-3" />,
-        statusText: '等待中',
+        statusText: t('workorder.approval.status.waiting'),
         statusClass: 'text-muted-foreground',
       };
     default:
       return {
         dotClass: 'bg-muted border-muted-foreground/30',
         icon: null,
-        statusText: '未知',
+        statusText: t('workorder.approval.status.unknown'),
         statusClass: 'text-muted-foreground',
       };
   }
@@ -88,6 +89,7 @@ function getStepDisplay(action: string, isCurrent: boolean) {
  * 驳回时可填写驳回原因。
  */
 export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgressPanelProps) {
+  const { t } = useTranslation();
   const [rejectingStep, setRejectingStep] = useState<number | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [approveComment, setApproveComment] = useState('');
@@ -125,7 +127,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
   if (approvals.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        暂无审批记录
+        {t('workorder.approval.noRecords')}
       </p>
     );
   }
@@ -134,7 +136,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
     <div className="relative space-y-0">
       {approvals.map((approval, index) => {
         const isCurrent = approval.stepOrder === currentStepOrder && !hasRejected;
-        const display = getStepDisplay(approval.action, isCurrent);
+        const display = getStepDisplay(approval.action, isCurrent, t);
         const isLast = index === approvals.length - 1;
 
         return (
@@ -157,13 +159,13 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
             <div className={`flex-1 pb-6 ${isLast ? 'pb-0' : ''}`}>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium">
-                  第 {approval.stepOrder} 级审批
+                  {t('workorder.approval.step', { step: approval.stepOrder })}
                 </span>
                 <Badge variant="outline" className={display.statusClass}>
                   {display.statusText}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
-                  {roleLabels[approval.expectedRole] ?? approval.expectedRole}
+                  {roleLabelKeys[approval.expectedRole] ? t(roleLabelKeys[approval.expectedRole]) : approval.expectedRole}
                 </span>
               </div>
 
@@ -175,7 +177,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
               )}
               {approval.comment && (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  意见：{approval.comment}
+                  {t('workorder.approval.comment', { comment: approval.comment })}
                 </p>
               )}
 
@@ -184,12 +186,12 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                 <div className="mt-3 space-y-2 rounded-md border border-blue-200 bg-blue-50/50 p-3">
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-muted-foreground">
-                      审批意见（可选）
+                      {t('workorder.approval.commentLabel')}
                     </label>
                     <Textarea
                       value={approveComment}
                       onChange={(e) => setApproveComment(e.target.value)}
-                      placeholder="填写审批意见..."
+                      placeholder={t('workorder.approval.commentPlaceholder')}
                       rows={2}
                       className="text-sm"
                     />
@@ -200,7 +202,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                       onClick={handleApprove}
                       disabled={approveMutation.isPending || rejectMutation.isPending}
                     >
-                      通过
+                      {t('workorder.approval.approve')}
                     </Button>
                     <Button
                       size="sm"
@@ -208,7 +210,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                       onClick={() => setRejectingStep(approval.stepOrder)}
                       disabled={approveMutation.isPending || rejectMutation.isPending}
                     >
-                      驳回
+                      {t('workorder.approval.reject')}
                     </Button>
                   </div>
 
@@ -216,12 +218,12 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                   {rejectingStep === approval.stepOrder && (
                     <div className="space-y-2 rounded-md border border-red-200 bg-red-50/50 p-3">
                       <label className="text-xs font-medium text-red-600">
-                        驳回原因
+                        {t('workorder.approval.rejectionReason')}
                       </label>
                       <Textarea
                         value={rejectComment}
                         onChange={(e) => setRejectComment(e.target.value)}
-                        placeholder="请填写驳回原因..."
+                        placeholder={t('workorder.approval.rejectionPlaceholder')}
                         rows={2}
                         className="text-sm"
                       />
@@ -232,7 +234,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                           onClick={() => handleReject()}
                           disabled={rejectMutation.isPending}
                         >
-                          确认驳回
+                          {t('workorder.approval.confirmReject')}
                         </Button>
                         <Button
                           size="sm"
@@ -242,7 +244,7 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
                             setRejectComment('');
                           }}
                         >
-                          取消
+                          {t('workorder.approval.cancel')}
                         </Button>
                       </div>
                     </div>

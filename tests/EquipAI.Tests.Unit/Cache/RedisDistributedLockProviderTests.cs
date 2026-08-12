@@ -134,4 +134,44 @@ public class RedisDistributedLockProviderTests
         var act = async () => await handle.DisposeAsync();
         await act.Should().NotThrowAsync("释放失败不应影响业务，锁会随 TTL 自动过期");
     }
+
+    [Fact]
+    public async Task 持锁期间应支持按令牌续租避免长任务提前失去互斥()
+    {
+        var provider = CreateProvider(out var dbMock);
+        dbMock.Setup(d => d.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), It.IsAny<When>()))
+            .ReturnsAsync(true);
+        dbMock.Setup(d => d.ScriptEvaluateAsync(
+                It.Is<string>(script => script.Contains("pexpire", StringComparison.OrdinalIgnoreCase)),
+                It.IsAny<RedisKey[]>(), It.IsAny<RedisValue[]>(), CommandFlags.None))
+            .ReturnsAsync(RedisResult.Create(1, ResultType.Integer));
+
+        var handle = await provider.AcquireAsync("long-running-task", TimeSpan.FromMinutes(1), TimeSpan.Zero);
+        var renewableHandle = handle.Should().BeAssignableTo<IRenewableDistributedLockHandle>().Subject;
+        (await renewableHandle.RenewAsync(TimeSpan.FromMinutes(1))).Should().BeTrue();
+
+        dbMock.Verify(d => d.ScriptEvaluateAsync(
+            It.Is<string>(script => script.Contains("pexpire", StringComparison.OrdinalIgnoreCase)),
+            It.Is<RedisKey[]>(keys => keys.Length == 1 && keys[0].ToString() == "lock:long-running-task"),
+            It.Is<RedisValue[]>(values => values.Length == 2 && values[1].ToString().Length > 0),
+            CommandFlags.None), Times.Once);
+    }
+
+    [Fact]
+    public async Task 续租时令牌已变化_应拒绝延长他人持有的锁()
+    {
+        var provider = CreateProvider(out var dbMock);
+        dbMock.Setup(d => d.StringSetAsync(It.IsAny<RedisKey>(), It.IsAny<RedisValue>(), It.IsAny<TimeSpan?>(), It.IsAny<When>()))
+            .ReturnsAsync(true);
+        dbMock.Setup(d => d.ScriptEvaluateAsync(
+                It.Is<string>(script => script.Contains("pexpire", StringComparison.OrdinalIgnoreCase)),
+                It.IsAny<RedisKey[]>(), It.IsAny<RedisValue[]>(), CommandFlags.None))
+            .ReturnsAsync(RedisResult.Create(0, ResultType.Integer));
+
+        var handle = await provider.AcquireAsync("replaced-lock", TimeSpan.FromMinutes(1), TimeSpan.Zero);
+        var renewableHandle = handle.Should().BeAssignableTo<IRenewableDistributedLockHandle>().Subject;
+
+        (await renewableHandle.RenewAsync(TimeSpan.FromMinutes(1))).Should().BeFalse(
+            "原锁已过期并被其他实例接管时，旧 token 不得延长新持有者的锁");
+    }
 }

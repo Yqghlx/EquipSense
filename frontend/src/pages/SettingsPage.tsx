@@ -29,6 +29,20 @@ const permissionKeys: Record<string, string> = {
   'aiAnalysis': 'settings.module.aiAnalysis',
 };
 
+/** 权限值对应的翻译键，避免矩阵中直接展示内部中文标识。 */
+const permissionValueKeys: Record<string, string> = {
+  CRUD: 'settings.permission.crud',
+  RW: 'settings.permission.rw',
+  R: 'settings.permission.read',
+  '-': 'settings.permission.none',
+  'RW+配置': 'settings.permission.rwConfigure',
+  'RW+派工验收': 'settings.permission.rwDispatchAccept',
+  'RW+验证': 'settings.permission.rwVerify',
+  'R+确认': 'settings.permission.readAcknowledge',
+  'R+执行': 'settings.permission.readExecute',
+  'R+查询': 'settings.permission.readQuery',
+};
+
 /** 权限模块列表（使用内部键） */
 const permissions = ['deviceManagement', 'alertManagement', 'workOrderManagement', 'knowledgeBase', 'reports', 'aiAnalysis'];
 
@@ -86,10 +100,10 @@ export default function SettingsPage() {
           <TabsTrigger value="llm" className="w-full justify-start px-3">{t('settings.llm')}</TabsTrigger>
           <TabsTrigger value="system" className="w-full justify-start px-3">{t('settings.system')}</TabsTrigger>
           <TabsTrigger value="integration" className="w-full justify-start px-3">{t('settings.integration')}</TabsTrigger>
-          <TabsTrigger value="approval-chains" className="w-full justify-start px-3">审批链配置</TabsTrigger>
+          <TabsTrigger value="approval-chains" className="w-full justify-start px-3">{t('settings.approvalChains')}</TabsTrigger>
           <TabsTrigger value="subscription" className="w-full justify-start px-3">{t('settings.subscription')}</TabsTrigger>
-          <TabsTrigger value="notifications" className="w-full justify-start px-3">通知偏好</TabsTrigger>
-          <TabsTrigger value="security" className="w-full justify-start px-3">安全与 MFA</TabsTrigger>
+          <TabsTrigger value="notifications" className="w-full justify-start px-3">{t('settings.notifications')}</TabsTrigger>
+          <TabsTrigger value="security" className="w-full justify-start px-3">{t('settings.securityMfa')}</TabsTrigger>
         </TabsList>
 
         <div className="flex-1 min-w-0 space-y-4">
@@ -120,18 +134,22 @@ export default function SettingsPage() {
                   {permissions.map((perm) => (
                     <TableRow key={perm}>
                       <TableCell className="font-medium">{t(permissionKeys[perm])}</TableCell>
-                      {roles.map((role) => (
-                        <TableCell key={role}>
-                          <Badge variant="outline" className={
-                            rbacMatrix[role][perm].includes('CRUD') ? 'border-green-500/30 text-green-500' :
-                            rbacMatrix[role][perm].includes('RW') ? 'border-blue-500/30 text-blue-500' :
-                            rbacMatrix[role][perm] === 'R' ? 'border-gray-500/30 text-gray-500' :
-                            'border-red-500/30 text-red-500'
-                          }>
-                            {rbacMatrix[role][perm]}
-                          </Badge>
-                        </TableCell>
-                      ))}
+                      {roles.map((role) => {
+                        const permissionValue = rbacMatrix[role][perm];
+
+                        return (
+                          <TableCell key={role}>
+                            <Badge variant="outline" className={
+                              permissionValue.includes('CRUD') ? 'border-green-500/30 text-green-500' :
+                              permissionValue.includes('RW') ? 'border-blue-500/30 text-blue-500' :
+                              permissionValue === 'R' ? 'border-gray-500/30 text-gray-500' :
+                              'border-red-500/30 text-red-500'
+                            }>
+                              {t(permissionValueKeys[permissionValue] ?? permissionValue)}
+                            </Badge>
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -154,7 +172,7 @@ export default function SettingsPage() {
                   <Input defaultValue="glm-5" placeholder={t('settings.modelIdentifier')} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Endpoint</Label>
+                  <Label>{t('settings.endpoint')}</Label>
                   <Input defaultValue="https://dashscope.aliyuncs.com/api/v1" placeholder={t('settings.apiEndpoint')} />
                 </div>
                 <div className="space-y-2">

@@ -23,8 +23,8 @@ public abstract class LockedTimerService : BackgroundService
     protected string LockResource { get; }
 
     /// <summary>
-    /// 锁的自动过期时间（TTL）。必须大于 <see cref="ExecuteWorkAsync"/> 的最长执行时间，
-    /// 否则任务未完成锁就释放，可能被另一实例重复获取导致重复执行。
+    /// 锁的初始自动过期时间（TTL）。生产 Redis 句柄会在任务执行期间自动续租；非续租实现
+    /// 仍必须让 TTL 覆盖 <see cref="ExecuteWorkAsync"/> 的最长执行时间，否则可能被另一实例重复获取。
     /// </summary>
     protected TimeSpan LockExpiry { get; }
 
@@ -102,7 +102,71 @@ public abstract class LockedTimerService : BackgroundService
             return;
         }
 
-        await ExecuteWorkAsync(ct);
+        if (handle is not IRenewableDistributedLockHandle renewableHandle)
+        {
+            // 测试替身或其他非 Redis 实现可能只提供基础锁语义；生产 Redis 实现支持续租。
+            await ExecuteWorkAsync(ct);
+            return;
+        }
+
+        using var workCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var renewalTask = RenewLockUntilCancelledAsync(renewableHandle, workCts, workCts.Token);
+        try
+        {
+            await ExecuteWorkAsync(workCts.Token);
+        }
+        finally
+        {
+            workCts.Cancel();
+            try
+            {
+                await renewalTask;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 主机关闭时续租循环被正常取消。
+            }
+        }
+    }
+
+    /// <summary>
+    /// 在任务执行期间周期续租；续租失败立即取消本轮任务，避免失去锁后仍继续产生副作用。
+    /// </summary>
+    private async Task RenewLockUntilCancelledAsync(
+        IRenewableDistributedLockHandle handle,
+        CancellationTokenSource workCts,
+        CancellationToken cancellationToken)
+    {
+        // 每次在 TTL 的三分之一时间点续租，并限制最长间隔，兼顾 Redis 负载与故障恢复窗口。
+        var renewalInterval = TimeSpan.FromTicks(Math.Max(
+            TimeSpan.FromSeconds(1).Ticks,
+            Math.Min(LockExpiry.Ticks / 3, TimeSpan.FromSeconds(30).Ticks)));
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(renewalInterval, cancellationToken);
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                if (!await handle.RenewAsync(LockExpiry, cancellationToken))
+                {
+                    Logger.LogError(
+                        "{Service} 分布式锁 {Resource} 续租失败，取消当前任务以避免租约失效后的重复执行",
+                        GetType().Name,
+                        LockResource);
+                    workCts.Cancel();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 主机关闭或任务完成时正常退出续租循环。
+        }
     }
 
     /// <summary>

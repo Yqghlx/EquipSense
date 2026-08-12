@@ -36,24 +36,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
  * - 这里只列工业监控场景常见的几个时区，未列出的可由 SysAdmin 直接通过 SQL/API 修改
  * - 默认值统一用 "UTC"，避免空值导致 DashboardStatsService 报错
  */
-const COMMON_TIME_ZONES: { value: string; label: string; offset: string }[] = [
-  { value: 'UTC', label: 'UTC（协调世界时）', offset: '+00:00' },
-  { value: 'Asia/Shanghai', label: '中国标准时间（北京）', offset: '+08:00' },
-  { value: 'Asia/Hong_Kong', label: '香港时间', offset: '+08:00' },
-  { value: 'Asia/Taipei', label: '台北时间', offset: '+08:00' },
-  { value: 'Asia/Singapore', label: '新加坡时间', offset: '+08:00' },
-  { value: 'Asia/Tokyo', label: '日本标准时间（东京）', offset: '+09:00' },
-  { value: 'Asia/Seoul', label: '韩国标准时间（首尔）', offset: '+09:00' },
-  { value: 'Asia/Kolkata', label: '印度标准时间（孟买）', offset: '+05:30' },
-  { value: 'Asia/Dubai', label: '海湾标准时间（迪拜）', offset: '+04:00' },
-  { value: 'Europe/London', label: '英国时间（伦敦）', offset: '+00:00/+01:00' },
-  { value: 'Europe/Paris', label: '中欧时间（巴黎）', offset: '+01:00/+02:00' },
-  { value: 'Europe/Berlin', label: '中欧时间（柏林）', offset: '+01:00/+02:00' },
-  { value: 'America/New_York', label: '美国东部时间（纽约）', offset: '-05:00/-04:00' },
-  { value: 'America/Chicago', label: '美国中部时间（芝加哥）', offset: '-06:00/-05:00' },
-  { value: 'America/Los_Angeles', label: '美国西部时间（洛杉矶）', offset: '-08:00/-07:00' },
-  { value: 'America/Sao_Paulo', label: '巴西时间（圣保罗）', offset: '-03:00' },
-  { value: 'Australia/Sydney', label: '澳东时间（悉尼）', offset: '+10:00/+11:00' },
+const COMMON_TIME_ZONES: { value: string; labelKey: string; offset: string }[] = [
+  { value: 'UTC', labelKey: 'admin.tenants.timeZones.utc', offset: '+00:00' },
+  { value: 'Asia/Shanghai', labelKey: 'admin.tenants.timeZones.chinaStandard', offset: '+08:00' },
+  { value: 'Asia/Hong_Kong', labelKey: 'admin.tenants.timeZones.hongKong', offset: '+08:00' },
+  { value: 'Asia/Taipei', labelKey: 'admin.tenants.timeZones.taipei', offset: '+08:00' },
+  { value: 'Asia/Singapore', labelKey: 'admin.tenants.timeZones.singapore', offset: '+08:00' },
+  { value: 'Asia/Tokyo', labelKey: 'admin.tenants.timeZones.japanStandard', offset: '+09:00' },
+  { value: 'Asia/Seoul', labelKey: 'admin.tenants.timeZones.koreaStandard', offset: '+09:00' },
+  { value: 'Asia/Kolkata', labelKey: 'admin.tenants.timeZones.indiaStandard', offset: '+05:30' },
+  { value: 'Asia/Dubai', labelKey: 'admin.tenants.timeZones.gulfStandard', offset: '+04:00' },
+  { value: 'Europe/London', labelKey: 'admin.tenants.timeZones.unitedKingdom', offset: '+00:00/+01:00' },
+  { value: 'Europe/Paris', labelKey: 'admin.tenants.timeZones.centralEuropeParis', offset: '+01:00/+02:00' },
+  { value: 'Europe/Berlin', labelKey: 'admin.tenants.timeZones.centralEuropeBerlin', offset: '+01:00/+02:00' },
+  { value: 'America/New_York', labelKey: 'admin.tenants.timeZones.eastern', offset: '-05:00/-04:00' },
+  { value: 'America/Chicago', labelKey: 'admin.tenants.timeZones.central', offset: '-06:00/-05:00' },
+  { value: 'America/Los_Angeles', labelKey: 'admin.tenants.timeZones.pacific', offset: '-08:00/-07:00' },
+  { value: 'America/Sao_Paulo', labelKey: 'admin.tenants.timeZones.brasilia', offset: '-03:00' },
+  { value: 'Australia/Sydney', labelKey: 'admin.tenants.timeZones.australianEastern', offset: '+10:00/+11:00' },
 ];
 
 /**
@@ -255,7 +255,7 @@ export default function TenantDetailPage() {
                 {COMMON_TIME_ZONES.map((tz) => (
                   <SelectItem key={tz.value} value={tz.value}>
                     <span className="font-mono text-xs text-muted-foreground mr-2">{tz.offset}</span>
-                    {tz.label} <span className="text-muted-foreground">({tz.value})</span>
+                    {t(tz.labelKey)} <span className="text-muted-foreground">({tz.value})</span>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -316,22 +316,24 @@ export default function TenantDetailPage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
-            账单历史
+            {t('admin.tenants.detail.billing.title')}
           </CardTitle>
         </CardHeader>
         <CardContent>
           {!billingData?.items?.length ? (
-            <p className="text-center py-4 text-sm text-muted-foreground">暂无账单记录</p>
+            <p className="text-center py-4 text-sm text-muted-foreground">
+              {t('admin.tenants.detail.billing.empty')}
+            </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>套餐</TableHead>
-                  <TableHead>金额</TableHead>
-                  <TableHead>计费周期</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>备注</TableHead>
-                  <TableHead>创建时间</TableHead>
+                  <TableHead>{t('admin.tenants.detail.billing.columns.plan')}</TableHead>
+                  <TableHead>{t('admin.tenants.detail.billing.columns.amount')}</TableHead>
+                  <TableHead>{t('admin.tenants.detail.billing.columns.period')}</TableHead>
+                  <TableHead>{t('admin.tenants.detail.billing.columns.status')}</TableHead>
+                  <TableHead>{t('admin.tenants.detail.billing.columns.remark')}</TableHead>
+                  <TableHead>{t('admin.tenants.detail.billing.columns.createdAt')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -339,14 +341,16 @@ export default function TenantDetailPage() {
                   <TableRow key={bill.id}>
                     <TableCell><Badge variant="outline">{bill.plan}</Badge></TableCell>
                     <TableCell className="font-medium">
-                      {bill.amount === 0 ? '免费' : `¥${bill.amount.toFixed(2)}`}
+                      {bill.amount === 0
+                        ? t('admin.tenants.detail.billing.free')
+                        : `¥${bill.amount.toFixed(2)}`}
                     </TableCell>
                     <TableCell className="text-sm">
                       {new Date(bill.periodStart).toLocaleDateString()} ~ {new Date(bill.periodEnd).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <Badge variant={bill.status === 'Paid' ? 'default' : 'outline'}>
-                        {bill.status === 'Paid' ? '已支付' : bill.status === 'Cancelled' ? '已取消' : '待支付'}
+                        {t(getBillingStatusKey(bill.status))}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{bill.remark ?? '-'}</TableCell>
@@ -362,6 +366,18 @@ export default function TenantDetailPage() {
       </Card>
     </div>
   );
+}
+
+/** 将账单状态映射为稳定的本地化资源键，避免把后端枚举直接展示给用户。 */
+function getBillingStatusKey(status: string): string {
+  switch (status) {
+    case 'Paid':
+      return 'admin.tenants.detail.billing.status.paid';
+    case 'Cancelled':
+      return 'admin.tenants.detail.billing.status.cancelled';
+    default:
+      return 'admin.tenants.detail.billing.status.pending';
+  }
 }
 
 /** 信息行组件 — label + value 水平排列 */

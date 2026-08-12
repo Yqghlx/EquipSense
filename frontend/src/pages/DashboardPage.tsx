@@ -9,6 +9,7 @@ import { useDashboardStats, useOee } from '../hooks/useDashboard';
 import { useAlerts } from '../hooks/useAlerts';
 import { useGlobalStats } from '../hooks/useTenantsAdmin';
 import { useAuthStore } from '../stores/authStore';
+import { getWorkOrderStatusLabels } from '../utils/workorder';
 import {
   Wrench, AlertTriangle, ClipboardList, Activity,
   Building2, Users, Snowflake,
@@ -19,19 +20,6 @@ const severityColors: Record<string, string> = {
   High: '#f97316',
   Normal: '#eab308',
   Low: '#6b7280',
-};
-
-/** 工单状态对应的中文标签 */
-const workOrderStatusLabels: Record<string, string> = {
-  PendingDispatch: '待派工',
-  Assigned: '已派工',
-  InProgress: '执行中',
-  Completed: '已完成',
-  SubmittedForApproval: '待审批',
-  Accepted: '已验收',
-  Rejected: '已驳回',
-  Closed: '已关闭',
-  Cancelled: '已取消',
 };
 
 /** 工单状态对应的 Badge 变体颜色 */
@@ -63,6 +51,7 @@ export default function DashboardPage() {
   const { data: oee } = useOee();
   const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
   const { data: globalStats } = useGlobalStats({ enabled: isSystemAdmin });
+  const workOrderStatusLabels = getWorkOrderStatusLabels(t);
 
   /** 统计卡片配置（可点击跳转） */
   const statCards = [

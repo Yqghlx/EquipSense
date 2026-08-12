@@ -9,25 +9,20 @@
  * - 普通用户登录不触发改密
  */
 import { test, expect } from '@playwright/test';
-import { BASE_URL, MACHINE_API_HEADERS, login, loginAs, captureErrors, getE2EPassword } from '../helpers';
+import { BASE_URL, login, loginAs, captureErrors, getE2EPassword, getToken } from '../helpers';
 
 test.describe('01-强制改密流程', () => {
   test('1. MustChangePassword 用户登录后应弹出改密对话框', async ({ page }) => {
     const errors = captureErrors(page);
 
     // 通过 API 创建 mustChangePassword=true 的测试用户
-    const adminToken = await (async () => {
-      const resp = await page.request.post(`${BASE_URL}/api/v1/auth/login`, {
-        data: { username: 'admin', password: getE2EPassword('admin') },
-        headers: MACHINE_API_HEADERS,
-      });
-      const body = await resp.json();
-      return body.accessToken || body.token;
-    })();
+    // Production E2E 会为管理员启用 MFA；统一复用认证辅助函数，确保完成 MFA
+    // 后再读取机器客户端令牌，避免直接读取 MFA challenge 响应导致 401。
+    const adminToken = await getToken(page);
 
     const suffix = Date.now().toString(36);
     const testUsername = `e2e-mcp-${suffix}`;
-    const resp = await page.request.post(`${BASE_URL}/api/v1/users`, {
+    const resp = await page.request.post(`${BASE_URL}/api/v1/admin/users`, {
       headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
       data: {
         username: testUsername,
@@ -37,18 +32,35 @@ test.describe('01-强制改密流程', () => {
       },
     });
 
-    // 如果 API 不支持创建 mustChangePassword 用户，则跳过
-    if (!resp.ok()) {
-      test.skip();
-      return;
-    }
+    expect(resp.ok(), `创建强制改密测试用户失败：HTTP ${resp.status()}`).toBeTruthy();
+
+    // getToken 会在当前浏览器上下文写入管理员 HttpOnly Cookie；创建完测试用户后
+    // 必须清除该会话，否则访问 /login 会被 AuthGuard 直接重定向到管理员仪表盘。
+    await page.context().clearCookies();
 
     // 用新用户登录
     await page.goto(`${BASE_URL}/login`);
     await page.waitForLoadState('networkidle');
     await page.getByPlaceholder(/用户名|username/i).fill(testUsername);
     await page.getByPlaceholder(/密码|password/i).fill('Test@12345');
+    const loginResponsePromise = page.waitForResponse(
+      (response) => response.url().includes('/api/v1/auth/login')
+        && response.request().method() === 'POST',
+    );
     await page.getByRole('button', { name: /登录|login/i }).click();
+    const loginResponse = await loginResponsePromise;
+    const loginBody = await loginResponse.json() as {
+      userInfo?: { mustChangePassword?: boolean; MustChangePassword?: boolean };
+      mfaRequired?: boolean;
+      mfaEnrollmentRequired?: boolean;
+    };
+    expect(loginResponse.ok(), `强制改密用户登录失败：HTTP ${loginResponse.status()}`).toBeTruthy();
+    expect(
+      loginBody.userInfo?.mustChangePassword ?? loginBody.userInfo?.MustChangePassword,
+      '登录响应必须明确返回 mustChangePassword=true，前端才能阻止默认密码继续使用',
+    ).toBe(true);
+    expect(loginBody.mfaRequired ?? false, '技术员测试用户不应进入 MFA 挑战流程').toBe(false);
+    expect(loginBody.mfaEnrollmentRequired ?? false, '技术员测试用户不应进入 MFA 注册流程').toBe(false);
     await page.waitForTimeout(2000);
 
     // 验证改密对话框弹出

@@ -45,30 +45,30 @@ export function ApprovalChainSettings() {
     { stepOrder: 1, role: 'maintenance_lead', specificApproverId: '', isRequired: true },
   ]);
 
-  /** 工单类型对应的中文标签 */
+  /** 工单类型对应的显示标签 */
   const typeLabels: Record<string, string> = {
-    '': '通用',
-    Corrective: '纠正性',
-    Preventive: '预防性',
-    Inspection: '巡检',
+    '': t('settings.approvalChain.types.general'),
+    Corrective: t('settings.approvalChain.types.corrective'),
+    Preventive: t('settings.approvalChain.types.preventive'),
+    Inspection: t('settings.approvalChain.types.inspection'),
   };
 
-  /** 优先级对应的中文标签 */
+  /** 优先级对应的显示标签 */
   const priorityLabels: Record<string, string> = {
-    '': '通用',
-    Urgent: '紧急',
-    High: '高',
-    Medium: '中',
-    Low: '低',
+    '': t('settings.approvalChain.priorities.general'),
+    Urgent: t('settings.approvalChain.priorities.urgent'),
+    High: t('settings.approvalChain.priorities.high'),
+    Medium: t('settings.approvalChain.priorities.medium'),
+    Low: t('settings.approvalChain.priorities.low'),
   };
 
-  /** 角色对应的中文标签 */
+  /** 审批角色对应的显示标签 */
   const roleLabels: Record<string, string> = {
-    system_admin: '系统管理员',
-    maintenance_lead: '维修主管',
-    technician: '技术员',
-    operator: '操作员',
-    viewer: '查看者',
+    system_admin: t('settings.approvalChain.roles.system_admin'),
+    maintenance_lead: t('settings.approvalChain.roles.maintenance_lead'),
+    technician: t('settings.approvalChain.roles.technician'),
+    operator: t('settings.approvalChain.roles.operator'),
+    viewer: t('settings.approvalChain.roles.viewer'),
   };
 
   /** 重置表单 */
@@ -163,12 +163,12 @@ export function ApprovalChainSettings() {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>审批链配置</CardTitle>
-            <CardDescription>配置不同工单类型和优先级的审批流程步骤</CardDescription>
+            <CardTitle>{t('settings.approvalChain.title')}</CardTitle>
+            <CardDescription>{t('settings.approvalChain.description')}</CardDescription>
           </div>
           <Button size="sm" onClick={openCreate}>
             <Plus className="mr-1 h-4 w-4" />
-            新增模板
+            {t('settings.approvalChain.addTemplate')}
           </Button>
         </div>
       </CardHeader>
@@ -189,20 +189,22 @@ export function ApprovalChainSettings() {
                   )}
                   <span className="font-medium">{chain.name}</span>
                   <Badge variant="outline">
-                    {typeLabels[chain.workOrderType ?? ''] ?? chain.workOrderType ?? '通用'}
+                    {typeLabels[chain.workOrderType ?? ''] ?? chain.workOrderType ?? t('settings.approvalChain.types.general')}
                   </Badge>
                   <Badge variant="outline">
-                    {priorityLabels[chain.priority ?? ''] ?? chain.priority ?? '通用'}
+                    {priorityLabels[chain.priority ?? ''] ?? chain.priority ?? t('settings.approvalChain.priorities.general')}
                   </Badge>
-                  <Badge variant="outline">{chain.steps.length} 步</Badge>
-                  {chain.isDefault && <Badge className="bg-blue-500/10 text-blue-500">默认</Badge>}
+                  <Badge variant="outline">{t('settings.approvalChain.stepCount', { count: chain.steps.length })}</Badge>
+                  {chain.isDefault && <Badge className="bg-blue-500/10 text-blue-500">{t('settings.approvalChain.default')}</Badge>}
                   <Badge variant={chain.enabled ? 'outline' : 'secondary'}>
-                    {chain.enabled ? '已启用' : '已禁用'}
+                    {chain.enabled ? t('settings.approvalChain.enabled') : t('settings.approvalChain.disabled')}
                   </Badge>
                   <Button
                     size="icon"
                     variant="ghost"
                     className="ml-auto h-8 w-8"
+                    aria-label={t('settings.approvalChain.edit')}
+                    title={t('settings.approvalChain.edit')}
                     onClick={(e) => { e.stopPropagation(); openEdit(chain); }}
                   >
                     <Pencil className="h-4 w-4" />
@@ -211,6 +213,8 @@ export function ApprovalChainSettings() {
                     size="icon"
                     variant="ghost"
                     className="h-8 w-8 text-destructive hover:text-destructive"
+                    aria-label={t('settings.approvalChain.delete')}
+                    title={t('settings.approvalChain.delete')}
                     onClick={(e) => {
                       e.stopPropagation();
                       deleteMutation.mutate(chain.id);
@@ -226,10 +230,10 @@ export function ApprovalChainSettings() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>步骤顺序</TableHead>
-                          <TableHead>审批角色</TableHead>
-                          <TableHead>指定审批人</TableHead>
-                          <TableHead>是否必填</TableHead>
+                          <TableHead>{t('settings.approvalChain.table.stepOrder')}</TableHead>
+                          <TableHead>{t('settings.approvalChain.table.role')}</TableHead>
+                          <TableHead>{t('settings.approvalChain.table.specificApprover')}</TableHead>
+                          <TableHead>{t('settings.approvalChain.table.required')}</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -240,7 +244,7 @@ export function ApprovalChainSettings() {
                             <TableCell>{step.specificApproverId ?? '-'}</TableCell>
                             <TableCell>
                               <Badge variant={step.isRequired ? 'outline' : 'secondary'}>
-                                {step.isRequired ? '必填' : '可选'}
+                                {step.isRequired ? t('settings.approvalChain.required') : t('settings.approvalChain.optional')}
                               </Badge>
                             </TableCell>
                           </TableRow>
@@ -254,7 +258,7 @@ export function ApprovalChainSettings() {
           </div>
         ) : (
           <p className="text-center text-muted-foreground">
-            {t('settings.noApprovalChain', '暂无审批链模板，点击"新增模板"创建第一个审批流程')}
+            {t('settings.approvalChain.empty')}
           </p>
         )}
       </CardContent>
@@ -263,32 +267,32 @@ export function ApprovalChainSettings() {
       <Dialog open={dialogOpen} onOpenChange={(v) => { if (!v) { setDialogOpen(false); resetForm(); } else { setDialogOpen(true); } }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingChainId ? '编辑审批链模板' : '新增审批链模板'}</DialogTitle>
+            <DialogTitle>{editingChainId ? t('settings.approvalChain.editTitle') : t('settings.approvalChain.createTitle')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>模板名称 *</Label>
+              <Label>{t('settings.approvalChain.nameLabel')}</Label>
               <Input
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
-                placeholder={t("settings.approvalChainNamePlaceholder", "例如：高优先级工单审批流程")}
+                placeholder={t('settings.approvalChain.namePlaceholder')}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>适用工单类型</Label>
+                <Label>{t('settings.approvalChain.workOrderTypeLabel')}</Label>
                 <Input
                   value={formWorkOrderType}
                   onChange={(e) => setFormWorkOrderType(e.target.value)}
-                  placeholder={t("settings.leaveBlankForAll", "留空表示通用")}
+                  placeholder={t('settings.approvalChain.leaveBlankForAll')}
                 />
               </div>
               <div className="space-y-2">
-                <Label>适用优先级</Label>
+                <Label>{t('settings.approvalChain.priorityLabel')}</Label>
                 <Input
                   value={formPriority}
                   onChange={(e) => setFormPriority(e.target.value)}
-                  placeholder={t("settings.leaveBlankForAll", "留空表示通用")}
+                  placeholder={t('settings.approvalChain.leaveBlankForAll')}
                 />
               </div>
             </div>
@@ -297,7 +301,7 @@ export function ApprovalChainSettings() {
                 checked={formIsDefault}
                 onCheckedChange={setFormIsDefault}
               />
-              <Label>设为默认模板</Label>
+              <Label>{t('settings.approvalChain.defaultLabel')}</Label>
             </div>
 
             <Separator />
@@ -305,10 +309,10 @@ export function ApprovalChainSettings() {
             {/* 审批步骤配置 */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label>审批步骤</Label>
+                <Label>{t('settings.approvalChain.stepsLabel')}</Label>
                 <Button size="sm" variant="outline" onClick={addStep}>
                   <Plus className="mr-1 h-3 w-3" />
-                  添加步骤
+                  {t('settings.approvalChain.addStep')}
                 </Button>
               </div>
               {formSteps.map((step, index) => (
@@ -319,13 +323,13 @@ export function ApprovalChainSettings() {
                   <Input
                     value={step.role}
                     onChange={(e) => updateStep(index, 'role', e.target.value)}
-                    placeholder={t("settings.roleLabel", "角色")}
+                    placeholder={t('settings.approvalChain.rolePlaceholder')}
                     className="flex-1"
                   />
                   <Input
                     value={step.specificApproverId}
                     onChange={(e) => updateStep(index, 'specificApproverId', e.target.value)}
-                    placeholder={t("settings.approverId", "指定审批人 ID")}
+                    placeholder={t('settings.approvalChain.approverIdPlaceholder')}
                     className="flex-1"
                   />
                   <Button
@@ -343,13 +347,15 @@ export function ApprovalChainSettings() {
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
-                取消
+                {t('common.cancel')}
               </Button>
               <Button
                 onClick={handleSubmit}
                 disabled={!formName.trim() || createMutation.isPending || updateMutation.isPending}
               >
-                {(createMutation.isPending || updateMutation.isPending) ? '保存中...' : (editingChainId ? '保存修改' : '创建')}
+                {(createMutation.isPending || updateMutation.isPending)
+                  ? t('common.saving')
+                  : (editingChainId ? t('common.save') : t('common.create'))}
               </Button>
             </div>
           </div>

@@ -160,7 +160,41 @@
     "subject": "标题",
     "content": "内容",
     "markRead": "标记已读",
-    "viewDetails": "查看详情"
+    "viewDetails": "查看详情",
+    "preferences": {
+      "title": "通知偏好设置",
+      "description": "按通知类型和渠道自定义接收方式",
+      "loading": "加载中...",
+      "table": {
+        "type": "通知类型",
+        "all": "全部"
+      },
+      "types": {
+        "alert": "告警通知",
+        "alertDescription": "设备告警触发、告警状态变更",
+        "workorder": "工单通知",
+        "workorderDescription": "工单创建、派工、状态变更",
+        "system": "系统通知",
+        "systemDescription": "系统配置变更、订阅到期提醒"
+      },
+      "channels": {
+        "signalr": "实时推送",
+        "signalrDescription": "页面内即时弹出通知",
+        "push": "浏览器推送",
+        "pushDescription": "浏览器未打开时推送通知",
+        "email": "邮件通知",
+        "emailDescription": "发送到注册邮箱（需配置 SMTP）"
+      },
+      "push": {
+        "unsupported": "当前浏览器不支持推送通知，浏览器推送渠道不可用",
+        "title": "浏览器推送订阅",
+        "subscribed": "已订阅，浏览器推送渠道可正常工作",
+        "notSubscribed": "未订阅，请开启以启用浏览器推送",
+        "permissionDenied": "通知权限已被拒绝，请在浏览器设置中手动开启"
+      },
+      "toggleChannel": "切换 {{type}}的{{channel}}",
+      "toggleAll": "切换{{type}}的所有通知渠道"
+    }
   },
   "pendingApprovals": {
     "title": "待审批",
@@ -277,6 +311,9 @@
       "enabled": "采集中",
       "disabled": "已停止",
       "gatewayId": "网关",
+      "gatewayPlaceholder": "选择网关（可选）",
+      "noOnlineGateway": "暂无在线网关",
+      "gatewayHint": "选择负责采集该设备数据的边缘网关，不选则使用默认网关",
       "connectionConfig": "连接配置",
       "dataPointMapping": "数据点映射",
       "createdAt": "配置创建时间",
@@ -391,6 +428,37 @@
     "assign": "派工",
     "start": "开始执行",
     "complete": "完成",
+    "offlineSave": "保存到离线队列",
+    "approvalProgressTitle": "审批进度",
+    "offline": "离线",
+    "pendingSync": "{{count}} 待同步",
+    "approval": {
+      "step": "第 {{step}} 级审批",
+      "noRecords": "暂无审批记录",
+      "comment": "意见：{{comment}}",
+      "commentLabel": "审批意见（可选）",
+      "commentPlaceholder": "填写审批意见...",
+      "approve": "通过",
+      "reject": "驳回",
+      "rejectionReason": "驳回原因",
+      "rejectionPlaceholder": "请填写驳回原因...",
+      "confirmReject": "确认驳回",
+      "cancel": "取消",
+      "status": {
+        "approved": "已通过",
+        "rejected": "已驳回",
+        "pending": "待审批",
+        "waiting": "等待中",
+        "unknown": "未知"
+      },
+      "roles": {
+        "system_admin": "系统管理员",
+        "maintenance_lead": "维修主管",
+        "technician": "技术员",
+        "operator": "操作员",
+        "viewer": "查看者"
+      }
+    },
     "accept": "验收通过",
     "reject": "验收不通过",
     "close": "关闭",
@@ -507,6 +575,21 @@
     "roles": "角色权限",
     "llm": "LLM 配置",
     "system": "系统参数",
+    "approvalChains": "审批链配置",
+    "notifications": "通知偏好",
+    "securityMfa": "安全与 MFA",
+    "permission": {
+      "crud": "增删改查",
+      "rw": "读写",
+      "read": "只读",
+      "none": "无",
+      "rwConfigure": "读写 + 配置",
+      "rwDispatchAccept": "读写 + 派工/验收",
+      "rwVerify": "读写 + 验证",
+      "readAcknowledge": "只读 + 确认",
+      "readExecute": "只读 + 执行",
+      "readQuery": "只读 + 查询"
+    },
     "module": {
       "deviceManagement": "设备管理",
       "alertManagement": "告警管理",
@@ -564,11 +647,119 @@
     "dataRetentionDays": "数据保留天数",
     "integration": "外部集成",
     "integrationDesc": "配置工单与外部系统的集成",
+    "integrations": {
+      "tabs": {
+        "dingtalk": "钉钉",
+        "feishu": "飞书",
+        "webhook": "Webhook",
+        "eam": "EAM"
+      },
+      "enabled": "已启用",
+      "disabled": "未启用",
+      "testing": "测试中...",
+      "testConnection": "测试连接",
+      "disable": "禁用",
+      "enableAndSave": "启用并保存",
+      "dingtalk": {
+        "webhookUrl": "Webhook URL *",
+        "secret": "加签密钥（可选）",
+        "messageType": "消息类型",
+        "actionCard": "ActionCard（推荐）",
+        "markdown": "Markdown",
+        "detailUrl": "工单详情页 URL 模板（可选）"
+      },
+      "feishu": {
+        "webhookUrl": "机器人 Webhook URL（推荐，简单模式）",
+        "apiModeNote": "以下为 API 模式配置（如需审批实例则必填）：",
+        "appId": "App ID",
+        "appSecret": "App Secret",
+        "approvalCode": "审批定义 Code（可选，用于创建审批实例）",
+        "approvalPlaceholder": "从飞书审批管理中获取"
+      },
+      "webhook": {
+        "url": "Webhook URL *",
+        "secret": "签名密钥（可选，设置后自动添加 X-EquipSense-Signature 头）",
+        "bodyTemplate": "Body 模板（可选，支持变量插值）",
+        "variables": "可用变量:"
+      },
+      "eam": {
+        "systemType": "EAM 系统类型",
+        "maximo": "IBM Maximo",
+        "sapPm": "SAP PM",
+        "custom": "自定义 REST API",
+        "endpoint": "REST API 端点 *",
+        "apiKey": "API Key",
+        "basicAuth": "或 Basic Auth"
+      },
+      "test": {
+        "duration": "耗时: {{duration}}ms",
+        "failed": "测试失败: {{message}}",
+        "unknownError": "未知错误"
+      }
+    },
     "subscription": "订阅管理",
     "systemInfo": "系统信息",
     "version": "版本",
     "environment": "运行环境",
     "uptime": "运行时间",
+    "uptimeUnits": {
+      "day": "{{count}}天",
+      "hour": "{{count}}小时",
+      "minute": "{{count}}分钟",
+      "second": "{{count}}秒"
+    },
+    "approvalChain": {
+      "title": "审批链配置",
+      "description": "配置不同工单类型和优先级的审批流程步骤",
+      "addTemplate": "新增模板",
+      "stepCount": "{{count}} 步",
+      "default": "默认",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "table": {
+        "stepOrder": "步骤顺序",
+        "role": "审批角色",
+        "specificApprover": "指定审批人",
+        "required": "是否必填"
+      },
+      "required": "必填",
+      "optional": "可选",
+      "empty": "暂无审批链模板，点击\"新增模板\"创建第一个审批流程",
+      "editTitle": "编辑审批链模板",
+      "createTitle": "新增审批链模板",
+      "nameLabel": "模板名称 *",
+      "namePlaceholder": "例如：高优先级工单审批流程",
+      "workOrderTypeLabel": "适用工单类型",
+      "priorityLabel": "适用优先级",
+      "leaveBlankForAll": "留空表示通用",
+      "defaultLabel": "设为默认模板",
+      "stepsLabel": "审批步骤",
+      "addStep": "添加步骤",
+      "rolePlaceholder": "角色",
+      "approverIdPlaceholder": "指定审批人 ID",
+      "edit": "编辑审批链",
+      "delete": "删除审批链",
+      "types": {
+        "general": "通用",
+        "corrective": "纠正性",
+        "preventive": "预防性",
+        "inspection": "巡检"
+      },
+      "priorities": {
+        "general": "通用",
+        "urgent": "紧急",
+        "high": "高",
+        "medium": "中",
+        "low": "低"
+      },
+      "roles": {
+        "system_admin": "系统管理员",
+        "maintenance_lead": "维修主管",
+        "technician": "技术员",
+        "operator": "操作员",
+        "viewer": "查看者"
+      }
+    },
     "approvalChainNamePlaceholder": "例如：高优先级工单审批流程",
     "leaveBlankForAll": "留空表示通用",
     "approverId": "指定审批人 ID",
@@ -591,7 +782,13 @@
     "users": "用户数",
     "dataRetention": "数据保留",
     "days": "天",
-    "changePlan": "变更计划"
+    "changePlan": "变更计划",
+    "plans": {
+      "trial": "试用版",
+      "basic": "基础版",
+      "professional": "专业版",
+      "enterprise": "企业版"
+    }
   },
   "dataquality": {
     "title": "数据质量",
@@ -637,6 +834,7 @@
     "sourceExpert": "专家创建",
     "sourceAI": "AI 生成",
     "sourceImported": "批量导入",
+    "sourceUnknown": "未知来源",
     "editDialog": {
       "title": "编辑知识规则",
       "description": "修改规则内容，仅变更的字段会被提交",
@@ -709,6 +907,9 @@
     "rejectReason": "驳回原因",
     "rejectReasonPlaceholder": "请输入驳回原因...",
     "confirmReject": "确认驳回",
+    "approveWithEdit": "编辑后批准",
+    "confirmApprove": "确认批准",
+    "aiRecommendation": "AI 分析推荐",
     "addComment": "添加备注",
     "batchApprove": "批量批准 ({{count}})",
     "batchReject": "批量驳回 ({{count}})",
@@ -781,14 +982,23 @@
     "opcuaUsername": "用户名（可选）",
     "opcuaPassword": "密码（可选）",
     "optionalPlaceholder": "可选",
+    "opcuaEndpointHint": "OPC UA 服务器端点地址，格式：opc.tcp://host:port",
     "modbusHost": "主机地址",
     "modbusPort": "端口",
     "modbusUnitId": "单元 ID",
+    "modbusHostHint": "Modbus TCP 设备的 IP 地址",
+    "modbusPortHint": "Modbus TCP 默认端口 502",
+    "modbusUnitHint": "Modbus 从站单元标识符（0-255）",
     "rtuPort": "串口设备",
     "rtuBaudRate": "波特率",
     "rtuDataBits": "数据位",
     "rtuStopBits": "停止位",
-    "rtuParity": "校验位"
+    "rtuParity": "校验位",
+    "rtuPortHint": "Linux：/dev/ttyUSB0、/dev/ttyS0 | Windows：COM1、COM2",
+    "rtuUnitHint": "Modbus RTU 从站地址（1-247）",
+    "parityNone": "无",
+    "parityEven": "偶",
+    "parityOdd": "奇"
   },
   "gateway": {
     "listTitle": "网关管理",
@@ -917,6 +1127,25 @@
         "frozen": "已冻结",
         "trial": "试用中"
       },
+      "timeZones": {
+        "utc": "UTC（协调世界时）",
+        "chinaStandard": "中国标准时间（北京）",
+        "hongKong": "香港时间",
+        "taipei": "台北时间",
+        "singapore": "新加坡时间",
+        "japanStandard": "日本标准时间（东京）",
+        "koreaStandard": "韩国标准时间（首尔）",
+        "indiaStandard": "印度标准时间（孟买）",
+        "gulfStandard": "海湾标准时间（迪拜）",
+        "unitedKingdom": "英国时间（伦敦）",
+        "centralEuropeParis": "中欧时间（巴黎）",
+        "centralEuropeBerlin": "中欧时间（柏林）",
+        "eastern": "美国东部时间（纽约）",
+        "central": "美国中部时间（芝加哥）",
+        "pacific": "美国西部时间（洛杉矶）",
+        "brasilia": "巴西时间（圣保罗）",
+        "australianEastern": "澳东时间（悉尼）"
+      },
       "detail": {
         "basicInfo": "基础信息",
         "resourceUsage": "资源用量",
@@ -933,7 +1162,25 @@
         "timeZone": "时区",
         "timeZoneDescription": "影响 Dashboard 趋势聚合的本地日期分组。设为 Asia/Shanghai 后，告警/工单的日趋势按北京时间 0 点切分，而非 UTC 0 点。",
         "timeZoneHint": "修改后 Dashboard 趋势将按新时区重新聚合。",
-        "timeZoneSaved": "时区已更新"
+        "timeZoneSaved": "时区已更新",
+        "billing": {
+          "title": "账单历史",
+          "empty": "暂无账单记录",
+          "columns": {
+            "plan": "套餐",
+            "amount": "金额",
+            "period": "计费周期",
+            "status": "状态",
+            "remark": "备注",
+            "createdAt": "创建时间"
+          },
+          "free": "免费",
+          "status": {
+            "paid": "已支付",
+            "cancelled": "已取消",
+            "pending": "待支付"
+          }
+        }
       }
     },
     "globalStats": {
@@ -1014,7 +1261,21 @@
     "descColumn": "描述",
     "ip": "IP 地址",
     "method": "方法",
-    "time": "时间"
+    "time": "时间",
+    "actionOptions": {
+      "authLoginSuccess": "AuthLoginSuccess（登录成功）",
+      "authLoginFailed": "AuthLoginFailed（登录失败）",
+      "login": "Login",
+      "logout": "Logout",
+      "create": "Create",
+      "update": "Update",
+      "delete": "Delete",
+      "acknowledge": "Acknowledge（确认告警）",
+      "resolve": "Resolve（解决告警）",
+      "recalculateHealth": "RecalculateHealth（重算健康度）",
+      "slaCheck": "SlaCheck（SLA 检查）",
+      "generateReport": "GenerateReport（生成报表）"
+    }
   },
   "users": {
     "title": "用户管理",
@@ -1032,7 +1293,14 @@
     "password": "初始密码",
     "changeRole": "变更角色",
     "deactivate": "停用",
-    "confirmDeactivate": "确定停用该用户？停用后无法登录"
+    "confirmDeactivate": "确定停用该用户？停用后无法登录",
+    "roles": {
+      "systemAdmin": "系统管理员",
+      "maintenanceLead": "维保主管",
+      "technician": "技术员",
+      "operator": "操作员",
+      "viewer": "观察者"
+    }
   },
   "fmea": {
     "title": "FMEA 故障模式库",

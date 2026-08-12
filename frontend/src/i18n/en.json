@@ -160,7 +160,41 @@
     "subject": "Title",
     "content": "Content",
     "markRead": "Mark as read",
-    "viewDetails": "View details"
+    "viewDetails": "View details",
+    "preferences": {
+      "title": "Notification preferences",
+      "description": "Customize how you receive each notification type",
+      "loading": "Loading...",
+      "table": {
+        "type": "Notification type",
+        "all": "All"
+      },
+      "types": {
+        "alert": "Alert notifications",
+        "alertDescription": "When an equipment alert is triggered or changes state",
+        "workorder": "Work order notifications",
+        "workorderDescription": "When work orders are created, assigned, or updated",
+        "system": "System notifications",
+        "systemDescription": "System configuration changes and subscription reminders"
+      },
+      "channels": {
+        "signalr": "Realtime push",
+        "signalrDescription": "Show notifications instantly in the page",
+        "push": "Browser push",
+        "pushDescription": "Push notifications when the browser is closed",
+        "email": "Email notifications",
+        "emailDescription": "Send to the registered email (SMTP required)"
+      },
+      "push": {
+        "unsupported": "This browser does not support push notifications. The browser push channel is unavailable.",
+        "title": "Browser push subscription",
+        "subscribed": "Subscribed; browser push notifications are ready",
+        "notSubscribed": "Not subscribed; enable this to receive browser push notifications",
+        "permissionDenied": "Notification permission was denied. Enable it manually in your browser settings."
+      },
+      "toggleChannel": "Toggle {{type}} via {{channel}}",
+      "toggleAll": "Toggle all {{type}} channels"
+    }
   },
   "pendingApprovals": {
     "title": "Pending approvals",
@@ -277,6 +311,9 @@
       "enabled": "Collecting",
       "disabled": "Stopped",
       "gatewayId": "Gateway",
+      "gatewayPlaceholder": "Select gateway (optional)",
+      "noOnlineGateway": "No online gateways",
+      "gatewayHint": "Select the edge gateway responsible for collecting this device data. Leave blank to use the default gateway.",
       "connectionConfig": "Connection Config",
       "dataPointMapping": "Data Point Mapping",
       "createdAt": "Config Created",
@@ -391,6 +428,37 @@
     "assign": "Assign",
     "start": "Start",
     "complete": "Complete",
+    "offlineSave": "Save to offline queue",
+    "approvalProgressTitle": "Approval progress",
+    "offline": "Offline",
+    "pendingSync": "{{count}} pending sync",
+    "approval": {
+      "step": "Approval level {{step}}",
+      "noRecords": "No approval records",
+      "comment": "Comment: {{comment}}",
+      "commentLabel": "Approval comment (optional)",
+      "commentPlaceholder": "Enter approval comment...",
+      "approve": "Approve",
+      "reject": "Reject",
+      "rejectionReason": "Rejection reason",
+      "rejectionPlaceholder": "Enter a rejection reason...",
+      "confirmReject": "Confirm rejection",
+      "cancel": "Cancel",
+      "status": {
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "pending": "Pending approval",
+        "waiting": "Waiting",
+        "unknown": "Unknown"
+      },
+      "roles": {
+        "system_admin": "System administrator",
+        "maintenance_lead": "Maintenance lead",
+        "technician": "Technician",
+        "operator": "Operator",
+        "viewer": "Viewer"
+      }
+    },
     "accept": "Accept",
     "reject": "Reject",
     "close": "Close",
@@ -507,6 +575,21 @@
     "roles": "Roles & Permissions",
     "llm": "LLM Configuration",
     "system": "System Parameters",
+    "approvalChains": "Approval chains",
+    "notifications": "Notification preferences",
+    "securityMfa": "Security & MFA",
+    "permission": {
+      "crud": "CRUD",
+      "rw": "RW",
+      "read": "Read",
+      "none": "None",
+      "rwConfigure": "RW + Configure",
+      "rwDispatchAccept": "RW + Dispatch/Accept",
+      "rwVerify": "RW + Verify",
+      "readAcknowledge": "Read + Acknowledge",
+      "readExecute": "Read + Execute",
+      "readQuery": "Read + Query"
+    },
     "module": {
       "deviceManagement": "Device Management",
       "alertManagement": "Alert Management",
@@ -564,11 +647,119 @@
     "dataRetentionDays": "Data Retention Days",
     "integration": "External Integrations",
     "integrationDesc": "Configure work order integrations with external systems",
+    "integrations": {
+      "tabs": {
+        "dingtalk": "DingTalk",
+        "feishu": "Feishu",
+        "webhook": "Webhook",
+        "eam": "EAM"
+      },
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "testing": "Testing...",
+      "testConnection": "Test connection",
+      "disable": "Disable",
+      "enableAndSave": "Enable and save",
+      "dingtalk": {
+        "webhookUrl": "Webhook URL *",
+        "secret": "Signing secret (optional)",
+        "messageType": "Message type",
+        "actionCard": "ActionCard (recommended)",
+        "markdown": "Markdown",
+        "detailUrl": "Work order detail URL template (optional)"
+      },
+      "feishu": {
+        "webhookUrl": "Bot Webhook URL (recommended, simple mode)",
+        "apiModeNote": "The following fields configure API mode (required for approval instances):",
+        "appId": "App ID",
+        "appSecret": "App Secret",
+        "approvalCode": "Approval definition code (optional, used to create approval instances)",
+        "approvalPlaceholder": "Get from Feishu approval management"
+      },
+      "webhook": {
+        "url": "Webhook URL *",
+        "secret": "Signing secret (optional; adds X-EquipSense-Signature header)",
+        "bodyTemplate": "Body template (optional, supports variable interpolation)",
+        "variables": "Available variables:"
+      },
+      "eam": {
+        "systemType": "EAM system type",
+        "maximo": "IBM Maximo",
+        "sapPm": "SAP PM",
+        "custom": "Custom REST API",
+        "endpoint": "REST API endpoint *",
+        "apiKey": "API Key",
+        "basicAuth": "or Basic Auth"
+      },
+      "test": {
+        "duration": "Duration: {{duration}}ms",
+        "failed": "Test failed: {{message}}",
+        "unknownError": "Unknown error"
+      }
+    },
     "subscription": "Subscription",
     "systemInfo": "System Information",
     "version": "Version",
     "environment": "Environment",
     "uptime": "Uptime",
+    "uptimeUnits": {
+      "day": "{{count}}d",
+      "hour": "{{count}}h",
+      "minute": "{{count}}m",
+      "second": "{{count}}s"
+    },
+    "approvalChain": {
+      "title": "Approval chain configuration",
+      "description": "Configure approval steps for different work order types and priorities",
+      "addTemplate": "Add template",
+      "stepCount": "{{count}} steps",
+      "default": "Default",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "table": {
+        "stepOrder": "Step",
+        "role": "Approval role",
+        "specificApprover": "Specific approver",
+        "required": "Required"
+      },
+      "required": "Required",
+      "optional": "Optional",
+      "empty": "No approval chain templates. Click \"Add template\" to create one.",
+      "editTitle": "Edit approval chain template",
+      "createTitle": "Add approval chain template",
+      "nameLabel": "Template name *",
+      "namePlaceholder": "e.g. High-priority work order approval",
+      "workOrderTypeLabel": "Work order type",
+      "priorityLabel": "Priority",
+      "leaveBlankForAll": "Leave blank for all",
+      "defaultLabel": "Set as default template",
+      "stepsLabel": "Approval steps",
+      "addStep": "Add step",
+      "rolePlaceholder": "Role",
+      "approverIdPlaceholder": "Approver ID",
+      "edit": "Edit approval chain",
+      "delete": "Delete approval chain",
+      "types": {
+        "general": "General",
+        "corrective": "Corrective",
+        "preventive": "Preventive",
+        "inspection": "Inspection"
+      },
+      "priorities": {
+        "general": "General",
+        "urgent": "Urgent",
+        "high": "High",
+        "medium": "Medium",
+        "low": "Low"
+      },
+      "roles": {
+        "system_admin": "System admin",
+        "maintenance_lead": "Maintenance lead",
+        "technician": "Technician",
+        "operator": "Operator",
+        "viewer": "Viewer"
+      }
+    },
     "approvalChainNamePlaceholder": "e.g. High-priority work order approval",
     "leaveBlankForAll": "Leave blank for all",
     "approverId": "Approver ID",
@@ -591,7 +782,13 @@
     "users": "Users",
     "dataRetention": "Data Retention",
     "days": "days",
-    "changePlan": "Change Plan"
+    "changePlan": "Change Plan",
+    "plans": {
+      "trial": "Trial",
+      "basic": "Basic",
+      "professional": "Professional",
+      "enterprise": "Enterprise"
+    }
   },
   "dataquality": {
     "title": "Data Quality",
@@ -637,6 +834,7 @@
     "sourceExpert": "Expert",
     "sourceAI": "AI Generated",
     "sourceImported": "Imported",
+    "sourceUnknown": "Unknown source",
     "editDialog": {
       "title": "Edit Knowledge Rule",
       "description": "Modify rule content. Only changed fields will be submitted.",
@@ -709,6 +907,9 @@
     "rejectReason": "Rejection Reason",
     "rejectReasonPlaceholder": "Enter rejection reason...",
     "confirmReject": "Confirm Reject",
+    "approveWithEdit": "Edit and approve",
+    "confirmApprove": "Confirm approve",
+    "aiRecommendation": "AI recommendation",
     "addComment": "Add comment",
     "batchApprove": "Batch Approve ({{count}})",
     "batchReject": "Batch Reject ({{count}})",
@@ -781,14 +982,23 @@
     "opcuaUsername": "Username (optional)",
     "opcuaPassword": "Password (optional)",
     "optionalPlaceholder": "optional",
+    "opcuaEndpointHint": "OPC UA server endpoint URL, format: opc.tcp://host:port",
     "modbusHost": "Host",
     "modbusPort": "Port",
     "modbusUnitId": "Unit ID",
+    "modbusHostHint": "IP address of the Modbus TCP device",
+    "modbusPortHint": "Default Modbus TCP port: 502",
+    "modbusUnitHint": "Modbus unit identifier (0-255)",
     "rtuPort": "Serial port",
     "rtuBaudRate": "Baud rate",
     "rtuDataBits": "Data bits",
     "rtuStopBits": "Stop bits",
-    "rtuParity": "Parity"
+    "rtuParity": "Parity",
+    "rtuPortHint": "Linux: /dev/ttyUSB0, /dev/ttyS0 | Windows: COM1, COM2",
+    "rtuUnitHint": "Modbus RTU unit address (1-247)",
+    "parityNone": "None",
+    "parityEven": "Even",
+    "parityOdd": "Odd"
   },
   "gateway": {
     "listTitle": "Gateway Management",
@@ -917,6 +1127,25 @@
         "frozen": "Frozen",
         "trial": "Trial"
       },
+      "timeZones": {
+        "utc": "UTC (Coordinated Universal Time)",
+        "chinaStandard": "China Standard Time (Beijing)",
+        "hongKong": "Hong Kong Time",
+        "taipei": "Taipei Time",
+        "singapore": "Singapore Time",
+        "japanStandard": "Japan Standard Time (Tokyo)",
+        "koreaStandard": "Korea Standard Time (Seoul)",
+        "indiaStandard": "India Standard Time (Mumbai)",
+        "gulfStandard": "Gulf Standard Time (Dubai)",
+        "unitedKingdom": "United Kingdom Time (London)",
+        "centralEuropeParis": "Central European Time (Paris)",
+        "centralEuropeBerlin": "Central European Time (Berlin)",
+        "eastern": "Eastern Time (New York)",
+        "central": "Central Time (Chicago)",
+        "pacific": "Pacific Time (Los Angeles)",
+        "brasilia": "Brasilia Time (Sao Paulo)",
+        "australianEastern": "Australian Eastern Time (Sydney)"
+      },
       "detail": {
         "basicInfo": "Basic Information",
         "resourceUsage": "Resource Usage",
@@ -933,7 +1162,25 @@
         "timeZone": "Time Zone",
         "timeZoneDescription": "Affects Dashboard trend aggregation by local date. Set to Asia/Shanghai so daily trends split at Beijing midnight instead of UTC midnight.",
         "timeZoneHint": "After saving, Dashboard trends will be re-aggregated using the new time zone.",
-        "timeZoneSaved": "Time zone updated"
+        "timeZoneSaved": "Time zone updated",
+        "billing": {
+          "title": "Billing history",
+          "empty": "No billing records",
+          "columns": {
+            "plan": "Plan",
+            "amount": "Amount",
+            "period": "Billing period",
+            "status": "Status",
+            "remark": "Notes",
+            "createdAt": "Created at"
+          },
+          "free": "Free",
+          "status": {
+            "paid": "Paid",
+            "cancelled": "Cancelled",
+            "pending": "Pending"
+          }
+        }
       }
     },
     "globalStats": {
@@ -1014,7 +1261,21 @@
     "descColumn": "Description",
     "ip": "IP Address",
     "method": "Method",
-    "time": "Time"
+    "time": "Time",
+    "actionOptions": {
+      "authLoginSuccess": "AuthLoginSuccess (Login succeeded)",
+      "authLoginFailed": "AuthLoginFailed (Login failed)",
+      "login": "Login",
+      "logout": "Logout",
+      "create": "Create",
+      "update": "Update",
+      "delete": "Delete",
+      "acknowledge": "Acknowledge (Acknowledge alert)",
+      "resolve": "Resolve (Resolve alert)",
+      "recalculateHealth": "RecalculateHealth (Recalculate health)",
+      "slaCheck": "SlaCheck (SLA check)",
+      "generateReport": "GenerateReport (Generate report)"
+    }
   },
   "users": {
     "title": "User Management",
@@ -1032,7 +1293,14 @@
     "password": "Initial Password",
     "changeRole": "Change Role",
     "deactivate": "Deactivate",
-    "confirmDeactivate": "Deactivate this user? They will not be able to log in."
+    "confirmDeactivate": "Deactivate this user? They will not be able to log in.",
+    "roles": {
+      "systemAdmin": "System Admin",
+      "maintenanceLead": "Maintenance Lead",
+      "technician": "Technician",
+      "operator": "Operator",
+      "viewer": "Viewer"
+    }
   },
   "fmea": {
     "title": "FMEA Failure Mode Library",

@@ -2,6 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { OfflineStatusBadge } from '../OfflineStatusBadge';
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: { count?: number }) => {
+      if (key === 'workorder.offline') return '离线';
+      if (key === 'workorder.pendingSync') return `${options?.count ?? 0} 待同步`;
+      return key;
+    },
+  }),
+}));
+
 // Mock useOfflineStatus hook
 const mockUseOfflineStatus = vi.fn();
 vi.mock('../../../hooks/useOfflineStatus', () => ({
