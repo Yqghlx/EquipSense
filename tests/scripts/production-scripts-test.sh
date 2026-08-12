@@ -647,18 +647,27 @@ test_setup_validates_production_compose_wrapper() {
 test_production_readiness_entrypoint_is_wired_and_read_only() {
   local setup_content
   local deploy_content
+  local deploy_script
   local runbook_content
   local readiness_content
   setup_content="$(cat "$PROJECT_ROOT/docker/setup.sh")"
   deploy_content="$(cat "$PROJECT_ROOT/docs/DEPLOY.md")"
+  deploy_script="$(cat "$PROJECT_ROOT/docker/deploy-production.sh")"
   runbook_content="$(cat "$PROJECT_ROOT/docs/OPS_RUNBOOK.md")"
   readiness_content="$(cat "$PROJECT_ROOT/docker/production-readiness.sh")"
 
   assert_contains "$setup_content" "production-readiness.sh|生产上线只读自检入口"
   assert_contains "$setup_content" '"production-readiness.sh"'
-  assert_contains "$deploy_content" 'bash docker/production-readiness.sh --env-file docker/.env'
-  assert_contains "$runbook_content" 'bash docker/production-readiness.sh --env-file docker/.env --runtime'
+  assert_contains "$deploy_content" 'production-readiness.sh'
+  assert_contains "$deploy_content" '--compose-file docker/docker-compose.prod.yml'
+  assert_contains "$runbook_content" 'production-readiness.sh'
+  assert_contains "$runbook_content" '--compose-file docker/docker-compose.prod.yml'
+  assert_contains "$runbook_content" '回滚后的全量运行态 readiness'
   assert_contains "$readiness_content" 'config --quiet'
+  assert_contains "$readiness_content" '--compose-file'
+  assert_contains "$deploy_script" 'production-readiness.sh'
+  assert_contains "$deploy_script" 'run_readiness_gate --runtime'
+  assert_contains "$deploy_script" 'docker-compose.prod.yml'
   assert_contains "$readiness_content" 'ps --all --format'
   [[ "$readiness_content" != *' compose up '* ]] \
     || fail "只读 readiness 入口不得执行 compose up"
@@ -3521,9 +3530,13 @@ test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip() {
 
 test_deploy_has_fail_closed_preflight() {
   local deploy_block
+  local deploy_script
   deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  deploy_script="$(cat "$PROJECT_ROOT/docker/deploy-production.sh")"
   assert_contains "$deploy_block" 'test -f ./deploy-production.sh'
   assert_contains "$deploy_block" 'bash ./deploy-production.sh "$TARGET_VERSION"'
+  assert_contains "$deploy_script" 'run_readiness_gate'
+  assert_contains "$deploy_script" 'run_readiness_gate --runtime'
   [[ "$deploy_block" != *'docker compose --env-file .env'* ]] \
     || fail "CI 不应再维护未经行为测试的内联部署副本"
 }

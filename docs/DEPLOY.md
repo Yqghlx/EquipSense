@@ -92,10 +92,17 @@ cd ..
 
 ```bash
 # 启动前静态检查；失败时按变量名、证书文件或 Compose 错误整改
-bash docker/production-readiness.sh --env-file docker/.env
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml
 
 # 启动后运行态检查；不会修改容器
-bash docker/production-readiness.sh --env-file docker/.env --runtime
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --runtime
 ```
 
 自检返回非零时不得继续发布；输出只包含变量名、文件名、服务名和错误类别，不包含 `.env` 的实际值。
@@ -142,7 +149,10 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 
 ```bash
 # 启动前只读门禁
-bash docker/production-readiness.sh --env-file docker/.env
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml
 
 docker/compose-production.sh up -d
 ```
@@ -153,7 +163,11 @@ docker/compose-production.sh up -d
 
 ```bash
 # 汇总检查所有生产服务状态和健康检查
-bash docker/production-readiness.sh --env-file docker/.env --runtime
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --runtime
 
 # 检查所有服务状态
 docker/compose-production.sh ps
@@ -269,12 +283,15 @@ GitHub Actions 的 `deploy` job 要求 `DEPLOY_PATH` 指向生产 Docker 文件�
 
 - `.env`（权限为 `600`，由密钥管理系统或人工安全注入）
 - `validate-env.sh`
+- `production-readiness.sh`
 - `docker-compose.yml` 与 `docker-compose.prod.yml`
 - `deploy-production.sh`（与仓库 `docker/deploy-production.sh` 保持一致并具备执行权限）
 
 GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。脚本会先获取 Compose 目录下的单实例部署锁，再执行
-`bash ./validate-env.sh .env --check-runtime-files` 和 Compose 渲染门禁；只有生产凭据、
-镜像 digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重建容器。校验或
+只读生产 readiness 静态门禁（包含基础 Compose 和生产 overlay）；只有生产凭据、镜像
+digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重建容器。目标版本还必须
+通过后端、边缘网关、前端三项应用探针和全量运行态 readiness，才会原子更新版本记录；
+任一目标检查失败都会使用本机旧镜像回滚，并在回滚后再次执行全量 readiness。校验或
 镜像拉取失败发生在运行态变更前，不触发回滚。
 
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
@@ -289,8 +306,9 @@ Smoke Compose 仅在临时隔离数据库中显式设置 `SEED_DEMO_DATA=full`�
 
 首次重建 backend/frontend/edgegateway 后的任何失败都会进入统一回滚：脚本使用
 `.last-deployed-tag` 对应的本机旧镜像（`--pull never`）恢复三个无状态应用服务，再次验证
-后端 `/health/ready`、边缘网关 `/health` 与前端容器 health。只有目标版本健康通过后才以
-临时文件加原子 `mv` 更新版本记录。同一 tag 重复触发时只验证现有服务健康，不重复重建。
+后端 `/health/ready`、边缘网关 `/health`、前端容器 health 和回滚后的全量运行态 readiness。
+只有目标版本的三项应用探针与全量运行态 readiness 都通过后才以临时文件加原子 `mv`
+更新版本记录。同一 tag 重复触发时也必须通过全量 readiness，不重复重建。
 部署脚本会从 `.env` 读取 `EDGE_PORT` 生成网关健康探针；若生产入口经过额外代理，可显式设置
 `DEPLOY_EDGE_HEALTH_URL` 覆盖默认的 `http://localhost:<EDGE_PORT>/health`。
 

@@ -8,10 +8,17 @@
 
 ```bash
 # 不启动、不重启、不构建服务，只检查配置、证书和 Compose 解析
-bash docker/production-readiness.sh --env-file docker/.env
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml
 
 # 服务已启动时，额外检查所有运行服务及其健康状态
-bash docker/production-readiness.sh --env-file docker/.env --runtime
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --runtime
 ```
 
 该入口失败时只会报告变量名、证书文件、服务名和错误类别，不会打印密钥；修复后必须重新执行，不能用 `--runtime` 失败时的旧状态替代检查。
@@ -434,9 +441,10 @@ bash tests/backup-restore-rehearsal.sh
 ### 6.5 生产部署自动回滚失败
 
 默认滚动部署会先获取 Compose 目录下的单实例锁，只重建 backend/frontend/edgegateway。目标版本异常时，`deploy-production.sh` 会使用
-`.last-deployed-tag` 对应的本机旧镜像回滚，并重新验证后端 readiness、边缘网关 `/health`
-与前端 health；网关的 SQLite 缓冲仍保留在 `edgegateway_data` 命名卷中。
-若日志出现“严重：回滚健康检查失败”或“旧版本容器重建失败”，执行：
+`.last-deployed-tag` 对应的本机旧镜像回滚，并重新验证后端 readiness、边缘网关 `/health`、
+前端 health 和回滚后的全量运行态 readiness；网关的 SQLite 缓冲仍保留在 `edgegateway_data`
+命名卷中。若日志出现“严重：回滚健康检查失败”“回滚后的全量运行态 readiness 失败”或
+“旧版本容器重建失败”，执行：
 
 ```bash
 cd "$DEPLOY_PATH"
@@ -455,6 +463,13 @@ docker compose --env-file .env \
 # 验证后端依赖就绪；前端 health 仍需结合上面的 ps 输出
 curl --fail --show-error http://localhost:8080/health/ready
 curl --fail --show-error http://localhost:8081/health
+
+# 重新执行基础 Compose + 生产 overlay 的全量运行态 readiness
+bash ./production-readiness.sh \
+  --env-file .env \
+  --compose-file docker-compose.yml \
+  --compose-file docker-compose.prod.yml \
+  --runtime
 ```
 
 处置原则：

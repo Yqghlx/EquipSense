@@ -237,11 +237,11 @@ git commit -m "feat: verify runtime readiness after deploy and rollback"
 - Consumes: Task 1 的多文件 CLI 和 Task 3 的自动运行态门禁。
 - Produces: 可复制的基础 Compose + 生产 overlay 命令，以及“部署成功必须包含全量 readiness”的运维说明。
 
-- [ ] **Step 1: 先补契约断言**
+- [x] **Step 1: 先补契约断言**
 
 在现有契约测试中断言：readiness 内容包含 `--compose-file`；部署脚本包含 `production-readiness.sh`、`run_readiness_gate --runtime` 和 `docker-compose.prod.yml`；部署文档包含第二个 Compose 文件；运维手册包含“回滚后的全量运行态 readiness”。
 
-- [ ] **Step 2: 更新文档命令**
+- [x] **Step 2: 更新文档命令**
 
 统一使用：
 
@@ -260,7 +260,7 @@ bash docker/production-readiness.sh \
 
 明确 `deploy-production.sh` 自动执行静态 readiness、三项应用探针和全量运行态 readiness；任一失败都不会写目标版本，目标失败会使用旧镜像回滚，回滚也必须通过全量 readiness。
 
-- [ ] **Step 3: 运行文档和契约测试**
+- [x] **Step 3: 运行文档和契约测试**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh setup
@@ -268,11 +268,12 @@ bash tests/scripts/production-scripts-test.sh ci
 bash tests/scripts/production-scripts-test.sh all
 ```
 
-- [ ] **Step 4: 提交 Task 4**
+- [x] **Step 4: 提交 Task 4**
 
 ```bash
 git add docs/DEPLOY.md docs/OPS_RUNBOOK.md \
-  tests/scripts/production-scripts-test.sh
+  tests/scripts/production-scripts-test.sh \
+  docs/superpowers/plans/2026-08-12-production-release-readiness-gate.md
 git commit -m "docs: document full runtime readiness deployment gate"
 ```
 
