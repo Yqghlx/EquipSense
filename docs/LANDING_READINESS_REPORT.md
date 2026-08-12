@@ -5,7 +5,7 @@
 
 > **当前状态说明（2026-08-13）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）；同时完成推送订阅、通知偏好和知识规则导出的当前用户/租户纵深隔离，并修复 Vite 8 下 PWA Service Worker 构建的 `inlineDynamicImports` 弃用警告。按仓库命令实测，本轮设备对比聚焦后端单测 22/22、聚焦集成测试 12/12、全量后端单测 1591/1591、默认后端集成 183 总数（177 通过、6 跳过、0 失败）、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1105 个键完全对齐，Vitest 85 个测试文件/489 个测试全部通过，生产构建 precache 133 entries 且无 PWA 弃用警告。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
 
-> **备份恢复完整性增量（2026-08-13）**：`backup.sh` 现在为每个成功批次原子生成 `backup-manifest_*.tsv`，记录启用组件的文件名、大小和 SHA-256；`restore.sh --confirm` 在停服、Docker 或 AWS 副作用前验证清单，串批次、篡改和缺少清单的确认恢复均 fail-closed，历史备份仅可显式使用 `--legacy`。`production-scripts-test.sh all` 和脚本语法检查已通过，当前环境因 Docker 引擎不可用未能重跑真实隔离 Docker 演练；既有历史演练结果不替代本次提交的 Docker 复验。真实生产等价存储、密钥管理和 RTO/RPO 演练仍属于部署侧上线前置条件。
+> **备份恢复完整性增量（2026-08-13）**：`backup.sh` 现在为每个成功批次原子生成 `backup-manifest_*.tsv`，记录启用组件的文件名、大小和 SHA-256；`restore.sh --confirm` 在停服、Docker 或 AWS 副作用前验证清单，串批次、篡改和缺少清单的确认恢复均 fail-closed，历史备份仅可显式使用 `--legacy`。`production-scripts-test.sh all`、脚本语法检查和当前提交的真实隔离 Docker 演练均已通过：演练完成 PostgreSQL custom dump、附件卷恢复和恢复后健康检查，RTO 为 2 秒；Redis 因该场景未启用而明确跳过。真实生产等价存储、密钥管理、Redis 恢复和正式 RTO/RPO 演练仍属于部署侧上线前置条件。
 
 > **本轮发布门禁补充（2026-08-13）**：`production-readiness.sh` 已支持按顺序叠加基础 Compose 与生产 overlay，并接入 `deploy-production.sh` 的部署前静态检查、目标版本/同 tag/回滚后的全量运行态检查；目标版本只有在应用探针和全量 readiness 均通过后才写入版本记录，回滚 readiness 失败保持严重失败。`bash tests/scripts/production-scripts-test.sh readiness|deploy|setup|ci|all`、Shell 语法检查和差异检查均通过。真实工作区复核仍以非零退出报告 27 个问题，未修改 `docker/.env`。
 
@@ -173,8 +173,8 @@
 - [ ] TLS 证书已挂载（`SSL_CERT_PATH` / `SSL_KEY_PATH`）
 - [ ] `GRAFANA_PASSWORD` 已修改
 - [ ] 已按部署形态完成附件备份：单机纳入 `attachments_data` 卷，跨主机/多副本启用 S3 兼容存储并完成对象前缀恢复演练
-- [x] 仓库级隔离恢复实演已通过：`bash tests/backup-restore-rehearsal.sh` 真实执行 `backup.sh` 与 `restore.sh --confirm`，并接入 CI；这不替代生产存储、Redis、密钥和容量条件下的正式演练
-- [ ] 已在隔离数据库和临时附件卷使用 `docker/restore.sh --confirm` 完成恢复演练，并记录 RTO/RPO
+- [x] 仓库级隔离恢复实演已通过：`bash tests/backup-restore-rehearsal.sh` 真实执行 `backup.sh` 与 `restore.sh --confirm`，批次清单校验、数据库、附件卷和恢复后健康检查均成功，记录 RTO 为 2 秒；Redis 因场景未启用而跳过。这不替代生产存储、Redis、密钥和容量条件下的正式演练
+- [x] 已在隔离数据库和临时附件卷使用 `docker/restore.sh --confirm` 完成恢复演练并记录 RTO；生产环境仍须补做 Redis 及正式 RPO/RTO 验收
 - [ ] 钉钉/飞书集成在租户 Settings 配置（如需机器人推送）
 - [ ] 首次启动验证：`/health` 返回 Healthy，使用 `SEED_ADMIN_PASSWORD` 配置的管理员初始密码登录后立即改密（不再使用公开默认密码）
 

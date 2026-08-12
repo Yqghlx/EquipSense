@@ -159,7 +159,7 @@ Document manifest permissions, checksum verification, pre-mutation boundary, exp
 
 Record the code-side mitigation while keeping real production credentials, object-storage permissions, and production-equivalent rehearsal as deployment-side prerequisites.
 
-- [ ] **Step 4: Run syntax, script, and Docker rehearsal checks**
+- [x] **Step 4: Run syntax, script, and Docker rehearsal checks**
 
 Run:
 
@@ -171,7 +171,7 @@ bash tests/backup-restore-rehearsal.sh
 
 Expected: syntax and script tests pass; Docker rehearsal passes when the Docker engine is available, otherwise report the environmental prerequisite without weakening the script gate.
 
-当前结果：Shell 语法和 `bash tests/scripts/production-scripts-test.sh all` 已通过；当前机器 Docker 引擎不可用，真实隔离演练待 CI 或可用 Docker runner 执行。
+当前结果：Shell 语法、`bash tests/scripts/production-scripts-test.sh all` 和 `bash tests/backup-restore-rehearsal.sh` 均已通过。真实隔离演练使用当前提交执行 PostgreSQL custom dump、附件卷恢复和恢复后健康检查，RTO 为 2 秒；Redis 因 `BACKUP_REDIS=false` 明确跳过。生产等价环境仍需单独验证 Redis、对象存储权限及正式 RTO/RPO。
 
 - [x] **Step 5: Commit the rehearsal and evidence**
 
