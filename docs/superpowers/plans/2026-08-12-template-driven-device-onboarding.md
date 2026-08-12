@@ -155,7 +155,7 @@ git commit -m "feat: validate template alarm rule definitions"
 - `DefaultAlertRuleRequest`：增加 `Name`、`Operator`、`CooldownSeconds`、`Enabled`、`AutoCreateWorkorder` 可选字段，保留旧 `Metric`、`Threshold`、`Severity`。
 - `DeviceConfigController.QuickRegister` 返回原有创建对象；模板不可见返回 `404/TEMPLATE_NOT_FOUND`，模板规则无效返回 `422/TEMPLATE_RULES_INVALID`，重复编码返回 `409/DUPLICATE_CODE`。
 
-- [ ] **Step 1: 写失败的服务/控制器测试**
+- [x] **Step 1: 写失败的服务/控制器测试**
 
 在现有 SQLite `DeviceConfigControllerTests` 中先插入当前租户模板、系统模板和其他租户模板，并增加以下测试：
 
@@ -186,7 +186,7 @@ public async Task QuickRegister_未勾选默认规则_只创建设备不创建�
 
 另加无效模板 JSON 的回滚断言：设备、规则、租户计数均保持原值；扩展集成测试验证 HTTP 状态和错误码；保留现有请求体 `TenantId` 恶意值测试。
 
-- [ ] **Step 2: 运行测试确认按预期失败**
+- [x] **Step 2: 运行测试确认按预期失败**
 
 运行：
 
@@ -197,7 +197,7 @@ dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceC
 
 预期：新测试因请求字段、模板关联和错误映射尚未实现而失败；已有无模板注册和跨租户测试必须保持可编译并明确显示失败原因。
 
-- [ ] **Step 3: 实现模板权威读取与规则映射**
+- [x] **Step 3: 实现模板权威读取与规则映射**
 
 在 `QuickRegisterAsync` 中按以下顺序实现：
 
@@ -206,12 +206,13 @@ dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceC
 3. 创建设备时设置 `TenantId`、`TypeTemplateId`、模板名称类型、`Offline` 状态和 `HealthScore=100`。
 4. 仅当 `ApplyDefaultAlarmRules` 为真时调用 Task 1 解析器，在当前事务中把每个定义映射为 `AlertRule`，保留 `Operator`、`Threshold`、`Severity`、`CooldownSeconds`、`Enabled`、`AutoCreateWorkorder`。
 5. 无模板兼容路径继续使用请求中的规则，但使用同一字段映射逻辑，不再硬编码 `>` 或 `true`。
-6. 读取当前租户 `Tenant`、增加 `CurrentDeviceCount`，调用一次 `SaveChangesAsync`；解析或校验失败不得先保存设备。
-7. 捕获生产 PostgreSQL 的设备唯一索引冲突（`IX_devices_tenant_id_device_code`），转换为 `DUPLICATE_CODE`；保留先查后写的友好提示，并覆盖并发窗口。
+6. 关系型数据库使用 `ExecuteUpdateAsync` 原子递增当前租户 `CurrentDeviceCount`，非关系型测试提供程序保留跟踪实体回退；设备、规则、计数仍在同一事务中提交。
+7. 在执行策略重试中复用稳定设备 ID，并在每次尝试前清理回滚后残留的 Added/Modified 状态；若提交结果不明确但设备已落库，按同一 ID 返回已创建结果，避免重复写入。
+8. 捕获生产 PostgreSQL 的设备唯一索引冲突（`IX_devices_tenant_id_device_code`），转换为 `DUPLICATE_CODE`；保留先查后写的友好提示，并覆盖并发窗口。
 
 在 Controller 中捕获 `DeviceConfigException` 映射标准 `{ code, message, details }`；不把模板 JSON 或数据库异常详情返回客户端。对 SQLite 测试提供程序同步识别其设备唯一约束错误，保证行为测试可复现。
 
-- [ ] **Step 4: 运行后端测试确认通过**
+- [x] **Step 4: 运行后端测试确认通过**
 
 运行：
 

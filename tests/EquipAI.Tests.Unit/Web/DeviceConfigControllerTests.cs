@@ -1,13 +1,17 @@
+using System.Text.Json;
 using EquipAI.Application.Devices;
+using EquipAI.Core.Constants;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.WebAPI.Controllers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Xunit;
 
 namespace EquipAI.Tests.Unit.Web;
@@ -51,7 +55,12 @@ public class DeviceConfigControllerTests : IAsyncLifetime
         var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
         await db.Database.EnsureCreatedAsync();
 
-        // 种子：两个租户，设备计数均为 0（凸显计数维护断言）
+        // 种子：两个业务租户和一个系统租户，设备计数均为 0（凸显计数维护断言）。
+        db.Add(new Tenant
+        {
+            Id = SystemConstants.SystemTenantId, Name = "系统租户", Slug = "system", Plan = TenantPlan.Enterprise,
+            CurrentDeviceCount = 0, MaxDevices = int.MaxValue
+        });
         db.Add(new Tenant
         {
             Id = _tenantA, Name = "TA", Slug = "ta", Plan = TenantPlan.Basic,
@@ -103,6 +112,227 @@ public class DeviceConfigControllerTests : IAsyncLifetime
         tA.CurrentDeviceCount.Should().Be(1,
             "通过本端点创建设备应维护租户 A 的 CurrentDeviceCount，否则配额中间件超卖");
         tB.CurrentDeviceCount.Should().Be(0, "租户 B 的计数不应受影响");
+    }
+
+    [Fact]
+    public async Task QuickRegister_使用系统模板并应用默认规则_应保存模板关联和完整规则语义()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var templateId = Guid.NewGuid();
+        db.DeviceTypeTemplates.Add(new DeviceTypeTemplate
+        {
+            Id = templateId,
+            TenantId = SystemConstants.SystemTenantId,
+            Name = "空压机模板",
+            Industry = "制造业",
+            Parameters = "{}",
+            DefaultAlarmRules = """
+                [
+                  {"name":"排气压力过低","metric":"discharge_pressure","ruleType":"threshold","operator":"lt","threshold":0.5,"severity":"High","cooldownSeconds":600,"enabled":false,"autoCreateWorkorder":false},
+                  {"name":"振动超标","metric":"vibration","ruleType":"threshold","operator":"gt","threshold":7,"severity":"Critical","cooldownSeconds":300,"enabled":true,"autoCreateWorkorder":true}
+                ]
+                """
+        });
+        await db.SaveChangesAsync();
+
+        var service = new DeviceConfigService(db, tenantContext);
+        var result = await service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            TemplateId = templateId,
+            ApplyDefaultAlarmRules = true,
+            DeviceCode = "TPL-001",
+            Name = "一号空压机",
+            TenantId = _tenantB
+        });
+
+        result.DuplicateCode.Should().BeFalse();
+        var device = await db.UnfilteredSet<Device>().SingleAsync(d => d.Id == result.DeviceId);
+        device.TenantId.Should().Be(_tenantA);
+        device.TypeTemplateId.Should().Be(templateId);
+        device.Type.Should().Be("空压机模板");
+
+        var rules = await db.UnfilteredSet<AlertRule>()
+            .Where(r => r.DeviceId == device.Id)
+            .OrderBy(r => r.Name)
+            .ToListAsync();
+        rules.Should().HaveCount(2);
+        rules.Should().OnlyContain(rule => rule.TenantId == _tenantA);
+        rules.Should().ContainSingle(r =>
+            r.Operator == "lt"
+            && r.Threshold == 0.5m
+            && r.Severity == AlertSeverity.High
+            && r.CooldownSeconds == 600
+            && !r.Enabled
+            && !r.AutoCreateWorkorder);
+        rules.Should().ContainSingle(r =>
+            r.Operator == "gt"
+            && r.Threshold == 7m
+            && r.Severity == AlertSeverity.Critical
+            && r.CooldownSeconds == 300
+            && r.Enabled
+            && r.AutoCreateWorkorder);
+    }
+
+    [Fact]
+    public async Task ListTemplates_应返回当前租户和系统模板并排除其他租户模板()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        await AddTemplateAsync(db, "[]", SystemConstants.SystemTenantId);
+        await AddTemplateAsync(db, "[]", _tenantA);
+        await AddTemplateAsync(db, "[]", _tenantB);
+        var service = new DeviceConfigService(db, tenantContext);
+
+        var result = await service.ListTemplatesAsync();
+        var serialized = JsonSerializer.Serialize(result);
+
+        serialized.Should().Contain(SystemConstants.SystemTenantId.ToString());
+        serialized.Should().Contain(_tenantA.ToString());
+        serialized.Should().NotContain(_tenantB.ToString());
+    }
+
+    [Fact]
+    public async Task QuickRegister_未勾选默认规则_只保存模板关联不创建告警()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var templateId = await AddTemplateAsync(db, "[{\"name\":\"温度告警\",\"metric\":\"temperature\",\"ruleType\":\"threshold\",\"operator\":\">\",\"threshold\":80}]");
+        var service = new DeviceConfigService(db, tenantContext);
+
+        var result = await service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            TemplateId = templateId,
+            ApplyDefaultAlarmRules = false,
+            DeviceCode = "TPL-002"
+        });
+
+        var device = await db.UnfilteredSet<Device>().SingleAsync(d => d.Id == result.DeviceId);
+        device.TypeTemplateId.Should().Be(templateId);
+        (await db.UnfilteredSet<AlertRule>().CountAsync(r => r.DeviceId == device.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task QuickRegister_模板不可见_应返回稳定业务错误且不创建设备()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var foreignTemplateId = await AddTemplateAsync(db, "[]", _tenantB);
+        var service = new DeviceConfigService(db, tenantContext);
+
+        var exception = await FluentActions.Awaiting(() => service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            TemplateId = foreignTemplateId,
+            ApplyDefaultAlarmRules = true,
+            DeviceCode = "TPL-003"
+        })).Should().ThrowAsync<DeviceConfigException>();
+
+        exception.Which.Code.Should().Be("TEMPLATE_NOT_FOUND");
+        (await db.UnfilteredSet<Device>().CountAsync(d => d.DeviceCode == "TPL-003")).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task QuickRegister_模板规则无效_应回滚设备和租户计数()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var templateId = await AddTemplateAsync(db, "{invalid-json");
+        var service = new DeviceConfigService(db, tenantContext);
+
+        var exception = await FluentActions.Awaiting(() => service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            TemplateId = templateId,
+            ApplyDefaultAlarmRules = true,
+            DeviceCode = "TPL-004"
+        })).Should().ThrowAsync<DeviceTemplateRulesException>();
+
+        exception.Which.Code.Should().Be("TEMPLATE_RULES_INVALID");
+        (await db.UnfilteredSet<Device>().CountAsync(d => d.DeviceCode == "TPL-004")).Should().Be(0);
+        (await db.UnfilteredSet<AlertRule>().CountAsync(r => r.Metric == "temperature")).Should().Be(0);
+        (await db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantA)).CurrentDeviceCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task QuickRegister_无模板兼容路径_应保留客户端规则全部字段()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var service = new DeviceConfigService(db, tenantContext);
+
+        var result = await service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            DeviceCode = "LEGACY-001",
+            Name = "兼容设备",
+            DefaultAlertRules =
+            [
+                new DefaultAlertRuleRequest
+                {
+                    Name = "压力过低",
+                    Metric = "pressure",
+                    Operator = "lt",
+                    Threshold = 0.5m,
+                    Severity = AlertSeverity.High,
+                    CooldownSeconds = 90,
+                    Enabled = false,
+                    AutoCreateWorkorder = false
+                }
+            ]
+        });
+
+        var rule = await db.UnfilteredSet<AlertRule>().SingleAsync(r => r.DeviceId == result.DeviceId);
+        rule.Name.Should().Be("压力过低");
+        rule.Operator.Should().Be("lt");
+        rule.Threshold.Should().Be(0.5m);
+        rule.Severity.Should().Be(AlertSeverity.High);
+        rule.CooldownSeconds.Should().Be(90);
+        rule.Enabled.Should().BeFalse();
+        rule.AutoCreateWorkorder.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task QuickRegister_重复编码_应由控制器返回409和稳定业务码()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var service = new DeviceConfigService(db, tenantContext);
+        var controller = new DeviceConfigController(service);
+        var request = new QuickRegisterRequest { DeviceCode = "DUP-001" };
+
+        (await controller.QuickRegister(request)).Should().BeOfType<CreatedAtActionResult>();
+        var response = await controller.QuickRegister(request);
+
+        var conflict = response.Should().BeOfType<ConflictObjectResult>().Subject;
+        JsonSerializer.Serialize(conflict.Value).Should().Contain("DUPLICATE_CODE");
+    }
+
+    [Fact]
+    public void QuickRegister_设备唯一约束异常_应识别为编码冲突()
+    {
+        var postgresException = new PostgresException("duplicate key", "ERROR", "unique_violation", "23505");
+        var exception = new DbUpdateException("设备唯一索引冲突", postgresException);
+
+        DeviceConfigService.IsDeviceCodeUniqueViolation(exception).Should().BeTrue();
+    }
+
+    private static async Task<Guid> AddTemplateAsync(AppDbContext db, string defaultAlarmRules, Guid? tenantId = null)
+    {
+        var template = new DeviceTypeTemplate
+        {
+            TenantId = tenantId ?? SystemConstants.SystemTenantId,
+            Name = $"测试模板-{Guid.NewGuid():N}",
+            Parameters = "{}",
+            DefaultAlarmRules = defaultAlarmRules
+        };
+        db.DeviceTypeTemplates.Add(template);
+        await db.SaveChangesAsync();
+        return template.Id;
     }
 
     /// <summary>测试用固定租户上下文（模拟 JWT 解析出的租户）</summary>

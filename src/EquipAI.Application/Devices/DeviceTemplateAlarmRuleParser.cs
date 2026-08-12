@@ -156,11 +156,19 @@ public static class DeviceTemplateAlarmRuleParser
 
         var name = GetRequiredString(element, "name", index);
         var metric = GetRequiredString(element, "metric", index);
+        if (name.Length > 200 || metric.Length > 100)
+            throw Invalid($"第 {index + 1} 条默认告警规则的文本字段超出长度限制。");
+
         var operatorText = GetRequiredString(element, "operator", index).ToLowerInvariant();
         if (!SupportedOperators.Contains(operatorText))
             throw Invalid($"第 {index + 1} 条默认告警规则的操作符不受支持。");
 
         var threshold = GetRequiredDecimal(element, "threshold", index);
+        if (threshold < -99999999999999.9999m || threshold > 99999999999999.9999m
+            || decimal.Round(threshold, 4) != threshold)
+        {
+            throw Invalid($"第 {index + 1} 条默认告警规则的阈值超出数据库精度范围。");
+        }
         var severity = GetOptionalEnum(element, "severity", AlertSeverity.Normal, index);
         var cooldownSeconds = GetOptionalInt32(element, "cooldownSeconds", DefaultCooldownSeconds, index);
         if (cooldownSeconds < 0)

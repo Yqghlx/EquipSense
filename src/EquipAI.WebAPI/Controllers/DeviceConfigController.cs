@@ -39,13 +39,52 @@ public class DeviceConfigController : ControllerBase
     [HttpPost("quick-register")]
     [ProducesResponseType(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult> QuickRegister([FromBody] QuickRegisterRequest request, CancellationToken ct = default)
     {
-        var (deviceId, deviceCode, name, type, duplicate) = await _service.QuickRegisterAsync(request, ct);
-        if (duplicate)
-            return BadRequest(new { code = "DUPLICATE_CODE", message = $"设备编码 {deviceCode} 已存在" });
+        try
+        {
+            var (deviceId, deviceCode, name, type, duplicate) = await _service.QuickRegisterAsync(request, ct);
+            if (duplicate)
+                return Conflict(new { code = "DUPLICATE_CODE", message = $"设备编码 {deviceCode} 已存在", details = (object?)null });
 
-        return CreatedAtAction(nameof(GetTemplates), new { id = deviceId },
-            new { Id = deviceId, DeviceCode = deviceCode, Name = name, Type = type });
+            return CreatedAtAction(nameof(GetTemplates), new { id = deviceId },
+                new { Id = deviceId, DeviceCode = deviceCode, Name = name, Type = type });
+        }
+        catch (DeviceTemplateRulesException exception)
+        {
+            return UnprocessableEntity(new
+            {
+                code = exception.Code,
+                message = exception.Message,
+                details = (object?)null
+            });
+        }
+        catch (DeviceConfigException exception)
+        {
+            return exception.Code switch
+            {
+                "TEMPLATE_NOT_FOUND" => NotFound(new
+                {
+                    code = exception.Code,
+                    message = exception.Message,
+                    details = (object?)null
+                }),
+                "DUPLICATE_CODE" => Conflict(new
+                {
+                    code = exception.Code,
+                    message = exception.Message,
+                    details = (object?)null
+                }),
+                _ => BadRequest(new
+                {
+                    code = exception.Code,
+                    message = exception.Message,
+                    details = (object?)null
+                })
+            };
+        }
     }
 }

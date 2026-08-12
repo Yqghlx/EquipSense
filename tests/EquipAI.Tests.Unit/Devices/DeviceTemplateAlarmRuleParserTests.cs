@@ -134,4 +134,18 @@ public class DeviceTemplateAlarmRuleParserTests
 
         act.Should().Throw<DeviceTemplateRulesException>();
     }
+
+    [Theory]
+    [InlineData("threshold")]
+    [InlineData("name")]
+    public void Parse_超出数据库约束_应拒绝规则(string field)
+    {
+        var json = field == "name"
+            ? $"[{{\"name\":\"{new string('名', 201)}\",\"metric\":\"temperature\",\"ruleType\":\"threshold\",\"operator\":\">\",\"threshold\":80}}]"
+            : "[{\"name\":\"温度告警\",\"metric\":\"temperature\",\"ruleType\":\"threshold\",\"operator\":\">\",\"threshold\":80.12345}]";
+
+        var act = () => DeviceTemplateAlarmRuleParser.Parse(json);
+
+        act.Should().Throw<DeviceTemplateRulesException>();
+    }
 }
