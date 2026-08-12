@@ -293,6 +293,58 @@ public class KnowledgeImportServiceTests
         json.Should().Contain("\"ConfidenceWeight\": 0.7");
     }
 
+    /// <summary>
+    /// 安全边界：导出查询必须使用显式租户参数，不能只依赖当前 DbContext 的全局过滤器。
+    /// </summary>
+    [Fact]
+    public async Task ExportAsJsonAsync_应按显式租户参数过滤()
+    {
+        var otherTenantId = Guid.NewGuid();
+        _db.KnowledgeRules.AddRange(
+            new KnowledgeRule
+            {
+                TenantId = _tenantId,
+                DeviceType = "电机",
+                Name = "当前租户规则",
+                Conditions = "[]",
+                Conclusion = "当前租户结论",
+            },
+            new KnowledgeRule
+            {
+                TenantId = otherTenantId,
+                DeviceType = "泵",
+                Name = "其他租户规则",
+                Conditions = "[]",
+                Conclusion = "其他租户结论",
+            });
+        await _db.SaveChangesAsync();
+
+        var json = await _sut.ExportAsJsonAsync(otherTenantId, null, CancellationToken.None);
+
+        json.Should().Be("[]");
+    }
+
+    /// <summary>
+    /// CSV 导出也必须使用显式租户参数，避免与 JSON 导出产生不一致的隔离行为。
+    /// </summary>
+    [Fact]
+    public async Task ExportAsCsvAsync_应按显式租户参数过滤()
+    {
+        _db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            TenantId = _tenantId,
+            DeviceType = "电机",
+            Name = "当前租户规则",
+            Conditions = "[]",
+            Conclusion = "当前租户结论",
+        });
+        await _db.SaveChangesAsync();
+
+        var csv = await _sut.ExportAsCsvAsync(Guid.NewGuid(), null, CancellationToken.None);
+
+        csv.Should().Be("device_type,name,conditions,conclusion,recommended_actions,check_steps,confidence_weight\n");
+    }
+
     // ========================================================================
     // CSV 行解析测试（静态方法间接测试）
     // ========================================================================

@@ -134,7 +134,9 @@ public class KnowledgeImportService
     /// <returns>格式化的 JSON 字符串</returns>
     public async Task<string> ExportAsJsonAsync(Guid tenantId, string? deviceType, CancellationToken ct)
     {
-        var query = _dbContext.KnowledgeRules.AsQueryable();
+        // 显式绑定 tenantId，避免后台复用或过滤器上下文异常时导出其他租户数据。
+        var query = _dbContext.KnowledgeRules
+            .Where(rule => rule.TenantId == tenantId);
 
         if (!string.IsNullOrWhiteSpace(deviceType))
             query = query.Where(r => r.DeviceType == deviceType);
@@ -167,7 +169,9 @@ public class KnowledgeImportService
     /// <returns>CSV 格式字符串（含表头）</returns>
     public async Task<string> ExportAsCsvAsync(Guid tenantId, string? deviceType, CancellationToken ct)
     {
-        var query = _dbContext.KnowledgeRules.AsQueryable();
+        // 与 JSON 导出保持相同的显式租户边界，不能只依赖全局查询过滤器。
+        var query = _dbContext.KnowledgeRules
+            .Where(rule => rule.TenantId == tenantId);
 
         if (!string.IsNullOrWhiteSpace(deviceType))
             query = query.Where(r => r.DeviceType == deviceType);
