@@ -84,9 +84,10 @@ public class AlertNotificationService
         // 关键修复：历史站内通知 Content 直接拼 alert.DeviceId（原始 UUID），运维在通知列表看到的是
         // 不可读的 GUID，而同一告警的钉钉/飞书卡片却显示友好标识，体验不一致且不专业。
         // 此处统一查询一次 deviceLabel，站内通知与机器人推送共用，消除重复查询。
-        // UnfilteredSet + DeviceId 全局唯一 PK：后台事件处理器无 HttpContext，须绕过 Guid.Empty 过滤器。
+        // 后台事件处理器无 HttpContext，须绕过全局租户过滤器；但仍必须校验事件租户，
+        // 防止错误或伪造的设备 ID 把其他租户的编码/名称带入通知。
         var deviceLabel = await db.UnfilteredSet<Core.Entities.Device>()
-            .Where(d => d.Id == @event.DeviceId)
+            .Where(d => d.Id == @event.DeviceId && d.TenantId == @event.TenantId)
             .Select(d => d.DeviceCode + (string.IsNullOrEmpty(d.Name) ? "" : $"（{d.Name}）"))
             .FirstOrDefaultAsync(ct) ?? @event.DeviceId.ToString();
 

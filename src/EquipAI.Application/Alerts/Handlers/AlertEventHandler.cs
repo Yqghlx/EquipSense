@@ -43,10 +43,13 @@ public class AlertEventHandler : IEventHandler<AlertTriggeredEvent>
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让 FindAsync 返回 null
+        // 后台事件处理器无 HttpContext，需要绕过全局租户过滤器；AlertId 仍必须与事件租户绑定，
+        // 防止错误或伪造事件读取其他租户的告警编码并推送给当前租户。
         var alert = await dbContext.Alerts
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(a => a.Id == @event.AlertId, cancellationToken);
+            .FirstOrDefaultAsync(
+                a => a.Id == @event.AlertId && a.TenantId == @event.TenantId,
+                cancellationToken);
         if (alert != null)
         {
             // 1. SignalR 实时推送到前端（失败不阻塞后续多渠道通知）

@@ -55,6 +55,22 @@ public class AlertEvaluationService : IAlertEvaluationService
         // 否则 Outbox 会写入外层请求 DbContext，无法与告警状态一起提交。
         var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
+        // 后台事件处理器没有 HttpContext，必须绕过全局租户过滤器；但设备归属仍要由事件租户显式确认。
+        // 这一步必须位于规则查询之前，避免调用方传入 deviceType 或通用规则时留下跨租户告警引用。
+        var device = await dbContext.Devices
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                d => d.Id == deviceId && d.TenantId == tenantId,
+                cancellationToken);
+        if (device == null)
+        {
+            _logger.LogWarning(
+                "告警评估跳过未知或跨租户设备: TenantId={TenantId}, DeviceId={DeviceId}",
+                tenantId,
+                deviceId);
+            return;
+        }
+
         // 查询当前设备当前指标的基线数据，供 BaselineEvaluator 使用
         // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
         var baseline = await dbContext.Set<Core.Entities.MetricBaseline>()
@@ -75,14 +91,11 @@ public class AlertEvaluationService : IAlertEvaluationService
         // - 设备类型为空（通用规则）或等于当前设备类型
         // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
 
-        // 调用方（TelemetryEventHandler）未提供设备类型时，从数据库查询，否则按 DeviceType 过滤的规则永远匹配不到
+        // 调用方（TelemetryEventHandler）未提供设备类型时，使用已完成租户校验的设备实体，
+        // 否则按 DeviceType 过滤的规则永远匹配不到。
         if (string.IsNullOrEmpty(deviceType))
         {
-            deviceType = await dbContext.Devices
-                .IgnoreQueryFilters()
-                .Where(d => d.Id == deviceId)
-                .Select(d => d.Type)
-                .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
+            deviceType = device.Type;
         }
 
         var rules = await dbContext.AlertRules
@@ -215,10 +228,10 @@ public class AlertEvaluationService : IAlertEvaluationService
         Guid deviceId, AlertRule rule, string metric, double value, DeviceContext context,
         CancellationToken cancellationToken)
     {
-        // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让 FindAsync 返回 null
+        // 后台事件处理器无 HttpContext，需要绕过全局租户过滤器；TenantId 条件仍保留，避免编码查询越过业务边界。
         var device = await dbContext.Devices
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(d => d.Id == deviceId);
+            .FirstOrDefaultAsync(d => d.Id == deviceId && d.TenantId == tenantId, cancellationToken);
         var deviceCode = device?.DeviceCode ?? deviceId.ToString("N")[..8];
 
         // 告警编码必须全局唯一：同一设备同一秒可能同时命中多条分层规则，

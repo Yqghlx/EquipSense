@@ -254,6 +254,74 @@ public class AlertNotificationServiceTests
             "不应在通知内容中展示不可读的设备 GUID（应显示 PUMP-001（一号泵））");
     }
 
+    /// <summary>
+    /// 安全边界：事件租户与设备租户不一致时，通知内容不得泄露其他租户的设备标识。
+    ///
+    /// Why：后台通知使用 UnfilteredSet 绕过 HTTP 租户过滤器是必要的，但设备标签仍必须按事件租户校验，
+    /// 否则只要事件携带了其他租户设备 ID，站内通知或机器人消息就会泄露设备编码和名称。
+    /// </summary>
+    [Fact]
+    public async Task Notification_Content_事件租户与设备租户不一致_不应泄露其他租户设备标签()
+    {
+        var eventTenantId = Guid.NewGuid();
+        var deviceTenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var (db, svc) = await CreateAsync(async ctx =>
+        {
+            await ctx.Users.AddAsync(new User
+            {
+                Id = Guid.NewGuid(),
+                TenantId = eventTenantId,
+                Role = UserRole.SystemAdmin,
+                Username = "event-tenant-admin",
+                DisplayName = "事件租户管理员",
+                PasswordHash = "x",
+            });
+            await ctx.Devices.AddAsync(new Device
+            {
+                Id = deviceId,
+                TenantId = deviceTenantId,
+                DeviceCode = "SECRET-TENANT-A-PUMP",
+                Name = "租户A机密设备",
+                Type = "泵",
+            });
+            await ctx.SaveChangesAsync();
+        });
+
+        var evt = new AlertTriggeredEvent(
+            EventId: Guid.NewGuid(),
+            OccurredAt: DateTime.UtcNow,
+            TenantId: eventTenantId,
+            AlertId: alertId,
+            DeviceId: deviceId,
+            RuleId: null,
+            Metric: "oil_temperature",
+            Value: 95.0,
+            Severity: "Low");
+        var alert = new Alert
+        {
+            Id = alertId,
+            TenantId = eventTenantId,
+            DeviceId = deviceId,
+            Severity = AlertSeverity.Low,
+            Status = AlertStatus.Active,
+            Metric = "oil_temperature",
+            AlertCode = "ALT-CROSS-TENANT",
+            OccurredAt = DateTime.UtcNow,
+        };
+
+        await svc.DispatchAsync(evt, alert);
+
+        var notification = await db.Notifications
+            .IgnoreQueryFilters()
+            .SingleAsync();
+        notification.Content.Should().NotContain("SECRET-TENANT-A-PUMP",
+            "通知不得泄露其他租户设备编码");
+        notification.Content.Should().NotContain("租户A机密设备",
+            "通知不得泄露其他租户设备名称");
+    }
+
     [Fact]
     public async Task DispatchAsync_机器人推送收到停机取消时应传播取消信号()
     {

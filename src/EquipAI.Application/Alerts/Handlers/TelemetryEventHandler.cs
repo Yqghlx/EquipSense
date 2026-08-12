@@ -40,7 +40,10 @@ public class TelemetryEventHandler : IEventHandler<TelemetryReceivedEvent>
         // 只在状态非 Online 时写库，避免每条遥测都触发 UPDATE（高频场景下可降低 DB 压力）
         // LastSeenAt 始终更新，作为 DeviceStatusMonitor 判定超时的依据
         // 返回 false 表示设备不存在（野生遥测），直接 return 避免后续评估器对幽灵设备产生无意义调用
-        var deviceFound = await UpdateDevicePresenceAsync(@event.DeviceId, cancellationToken);
+        var deviceFound = await UpdateDevicePresenceAsync(
+            @event.TenantId,
+            @event.DeviceId,
+            cancellationToken);
         if (!deviceFound)
         {
             return;
@@ -66,14 +69,14 @@ public class TelemetryEventHandler : IEventHandler<TelemetryReceivedEvent>
     /// <remarks>
     /// 使用 IgnoreQueryFilters 绕过多租户过滤器：MQTT 上来的遥测消息可能来自任意租户的设备，
     /// 而当前 ITenantContext 是从 HTTP 请求上下文解析的（事件处理在后台 Channel 消费，无 HTTP 上下文）。
-    /// 设备主键 Id 已是全局唯一，按 Id 直接定位即可，不需要租户过滤。
+    /// 但事件中的 TenantId 仍是业务边界，设备必须同时满足设备 ID 和事件租户，不能只按全局 ID 定位。
     /// </remarks>
     /// <returns>true 表示设备存在并已更新；false 表示设备不存在（野生遥测），调用方应跳过后续处理</returns>
-    private async Task<bool> UpdateDevicePresenceAsync(Guid deviceId, CancellationToken ct)
+    private async Task<bool> UpdateDevicePresenceAsync(Guid tenantId, Guid deviceId, CancellationToken ct)
     {
         var device = await _dbContext.Devices
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(d => d.Id == deviceId, ct);
+            .FirstOrDefaultAsync(d => d.Id == deviceId && d.TenantId == tenantId, ct);
         if (device == null)
         {
             _logger.LogWarning("收到未知设备的遥测，跳过状态更新：{DeviceId}", deviceId);

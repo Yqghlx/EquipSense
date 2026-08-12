@@ -341,6 +341,49 @@ public class TelemetryEventHandlerTests : IAsyncDisposable
             "评估器收到的 tenantId 应来自事件本身（事件携带真实租户），而非 ITenantContext（无 HTTP 上下文）");
     }
 
+    /// <summary>
+    /// 安全边界：事件租户与设备租户不一致时，不得按全局设备 ID 更新其他租户的设备。
+    ///
+    /// Why：后台消费者必须绕过 HTTP 租户过滤器，但 MQTT 事件中的租户字段仍是业务边界的一部分。
+    /// 如果只按设备 ID 查询，伪造或路由错误的事件会把其他租户设备标记为在线，并继续进入告警评估链。
+    /// </summary>
+    [Fact]
+    public async Task HandleAsync_事件租户与设备租户不一致_不应更新设备或调用评估器()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        var deviceTenantId = Guid.NewGuid();
+        var eventTenantId = Guid.NewGuid();
+        db.Devices.Add(new Device
+        {
+            Id = deviceId,
+            Name = "租户A设备",
+            Type = "pump",
+            DeviceCode = "PUMP-TENANT-A",
+            TenantId = deviceTenantId,
+            Status = DeviceStatus.Offline,
+        });
+        await db.SaveChangesAsync();
+
+        var handler = CreateHandler(db);
+
+        await handler.HandleAsync(CreateEvent(deviceId, eventTenantId));
+
+        var unchanged = await db.Devices
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync(d => d.Id == deviceId);
+        unchanged.Status.Should().Be(DeviceStatus.Offline,
+            "事件租户不匹配时不能更新其他租户设备的在线状态");
+        _evalServiceMock.Verify(
+            x => x.EvaluateForDeviceAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<double>(), It.IsAny<DeviceContext>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            "租户不匹配的遥测不得进入告警评估链");
+    }
+
     // =========================================================================
     // 测试辅助类
     // =========================================================================

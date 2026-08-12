@@ -252,6 +252,144 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// 安全边界：设备租户与评估租户不一致时，不能使用其他租户的设备类型匹配规则。
+    ///
+    /// Why：后台评估必须绕过 HTTP 租户过滤器读取事件所属租户的数据，但设备类型查询也必须带上
+    /// 事件租户条件，否则跨租户设备 ID 会把错误的类型带入规则匹配，进而创建错误租户的告警。
+    /// </summary>
+    [Fact]
+    public async Task 设备租户与评估租户不一致_不应使用其他租户设备类型匹配规则()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        var deviceTenantId = Guid.NewGuid();
+        var evaluationTenantId = Guid.NewGuid();
+        await AddDeviceAsync(db, deviceTenantId, deviceId);
+
+        var rule = CreateAlertRule(
+            evaluationTenantId,
+            metric: "temperature",
+            deviceType: "电机");
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        var (service, _, _, evaluatorMocks) = CreateService(db, (RuleType.Threshold, true));
+
+        await service.EvaluateForDeviceAsync(
+            evaluationTenantId,
+            deviceId,
+            string.Empty,
+            "temperature",
+            95.0,
+            new DeviceContext());
+
+        var crossTenantAlerts = await db.Alerts
+            .IgnoreQueryFilters()
+            .Where(a => a.TenantId == evaluationTenantId)
+            .ToListAsync();
+        crossTenantAlerts.Should().BeEmpty(
+            "不能借用其他租户设备的类型去匹配当前租户规则");
+        evaluatorMocks[0].Verify(
+            e => e.Evaluate(It.IsAny<double>(), It.IsAny<AlertRule>(), It.IsAny<DeviceContext>()),
+            Times.Never,
+            "跨租户设备不应进入当前租户规则评估");
+    }
+
+    /// <summary>
+    /// 安全边界：即使当前租户存在通用规则，设备不属于该租户时也不能创建告警。
+    ///
+    /// Why：调用方可能已经传入 deviceType，或规则本身不限制设备类型；只保护设备类型查询仍会留下
+    /// 跨租户设备引用。评估入口必须先确认设备 ID 与事件租户成对存在，再继续规则评估。
+    /// </summary>
+    [Fact]
+    public async Task 设备租户与评估租户不一致_通用规则也不应创建告警()
+    {
+        var db = GetDb();
+        var deviceId = Guid.NewGuid();
+        var deviceTenantId = Guid.NewGuid();
+        var evaluationTenantId = Guid.NewGuid();
+        await AddDeviceAsync(db, deviceTenantId, deviceId);
+
+        var rule = CreateAlertRule(evaluationTenantId, deviceType: null);
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        var (service, eventBusMock, aggregatorMock, evaluatorMocks) =
+            CreateService(db, (RuleType.Threshold, true));
+        aggregatorMock
+            .Setup(a => a.EvaluateAsync(
+                deviceId,
+                It.IsAny<Guid>(),
+                "temperature",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AlertAggregationDecision(true, false, false));
+
+        await service.EvaluateForDeviceAsync(
+            evaluationTenantId,
+            deviceId,
+            "电机",
+            "temperature",
+            95.0,
+            new DeviceContext());
+
+        var crossTenantAlerts = await db.Alerts
+            .IgnoreQueryFilters()
+            .Where(a => a.TenantId == evaluationTenantId)
+            .ToListAsync();
+        crossTenantAlerts.Should().BeEmpty("跨租户设备不能被当前租户的通用规则创建告警");
+        evaluatorMocks[0].Verify(
+            e => e.Evaluate(It.IsAny<double>(), It.IsAny<AlertRule>(), It.IsAny<DeviceContext>()),
+            Times.Never,
+            "设备归属校验失败时不应调用规则评估器");
+        eventBusMock.Verify(
+            e => e.PublishAsync(It.IsAny<IIntegrationEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "设备归属校验失败时不应发布告警事件");
+    }
+
+    /// <summary>
+    /// 后台正向路径：当前 ITenantContext 与事件租户不同，但事件租户确实拥有设备时，仍应正常评估。
+    ///
+    /// Why：后台消费者没有 HTTP 上下文，不能把 Guid.Empty 或其他请求上下文租户当成事件租户；
+    /// 该测试确保新增的设备归属校验不会误伤真实 MQTT 事件。
+    /// </summary>
+    [Fact]
+    public async Task 后台事件租户与当前上下文不同_设备属于事件租户_应正常创建告警()
+    {
+        var db = GetDb();
+        var eventTenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        await AddDeviceAsync(db, eventTenantId, deviceId);
+
+        var rule = CreateAlertRule(eventTenantId);
+        db.AlertRules.Add(rule);
+        await db.SaveChangesAsync();
+
+        var (service, _, aggregatorMock, _) = CreateService(db, (RuleType.Threshold, true));
+        aggregatorMock
+            .Setup(a => a.EvaluateAsync(
+                deviceId,
+                It.IsAny<Guid>(),
+                "temperature",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AlertAggregationDecision(true, false, false));
+
+        await service.EvaluateForDeviceAsync(
+            eventTenantId,
+            deviceId,
+            string.Empty,
+            "temperature",
+            95.0,
+            new DeviceContext());
+
+        var alerts = await db.Alerts
+            .IgnoreQueryFilters()
+            .Where(a => a.TenantId == eventTenantId && a.DeviceId == deviceId)
+            .ToListAsync();
+        alerts.Should().ContainSingle("真实事件租户拥有设备时应正常创建告警");
+    }
+
+    /// <summary>
     /// 测试 4：触发告警后，应通过事件总线发布 AlertTriggeredEvent
     /// 验证：事件总线 PublishAsync 被调用恰好 1 次
     /// </summary>
@@ -331,6 +469,7 @@ public class AlertEvaluationServiceTests : IAsyncDisposable
         var db = GetDb();
         var deviceId = Guid.NewGuid();
         var rule = CreateAlertRule(_tenantId);
+        await AddDeviceAsync(db, _tenantId, deviceId);
 
         // 预先在数据库中创建一条活跃告警（模拟第 1 次触发后的状态）
         var existingAlert = new Alert
