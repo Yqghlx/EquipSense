@@ -272,6 +272,41 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// 显式设备筛选也必须继续执行租户隔离，不能因为调用方传入了其他租户的同类型设备 ID 就越权读取。
+    /// </summary>
+    [Fact]
+    public async Task CompareAsync_显式DeviceIds混入其他租户设备_只返回当前租户设备()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        var currentDevice = await SeedDeviceAsync(db, _tenantId, "AC-001", "air_compressor", "当前租户-1#");
+        var currentDevice2 = await SeedDeviceAsync(db, _tenantId, "AC-002", "air_compressor", "当前租户-2#");
+        var otherTenant = Guid.NewGuid();
+        var otherTenantDevice = await SeedDeviceAsync(
+            db,
+            otherTenant,
+            "AC-X1",
+            "air_compressor",
+            "其他租户-1#");
+
+        await SeedConstantTelemetryAsync(db, _tenantId, currentDevice, "temperature", 4, 60.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, currentDevice2, "temperature", 4, 61.0);
+        await SeedConstantTelemetryAsync(db, otherTenant, otherTenantDevice, "temperature", 4, 200.0);
+
+        var result = await CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [currentDevice, currentDevice2, otherTenantDevice]);
+
+        result.Devices.Select(device => device.DeviceId)
+            .Should()
+            .BeEquivalentTo([currentDevice, currentDevice2], "显式筛选结果只能包含当前租户选中的设备")
+            .And.NotContain(otherTenantDevice, "显式筛选不能读取其他租户的同类型设备");
+    }
+
+    /// <summary>
     /// 显式设备筛选至少需要 2 台且最多允许 5 台，否则前端筛选器和后端计算范围会失去意义。
     /// </summary>
     [Theory]

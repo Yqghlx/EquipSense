@@ -2,11 +2,11 @@
 
 ## 状态
 
-DONE
+DONE（测试实现完成；生产契约红灯待后续实现任务处理）
 
 ## 基线
 
-- 执行日期：2026-08-12
+- 执行日期：2026-08-13
 - 基线提交：`b0f6646`
 
 ## 变更范围
@@ -24,6 +24,7 @@ DONE
 - `CompareAsync_未指定DeviceIds_保留同类型全量行为`
 - `CompareAsync_指定2个设备ID_仅返回选定设备`
 - `CompareAsync_指定列表包含其他类型设备_不会进入结果`
+- `CompareAsync_显式DeviceIds混入其他租户设备_只返回当前租户设备`
 - `CompareAsync_DeviceIds数量越界_应抛出明确参数异常`
 
 实现方式：
@@ -33,6 +34,7 @@ DONE
   `CompareAsync(Guid tenantId, string deviceType, string metric, int hours, IReadOnlyCollection<Guid>? deviceIds, CancellationToken ct)`。
 - 若签名不存在，测试以明确失败信息结束：  
   `DeviceComparisonService.CompareAsync 尚未提供 deviceIds 参数签名，无法验证显式设备筛选契约。`
+- 复审追加的跨租户测试创建另一租户的同类型设备，把它与当前租户选中的设备一起通过非空 `deviceIds` 显式传入，断言结果保留当前租户设备且排除另一租户设备；该测试不使用旧的无 `deviceIds` 调用路径。
 
 这样可以避免测试项目因直接调用不存在的参数签名而编译失败，同时把红灯精确指向“生产实现缺少新契约”。
 
@@ -57,14 +59,15 @@ dotnet test tests/EquipAI.Tests.Unit --filter FullyQualifiedName~DeviceCompariso
 结果：
 
 - 退出码：1
-- 总数：17
+- 总数：18
 - 通过：12
-- 失败：5
+- 失败：6
 
 失败用例：
 
 - `CompareAsync_指定2个设备ID_仅返回选定设备`
 - `CompareAsync_指定列表包含其他类型设备_不会进入结果`
+- `CompareAsync_显式DeviceIds混入其他租户设备_只返回当前租户设备`
 - `CompareAsync_DeviceIds数量越界_应抛出明确参数异常(deviceCount: 0)`
 - `CompareAsync_DeviceIds数量越界_应抛出明确参数异常(deviceCount: 1)`
 - `CompareAsync_DeviceIds数量越界_应抛出明确参数异常(deviceCount: 6)`
@@ -122,10 +125,11 @@ dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj --f
 ## 疑虑 / 交接提示
 
 1. 服务层当前红灯首先暴露的是“缺少新签名”，因此在生产实现加入新签名之前，看不到更深一层的筛选/异常语义。
-2. 集成测试首次运行出现过一次 `AccessViolationException`；使用 `-m:1` 后可稳定命中真实业务红灯。后续实现代理若遇到同类噪声，建议优先复用串行命令复核。
-3. 任务报告文件位于 `.superpowers/sdd/2026-08-13-device-comparison-page/`，默认被该目录的 `.gitignore` 忽略；本次提交已通过 `git add -f` 显式纳入版本控制。
+2. 集成测试使用 `-m:1` 串行运行，稳定命中真实业务红灯：当前控制器忽略 `deviceIds`，三个边界用例均收到 200 而非 400。
+3. 任务报告文件位于 `.superpowers/sdd/2026-08-13-device-comparison-page/`，默认被该目录的 `.gitignore` 忽略；本次提交通过 `git add -f` 显式纳入版本控制。
 
 ## 提交
 
 - 提交信息：`test: add device comparison backend contract tests`
-- 提交哈希：`d83023d`
+- 提交范围：服务层显式设备筛选契约测试、跨租户隔离测试、控制器参数边界测试及本报告。
+- 提交确认：本报告不写入自引用的精确提交哈希；最终提交哈希由审查包确认。
