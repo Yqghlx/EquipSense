@@ -46,6 +46,8 @@ public class PushNotificationService : IPushNotificationService
     public async Task RegisterSubscriptionAsync(Guid tenantId, Guid userId,
         string endpoint, string p256dh, string auth, string? userAgent = null)
     {
+        EnsureSelfServiceScope(tenantId, userId);
+
         var existing = await _dbContext.PushSubscriptions
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.Endpoint == endpoint);
@@ -85,6 +87,8 @@ public class PushNotificationService : IPushNotificationService
     /// <inheritdoc />
     public async Task UnregisterSubscriptionAsync(Guid userId, string endpoint)
     {
+        EnsureSelfServiceScope(_tenantContext.TenantId, userId);
+
         var sub = await _dbContext.PushSubscriptions
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(s => s.TenantId == _tenantContext.TenantId
@@ -96,6 +100,38 @@ public class PushNotificationService : IPushNotificationService
             _dbContext.PushSubscriptions.Remove(sub);
             await _dbContext.SaveChangesAsync();
             _logger.LogInformation("推送订阅已注销: UserId={UserId}", userId);
+        }
+    }
+
+    /// <summary>
+    /// 校验自助订阅操作只能作用于当前认证用户和当前租户。
+    ///
+    /// 为什么：注册和注销接口接收应用层参数，不能只依赖控制器当前实现传入上下文值；
+    /// 一旦出现新的调用方或参数映射错误，严格拒绝身份缺失/不匹配可以避免跨租户写入和代替其他用户删除订阅。
+    /// 后台发送方法使用显式目标租户和用户，不复用此校验。
+    /// </summary>
+    private void EnsureSelfServiceScope(Guid tenantId, Guid userId)
+    {
+        if (tenantId == Guid.Empty
+            || _tenantContext.TenantId == Guid.Empty
+            || tenantId != _tenantContext.TenantId)
+        {
+            _logger.LogWarning(
+                "推送订阅操作被拒绝：租户上下文不匹配，RequestedTenantId={RequestedTenantId}, CurrentTenantId={CurrentTenantId}",
+                tenantId,
+                _tenantContext.TenantId);
+            throw new UnauthorizedAccessException("只能操作当前租户的推送订阅");
+        }
+
+        if (userId == Guid.Empty
+            || _tenantContext.UserId == Guid.Empty
+            || userId != _tenantContext.UserId)
+        {
+            _logger.LogWarning(
+                "推送订阅操作被拒绝：用户上下文不匹配，RequestedUserId={RequestedUserId}, CurrentUserId={CurrentUserId}",
+                userId,
+                _tenantContext.UserId);
+            throw new UnauthorizedAccessException("只能操作当前用户的推送订阅");
         }
     }
 

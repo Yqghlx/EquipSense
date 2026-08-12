@@ -46,6 +46,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
     public async Task RegisterSubscriptionAsync_应保存订阅到数据库()
     {
         var userId = Guid.NewGuid();
+        _tenantContext.UserId = userId;
 
         await Service.RegisterSubscriptionAsync(
             _tenantId, userId,
@@ -64,6 +65,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
     {
         var userId = Guid.NewGuid();
         var endpoint = "https://fcm.googleapis.com/fcm/send/unreg";
+        _tenantContext.UserId = userId;
 
         await Service.RegisterSubscriptionAsync(_tenantId, userId, endpoint, "p256dh", "auth");
         await Service.UnregisterSubscriptionAsync(userId, endpoint);
@@ -179,7 +181,9 @@ public class PushNotificationServiceTests : IAsyncDisposable
         var user1 = Guid.NewGuid();
         var user2 = Guid.NewGuid();
 
+        _tenantContext.UserId = user1;
         await Service.RegisterSubscriptionAsync(_tenantId, user1, endpoint, "key1", "auth1");
+        _tenantContext.UserId = user2;
         await Service.RegisterSubscriptionAsync(_tenantId, user2, endpoint, "key2", "auth2");
 
         var subs = await _db.PushSubscriptions.IgnoreQueryFilters().ToListAsync();
@@ -191,14 +195,172 @@ public class PushNotificationServiceTests : IAsyncDisposable
     [Fact]
     public async Task UnregisterSubscriptionAsync_不存在的订阅不应抛出异常()
     {
-        var act = () => Service.UnregisterSubscriptionAsync(Guid.NewGuid(), "https://not-exist");
+        var userId = Guid.NewGuid();
+        _tenantContext.UserId = userId;
+
+        var act = () => Service.UnregisterSubscriptionAsync(userId, "https://not-exist");
+        await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// 安全边界：当前用户不能替同租户其他用户注册推送订阅。
+    ///
+    /// 为什么：控制器虽然从租户上下文读取用户 ID，但应用服务是独立的安全边界；
+    /// 未来若新增调用方直接传入错误的 userId，不能让订阅被写入其他用户名下。
+    /// </summary>
+    [Fact]
+    public async Task RegisterSubscriptionAsync_同租户其他用户不得冒用订阅归属()
+    {
+        var currentUserId = Guid.NewGuid();
+        var targetUserId = Guid.NewGuid();
+        _tenantContext.UserId = currentUserId;
+
+        var act = () => Service.RegisterSubscriptionAsync(
+            _tenantId,
+            targetUserId,
+            "https://fcm.googleapis.com/fcm/send/other-user-register",
+            "p256dh",
+            "auth");
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        (await _db.PushSubscriptions.IgnoreQueryFilters().ToListAsync()).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 安全边界：当前用户不能注销同租户其他用户的推送订阅。
+    /// </summary>
+    [Fact]
+    public async Task UnregisterSubscriptionAsync_同租户其他用户不得删除订阅()
+    {
+        var currentUserId = Guid.NewGuid();
+        var targetUserId = Guid.NewGuid();
+        var endpoint = "https://fcm.googleapis.com/fcm/send/other-user-unregister";
+        _db.PushSubscriptions.Add(new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = targetUserId,
+            Endpoint = endpoint,
+            P256dh = "p256dh",
+            Auth = "auth",
+        });
+        await _db.SaveChangesAsync();
+        _tenantContext.UserId = currentUserId;
+
+        var act = () => Service.UnregisterSubscriptionAsync(targetUserId, endpoint);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        var remaining = await _db.PushSubscriptions
+            .IgnoreQueryFilters()
+            .SingleAsync(s => s.Endpoint == endpoint);
+        remaining.UserId.Should().Be(targetUserId);
+    }
+
+    /// <summary>
+    /// 安全边界：自助注册必须绑定当前租户，不能通过参数写入其他租户。
+    /// </summary>
+    [Fact]
+    public async Task RegisterSubscriptionAsync_其他租户不得写入订阅()
+    {
+        var currentUserId = Guid.NewGuid();
+        _tenantContext.UserId = currentUserId;
+        var otherTenantId = Guid.NewGuid();
+
+        var act = () => Service.RegisterSubscriptionAsync(
+            otherTenantId,
+            currentUserId,
+            "https://fcm.googleapis.com/fcm/send/other-tenant-register",
+            "p256dh",
+            "auth");
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        (await _db.PushSubscriptions.IgnoreQueryFilters().ToListAsync()).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 正向边界：当前用户和当前租户匹配时，订阅注册仍然可用。
+    /// </summary>
+    [Fact]
+    public async Task RegisterSubscriptionAsync_当前用户上下文匹配时应成功()
+    {
+        var userId = Guid.NewGuid();
+        _tenantContext.UserId = userId;
+
+        await Service.RegisterSubscriptionAsync(
+            _tenantId,
+            userId,
+            "https://fcm.googleapis.com/fcm/send/current-user-register",
+            "p256dh",
+            "auth");
+
+        (await _db.PushSubscriptions.IgnoreQueryFilters().ToListAsync()).Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// 安全边界：缺少当前用户身份时，不能注册推送订阅。
+    /// </summary>
+    [Fact]
+    public async Task RegisterSubscriptionAsync_用户身份为空时应拒绝()
+    {
+        var act = () => Service.RegisterSubscriptionAsync(
+            _tenantId,
+            Guid.NewGuid(),
+            "https://fcm.googleapis.com/fcm/send/missing-user-context",
+            "p256dh",
+            "auth");
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        (await _db.PushSubscriptions.IgnoreQueryFilters().ToListAsync()).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// 安全边界：缺少当前用户身份时，不能注销推送订阅。
+    /// </summary>
+    [Fact]
+    public async Task UnregisterSubscriptionAsync_用户身份为空时应拒绝()
+    {
+        var userId = Guid.NewGuid();
+        var endpoint = "https://fcm.googleapis.com/fcm/send/missing-user-context-unregister";
+        _db.PushSubscriptions.Add(new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = userId,
+            Endpoint = endpoint,
+            P256dh = "p256dh",
+            Auth = "auth",
+        });
+        await _db.SaveChangesAsync();
+
+        var act = () => Service.UnregisterSubscriptionAsync(userId, endpoint);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        (await _db.PushSubscriptions.IgnoreQueryFilters().ToListAsync()).Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// 后台边界：按显式租户广播推送不应依赖当前 HTTP 用户身份。
+    /// </summary>
+    [Fact]
+    public async Task SendToTenantAsync_显式租户目标不应依赖当前用户上下文()
+    {
+        _db.PushSubscriptions.Add(new PushSubscription
+        {
+            TenantId = _tenantId,
+            UserId = Guid.NewGuid(),
+            Endpoint = "https://fcm.googleapis.com/fcm/send/background-tenant",
+            P256dh = "p256dh",
+            Auth = "auth",
+        });
+        await _db.SaveChangesAsync();
+
+        var act = () => Service.SendToTenantAsync(_tenantId, "标题", "内容");
+
         await act.Should().NotThrowAsync();
     }
 
     /// <summary>
     /// 安全边界：当前租户不能注销其他租户的订阅。
     ///
-    /// Why：后台/应用层查询使用 IgnoreQueryFilters 后，必须补回租户条件；否则只要拿到用户 ID 和 endpoint，
+    /// 为什么：后台/应用层查询使用 IgnoreQueryFilters 后，必须补回租户条件；否则只要拿到用户 ID 和 endpoint，
     /// 就可以删除其他租户的浏览器推送订阅，导致对方失去关键告警通知。
     /// </summary>
     [Fact]
@@ -207,6 +369,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
         var otherTenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
         var endpoint = "https://fcm.googleapis.com/fcm/send/other-tenant-unreg";
+        _tenantContext.UserId = userId;
         _db.PushSubscriptions.Add(new PushSubscription
         {
             TenantId = otherTenantId,
@@ -236,6 +399,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
         var originalUserId = Guid.NewGuid();
         var newUserId = Guid.NewGuid();
         var endpoint = "https://fcm.googleapis.com/fcm/send/other-tenant-register";
+        _tenantContext.UserId = newUserId;
         _db.PushSubscriptions.Add(new PushSubscription
         {
             TenantId = otherTenantId,
@@ -268,7 +432,7 @@ public class PushNotificationServiceTests : IAsyncDisposable
         public Guid TenantId { get; }
         public string IsolationMode { get; } = "shared";
         public bool IsSystemAdmin { get; } = false;
-        public Guid UserId { get; } = Guid.NewGuid();
+        public Guid UserId { get; set; }
     }
 
     public async ValueTask DisposeAsync() => await _db.DisposeAsync();
