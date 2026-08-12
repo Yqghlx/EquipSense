@@ -83,6 +83,38 @@ const mockedUseDeviceTemplates = vi.mocked(useDeviceTemplates);
 const mockedUseAlertRules = vi.mocked(useAlertRules);
 const mockedUsePermission = vi.mocked(usePermission);
 
+interface QueryOptionsContract {
+  enabled?: boolean;
+}
+
+interface ComparisonQueryParamsContract {
+  deviceType?: string;
+  metric?: string;
+  hours?: number;
+  deviceIds?: string[];
+  enabled?: boolean;
+}
+
+/** 只记录真正启用的查询，避免把 Hook 是否调用误当成网络执行。 */
+const queryExecutions: string[] = [];
+
+function isComparisonQueryEnabled(
+  params?: ComparisonQueryParamsContract,
+  options?: QueryOptionsContract,
+): boolean {
+  if (options?.enabled !== undefined) return options.enabled;
+  if (params?.enabled !== undefined) return params.enabled;
+
+  const uniqueDeviceIds = [...new Set(params?.deviceIds ?? [])];
+  return Boolean(
+    params?.deviceType
+      && params.metric
+      && params.hours
+      && uniqueDeviceIds.length >= 2
+      && uniqueDeviceIds.length <= 5,
+  );
+}
+
 const pumpDevices: Device[] = [
   {
     id: '11111111-1111-1111-1111-111111111111',
@@ -289,19 +321,29 @@ async function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  queryExecutions.length = 0;
   mockedUsePermission.mockReturnValue(allowReadPermission);
-  mockedUseDeviceTemplates.mockReturnValue({
-    data: mockTemplates,
-    isLoading: false,
-    isError: false,
-  } as never);
-  mockedUseAlertRules.mockReturnValue({
-    data: mockAlertRules,
-    isLoading: false,
-    isError: false,
-  } as never);
+  mockedUseDeviceTemplates.mockImplementation((_industry?: string, options?: QueryOptionsContract) => {
+    const enabled = options?.enabled !== false;
+    if (enabled) queryExecutions.push('device-templates');
+    return {
+      data: enabled ? mockTemplates : undefined,
+      isLoading: false,
+      isError: false,
+    } as never;
+  });
+  mockedUseAlertRules.mockImplementation((_query, options?: QueryOptionsContract) => {
+    const enabled = options?.enabled !== false;
+    if (enabled) queryExecutions.push('alert-rules');
+    return {
+      data: enabled ? mockAlertRules : undefined,
+      isLoading: false,
+      isError: false,
+    } as never;
+  });
   mockedUseDevices.mockImplementation((query: { deviceType?: string; keyword?: string }, options?: { enabled?: boolean }) => {
     const enabled = options?.enabled ?? true;
+    if (enabled) queryExecutions.push('devices');
     if (!enabled) {
       return {
         data: undefined,
@@ -331,13 +373,19 @@ beforeEach(() => {
       isError: false,
     } as never;
   });
-  mockedUseDeviceComparison.mockReturnValue({
-    data: mockComparisonResult,
-    isLoading: false,
-    isError: false,
-    isFetching: false,
-    refetch: vi.fn(),
-  } as never);
+  mockedUseDeviceComparison.mockImplementation((
+    params: ComparisonQueryParamsContract,
+    options?: QueryOptionsContract,
+  ) => {
+    if (isComparisonQueryEnabled(params, options)) queryExecutions.push('device-comparison');
+    return {
+      data: mockComparisonResult,
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never;
+  });
 });
 
 describe('DeviceComparisonPage 英文契约', () => {
@@ -354,8 +402,11 @@ describe('DeviceComparisonPage 英文契约', () => {
     expect(screen.getByLabelText('Window')).toHaveDisplayValue('24 hours');
     expect(screen.getByText('Group mean')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Device' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Code' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Average' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Latest' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Minimum' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Maximum' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Samples' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Z-Score' })).toBeInTheDocument();
   });
@@ -411,19 +462,22 @@ describe('DeviceComparisonPage 英文契约', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading comparison');
   });
 
-  it('首次加载失败时应显示失败提示和重试入口', async () => {
+  it('首次加载失败时应显示失败提示并可点击重试', async () => {
+    const user = userEvent.setup();
+    const refetch = vi.fn();
     mockedUseDeviceComparison.mockReturnValue({
       data: undefined,
       isLoading: false,
       isError: true,
       isFetching: false,
-      refetch: vi.fn(),
+      refetch,
     } as never);
 
     await renderPage();
 
     expect(screen.getByRole('alert')).toHaveTextContent('Failed to load comparison');
-    expect(screen.getByRole('button', { name: 'Retry comparison' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Retry comparison' }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it('有缓存结果时刷新失败应保留旧结果并提示缓存错误', async () => {
@@ -471,7 +525,7 @@ describe('DeviceComparisonPage 英文契约', () => {
     expect(screen.getAllByText('Outlier').length).toBeGreaterThan(0);
   });
 
-  it('无权限时应显示明确提示并阻止设备、规则和对比查询', async () => {
+  it('无权限时应显示明确提示并阻止设备、规则和对比查询执行', async () => {
     mockedUsePermission.mockReturnValue({
       ...allowReadPermission,
       canRead: false,
@@ -480,8 +534,6 @@ describe('DeviceComparisonPage 英文契约', () => {
     await renderPage();
 
     expect(screen.getByRole('alert')).toHaveTextContent('You do not have permission to view device comparison.');
-    expect(mockedUseDevices).not.toHaveBeenCalled();
-    expect(mockedUseAlertRules).not.toHaveBeenCalled();
-    expect(mockedUseDeviceComparison).not.toHaveBeenCalled();
+    expect(queryExecutions).toEqual([]);
   });
 });
