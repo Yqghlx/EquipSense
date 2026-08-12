@@ -88,6 +88,9 @@ afterEach(() => {
   // 恢复 Notification
   globalThis.Notification = originalNotification;
 
+  // 恢复测试期间创建的 console 等 spy，避免断言失败时污染后续测试。
+  vi.restoreAllMocks();
+
   // 恢复 navigator.serviceWorker（删除 mock 属性）
   delete (window.navigator as unknown as Record<string, unknown>).serviceWorker;
 
@@ -164,7 +167,6 @@ describe('usePushNotifications — subscribe', () => {
     expect(success!).toBe(false);
     expect(mockedRegister).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith('通知权限已被拒绝，请在浏览器设置中手动开启');
-    warnSpy.mockRestore();
   });
 
   it('注册成功时应更新订阅状态', async () => {

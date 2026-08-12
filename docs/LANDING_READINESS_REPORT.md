@@ -3,7 +3,7 @@
 > 基线生成时间：2026-06-14（历史基线）
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-13）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）；同时完成推送订阅、通知偏好和知识规则导出的当前用户/租户纵深隔离。按仓库命令实测，本轮设备对比聚焦后端单测 22/22、聚焦集成测试 12/12、全量后端单测 1591/1591、默认后端集成 183 总数（177 通过、6 跳过、0 失败）、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1105 个键完全对齐，Vitest 85 个测试文件/489 个测试全部通过，生产构建 precache 133 entries，并额外暴露 1 条 PWA `inlineDynamicImports` 弃用 warning。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
+> **当前状态说明（2026-08-13）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）；同时完成推送订阅、通知偏好和知识规则导出的当前用户/租户纵深隔离，并修复 Vite 8 下 PWA Service Worker 构建的 `inlineDynamicImports` 弃用警告。按仓库命令实测，本轮设备对比聚焦后端单测 22/22、聚焦集成测试 12/12、全量后端单测 1591/1591、默认后端集成 183 总数（177 通过、6 跳过、0 失败）、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1105 个键完全对齐，Vitest 85 个测试文件/489 个测试全部通过，生产构建 precache 133 entries 且无 PWA 弃用警告。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
 
 > **本轮发布门禁补充（2026-08-13）**：`production-readiness.sh` 已支持按顺序叠加基础 Compose 与生产 overlay，并接入 `deploy-production.sh` 的部署前静态检查、目标版本/同 tag/回滚后的全量运行态检查；目标版本只有在应用探针和全量 readiness 均通过后才写入版本记录，回滚 readiness 失败保持严重失败。`bash tests/scripts/production-scripts-test.sh readiness|deploy|setup|ci|all`、Shell 语法检查和差异检查均通过。真实工作区复核仍以非零退出报告 27 个问题，未修改 `docker/.env`。
 
@@ -144,12 +144,12 @@
 | 前端单元测试 | ✅ 85 个测试文件、489/489 通过 |
 | E2E 测试 | ✅ 隔离 Production 三镜像 433 个场景：432 通过、1 个架构性条件跳过、0 失败；main/tag 已接入 Production 全量门禁 |
 | i18n 完整性 | ✅ 1105 个键在中英文资源中完全对齐 |
-| 生产构建 | ✅ PWA SW 产出 + precache 133 entries + 边缘网关镜像可复现构建；本轮前端构建额外出现 1 条 `inlineDynamicImports` 弃用 warning |
+| 生产构建 | ✅ PWA SW 产出 + precache 133 entries + 边缘网关镜像可复现构建；已修复 Vite 8 下 PWA `inlineDynamicImports` 弃用 warning |
 | 生产配置 | ✅ appsettings.Production.json |
 | 依赖审计 | ✅ NuGet 全解决方案无已知漏洞；npm 全量审计 0 漏洞；审计服务失败会阻断 |
 | 生产脚本/启动门禁 | ✅ 三镜像发布/滚动回滚/蓝绿切换、环境校验、独立凭据与 TLS/MQTT 证书 fail-closed 检查、证书生命周期指标/告警契约、应用种子账户启动校验、边缘网关租户/持久化路径校验、Production runtime smoke 与默认全量 E2E 门禁、备份、恢复和 CI 契约行为测试通过；本轮新增有序 Compose overlay、部署前静态 readiness、目标版本/同 tag/回滚后全量运行态 readiness 及失败保留旧版本记录的行为测试；本机隔离 smoke 已用当前提交本地构建的三镜像和固定 digest 基础层通过，固定 digest 的 CI runner 仍需按发布流水线验证 |
 
-> 2026-08-13 Task 5 分层验证摘要：`dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests"` 22/22；`dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests"` 12/12；`dotnet test tests/EquipAI.Tests.Unit` 1591/1591；`dotnet test tests/EquipAI.Tests.Integration` 177 通过/6 跳过/0 失败，共 183；`dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false` 0 warning；`bash tests/scripts/production-scripts-test.sh` 通过；前端 `check:i18n`、TypeScript、ESLint、全量 Vitest 和生产构建全部 0 退出。E2E 433 条为历史隔离 Production 基线，本轮未重跑。
+> 2026-08-13 Task 5 分层验证摘要：`dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~DeviceComparisonServiceTests"` 22/22；`dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceComparisonControllerTests"` 12/12；`dotnet test tests/EquipAI.Tests.Unit` 1591/1591；`dotnet test tests/EquipAI.Tests.Integration` 177 通过/6 跳过/0 失败，共 183；`dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false` 0 warning；`bash tests/scripts/production-scripts-test.sh` 通过；前端 `check:i18n`、TypeScript、ESLint、全量 Vitest 和生产构建全部 0 退出，PWA Service Worker 使用 IIFE 格式以消除 Vite 8 弃用警告。E2E 433 条为历史隔离 Production 基线，本轮未重跑。
 
 > 本轮安全边界复核提交：`4210c31` 将推送订阅注册/注销绑定当前用户和租户，`cf81c57` 将通知偏好读写绑定当前用户和租户，`c2acbd1` 将知识规则 JSON/CSV 导出绑定显式租户参数；各项均有负向回归测试和独立审查证据。
 
