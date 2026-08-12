@@ -41,7 +41,10 @@ public class AlertQueryService
     public async Task<PagedResult<AlertDto>> ListAsync(
         PagedQuery query, string? status = null, string? severity = null, Guid? deviceId = null, CancellationToken ct = default)
     {
-        var alerts = _dbContext.Alerts.AsQueryable();
+        // 全局过滤器是纵深防御，业务查询仍需显式绑定租户，避免上下文配置异常时跨租户泄露告警。
+        var alerts = _dbContext.Alerts
+            .Where(a => a.TenantId == _tenantContext.TenantId)
+            .AsQueryable();
 
         if (deviceId.HasValue)
             alerts = alerts.Where(a => a.DeviceId == deviceId.Value);
@@ -74,7 +77,11 @@ public class AlertQueryService
     /// </summary>
     public async Task<AlertDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var alert = await _dbContext.Alerts.FindAsync(new object?[] { id }, ct);
+        // FindAsync 可能命中已跟踪的其他租户实体，因此这里必须使用带租户条件的查询。
+        var alert = await _dbContext.Alerts
+            .FirstOrDefaultAsync(
+                a => a.Id == id && a.TenantId == _tenantContext.TenantId,
+                ct);
         return alert is null ? null : _mapper.Map<AlertDto>(alert);
     }
 
@@ -83,7 +90,11 @@ public class AlertQueryService
     /// </summary>
     public async Task<(AlertDto? Alert, string? Error)> AcknowledgeAsync(Guid id, string? note, CancellationToken ct = default)
     {
-        var alert = await _dbContext.Alerts.FindAsync(new object?[] { id }, ct);
+        // 状态变更同样必须先验证租户归属，避免越权确认告警。
+        var alert = await _dbContext.Alerts
+            .FirstOrDefaultAsync(
+                a => a.Id == id && a.TenantId == _tenantContext.TenantId,
+                ct);
         if (alert is null)
             return (null, "告警不存在");
 
@@ -117,7 +128,11 @@ public class AlertQueryService
     /// </summary>
     public async Task<(AlertDto? Alert, string? Error)> ResolveAsync(Guid id, string resolution, CancellationToken ct = default)
     {
-        var alert = await _dbContext.Alerts.FindAsync(new object?[] { id }, ct);
+        // 状态变更同样必须先验证租户归属，避免越权解决告警。
+        var alert = await _dbContext.Alerts
+            .FirstOrDefaultAsync(
+                a => a.Id == id && a.TenantId == _tenantContext.TenantId,
+                ct);
         if (alert is null)
             return (null, "告警不存在");
 
