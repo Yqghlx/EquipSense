@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Reflection;
 using EquipAI.Application.Analysis;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -188,6 +189,108 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
         var act = () => service.CompareAsync(_tenantId, "air_compressor", "temperature", hours);
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>
+    /// 未指定 deviceIds 时应保持现有"同类型全量对比"语义，避免新增可选参数后破坏旧调用方。
+    /// </summary>
+    [Fact]
+    public async Task CompareAsync_未指定DeviceIds_保留同类型全量行为()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        var d1 = await SeedDeviceAsync(db, _tenantId, "AC-001", "air_compressor", "1#");
+        var d2 = await SeedDeviceAsync(db, _tenantId, "AC-002", "air_compressor", "2#");
+        var d3 = await SeedDeviceAsync(db, _tenantId, "AC-003", "air_compressor", "3#");
+        await SeedDeviceAsync(db, _tenantId, "PM-001", "pump", "泵-1#");
+
+        await SeedConstantTelemetryAsync(db, _tenantId, d1, "temperature", 4, 60.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, d2, "temperature", 4, 61.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, d3, "temperature", 4, 62.0);
+
+        var result = await CompareAsyncWithOptionalDeviceIds(service, "air_compressor", "temperature");
+
+        result.Devices.Should().HaveCount(3, "不传 deviceIds 时应继续返回该类型全部设备");
+        result.Devices.Should().OnlyContain(device => device.DeviceId == d1 || device.DeviceId == d2 || device.DeviceId == d3);
+    }
+
+    /// <summary>
+    /// 指定 deviceIds 后应只返回被选择的同类型设备，避免页面勾选 2 台却混入未选设备。
+    /// </summary>
+    [Fact]
+    public async Task CompareAsync_指定2个设备ID_仅返回选定设备()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        var d1 = await SeedDeviceAsync(db, _tenantId, "AC-001", "air_compressor", "1#");
+        var d2 = await SeedDeviceAsync(db, _tenantId, "AC-002", "air_compressor", "2#");
+        var d3 = await SeedDeviceAsync(db, _tenantId, "AC-003", "air_compressor", "3#");
+
+        await SeedConstantTelemetryAsync(db, _tenantId, d1, "temperature", 4, 60.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, d2, "temperature", 4, 61.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, d3, "temperature", 4, 62.0);
+
+        var result = await CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [d1, d3]);
+
+        result.Devices.Select(device => device.DeviceId)
+            .Should()
+            .BeEquivalentTo([d1, d3], "指定 deviceIds 后结果集应收缩为被勾选设备");
+    }
+
+    /// <summary>
+    /// 同类型过滤仍是硬边界：即使调用方把其他类型设备 ID 一并传入，结果中也不能混入不同类型设备。
+    /// </summary>
+    [Fact]
+    public async Task CompareAsync_指定列表包含其他类型设备_不会进入结果()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        var d1 = await SeedDeviceAsync(db, _tenantId, "AC-001", "air_compressor", "1#");
+        var d2 = await SeedDeviceAsync(db, _tenantId, "AC-002", "air_compressor", "2#");
+        var otherType = await SeedDeviceAsync(db, _tenantId, "PM-001", "pump", "泵-1#");
+
+        await SeedConstantTelemetryAsync(db, _tenantId, d1, "temperature", 4, 60.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, d2, "temperature", 4, 61.0);
+        await SeedConstantTelemetryAsync(db, _tenantId, otherType, "temperature", 4, 90.0);
+
+        var result = await CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: [d1, d2, otherType]);
+
+        result.Devices.Select(device => device.DeviceId)
+            .Should()
+            .BeEquivalentTo([d1, d2], "不同类型设备即使被传入也不应进入 air_compressor 的对比结果");
+    }
+
+    /// <summary>
+    /// 显式设备筛选至少需要 2 台且最多允许 5 台，否则前端筛选器和后端计算范围会失去意义。
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(6)]
+    public async Task CompareAsync_DeviceIds数量越界_应抛出明确参数异常(int deviceCount)
+    {
+        var service = CreateService(GetDb());
+        var deviceIds = Enumerable.Range(0, deviceCount).Select(_ => Guid.NewGuid()).ToArray();
+
+        var act = () => CompareAsyncWithOptionalDeviceIds(
+            service,
+            "air_compressor",
+            "temperature",
+            deviceIds: deviceIds);
+
+        var exception = await act.Should().ThrowAsync<ArgumentException>();
+        exception.Which.ParamName.Should().Be("deviceIds");
     }
 
     /// <summary>
@@ -482,6 +585,45 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
     // =========================================================================
     // 测试辅助类
     // =========================================================================
+
+    private async Task<DeviceComparisonResult> CompareAsyncWithOptionalDeviceIds(
+        DeviceComparisonService service,
+        string deviceType,
+        string metric,
+        int hours = 24,
+        IReadOnlyCollection<Guid>? deviceIds = null,
+        CancellationToken ct = default)
+    {
+        var method = typeof(DeviceComparisonService).GetMethod(
+            nameof(DeviceComparisonService.CompareAsync),
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types:
+            [
+                typeof(Guid),
+                typeof(string),
+                typeof(string),
+                typeof(int),
+                typeof(IReadOnlyCollection<Guid>),
+                typeof(CancellationToken)
+            ],
+            modifiers: null);
+
+        if (method is null)
+        {
+            if (deviceIds is null)
+            {
+                return await service.CompareAsync(_tenantId, deviceType, metric, hours, ct);
+            }
+
+            throw new Xunit.Sdk.XunitException(
+                "DeviceComparisonService.CompareAsync 尚未提供 deviceIds 参数签名，无法验证显式设备筛选契约。");
+        }
+
+        var invocation = method.Invoke(service, [_tenantId, deviceType, metric, hours, deviceIds, ct]);
+        invocation.Should().BeAssignableTo<Task<DeviceComparisonResult>>();
+        return await (Task<DeviceComparisonResult>)invocation!;
+    }
 
     private class TestTenantContext : ITenantContext
     {
