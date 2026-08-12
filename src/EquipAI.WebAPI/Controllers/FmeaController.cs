@@ -70,8 +70,7 @@ public class FmeaController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<FmeaEntryResponse>> GetById(Guid id)
     {
-        var (items, _) = await _fmeaService.GetEntriesAsync(1, 1);
-        var entry = items.FirstOrDefault(e => e.Id == id);
+        var entry = await _fmeaService.GetByIdAsync(id);
         if (entry is null) return NotFound();
         return Ok(entry);
     }

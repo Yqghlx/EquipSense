@@ -71,6 +71,20 @@ public class FmeaService
     }
 
     /// <summary>
+    /// 按 ID 查询单个 FMEA 条目，并显式限定当前租户。
+    /// 详情查询不能复用分页列表的第一页，否则排序靠后的合法条目会被误判为不存在。
+    /// </summary>
+    /// <param name="id">FMEA 条目 ID。</param>
+    /// <returns>当前租户可见的条目；不存在或不属于当前租户时返回 null。</returns>
+    public async Task<FmeaEntryResponse?> GetByIdAsync(Guid id)
+    {
+        var entry = await _db.FmeaLibrary
+            .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == _tenantContext.TenantId);
+
+        return entry is null ? null : MapToResponse(entry);
+    }
+
+    /// <summary>
     /// 创建 FMEA 条目
     /// </summary>
     public async Task<FmeaEntryResponse> CreateAsync(CreateFmeaEntryRequest request)
