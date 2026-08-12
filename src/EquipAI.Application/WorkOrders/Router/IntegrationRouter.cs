@@ -53,7 +53,9 @@ public class IntegrationRouter
 
         // 获取工单信息（标题、优先级）用于推送内容
         var workOrder = await db.UnfilteredSet<WorkOrder>()
-            .FirstOrDefaultAsync(wo => wo.Id == workOrderId, ct);
+            .FirstOrDefaultAsync(
+                wo => wo.Id == workOrderId && wo.TenantId == tenantId,
+                ct);
         if (workOrder == null)
         {
             _logger.LogWarning("工单不存在，跳过集成路由推送: {WorkOrderId}", workOrderId);

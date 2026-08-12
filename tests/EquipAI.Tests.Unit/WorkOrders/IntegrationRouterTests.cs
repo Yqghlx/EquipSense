@@ -168,6 +168,64 @@ public class IntegrationRouterTests : IDisposable
     }
 
     [Fact]
+    public async Task RouteCreatedAsync_传入租户与工单租户不一致_不应推送()
+    {
+        // Arrange：在同一数据库中准备另一个租户的工单，模拟事件租户与资源租户不一致。
+        var otherTenantId = Guid.NewGuid();
+        var otherWorkOrderId = Guid.NewGuid();
+        using (var seedScope = _scopeFactory.CreateScope())
+        {
+            var seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            seedDb.Set<Core.Entities.Tenant>().Add(new Core.Entities.Tenant
+            {
+                Id = otherTenantId,
+                Name = "其他租户",
+                Slug = "other-tenant",
+                Settings = "{}"
+            });
+            seedDb.Set<WorkOrder>().Add(new WorkOrder
+            {
+                Id = otherWorkOrderId,
+                TenantId = otherTenantId,
+                Title = "不应被推送的其他租户工单",
+                Priority = WorkOrderPriority.Critical,
+                Status = WorkOrderStatus.PendingDispatch,
+                Type = WorkOrderType.Corrective,
+                DeviceId = Guid.NewGuid()
+            });
+            await seedDb.SaveChangesAsync();
+        }
+
+        var dingTalkMock = new Mock<IWorkOrderIntegration>();
+        dingTalkMock.Setup(d => d.IntegrationType).Returns("dingtalk");
+        dingTalkMock.Setup(d => d.PushCreatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("should-not-send");
+
+        var router = CreateRouter([dingTalkMock.Object]);
+
+        // Act：使用租户 A 的事件上下文请求路由租户 B 的工单。
+        await router.RouteCreatedAsync(_tenantId, otherWorkOrderId, CancellationToken.None);
+
+        // Assert：跨租户资源必须被视为不存在，不能泄露标题或创建错误租户的推送日志。
+        dingTalkMock.Verify(d => d.PushCreatedAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        using var verifyScope = _scopeFactory.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var pushLogs = await verifyDb.Set<IntegrationPushLog>()
+            .IgnoreQueryFilters()
+            .Where(log => log.WorkOrderId == otherWorkOrderId)
+            .ToListAsync();
+        pushLogs.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task RouteCreatedAsync_当所有集成禁用时_不应调用任何推送()
     {
         // Arrange — 创建一个所有集成都禁用的租户
