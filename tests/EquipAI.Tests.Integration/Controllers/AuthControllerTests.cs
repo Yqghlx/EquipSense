@@ -3,15 +3,18 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using EquipAI.Application.DTOs.Auth;
+using EquipAI.Application.Security;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
+using EquipAI.Infrastructure.Cache;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
 using EquipAI.Tests.Integration.Infrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using OtpNet;
 
 namespace EquipAI.Tests.Integration.Controllers;
 
@@ -243,5 +246,186 @@ public class AuthControllerTests
             response.StatusCode.Should().Be(HttpStatusCode.OK,
                 "Cookie-only 刷新是前端主动续期和会话恢复的实际调用方式");
         }
+    }
+
+    /// <summary>
+    /// 通过完整 HTTP 管线验证恢复码的一次性消费、重新生成失效旧码、审计脱敏和响应禁止缓存。
+    /// </summary>
+    [Fact]
+    public async Task MfaRecoveryCodes_完整Http流程_应一次性消费并使重新生成前的旧码失效()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+        var tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var userId = Guid.NewGuid();
+        var username = $"mfa-recovery-http-{Guid.NewGuid():N}";
+        const string password = "MfaRecovery@123";
+        const string totpSecret = "JBSWY3DPEHPK3PXP";
+        var oldRecoveryCodes = MfaRecoveryCodeService.Generate();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var protector = scope.ServiceProvider.GetRequiredService<ITotpSecretProtector>();
+            db.Users.Add(new User
+            {
+                Id = userId,
+                TenantId = tenantId,
+                Username = username,
+                PasswordHash = PasswordHasher.HashPassword(password),
+                DisplayName = username,
+                Role = UserRole.Technician,
+                IsActive = true,
+                MustChangePassword = false,
+                MfaEnabled = true,
+                TotpSecret = protector.Protect(totpSecret),
+                MfaRecoveryCodes = oldRecoveryCodes.SerializedHashes,
+                Language = "zh-CN",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            var firstLogin = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest
+            {
+                Username = username,
+                Password = password,
+            });
+            firstLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+            var firstLoginResult = await firstLogin.Content.ReadFromJsonAsync<AuthResponse>();
+            firstLoginResult.Should().NotBeNull();
+            firstLoginResult!.MfaRequired.Should().BeTrue();
+            firstLoginResult.MfaChallengeToken.Should().NotBeNullOrWhiteSpace();
+
+            var firstVerify = await client.PostAsJsonAsync("/api/v1/auth/mfa/verify", new
+            {
+                challengeToken = firstLoginResult.MfaChallengeToken,
+                totpCode = oldRecoveryCodes.Codes[0],
+            });
+            firstVerify.StatusCode.Should().Be(HttpStatusCode.OK);
+            ShouldNotCache(firstVerify);
+            var firstAuth = await firstVerify.Content.ReadFromJsonAsync<AuthResponse>();
+            firstAuth.Should().NotBeNull();
+            firstAuth!.AccessToken.Should().NotBeNullOrWhiteSpace();
+
+            var repeatedLogin = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest
+            {
+                Username = username,
+                Password = password,
+            });
+            repeatedLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+            var repeatedLoginResult = await repeatedLogin.Content.ReadFromJsonAsync<AuthResponse>();
+            repeatedLoginResult.Should().NotBeNull();
+
+            var repeatedVerify = await client.PostAsJsonAsync("/api/v1/auth/mfa/verify", new
+            {
+                challengeToken = repeatedLoginResult!.MfaChallengeToken,
+                totpCode = oldRecoveryCodes.Codes[0],
+            });
+            repeatedVerify.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", firstAuth.AccessToken);
+            var currentTotpCode = new Totp(Base32Encoding.ToBytes(totpSecret)).ComputeTotp();
+            var regenerate = await client.PostAsJsonAsync(
+                "/api/v1/auth/mfa/recovery-codes/regenerate",
+                new { totpCode = currentTotpCode });
+            regenerate.StatusCode.Should().Be(HttpStatusCode.OK);
+            ShouldNotCache(regenerate);
+            var regenerated = await regenerate.Content.ReadFromJsonAsync<MfaRecoveryCodesResponse>();
+            regenerated.Should().NotBeNull();
+            regenerated!.RecoveryCodes.Should().HaveCount(8);
+            regenerated.RecoveryCodes.Should().NotContain(oldRecoveryCodes.Codes);
+
+            client.DefaultRequestHeaders.Authorization = null;
+            var oldCodeLogin = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest
+            {
+                Username = username,
+                Password = password,
+            });
+            oldCodeLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+            var oldCodeLoginResult = await oldCodeLogin.Content.ReadFromJsonAsync<AuthResponse>();
+            oldCodeLoginResult.Should().NotBeNull();
+
+            var oldCodeVerify = await client.PostAsJsonAsync("/api/v1/auth/mfa/verify", new
+            {
+                challengeToken = oldCodeLoginResult!.MfaChallengeToken,
+                totpCode = oldRecoveryCodes.Codes[1],
+            });
+            oldCodeVerify.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+            var newCodeLogin = await client.PostAsJsonAsync("/api/v1/auth/login", new LoginRequest
+            {
+                Username = username,
+                Password = password,
+            });
+            newCodeLogin.StatusCode.Should().Be(HttpStatusCode.OK);
+            var newCodeLoginResult = await newCodeLogin.Content.ReadFromJsonAsync<AuthResponse>();
+            newCodeLoginResult.Should().NotBeNull();
+
+            var newCodeVerify = await client.PostAsJsonAsync("/api/v1/auth/mfa/verify", new
+            {
+                challengeToken = newCodeLoginResult!.MfaChallengeToken,
+                totpCode = regenerated.RecoveryCodes[0],
+            });
+            newCodeVerify.StatusCode.Should().Be(HttpStatusCode.OK);
+            ShouldNotCache(newCodeVerify);
+
+            using var auditScope = _factory.Services.CreateScope();
+            var auditDb = auditScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var recoveryAudits = await auditDb.Set<AuditLog>()
+                .IgnoreQueryFilters()
+                .Where(audit => audit.TenantId == tenantId
+                    && audit.ResourceId == userId.ToString()
+                    && (audit.Action == "AuthMfaRecoveryCodeUsed"
+                        || audit.Action == "MfaRecoveryCodesRegenerated"))
+                .ToListAsync();
+
+            recoveryAudits.Count(audit => audit.Action == "AuthMfaRecoveryCodeUsed")
+                .Should().Be(2);
+            recoveryAudits.Count(audit => audit.Action == "MfaRecoveryCodesRegenerated")
+                .Should().Be(1);
+            recoveryAudits.Should().OnlyContain(audit =>
+                audit.TenantId == tenantId
+                && audit.ResourceType == "User"
+                && audit.ResourceId == userId.ToString());
+            recoveryAudits.Select(audit => audit.Description)
+                .Should().OnlyContain(description =>
+                    !oldRecoveryCodes.Codes.Any(description.Contains)
+                    && !regenerated.RecoveryCodes.Any(description.Contains)
+                    && !description.Contains(currentTotpCode, StringComparison.Ordinal));
+        }
+        finally
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var redis = scope.ServiceProvider.GetRequiredService<RedisService>();
+            var user = await db.Users.IgnoreQueryFilters()
+                .SingleOrDefaultAsync(candidate => candidate.Id == userId);
+            if (user is not null)
+            {
+                db.Users.Remove(user);
+            }
+
+            var audits = await db.Set<AuditLog>()
+                .IgnoreQueryFilters()
+                .Where(audit => audit.TenantId == tenantId
+                    && audit.ResourceId == userId.ToString())
+                .ToListAsync();
+            db.Set<AuditLog>().RemoveRange(audits);
+            await db.SaveChangesAsync();
+            await redis.RemoveRefreshTokenAsync(userId);
+        }
+    }
+
+    /// <summary>
+    /// 断言敏感认证响应明确要求浏览器和中间代理不缓存。
+    /// </summary>
+    private static void ShouldNotCache(HttpResponseMessage response)
+    {
+        response.Headers.TryGetValues("Cache-Control", out var cacheControlValues)
+            .Should().BeTrue();
+        cacheControlValues.Should().Contain(value =>
+            value.Contains("no-store", StringComparison.OrdinalIgnoreCase));
     }
 }

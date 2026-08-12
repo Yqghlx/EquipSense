@@ -3762,6 +3762,17 @@ test_user_guide_documents_template_onboarding() {
   assert_contains "$guide_content" "设备接入向导"
 }
 
+test_ops_runbook_documents_mfa_recovery_rehearsal_safety() {
+  local runbook_content
+  runbook_content="$(cat "$PROJECT_ROOT/docs/OPS_RUNBOOK.md")"
+  assert_contains "$runbook_content" "专用测试账号"
+  assert_contains "$runbook_content" "Cache-Control: no-store"
+  assert_contains "$runbook_content" "代理、浏览器缓存"
+  assert_contains "$runbook_content" "锁竞争"
+  assert_contains "$runbook_content" "自动化测试"
+  assert_contains "$runbook_content" "不得记录验证码/恢复码"
+}
+
 case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
@@ -3808,6 +3819,7 @@ case "${1:-all}" in
     test_setup_mosquitto_does_not_expose_password_in_process_arguments
     test_setup_mosquitto_rejects_password_file_symlink
     test_user_guide_documents_template_onboarding
+    test_ops_runbook_documents_mfa_recovery_rehearsal_safety
     ;;
   readiness)
     test_validate_env_rejects_demo_data_in_production_without_isolated_flag
@@ -4019,6 +4031,7 @@ case "${1:-all}" in
     test_frontend_auth_session_clears_sensitive_state
     test_development_internal_ports_bind_loopback_by_default
     test_user_guide_documents_template_onboarding
+    test_ops_runbook_documents_mfa_recovery_rehearsal_safety
     ;;
   *)
     fail "用法：$0 [setup|readiness|backup|restore|deploy|ci|all]"

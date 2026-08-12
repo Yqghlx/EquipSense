@@ -53,4 +53,37 @@ public sealed class AuthEndpointSecurityTests
             "刷新成功响应必须出现在 Swagger/OpenAPI 契约中");
         response!.Type.Should().Be(typeof(AuthResponse));
     }
+
+    /// <summary>
+    /// MFA 验证和恢复码响应包含令牌或明文恢复码，禁止被浏览器、代理和网关缓存。
+    /// </summary>
+    [Fact]
+    public void 敏感Mfa端点_必须禁止响应缓存()
+    {
+        var methodNames = new[]
+        {
+            nameof(AuthController.VerifyMfa),
+            nameof(AuthController.SetupMfaEnrollment),
+            nameof(AuthController.ConfirmMfaEnrollment),
+            nameof(AuthController.SetupMfa),
+            nameof(AuthController.ConfirmMfa),
+            nameof(AuthController.RegenerateMfaRecoveryCodes),
+        };
+
+        foreach (var methodName in methodNames)
+        {
+            var method = typeof(AuthController).GetMethod(
+                methodName,
+                BindingFlags.Public | BindingFlags.Instance);
+
+            method.Should().NotBeNull();
+            var attribute = method!.GetCustomAttribute<ResponseCacheAttribute>();
+
+            attribute.Should().NotBeNull($"{methodName} 返回敏感认证数据，必须禁止缓存");
+            attribute!.NoStore.Should().BeTrue($"{methodName} 必须设置 NoStore");
+            attribute.Location.Should().Be(
+                ResponseCacheLocation.None,
+                $"{methodName} 不应允许任何缓存位置");
+        }
+    }
 }

@@ -214,6 +214,12 @@ public class AuthServiceTests : IAsyncDisposable
             persistedUser.MfaRecoveryCodes,
             recoveryCodes.Codes[0],
             out _).Should().BeFalse();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>() as StubAuditLogService;
+        var recoveryAudit = audit!.Records.Single(record => record.Action == "AuthMfaRecoveryCodeUsed");
+        recoveryAudit.TenantId.Should().Be(_tenantId);
+        recoveryAudit.ResourceType.Should().Be("User");
+        recoveryAudit.ResourceId.Should().Be(user.Id.ToString());
+        recoveryAudit.Description.Should().NotContain(recoveryCodes.Codes[0]);
         _stubRedis.AtomicGetAndDeleteCount.Should().Be(1);
         _lockProvider.AcquireCount.Should().Be(2,
             "恢复码消费和令牌签发分别需要各自的用户级锁");
@@ -244,6 +250,88 @@ public class AuthServiceTests : IAsyncDisposable
             .Should().BeFalse();
         MfaRecoveryCodeService.TryConsume(user.MfaRecoveryCodes, result.RecoveryCodes[0], out _)
             .Should().BeTrue();
+
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>() as StubAuditLogService;
+        var regenerationAudit = audit!.Records.Single(record => record.Action == "MfaRecoveryCodesRegenerated");
+        regenerationAudit.TenantId.Should().Be(_tenantId);
+        regenerationAudit.ResourceType.Should().Be("User");
+        regenerationAudit.ResourceId.Should().Be(user.Id.ToString());
+        regenerationAudit.Description.Should().NotContain(oldCodes.Codes[0]);
+        regenerationAudit.Description.Should().NotContain(result.RecoveryCodes[0]);
+    }
+
+    [Fact]
+    public async Task RegenerateMfaRecoveryCodes_验证码错误_应保持旧摘要并记录脱敏失败审计()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var totp = (StubTotpService)scope.ServiceProvider
+            .GetRequiredService<EquipAI.Infrastructure.Identity.ITotpService>();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>() as StubAuditLogService;
+
+        var user = CreateTestUser("mfarecoveryregeneratefailed", _tenantId, "password123");
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        var oldCodes = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = oldCodes.SerializedHashes;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        totp.SetVerifyResult(false);
+
+        var act = () => service.RegenerateMfaRecoveryCodesAsync(user.Id, "654321");
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        var persistedUser = await db.Users.IgnoreQueryFilters()
+            .SingleAsync(candidate => candidate.Id == user.Id);
+        persistedUser.MfaRecoveryCodes.Should().Be(oldCodes.SerializedHashes);
+        var failureAudit = audit!.Records.Single(record => record.Action == "MfaRecoveryCodesRegenerateFailed");
+        failureAudit.TenantId.Should().Be(_tenantId);
+        failureAudit.ResourceType.Should().Be("User");
+        failureAudit.ResourceId.Should().Be(user.Id.ToString());
+        failureAudit.Description.Should().NotContain("654321");
+        failureAudit.Description.Should().NotContain(oldCodes.Codes[0]);
+        audit.Records.Should().NotContain(record => record.Action == "MfaRecoveryCodesRegenerated");
+    }
+
+    [Fact]
+    public async Task VerifyMfa_恢复码锁未获取_应拒绝且不修改摘要或记录消费审计()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var totp = (StubTotpService)scope.ServiceProvider
+            .GetRequiredService<EquipAI.Infrastructure.Identity.ITotpService>();
+        var audit = scope.ServiceProvider.GetRequiredService<IAuditLogService>() as StubAuditLogService;
+
+        var user = CreateTestUser("mfarecoverylockrejected", _tenantId, "password123");
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        var recoveryCodes = MfaRecoveryCodeService.Generate();
+        user.MfaRecoveryCodes = recoveryCodes.SerializedHashes;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var loginResult = await service.LoginAsync(new LoginRequest
+        {
+            Username = user.Username,
+            Password = "password123",
+        });
+        totp.SetVerifyResult(false);
+        _lockProvider.RecoveryLockAcquired = false;
+
+        var act = () => service.VerifyMfaAsync(
+            loginResult.MfaChallengeToken!,
+            recoveryCodes.Codes[0]);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        var persistedUser = await db.Users.IgnoreQueryFilters()
+            .SingleAsync(candidate => candidate.Id == user.Id);
+        persistedUser.MfaRecoveryCodes.Should().Be(recoveryCodes.SerializedHashes);
+        audit!.Records.Should().NotContain(record => record.Action == "AuthMfaRecoveryCodeUsed");
+        audit.Records.Should().NotContain(record => record.Action == "AuthMfaSuccess");
     }
 
     [Fact]
@@ -1657,9 +1745,13 @@ public class AuthServiceTests : IAsyncDisposable
         /// <summary>记录所有审计动作名（用于断言安全事件是否被记录，如令牌重用）</summary>
         public List<string> LoggedActions { get; } = new();
 
+        /// <summary>记录审计字段快照，用于校验租户、资源和脱敏描述。</summary>
+        public List<AuditRecord> Records { get; } = new();
+
         public Task LogAsync(Guid tenantId, string action, string resourceType, string? resourceId = null, string? description = null, CancellationToken ct = default)
         {
             LoggedActions.Add(action);
+            Records.Add(new AuditRecord(tenantId, action, resourceType, resourceId, description));
             return Task.CompletedTask;
         }
 
@@ -1669,6 +1761,44 @@ public class AuthServiceTests : IAsyncDisposable
         public Task<PagedResult<AuditLogDto>> GetAuditLogsAsync(Guid tenantId, int page = 1, int pageSize = 20,
             CancellationToken ct = default, string? action = null, string? resourceType = null)
             => Task.FromResult(new PagedResult<AuditLogDto> { Items = [], Total = 0, Page = page, PageSize = pageSize });
+    }
+
+    /// <summary>
+    /// 审计字段快照；只保存服务已经生成的审计字段，不接收或保存验证码原文。
+    /// </summary>
+    private sealed class AuditRecord
+    {
+        /// <summary>审计所属租户。</summary>
+        public Guid TenantId { get; }
+
+        /// <summary>审计动作。</summary>
+        public string Action { get; }
+
+        /// <summary>审计资源类型。</summary>
+        public string ResourceType { get; }
+
+        /// <summary>审计资源 ID。</summary>
+        public string? ResourceId { get; }
+
+        /// <summary>审计描述。</summary>
+        public string Description { get; }
+
+        /// <summary>
+        /// 创建审计字段快照。
+        /// </summary>
+        /// <param name="tenantId">审计所属租户。</param>
+        /// <param name="action">审计动作。</param>
+        /// <param name="resourceType">审计资源类型。</param>
+        /// <param name="resourceId">审计资源 ID。</param>
+        /// <param name="description">审计描述。</param>
+        public AuditRecord(Guid tenantId, string action, string resourceType, string? resourceId, string? description)
+        {
+            TenantId = tenantId;
+            Action = action;
+            ResourceType = resourceType;
+            ResourceId = resourceId;
+            Description = description ?? string.Empty;
+        }
     }
 
     /// <summary>
@@ -1719,6 +1849,9 @@ public class AuthServiceTests : IAsyncDisposable
 
         public bool IsAcquired { get; set; } = true;
 
+        /// <summary>仅控制恢复码锁的获取结果，用于模拟同一用户的锁竞争。</summary>
+        public bool? RecoveryLockAcquired { get; set; }
+
         public Task<IDistributedLockHandle> AcquireAsync(
             string resource,
             TimeSpan expiry,
@@ -1728,7 +1861,11 @@ public class AuthServiceTests : IAsyncDisposable
             AcquireCount++;
             LastResource = resource;
             Resources.Add(resource);
-            return Task.FromResult<IDistributedLockHandle>(new RecordingLockHandle(IsAcquired));
+            var isAcquired = resource.StartsWith("auth:mfa-recovery:", StringComparison.Ordinal)
+                && RecoveryLockAcquired.HasValue
+                ? RecoveryLockAcquired.Value
+                : IsAcquired;
+            return Task.FromResult<IDistributedLockHandle>(new RecordingLockHandle(isAcquired));
         }
     }
 

@@ -11,7 +11,7 @@
 ## Architecture
 
 - 继续使用现有 `AuthService` 的恢复码哈希存储、一次性消费和 `auth:mfa-recovery:{userId}` 分布式锁，不改变恢复码格式、哈希算法或 API 业务语义。
-- 在 `AuthController` 的敏感响应端点声明 `ResponseCache(NoStore = true, Location = None)`，覆盖 MFA 验证、MFA 确认和恢复码重新生成响应。
+- 在 `AuthController` 的敏感响应端点声明 `ResponseCache(NoStore = true, Location = None)`，覆盖 MFA 初始化、验证、确认和恢复码重新生成响应。
 - 单元测试通过结构化审计桩验证 `Action`、`TenantId`、`ResourceId` 和描述内容；审计桩永远不保存恢复码或 TOTP 明文。
 - 集成测试使用隔离测试用户和测试租户，通过真实 HTTP、SQLite 测试数据库、真实 TOTP 计算和测试环境依赖替身验证跨层行为；不连接生产数据库、Redis 或真实消息基础设施。
 - 运维演练仍需人工使用专用测试账号完成，自动化测试只提供回归证据，不消费生产恢复码。
@@ -49,7 +49,7 @@
 
 ### 1. 建立响应缓存安全红灯
 
-1. 在 `AuthEndpointSecurityTests` 中增加反射测试，逐一检查 `VerifyMfa`、`ConfirmMfaEnrollment`、`ConfirmMfa` 和 `RegenerateMfaRecoveryCodes` 方法的 `ResponseCacheAttribute`：`NoStore == true` 且 `Location == None`。
+1. 在 `AuthEndpointSecurityTests` 中增加反射测试，逐一检查 `SetupMfaEnrollment`、`VerifyMfa`、`ConfirmMfaEnrollment`、`SetupMfa`、`ConfirmMfa` 和 `RegenerateMfaRecoveryCodes` 方法的 `ResponseCacheAttribute`：`NoStore == true` 且 `Location == None`。
 2. 先运行该测试并确认在当前代码上失败，证明生产端点确实没有缓存契约。
 3. 在 `AuthController` 对应方法上增加属性，不改变业务逻辑。
 4. 重跑该测试并增加/保留一个真实 HTTP 响应头断言，确认框架实际输出包含 `no-store`。

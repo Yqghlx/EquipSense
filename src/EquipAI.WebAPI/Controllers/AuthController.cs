@@ -221,6 +221,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/verify")]
     [EnableRateLimiting("auth")]
     [SkipAudit] // 验证过程在 AuthService 内部记录审计
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponse>> VerifyMfa([FromBody] MfaVerifyRequest request)
@@ -245,6 +246,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/enroll/setup")]
     [EnableRateLimiting("auth")]
     [SkipAudit]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(MfaSetupResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<MfaSetupResponse>> SetupMfaEnrollment([FromBody] MfaEnrollmentRequest request)
@@ -267,6 +269,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/enroll/confirm")]
     [EnableRateLimiting("auth")]
     [SkipAudit]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<AuthResponse>> ConfirmMfaEnrollment([FromBody] MfaEnrollmentConfirmRequest request)
@@ -292,6 +295,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/setup")]
     [Authorize]
     [Audit("MfaSetup", "User")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(MfaSetupResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<MfaSetupResponse>> SetupMfa()
@@ -315,6 +319,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/confirm")]
     [Authorize]
     [Audit("MfaConfirm", "User")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(MfaRecoveryCodesResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ConfirmMfa([FromBody] MfaConfirmRequest request)
@@ -345,6 +350,7 @@ public class AuthController : ControllerBase
     [HttpPost("mfa/recovery-codes/regenerate")]
     [Authorize]
     [Audit("MfaRecoveryCodesRegenerate", "User")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(MfaRecoveryCodesResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
