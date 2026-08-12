@@ -51,7 +51,7 @@ EquipSense 是面向工业企业的设备监控与预测维护 SaaS 平台，核
 | 数据库访问 | EF Core 参数化查询（防 SQL 注入） | ✅ 已实现 |
 | 多租户隔离 | 全局查询过滤器（TenantId），纵深防御中间件链 | ✅ 已实现 |
 | 敏感字段加密 | 密码 bcrypt 哈希；TOTP 密钥和用户手机号/邮箱使用 AES-256-GCM 应用层加密，联系方式使用字段级盲索引查找 | ✅ 已实现（生产密钥与历史迁移需验收） |
-| 数据备份 | `docker/backup.sh` 以 PostgreSQL custom format 导出数据库、本地或 S3 对象前缀中的附件和可选 Redis，逐文件校验并支持 S3/OSS 异地同步；`docker/restore.sh` 兼容历史 gzip 备份，使用 TimescaleDB pre/post restore、dry-run、危险归档拒绝、受控重建数据库和恢复后健康检查 | ✅ 已实现（需配置定时任务、异地目标和隔离恢复演练） |
+| 数据备份 | `docker/backup.sh` 以 PostgreSQL custom format 导出数据库、本地或 S3 对象前缀中的附件和可选 Redis，逐文件校验并生成文件名/大小/SHA-256 批次清单，支持 S3/OSS 异地同步；`docker/restore.sh` 兼容历史 gzip 备份，使用清单前置校验、TimescaleDB pre/post restore、dry-run、危险归档拒绝、受控重建数据库和恢复后健康检查 | ✅ 已实现（需配置定时任务、异地目标和隔离恢复演练） |
 
 ### 2.5 安全审计
 

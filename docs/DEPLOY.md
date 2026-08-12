@@ -404,7 +404,7 @@ cd docker
 cd ..
 ```
 
-脚本会先在 `BACKUP_DIR/.backup.lock` 获取单实例锁，避免重叠任务并发导出、清理或同步；遗留锁必须确认没有备份进程后再人工处理。脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）以及 `redis_*.rdb`。`RETAIN_DAYS` 必须是大于 0 的整数，历史备份清理失败也会使脚本返回非零；Redis 备份会轮询 `INFO persistence`，确认后台快照完成并校验 RDB 文件头后才保存。生产环境默认启用 `BACKUP_REDIS=true`，因此未配置 `REDIS_PASSWORD` 会在备份开始前失败；如确实不需要 Redis 数据，必须显式设置 `BACKUP_REDIS=false`。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。开启 `S3_SYNC=true` 后，如果本地任一备份不完整，脚本会跳过异地同步；目标未配置、主机未安装 `aws-cli` 或同步失败时也会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
+脚本会先在 `BACKUP_DIR/.backup.lock` 获取单实例锁，避免重叠任务并发导出、清理或同步；遗留锁必须确认没有备份进程后再人工处理。脚本会生成以下文件并逐个校验：`*.dump`（PostgreSQL custom format）、`attachments_*.tar.gz`（工单附件）、`redis_*.rdb` 以及 `backup-manifest_*.tsv`（批次文件名、大小和 SHA-256 清单）。清单采用原子写入，清单生成失败会使备份返回非零；保留清理和 `S3_SYNC=true` 也会包含清单，防止恢复时误拼接不同批次。`RETAIN_DAYS` 必须是大于 0 的整数，历史备份清理失败也会使脚本返回非零；Redis 备份会轮询 `INFO persistence`，确认后台快照完成并校验 RDB 文件头后才保存。生产环境默认启用 `BACKUP_REDIS=true`，因此未配置 `REDIS_PASSWORD` 会在备份开始前失败；如确实不需要 Redis 数据，必须显式设置 `BACKUP_REDIS=false`。历史版本生成的 `*.sql.gz` 仍可由恢复脚本兼容读取。生产环境保持 `BACKUP_ATTACHMENTS=true`，并将 `BACKUP_DIR` 或 `S3_BUCKET` 配置到异地存储。开启 `S3_SYNC=true` 后，如果本地任一备份不完整，脚本会跳过异地同步；目标未配置、主机未安装 `aws-cli` 或同步失败时也会以非零状态结束，避免把不完整或没有异地副本的备份误报为成功。
 
 ### PostgreSQL 与附件恢复
 
@@ -421,7 +421,8 @@ cd ..
   --compose-file docker/docker-compose.yml \
   --compose-file docker/docker-compose.prod.yml \
   --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.dump \
-  --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz
+  --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
+  --manifest docker/backups/backup-manifest_YYYYMMDD_HHMMSS.tsv
 
 # 确认后执行数据库、附件恢复及健康检查
 ./docker/restore.sh \
@@ -430,6 +431,7 @@ cd ..
   --compose-file docker/docker-compose.prod.yml \
   --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.dump \
   --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
+  --manifest docker/backups/backup-manifest_YYYYMMDD_HHMMSS.tsv \
   --confirm
 ```
 
@@ -440,6 +442,8 @@ Redis RDB 恢复是可选的，在两条命令中都追加
 附件卷；数据库使用单事务导入，附件替换不自动回滚，因此必须先在隔离环境演练并
 记录 RTO/RPO。S3 模式下，`restore.sh` 会把归档同步回
 `FILE_STORAGE_S3_KEY_PREFIX` 对应的对象前缀，不会把对象存储误当成本地附件卷。
+没有批次清单的历史备份只能在确认恢复时显式追加 `--legacy`；该兼容路径不具备文件名、大小
+和摘要的批次证据，不得作为常规生产恢复流程。
 
 ### Volume 管理
 

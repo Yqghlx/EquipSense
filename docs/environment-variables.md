@@ -169,9 +169,11 @@ S3 模式下，实际对象键为 `KeyPrefix/{tenantId}/{category}/{uniqueName}`
 
 ## 备份
 
-`docker/backup.sh` 默认备份 PostgreSQL 和工单附件；Redis 为可选缓存备份。恢复统一使用
-`docker/restore.sh`：它默认只执行备份完整性校验和 dry-run，必须显式传入 `--confirm`
-才会停止服务、覆盖数据库和附件。跨主机部署时应将备份目录同步到 S3/OSS，并定期在
+`docker/backup.sh` 默认备份 PostgreSQL 和工单附件；Redis 为可选缓存备份，并为每个成功批次
+生成 `backup-manifest_*.tsv`，记录启用组件的文件名、大小和 SHA-256。恢复统一使用
+`docker/restore.sh`：它默认只执行备份完整性校验和 dry-run，必须显式传入 `--manifest` 和
+`--confirm` 才会在生产路径停止服务、覆盖数据库和附件；脚本会在副作用前拒绝串批次或被篡改的文件。
+无清单的历史备份只能显式使用 `--legacy`。跨主机部署时应将备份目录同步到 S3/OSS，并定期在
 隔离环境执行恢复演练、记录 RTO/RPO。
 
 PostgreSQL 新备份使用 custom format（文件名为 `*.dump`，由容器内 `pg_restore --list`

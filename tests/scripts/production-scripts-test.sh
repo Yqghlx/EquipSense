@@ -1932,6 +1932,18 @@ test_backup_includes_attachments() {
   [[ -n "$attachment_file" ]] || fail "应生成工单附件备份"
   [[ "$(head -c 5 "$dump_file")" = "PGDMP" ]] || fail "PostgreSQL 备份应使用 custom format"
   tar -tzf "$attachment_file" | grep -q 'report.txt' || fail "附件归档中缺少测试文件"
+
+  local manifest_file
+  manifest_file="$(find "$backup_dir" -name 'backup-manifest_*.tsv' -print -quit)"
+  [[ -n "$manifest_file" ]] || fail "完整备份应生成批次清单"
+  grep -q $'^format\tequipsense-backup-manifest-v1$' "$manifest_file" \
+    || fail "批次清单应声明版本格式"
+  grep -q $'^artifact\tdatabase\t' "$manifest_file" \
+    || fail "批次清单应记录 PostgreSQL 归档"
+  grep -q $'^artifact\tattachments\t' "$manifest_file" \
+    || fail "批次清单应记录附件归档"
+  ! grep -Fq 'test-password' "$manifest_file" \
+    || fail "批次清单不应包含数据库密码"
   [[ ! -d "$backup_dir/.backup.lock" ]] || fail "备份成功退出后必须释放单实例锁"
 
   local backup_mode
@@ -1945,6 +1957,14 @@ test_backup_includes_attachments() {
   fi
   [[ "$backup_mode" = "700" ]] || fail "备份目录应为 700 权限，实际为 $backup_mode"
   [[ "$file_mode" = "600" ]] || fail "数据库备份文件应为 600 权限，实际为 $file_mode"
+
+  local manifest_mode
+  if stat -c '%a' "$manifest_file" >/dev/null 2>&1; then
+    manifest_mode="$(stat -c '%a' "$manifest_file")"
+  else
+    manifest_mode="$(stat -f '%Lp' "$manifest_file")"
+  fi
+  [[ "$manifest_mode" = "600" ]] || fail "批次清单应为 600 权限，实际为 $manifest_mode"
 }
 
 test_backup_s3_storage_includes_object_prefix() {
@@ -2232,6 +2252,10 @@ test_backup_uses_configured_redis_container_and_waits_for_snapshot() {
   redis_file="$(find "$backup_dir" -name 'redis_*.rdb' -print -quit)"
   [[ -n "$redis_file" ]] || fail "应生成 Redis RDB 备份"
   [[ "$(head -c 5 "$redis_file")" = "REDIS" ]] || fail "Redis 备份应包含 RDB 文件头"
+  local redis_manifest
+  redis_manifest="$(find "$backup_dir" -name 'backup-manifest_*.tsv' -print -quit)"
+  grep -q $'^artifact\tredis\t' "$redis_manifest" \
+    || fail "批次清单应记录 Redis 归档"
   grep -q 'fake-redis' "$docker_log" || fail "备份应使用 REDIS_CONTAINER 配置，而不是硬编码容器名"
   grep -q 'INFO persistence' "$docker_log" || fail "备份复制前应等待 Redis 后台快照完成"
 }
@@ -2378,6 +2402,42 @@ create_restore_fixtures() {
   chmod 600 "$case_dir/database.sql.gz" "$case_dir/attachments.tar.gz"
 }
 
+sha256_file_for_test() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+  else
+    shasum -a 256 "$path" | awk '{print $1}'
+  fi
+}
+
+create_restore_manifest() {
+  local case_dir="$1"
+  local manifest_path="$case_dir/backup-manifest_20260813_120000.tsv"
+  local database_path="$case_dir/database.sql.gz"
+  local attachment_path="$case_dir/attachments.tar.gz"
+  local database_size
+  local attachment_size
+  database_size="$(wc -c < "$database_path" | tr -d '[:space:]')"
+  attachment_size="$(wc -c < "$attachment_path" | tr -d '[:space:]')"
+  {
+    printf 'format\tequipsense-backup-manifest-v1\n'
+    printf 'batch_id\t20260813_120000\n'
+    printf 'artifact\tdatabase\t%s\t%s\t%s\n' \
+      "$(basename "$database_path")" "$database_size" "$(sha256_file_for_test "$database_path")"
+    printf 'artifact\tattachments\t%s\t%s\t%s\n' \
+      "$(basename "$attachment_path")" "$attachment_size" "$(sha256_file_for_test "$attachment_path")"
+    if [[ -f "$case_dir/redis.rdb" ]]; then
+      printf 'artifact\tredis\t%s\t%s\t%s\n' \
+        "redis.rdb" \
+        "$(wc -c < "$case_dir/redis.rdb" | tr -d '[:space:]')" \
+        "$(sha256_file_for_test "$case_dir/redis.rdb")"
+    fi
+  } > "$manifest_path"
+  chmod 600 "$manifest_path"
+  printf '%s\n' "$manifest_path"
+}
+
 create_custom_restore_fixture() {
   local case_dir="$1"
   : > "$case_dir/.env"
@@ -2460,6 +2520,8 @@ test_restore_confirm_cleans_attachments_without_running_backend() {
   : > "$case_dir/compose.prod.yml"
   printf 'REDIS0009' > "$case_dir/redis.rdb"
   chmod 600 "$case_dir/redis.rdb"
+  local manifest_path
+  manifest_path="$(create_restore_manifest "$case_dir")"
 
   # 模拟所有 Compose 动作；PostgreSQL exec 同时消费恢复输入并在连通性检查时返回 1。
   printf '%s\n' \
@@ -2485,7 +2547,7 @@ test_restore_confirm_cleans_attachments_without_running_backend() {
       --db-backup "$case_dir/database.sql.gz" \
       --attachments-backup "$case_dir/attachments.tar.gz" \
       --redis-backup "$case_dir/redis.rdb" \
-      --confirm 2>&1)"; then
+      --manifest "$manifest_path" --confirm 2>&1)"; then
     printf '%s\n' "$output" >&2
     fail "合法备份的 confirm 恢复应成功完成模拟流程"
   fi
@@ -2511,6 +2573,8 @@ test_restore_s3_storage_syncs_back_to_object_prefix() {
   local fake_s3_target="$case_dir/fake-s3-target"
   mkdir -p "$case_dir/bin" "$fake_s3_target"
   create_restore_fixtures "$case_dir"
+  local manifest_path
+  manifest_path="$(create_restore_manifest "$case_dir")"
   : > "$case_dir/compose.yml"
   printf '%s\n' \
     'FILE_STORAGE_PROVIDER=S3' \
@@ -2547,7 +2611,7 @@ test_restore_s3_storage_syncs_back_to_object_prefix() {
       --compose-file "$case_dir/compose.yml" \
       --db-backup "$case_dir/database.sql.gz" \
       --attachments-backup "$case_dir/attachments.tar.gz" \
-      --confirm 2>&1)"; then
+      --manifest "$manifest_path" --confirm 2>&1)"; then
     printf '%s\n' "$output" >&2
     fail "S3 附件恢复应同步回对象前缀"
   fi
@@ -2585,7 +2649,7 @@ test_restore_confirm_uses_custom_format_and_timescale_lifecycle() {
       --env-file "$case_dir/.env" \
       --compose-file "$case_dir/compose.yml" \
       --db-backup "$case_dir/database.dump" \
-      --skip-attachments --confirm 2>&1)"; then
+      --skip-attachments --legacy --confirm 2>&1)"; then
     printf '%s\n' "$output" >&2
     fail "合法 custom 备份的 confirm 恢复应成功完成模拟流程"
   fi
@@ -2635,7 +2699,7 @@ test_restore_failure_exits_timescale_restore_mode() {
       --env-file "$case_dir/.env" \
       --compose-file "$case_dir/compose.yml" \
       --db-backup "$case_dir/database.dump" \
-      --skip-attachments --confirm 2>&1)"
+      --skip-attachments --legacy --confirm 2>&1)"
   result_code=$?
   set -e
 
@@ -2646,6 +2710,133 @@ test_restore_failure_exits_timescale_restore_mode() {
     || fail "恢复失败测试必须确认曾进入 TimescaleDB restoring 模式"
   grep -q 'timescaledb_post_restore' "$docker_log" \
     || fail "pg_restore 失败后必须尝试退出 TimescaleDB restoring 模式"
+}
+
+test_restore_rejects_tampered_manifest_artifact() {
+  local case_dir="$TEST_ROOT/restore-tampered-manifest"
+  local docker_called="$case_dir/docker-called"
+  mkdir -p "$case_dir/bin"
+  create_restore_fixtures "$case_dir"
+  local manifest_path
+  manifest_path="$(create_restore_manifest "$case_dir")"
+  printf 'X' | dd of="$case_dir/attachments.tar.gz" bs=1 count=1 conv=notrunc 2>/dev/null
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$RESTORE_DOCKER_CALLED"' \
+    'exit 99' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$docker_called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments.tar.gz" \
+      --manifest "$manifest_path" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "附件被篡改时恢复前清单校验必须失败"
+  assert_contains "$output" "SHA-256"
+  [[ ! -f "$docker_called" ]] || fail "清单校验失败时不应调用 Docker"
+}
+
+test_restore_rejects_mixed_batch_manifest() {
+  local case_dir="$TEST_ROOT/restore-mixed-manifest"
+  local docker_called="$case_dir/docker-called"
+  mkdir -p "$case_dir/bin"
+  create_restore_fixtures "$case_dir"
+  local manifest_path
+  manifest_path="$(create_restore_manifest "$case_dir")"
+  cp "$case_dir/attachments.tar.gz" "$case_dir/attachments-other-batch.tar.gz"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$RESTORE_DOCKER_CALLED"' \
+    'exit 99' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$docker_called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments-other-batch.tar.gz" \
+      --manifest "$manifest_path" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "不同批次附件不应通过批次清单校验"
+  assert_contains "$output" "批次清单"
+  [[ ! -f "$docker_called" ]] || fail "串批次校验失败时不应调用 Docker"
+}
+
+test_restore_confirm_requires_manifest_or_explicit_legacy() {
+  local case_dir="$TEST_ROOT/restore-manifest-required"
+  local docker_called="$case_dir/docker-called"
+  mkdir -p "$case_dir/bin"
+  create_custom_restore_fixture "$case_dir"
+  : > "$case_dir/compose.yml"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$RESTORE_DOCKER_CALLED"' \
+    'exit 99' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$docker_called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --compose-file "$case_dir/compose.yml" \
+      --db-backup "$case_dir/database.dump" \
+      --skip-attachments --confirm 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "无清单确认恢复必须显式选择 legacy 模式"
+  assert_contains "$output" "--manifest"
+  [[ ! -f "$docker_called" ]] || fail "缺少清单时不应调用 Docker"
+}
+
+test_restore_rejects_malformed_manifest_before_docker() {
+  local case_dir="$TEST_ROOT/restore-malformed-manifest"
+  local docker_called="$case_dir/docker-called"
+  mkdir -p "$case_dir/bin"
+  create_restore_fixtures "$case_dir"
+  local manifest_path
+  manifest_path="$(create_restore_manifest "$case_dir")"
+  sed -i.bak 's/equipsense-backup-manifest-v1/not-a-manifest/' "$manifest_path"
+  rm -f "$manifest_path.bak"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    ': > "$RESTORE_DOCKER_CALLED"' \
+    'exit 99' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(PATH="$case_dir/bin:$PATH" RESTORE_DOCKER_CALLED="$docker_called" \
+    bash "$PROJECT_ROOT/docker/restore.sh" \
+      --env-file "$case_dir/.env" \
+      --db-backup "$case_dir/database.sql.gz" \
+      --attachments-backup "$case_dir/attachments.tar.gz" \
+      --manifest "$manifest_path" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "格式错误的批次清单不应通过恢复前校验"
+  assert_contains "$output" "批次清单"
+  [[ ! -f "$docker_called" ]] || fail "格式错误的清单不应调用 Docker"
 }
 
 test_restore_rejects_corrupted_archive() {
@@ -2746,7 +2937,7 @@ test_restore_rejects_overlapping_confirm_runs() {
       --env-file "$case_dir/.env" \
       --compose-file "$case_dir/compose.yml" \
       --db-backup "$case_dir/database.dump" \
-      --skip-attachments --confirm 2>&1)"
+      --skip-attachments --legacy --confirm 2>&1)"
   result_code=$?
   set -e
 
@@ -3224,6 +3415,8 @@ test_backup_restore_rehearsal_is_wired() {
   assert_contains "$rehearsal_script" 'docker compose'
   assert_contains "$rehearsal_script" 'backup.sh'
   assert_contains "$rehearsal_script" 'restore.sh'
+  assert_contains "$rehearsal_script" 'backup-manifest_*.tsv'
+  assert_contains "$rehearsal_script" '--manifest'
   assert_contains "$rehearsal_script" '--confirm'
   assert_contains "$rehearsal_script" 'down -v --remove-orphans'
   assert_contains "$rehearsal_script" 'trap cleanup EXIT'
@@ -3773,6 +3966,15 @@ test_ops_runbook_documents_mfa_recovery_rehearsal_safety() {
   assert_contains "$runbook_content" "不得记录验证码/恢复码"
 }
 
+test_ops_runbook_documents_backup_manifest_safety() {
+  local runbook_content
+  runbook_content="$(cat "$PROJECT_ROOT/docs/OPS_RUNBOOK.md")"
+  assert_contains "$runbook_content" "backup-manifest_*.tsv"
+  assert_contains "$runbook_content" "SHA-256"
+  assert_contains "$runbook_content" "--legacy"
+  assert_contains "$runbook_content" "停止服务、调用 Docker 或 AWS"
+}
+
 case "${1:-all}" in
   setup)
     test_validate_env_accepts_complete_config
@@ -3820,6 +4022,7 @@ case "${1:-all}" in
     test_setup_mosquitto_rejects_password_file_symlink
     test_user_guide_documents_template_onboarding
     test_ops_runbook_documents_mfa_recovery_rehearsal_safety
+    test_ops_runbook_documents_backup_manifest_safety
     ;;
   readiness)
     test_validate_env_rejects_demo_data_in_production_without_isolated_flag
@@ -3855,6 +4058,10 @@ case "${1:-all}" in
     test_restore_s3_storage_syncs_back_to_object_prefix
     test_restore_confirm_uses_custom_format_and_timescale_lifecycle
     test_restore_failure_exits_timescale_restore_mode
+    test_restore_rejects_tampered_manifest_artifact
+    test_restore_rejects_mixed_batch_manifest
+    test_restore_confirm_requires_manifest_or_explicit_legacy
+    test_restore_rejects_malformed_manifest_before_docker
     test_restore_rejects_corrupted_archive
     test_restore_rejects_unsafe_attachment_archive
     test_restore_rejects_corrupted_redis_backup
@@ -3978,6 +4185,10 @@ case "${1:-all}" in
     test_restore_s3_storage_syncs_back_to_object_prefix
     test_restore_confirm_uses_custom_format_and_timescale_lifecycle
     test_restore_failure_exits_timescale_restore_mode
+    test_restore_rejects_tampered_manifest_artifact
+    test_restore_rejects_mixed_batch_manifest
+    test_restore_confirm_requires_manifest_or_explicit_legacy
+    test_restore_rejects_malformed_manifest_before_docker
     test_restore_rejects_corrupted_archive
     test_restore_rejects_unsafe_attachment_archive
     test_restore_rejects_corrupted_redis_backup
@@ -4032,6 +4243,7 @@ case "${1:-all}" in
     test_development_internal_ports_bind_loopback_by_default
     test_user_guide_documents_template_onboarding
     test_ops_runbook_documents_mfa_recovery_rehearsal_safety
+    test_ops_runbook_documents_backup_manifest_safety
     ;;
   *)
     fail "用法：$0 [setup|readiness|backup|restore|deploy|ci|all]"

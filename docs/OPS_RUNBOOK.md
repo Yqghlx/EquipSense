@@ -285,12 +285,12 @@ curl --fail --silent "http://127.0.0.1:${BACKEND_PORT:-8080}/metrics" | grep -E 
 cd /path/to/EquipSense
 ./docker/backup.sh
 
-# 检查本次生成的文件（数据库、附件，以及按配置生成的 Redis RDB）
+# 检查本次生成的文件（数据库、附件、批次清单，以及按配置生成的 Redis RDB）
 ls -lht docker/backups
 ```
 
 `backup.sh` 会先获取 `BACKUP_DIR/.backup.lock` 单实例锁，再校验 `RETAIN_DAYS` 并逐个执行 PostgreSQL custom/tar 完整性校验；历史备份清理失败也会返回非零，避免磁盘持续增长；本地附件模式默认必须同时生成
-`*.dump` 和 `attachments_*.tar.gz`。S3 附件模式会从配置的对象前缀同步后再生成同名归档，避免只归档空的本地卷。历史 `*.sql.gz` 仍可用于兼容恢复。显式启用 `BACKUP_REDIS=true` 后，Redis
+`*.dump`、`attachments_*.tar.gz` 和 `backup-manifest_*.tsv`。批次清单记录启用组件的相对文件名、字节数和 SHA-256，只有清单原子写入成功才报告备份完成；清单也会纳入保留清理和 `S3_SYNC=true` 的异地同步，避免恢复时误拼接不同时间点的数据库与附件。S3 附件模式会从配置的对象前缀同步后再生成同名归档，避免只归档空的本地卷。历史 `*.sql.gz` 仍可用于兼容恢复。显式启用 `BACKUP_REDIS=true` 后，Redis
 快照会等待 `INFO persistence` 报告后台保存完成，并校验 `REDIS` 文件头；缺少 `REDIS_PASSWORD`、快照或复制失败会使脚本在本地备份开始前或过程中返回非零。启用 `S3_SYNC=true` 后，本地备份不完整时会跳过异地同步，异地目标缺失、未安装
 `aws-cli` 或同步失败也会返回非零。备份文件和目录应保持 600/700 权限，并在
 密钥管理系统之外单独保护 `TOTP_ENCRYPTION_KEY`。
@@ -301,17 +301,22 @@ ls -lht docker/backups
 
 恢复会在环境文件旁获取单实例锁，随后重建目标数据库并替换附件卷内容。必须在维护窗口内
 执行，并先在隔离环境完成演练；脚本默认只做校验和 dry-run，只有显式传入
-`--confirm` 才会停止服务并修改数据。
+`--confirm` 才会停止服务并修改数据。生产确认恢复必须同时提供同一批次的
+`backup-manifest_*.tsv`；恢复脚本会在停止服务、调用 Docker 或 AWS 之前核对文件名、大小和
+SHA-256。历史无清单备份只能显式追加 `--legacy`，该模式不具备批次完整性证据，不得作为常规
+生产恢复路径。
 
 ```bash
 # 1. 明确选择同一时间点的备份，不要把数据库和附件混用不同批次
 DB_BACKUP="docker/backups/equipai_YYYYMMDD_HHMMSS.dump"
 ATTACHMENTS_BACKUP="docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz"
+MANIFEST="docker/backups/backup-manifest_YYYYMMDD_HHMMSS.tsv"
 REDIS_BACKUP="docker/backups/redis_YYYYMMDD_HHMMSS.rdb"  # 没有则留空
 RESTORE_ARGS=(
   --env-file docker/.env
   --db-backup "$DB_BACKUP"
   --attachments-backup "$ATTACHMENTS_BACKUP"
+  --manifest "$MANIFEST"
 )
 if [[ -n "$REDIS_BACKUP" ]]; then
   RESTORE_ARGS+=(--redis-backup "$REDIS_BACKUP")
@@ -333,6 +338,7 @@ fi
   --compose-file docker/docker-compose.prod.yml \
   --db-backup docker/backups/equipai_YYYYMMDD_HHMMSS.dump \
   --attachments-backup docker/backups/attachments_YYYYMMDD_HHMMSS.tar.gz \
+  --manifest docker/backups/backup-manifest_YYYYMMDD_HHMMSS.tsv \
   --confirm
 ```
 
@@ -346,7 +352,7 @@ PostgreSQL、附件目录（S3 模式为对象前缀同步结果）和 `/health`
 
 提交代码或变更备份/恢复脚本后，先运行仓库内的真实 Docker 演练。脚本会创建随机命名的
 临时 PostgreSQL、附件卷和 Nginx 健康端点，写入基线数据，执行 `backup.sh`，故意修改数据，
-再使用 `restore.sh --confirm` 恢复并校验数据库、附件和健康检查；退出时会销毁临时容器、网络
+再使用 `restore.sh --manifest <同批次清单> --confirm` 恢复并校验数据库、附件和健康检查；退出时会销毁临时容器、网络
 和数据卷。它不会读取或修改 `docker/.env`，也不会触碰正在运行的生产容器。
 
 ```bash
@@ -383,6 +389,7 @@ bash tests/backup-restore-rehearsal.sh
 ### 每周检查（15 分钟）
 
 - [ ] 备份文件存在且大小正常
+- [ ] 每个完整备份都有 600 权限的 `backup-manifest_*.tsv`，并抽查数据库、附件和 Redis 文件的 SHA-256 与清单一致
 - [ ] 本地模式 `attachments_data` 附件卷已纳入备份；S3 模式对象前缀已完成同步备份，且恢复演练通过
 - [ ] Seq 日志无持续 ERROR（`http://localhost:5341`）
 - [ ] 时序数据保留正常（`SELECT min(time), max(time) FROM device_telemetry;`）

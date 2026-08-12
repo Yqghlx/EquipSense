@@ -13,6 +13,18 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 COMPOSE_FILES=()
 DB_BACKUP=""
 DB_BACKUP_FORMAT=""
+MANIFEST=""
+ALLOW_LEGACY=false
+MANIFEST_BATCH_ID=""
+MANIFEST_DATABASE_NAME=""
+MANIFEST_DATABASE_SIZE=""
+MANIFEST_DATABASE_DIGEST=""
+MANIFEST_ATTACHMENTS_NAME=""
+MANIFEST_ATTACHMENTS_SIZE=""
+MANIFEST_ATTACHMENTS_DIGEST=""
+MANIFEST_REDIS_NAME=""
+MANIFEST_REDIS_SIZE=""
+MANIFEST_REDIS_DIGEST=""
 ATTACHMENTS_BACKUP=""
 REDIS_BACKUP=""
 ATTACHMENTS_PATH="/app/uploads"
@@ -38,6 +50,7 @@ usage() {
   --env-file PATH             生产环境变量文件
   --db-backup PATH            PostgreSQL .dump 备份（兼容历史 .sql.gz）
   --attachments-backup PATH   工单附件 .tar.gz 备份
+  --manifest PATH             同一批次的备份完整性清单（生产确认恢复必填）
 
 可选：
   --skip-attachments          明确跳过附件恢复（不再要求 --attachments-backup）
@@ -45,10 +58,12 @@ usage() {
   --compose-file PATH         Compose 文件，可重复指定；默认 docker/docker-compose.yml
   --attachments-path PATH     容器内附件目录，默认 /app/uploads
   --health-url URL            恢复后的健康检查地址，默认 http://localhost:8080/health
+  --legacy                    显式允许无批次清单的历史备份确认恢复
   --confirm                   确认执行停止服务、数据库覆盖和附件恢复
   -h, --help                  显示帮助
 
-不传 --confirm 时只做校验和 dry-run，不调用 Docker，不修改任何服务或数据。
+不传 --confirm 时只做校验和 dry-run，不调用 Docker，不修改任何服务或数据；没有批次清单的
+历史备份确认恢复还必须显式传入 --legacy。
 EOF
 }
 
@@ -78,6 +93,7 @@ get_file_mode() {
 require_private_file() {
   local path="$1"
   local label="$2"
+  [[ ! -L "$path" ]] || fatal "$label不得为符号链接：$path"
   [[ -f "$path" ]] || fatal "$label不存在：$path"
 
   local mode
@@ -106,6 +122,138 @@ detect_database_backup_format() {
   fi
 
   fatal "PostgreSQL 备份格式无法识别：需要 PGDMP custom 文件或纯文本 gzip 文件：$DB_BACKUP"
+}
+
+init_sha256_tool() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    SHA256_TOOL="sha256sum"
+  elif command -v shasum >/dev/null 2>&1; then
+    SHA256_TOOL="shasum"
+  else
+    fatal "恢复前清单校验需要 sha256sum 或 shasum"
+  fi
+}
+
+sha256_file() {
+  if [ "$SHA256_TOOL" = "sha256sum" ]; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+validate_backup_manifest() {
+  require_private_file "$MANIFEST" "备份批次清单"
+  init_sha256_tool
+
+  local line_number=0
+  local format_count=0
+  local batch_count=0
+  local field_one
+  local field_two
+  local field_three
+  local field_four
+  local field_five
+  local extra_field
+
+  while IFS=$'\t' read -r field_one field_two field_three field_four field_five extra_field; do
+    line_number=$((line_number + 1))
+    [[ -n "$field_one" ]] || fatal "批次清单第 ${line_number} 行为空"
+    [[ -z "$extra_field" ]] || fatal "批次清单第 ${line_number} 行字段数量不正确"
+
+    case "$field_one" in
+      format)
+        [[ "$field_two" = "equipsense-backup-manifest-v1" && -z "$field_three" && -z "$field_four" && -z "$field_five" ]] \
+          || fatal "批次清单格式版本无效"
+        format_count=$((format_count + 1))
+        ;;
+      batch_id)
+        [[ "$field_two" =~ ^[0-9]{8}_[0-9]{6}$ && -z "$field_three" && -z "$field_four" && -z "$field_five" ]] \
+          || fatal "批次清单 batch_id 无效"
+        MANIFEST_BATCH_ID="$field_two"
+        batch_count=$((batch_count + 1))
+        ;;
+      artifact)
+        [[ "$field_two" = database || "$field_two" = attachments || "$field_two" = redis ]] \
+          || fatal "批次清单包含未知备份类型：$field_two"
+        [[ "$field_three" =~ ^[A-Za-z0-9_.-]+$ ]] \
+          || fatal "批次清单包含不安全文件名：$field_three"
+        [[ "$field_four" =~ ^[1-9][0-9]*$ ]] \
+          || fatal "批次清单文件大小无效：$field_three"
+        [[ "$field_five" =~ ^[0-9a-f]{64}$ ]] \
+          || fatal "批次清单 SHA-256 无效：$field_three"
+        case "$field_two" in
+          database)
+            [[ -z "$MANIFEST_DATABASE_NAME" ]] || fatal "批次清单重复记录 database"
+            MANIFEST_DATABASE_NAME="$field_three"
+            MANIFEST_DATABASE_SIZE="$field_four"
+            MANIFEST_DATABASE_DIGEST="$field_five"
+            ;;
+          attachments)
+            [[ -z "$MANIFEST_ATTACHMENTS_NAME" ]] || fatal "批次清单重复记录 attachments"
+            MANIFEST_ATTACHMENTS_NAME="$field_three"
+            MANIFEST_ATTACHMENTS_SIZE="$field_four"
+            MANIFEST_ATTACHMENTS_DIGEST="$field_five"
+            ;;
+          redis)
+            [[ -z "$MANIFEST_REDIS_NAME" ]] || fatal "批次清单重复记录 redis"
+            MANIFEST_REDIS_NAME="$field_three"
+            MANIFEST_REDIS_SIZE="$field_four"
+            MANIFEST_REDIS_DIGEST="$field_five"
+            ;;
+        esac
+        ;;
+      *)
+        fatal "批次清单第 ${line_number} 行包含未知字段：$field_one"
+        ;;
+    esac
+  done < "$MANIFEST"
+
+  [[ "$format_count" = 1 ]] || fatal "批次清单必须且只能包含一条 format 记录"
+  [[ "$batch_count" = 1 ]] || fatal "批次清单必须且只能包含一条 batch_id 记录"
+  [[ -n "$MANIFEST_DATABASE_NAME" ]] || fatal "批次清单缺少 database 备份"
+}
+
+verify_manifest_artifact() {
+  local artifact_type="$1"
+  local artifact_path="$2"
+  local expected_name=""
+  local expected_size=""
+  local expected_digest=""
+  local actual_size
+  local actual_digest
+
+  case "$artifact_type" in
+    database)
+      expected_name="$MANIFEST_DATABASE_NAME"
+      expected_size="$MANIFEST_DATABASE_SIZE"
+      expected_digest="$MANIFEST_DATABASE_DIGEST"
+      ;;
+    attachments)
+      expected_name="$MANIFEST_ATTACHMENTS_NAME"
+      expected_size="$MANIFEST_ATTACHMENTS_SIZE"
+      expected_digest="$MANIFEST_ATTACHMENTS_DIGEST"
+      ;;
+    redis)
+      expected_name="$MANIFEST_REDIS_NAME"
+      expected_size="$MANIFEST_REDIS_SIZE"
+      expected_digest="$MANIFEST_REDIS_DIGEST"
+      ;;
+    *)
+      fatal "未知的恢复备份类型：$artifact_type"
+      ;;
+  esac
+
+  [[ -n "$expected_name" ]] || fatal "批次清单缺少 $artifact_type 备份"
+  [[ "$(basename -- "$artifact_path")" = "$expected_name" ]] \
+    || fatal "传入的 $artifact_type 文件与批次清单不匹配"
+  require_private_file "$artifact_path" "$artifact_type 备份"
+  actual_size="$(wc -c < "$artifact_path" | tr -d '[:space:]')"
+  [[ "$actual_size" = "$expected_size" ]] \
+    || fatal "$artifact_type 备份大小与批次清单不匹配"
+  actual_digest="$(sha256_file "$artifact_path")"
+  [[ "$actual_digest" = "$expected_digest" ]] \
+    || fatal "$artifact_type 备份 SHA-256 与批次清单不匹配"
 }
 
 validate_attachment_archive() {
@@ -197,17 +345,37 @@ validate_inputs() {
     [[ -f "$compose_file" ]] || fatal "Compose 文件不存在：$compose_file"
   done
   require_private_file "$DB_BACKUP" "PostgreSQL 备份"
-  detect_database_backup_format
 
   if [[ "$SKIP_ATTACHMENTS" = false ]]; then
     [[ -n "$ATTACHMENTS_BACKUP" ]] || fatal "必须指定 --attachments-backup，或显式使用 --skip-attachments"
     require_private_file "$ATTACHMENTS_BACKUP" "附件备份"
-    validate_attachment_archive
   fi
 
   if [[ -n "$REDIS_BACKUP" ]]; then
     require_private_file "$REDIS_BACKUP" "Redis 备份"
     [[ -s "$REDIS_BACKUP" ]] || fatal "Redis 备份为空：$REDIS_BACKUP"
+  fi
+
+  if [[ -n "$MANIFEST" ]]; then
+    validate_backup_manifest
+    verify_manifest_artifact database "$DB_BACKUP"
+    if [[ "$SKIP_ATTACHMENTS" = false ]]; then
+      verify_manifest_artifact attachments "$ATTACHMENTS_BACKUP"
+    fi
+    if [[ -n "$REDIS_BACKUP" ]]; then
+      verify_manifest_artifact redis "$REDIS_BACKUP"
+    fi
+  elif [[ "$CONFIRM" = true && "$ALLOW_LEGACY" = false ]]; then
+    fatal "确认恢复必须提供 --manifest；仅历史无清单备份可显式使用 --legacy"
+  fi
+
+  # 先验证批次摘要，再解析 gzip/tar/RDB 内容；这样清单发现的篡改不会被后续格式错误遮蔽，
+  # 并且所有失败都发生在任何 Docker、AWS 或服务状态变更之前。
+  detect_database_backup_format
+  if [[ "$SKIP_ATTACHMENTS" = false ]]; then
+    validate_attachment_archive
+  fi
+  if [[ -n "$REDIS_BACKUP" ]]; then
     [[ "$(LC_ALL=C head -c 5 "$REDIS_BACKUP")" = "REDIS" ]] \
       || fatal "Redis 备份不是可识别的 RDB 文件：$REDIS_BACKUP"
   fi
@@ -238,6 +406,11 @@ print_plan() {
   done
   printf '  PostgreSQL：%s\n' "$DB_BACKUP"
   printf '  PostgreSQL 格式：%s\n' "$DB_BACKUP_FORMAT"
+  if [[ -n "$MANIFEST" ]]; then
+    printf '  批次清单：%s（batch_id=%s）\n' "$MANIFEST" "$MANIFEST_BATCH_ID"
+  elif [[ "$ALLOW_LEGACY" = true ]]; then
+    printf '  批次完整性：历史兼容模式（未提供 --manifest）\n'
+  fi
   if [[ "$SKIP_ATTACHMENTS" = true ]]; then
     printf '  工单附件：跳过（已显式指定 --skip-attachments）\n'
   elif [[ "$FILE_STORAGE_PROVIDER" = S3 ]]; then
@@ -262,6 +435,11 @@ while [[ $# -gt 0 ]]; do
     --db-backup)
       [[ $# -ge 2 ]] || fatal "--db-backup 缺少参数"
       DB_BACKUP="$(make_absolute "$2")"
+      shift 2
+      ;;
+    --manifest)
+      [[ $# -ge 2 ]] || fatal "--manifest 缺少参数"
+      MANIFEST="$(make_absolute "$2")"
       shift 2
       ;;
     --attachments-backup)
@@ -296,6 +474,10 @@ while [[ $# -gt 0 ]]; do
       SKIP_ATTACHMENTS=true
       shift
       ;;
+    --legacy)
+      ALLOW_LEGACY=true
+      shift
+      ;;
     --confirm)
       CONFIRM=true
       shift
@@ -309,6 +491,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$ALLOW_LEGACY" = true && -n "$MANIFEST" ]]; then
+  fatal "--legacy 只能用于未提供 --manifest 的历史备份"
+fi
 
 [[ -n "$DB_BACKUP" ]] || fatal "必须指定 --db-backup"
 load_file_storage_config

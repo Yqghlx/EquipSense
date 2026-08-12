@@ -77,6 +77,28 @@ S3_SYNC="$(env_value S3_SYNC)"; S3_SYNC="${S3_SYNC:-false}"
 S3_BUCKET="$(env_value S3_BUCKET)"
 BACKUP_WEBHOOK="$(env_value BACKUP_WEBHOOK)"
 
+PG_FILE=""
+ATTACHMENTS_FILE=""
+REDIS_FILE=""
+MANIFEST_FILE=""
+
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA256_TOOL="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+  SHA256_TOOL="shasum"
+else
+  echo "[FATAL] 生成备份批次清单需要 sha256sum 或 shasum" >&2
+  exit 1
+fi
+
+sha256_file() {
+  if [ "$SHA256_TOOL" = "sha256sum" ]; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
 # 相对路径始终相对于 docker/ 目录，避免从仓库根目录和定时任务执行时产生两套备份目录。
 case "$BACKUP_DIR" in
   /*)
@@ -364,6 +386,7 @@ cleanup_old_backups() {
     "${PG_DB}_*.sql.gz"
     "redis_*.rdb"
     "attachments_*.tar.gz"
+    "backup-manifest_*.tsv"
   )
 
   # 清理失败会让磁盘持续增长，必须纳入备份结果，而不能再用 `|| true` 静默吞掉。
@@ -382,6 +405,86 @@ cleanup_old_backups() {
 cleanup_old_backups
 
 # ============================================================
+# 批次完整性清单
+# ============================================================
+write_backup_manifest() {
+  local manifest_temp="$BACKUP_DIR/backup-manifest_${TIMESTAMP}.tsv.tmp.$$"
+  local manifest_path="$BACKUP_DIR/backup-manifest_${TIMESTAMP}.tsv"
+  local file
+  local filename
+  local artifact_type
+  local file_size
+  local digest
+
+  rm -f -- "$manifest_temp" "$manifest_path"
+
+  # 清单只记录当前批次的单层文件名和摘要，不执行清单内容；临时文件完成后再原子改名，
+  # 避免异地同步或恢复流程读到半份清单。任何一个启用组件缺失都使整批备份失败。
+  if ! {
+    printf 'format\tequipsense-backup-manifest-v1\n'
+    printf 'batch_id\t%s\n' "$TIMESTAMP"
+    for file in "${BACKUP_FILES[@]}"; do
+      [ -f "$file" ] || {
+        echo "  ✗ 批次清单引用的备份文件不存在: $file" >&2
+        return 1
+      }
+      filename="$(basename -- "$file")"
+      if ! [[ "$filename" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+        echo "  ✗ 备份文件名包含不安全字符，无法写入批次清单: $filename" >&2
+        return 1
+      fi
+
+      if [[ -n "$PG_FILE" && "$file" = "$PG_FILE" ]]; then
+        artifact_type="database"
+      elif [[ -n "$ATTACHMENTS_FILE" && "$file" = "$ATTACHMENTS_FILE" ]]; then
+        artifact_type="attachments"
+      elif [[ -n "$REDIS_FILE" && "$file" = "$REDIS_FILE" ]]; then
+        artifact_type="redis"
+      else
+        echo "  ✗ 无法识别批次清单中的备份文件类型: $filename" >&2
+        return 1
+      fi
+
+      [ -s "$file" ] || {
+        echo "  ✗ 备份文件为空，无法写入批次清单: $filename" >&2
+        return 1
+      }
+      file_size="$(wc -c < "$file" | tr -d '[:space:]')"
+      [[ "$file_size" =~ ^[1-9][0-9]*$ ]] || {
+        echo "  ✗ 无法读取备份文件大小: $filename" >&2
+        return 1
+      }
+      digest="$(sha256_file "$file")"
+      [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+        echo "  ✗ 无法生成备份文件 SHA-256: $filename" >&2
+        return 1
+      }
+      printf 'artifact\t%s\t%s\t%s\t%s\n' \
+        "$artifact_type" "$filename" "$file_size" "$digest"
+    done
+  } > "$manifest_temp"; then
+    rm -f -- "$manifest_temp" "$manifest_path"
+    return 1
+  fi
+
+  chmod 600 "$manifest_temp"
+  if ! mv -f -- "$manifest_temp" "$manifest_path"; then
+    rm -f -- "$manifest_temp" "$manifest_path"
+    return 1
+  fi
+  MANIFEST_FILE="$manifest_path"
+  BACKUP_FILES+=("$MANIFEST_FILE")
+  echo "  ✓ 批次完整性清单已生成: $MANIFEST_FILE"
+}
+
+if [ "$BACKUP_SUCCESS" = "true" ]; then
+  if ! write_backup_manifest; then
+    echo "  ✗ 批次完整性清单生成失败，拒绝报告备份成功" >&2
+    BACKUP_SUCCESS=false
+  fi
+fi
+
+# ============================================================
 # 异地同步（S3/OSS，可选）
 # ============================================================
 if [[ "${S3_SYNC:-false}" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
@@ -397,7 +500,8 @@ if [[ "${S3_SYNC:-false}" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
     echo "  ✗ S3_SYNC 已开启，但主机未安装 aws-cli" >&2
     BACKUP_SUCCESS=false
   elif aws s3 sync "$BACKUP_DIR" "$S3_BUCKET" \
-    --exclude "*" --include "*.dump" --include "*.sql.gz" --include "*.rdb" --include "attachments_*.tar.gz"; then
+    --exclude "*" --include "*.dump" --include "*.sql.gz" --include "*.rdb" \
+    --include "attachments_*.tar.gz" --include "backup-manifest_*.tsv"; then
     echo "  ✓ S3 同步完成"
   else
     echo "  ✗ S3 同步失败" >&2

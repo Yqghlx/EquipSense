@@ -19,6 +19,7 @@ REHEARSAL_PORT=""
 PG_CONTAINER=""
 BACKEND_CONTAINER=""
 BACKUP_DIR=""
+MANIFEST=""
 
 fatal() {
   printf '备份恢复演练失败：%s\n' "$*" >&2
@@ -188,8 +189,10 @@ printf '执行真实备份并校验归档……\n'
 "$BACKUP_SCRIPT"
 DB_BACKUP="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.dump' -print -quit)"
 ATTACHMENTS_BACKUP="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'attachments_*.tar.gz' -print -quit)"
+MANIFEST="$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'backup-manifest_*.tsv' -print -quit)"
 [[ -n "$DB_BACKUP" ]] || fatal "未生成 PostgreSQL custom 备份"
 [[ -n "$ATTACHMENTS_BACKUP" ]] || fatal "未生成工单附件备份"
+[[ -n "$MANIFEST" ]] || fatal "未生成备份批次完整性清单"
 
 printf '破坏基线数据，验证恢复确实覆盖目标……\n'
 compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d rehearsal \
@@ -203,6 +206,7 @@ restore_started_at="$SECONDS"
   --compose-file "$COMPOSE_FILE" \
   --db-backup "$DB_BACKUP" \
   --attachments-backup "$ATTACHMENTS_BACKUP" \
+  --manifest "$MANIFEST" \
   --attachments-path /app/uploads \
   --health-url "http://127.0.0.1:${REHEARSAL_PORT}/health" \
   --confirm
