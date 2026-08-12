@@ -50,7 +50,9 @@ public class WorkOrderAutoCreateHandler : IEventHandler<AlertTriggeredEvent>
         // 使用 IgnoreQueryFilters 绕过全局租户过滤器（后台事件处理器无 HttpContext）
         var rule = await dbContext.AlertRules
             .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(r => r.Id == @event.RuleId, cancellationToken);
+            .FirstOrDefaultAsync(
+                r => r.Id == @event.RuleId && r.TenantId == @event.TenantId,
+                cancellationToken);
         if (rule?.AutoCreateWorkorder != true)
         {
             _logger.LogDebug("告警规则未启用自动创建工单: RuleId={RuleId}", @event.RuleId);

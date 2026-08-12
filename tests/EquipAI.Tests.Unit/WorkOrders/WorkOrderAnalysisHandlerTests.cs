@@ -75,6 +75,38 @@ public class WorkOrderAnalysisHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_事件租户与工单租户不一致_不应更新工单或推送通知()
+    {
+        var (db, handler, signalRMock) = CreateSut();
+        var alertId = Guid.NewGuid();
+        var analysisId = Guid.NewGuid();
+        var eventTenantId = Guid.NewGuid();
+
+        db.WorkOrders.Add(new Core.Entities.WorkOrder
+        {
+            TenantId = _tenantId, AlertId = alertId,
+            Title = "其他租户活跃工单", Status = WorkOrderStatus.InProgress,
+            RootCause = "原始根因"
+        });
+        await db.SaveChangesAsync();
+
+        await handler.HandleAsync(
+            new AnalysisCompletedEvent(
+                EventId: Guid.NewGuid(), OccurredAt: DateTime.UtcNow,
+                TenantId: eventTenantId, AnalysisId: analysisId, AlertId: alertId,
+                DeviceId: Guid.NewGuid(), Metric: "temperature", Level: AnalysisLevel.L3,
+                Confidence: 0.85, RootCause: "越权根因", Suggestion: "越权建议"),
+            CancellationToken.None);
+
+        var workOrder = await db.WorkOrders.IgnoreQueryFilters().SingleAsync();
+        workOrder.AnalysisId.Should().BeNull();
+        workOrder.RootCause.Should().Be("原始根因");
+        signalRMock.Invocations
+            .Should().NotContain(i =>
+                i.Method.Name == nameof(ISignalRNotificationService.SendWorkOrderAnalysisUpdatedAsync));
+    }
+
+    [Fact]
     public async Task HandleAsync_更新工单后应推送分析完成事件让详情页实时刷新()
     {
         var (db, handler, signalRMock) = CreateSut();

@@ -36,7 +36,8 @@ public class WorkOrderAnalysisHandler : IEventHandler<AnalysisCompletedEvent>
         // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让查询返回 null
         var workOrder = await dbContext.WorkOrders
             .IgnoreQueryFilters()
-            .Where(wo => wo.AlertId == @event.AlertId
+            .Where(wo => wo.TenantId == @event.TenantId
+                && wo.AlertId == @event.AlertId
                 && wo.Status != WorkOrderStatus.Closed
                 && wo.Status != WorkOrderStatus.Cancelled)
             .FirstOrDefaultAsync(cancellationToken);

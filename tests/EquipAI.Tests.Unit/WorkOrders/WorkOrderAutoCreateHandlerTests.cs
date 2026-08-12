@@ -115,6 +115,34 @@ public class WorkOrderAutoCreateHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_事件租户与规则租户不一致_不应自动创建工单()
+    {
+        var (db, eventBus, handler) = CreateSut();
+        var ruleId = Guid.NewGuid();
+        var eventTenantId = Guid.NewGuid();
+
+        db.AlertRules.Add(new AlertRule
+        {
+            Id = ruleId, TenantId = _tenantId, Name = "其他租户自动规则",
+            Metric = "temperature", Conditions = "[]",
+            Severity = AlertSeverity.High, AutoCreateWorkorder = true
+        });
+        await db.SaveChangesAsync();
+
+        var alertEvent = new AlertTriggeredEvent(
+            EventId: Guid.NewGuid(), OccurredAt: DateTime.UtcNow,
+            TenantId: eventTenantId, AlertId: Guid.NewGuid(), DeviceId: Guid.NewGuid(),
+            RuleId: ruleId, Metric: "temperature", Value: 100.0, Severity: "High");
+
+        await handler.HandleAsync(alertEvent, CancellationToken.None);
+
+        (await db.WorkOrders.IgnoreQueryFilters().ToListAsync()).Should().BeEmpty();
+        eventBus.Verify(
+            e => e.PublishAsync(It.IsAny<WorkOrderCreatedEvent>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task HandleAsync_自动创建工单应写入创建审计日志()
     {
         var (db, _, handler) = CreateSut();
