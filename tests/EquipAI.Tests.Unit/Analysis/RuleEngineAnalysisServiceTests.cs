@@ -298,6 +298,121 @@ public class RuleEngineAnalysisServiceTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// 安全边界：设备属于租户 A 时，租户 B 的规则不能借用该设备类型完成匹配。
+    ///
+    /// Why：后台规则匹配绕过 HTTP 租户过滤器读取事件数据，但设备类型仍必须绑定事件租户，
+    /// 否则跨租户设备 ID 配合同类型规则会产生错误的根因结论。
+    /// </summary>
+    [Fact]
+    public async Task MatchRuleAsync_设备租户与事件租户不一致_不应返回规则()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var deviceId = Guid.NewGuid();
+        var deviceTenantId = Guid.NewGuid();
+        var eventTenantId = Guid.NewGuid();
+
+        db.Devices.Add(new Device
+        {
+            Id = deviceId,
+            TenantId = deviceTenantId,
+            DeviceCode = "TENANT-A-DEV",
+            Name = "租户A设备",
+            Type = "电机",
+        });
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            TenantId = eventTenantId,
+            DeviceType = "电机",
+            Name = "租户B电机规则",
+            Conditions = """[{"metric":"temperature","operator":">","threshold":80}]""",
+            Conclusion = "不应被跨租户设备命中",
+            ConfidenceWeight = 0.9m,
+            Enabled = true,
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IRuleEngineAnalysisService>();
+        var result = await service.MatchRuleAsync(eventTenantId, deviceId, "temperature", 95.0);
+
+        result.Should().BeNull("规则引擎不能读取其他租户设备类型");
+    }
+
+    /// <summary>
+    /// 后台正向路径：当前上下文租户与事件租户不同，但设备属于事件租户时仍应匹配规则。
+    /// </summary>
+    [Fact]
+    public async Task MatchRuleAsync_后台事件租户与当前上下文不同_合法设备应正常匹配()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventTenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+
+        db.Devices.Add(new Device
+        {
+            Id = deviceId,
+            TenantId = eventTenantId,
+            DeviceCode = "EVENT-TENANT-DEV",
+            Name = "事件租户设备",
+            Type = "电机",
+        });
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            TenantId = eventTenantId,
+            DeviceType = "电机",
+            Name = "后台电机规则",
+            Conditions = """[{"metric":"temperature","operator":">","threshold":80}]""",
+            Conclusion = "后台事件正常命中",
+            ConfidenceWeight = 0.9m,
+            Enabled = true,
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IRuleEngineAnalysisService>();
+        var result = await service.MatchRuleAsync(eventTenantId, deviceId, "temperature", 95.0);
+
+        result.Should().NotBeNull("后台处理应使用事件租户而非当前 HTTP 上下文租户");
+        result!.Conclusion.Should().Be("后台事件正常命中");
+    }
+
+    /// <summary>
+    /// 安全边界：不存在的设备即使有通配知识规则，也不能产生诊断结论。
+    ///
+    /// Why：未知设备的设备类型为空；旧实现会把 DeviceType="*" 规则当成匹配结果，
+    /// 将没有真实设备上下文的遥测误判为根因，造成错误建议。
+    /// </summary>
+    [Fact]
+    public async Task MatchRuleAsync_不存在设备加通配规则_不应返回规则()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var eventTenantId = Guid.NewGuid();
+        var unknownDeviceId = Guid.NewGuid();
+
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            TenantId = eventTenantId,
+            DeviceType = "*",
+            Name = "通配温度规则",
+            Conditions = """[{"metric":"temperature","operator":">","threshold":80}]""",
+            Conclusion = "未知设备不应命中",
+            ConfidenceWeight = 0.8m,
+            Enabled = true,
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IRuleEngineAnalysisService>();
+        var result = await service.MatchRuleAsync(
+            eventTenantId,
+            unknownDeviceId,
+            "temperature",
+            95.0);
+
+        result.Should().BeNull("没有设备实体时不能生成诊断规则匹配");
+    }
+
+    /// <summary>
     /// 测试用租户上下文
     /// </summary>
     private class TestTenantContext : ITenantContext

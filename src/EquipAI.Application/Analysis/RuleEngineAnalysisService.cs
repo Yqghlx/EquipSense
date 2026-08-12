@@ -34,13 +34,22 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 查询设备类型，用于匹配规则的 DeviceType 字段
-        // IgnoreQueryFilters: 后台事件处理器无 HttpContext，全局租户过滤器会让查询返回 null
+        // 查询设备类型，用于匹配规则的 DeviceType 字段。
+        // 后台事件处理器无 HttpContext，需要绕过全局租户过滤器；但设备 ID 仍必须与事件租户绑定，
+        // 否则跨租户设备会把错误的类型带入当前租户规则匹配。
         var deviceType = await db.Devices
             .IgnoreQueryFilters()
-            .Where(d => d.Id == deviceId)
+            .Where(d => d.Id == deviceId && d.TenantId == tenantId)
             .Select(d => d.Type)
             .FirstOrDefaultAsync(ct);
+        if (deviceType is null)
+        {
+            _logger.LogWarning(
+                "规则匹配跳过未知或跨租户设备: TenantId={TenantId}, DeviceId={DeviceId}",
+                tenantId,
+                deviceId);
+            return null;
+        }
 
         // 查询所有启用的规则：同租户 + 系统租户（通用规则），且设备类型匹配或为通配符
         var rules = await db.UnfilteredSet<Core.Entities.KnowledgeRule>()
