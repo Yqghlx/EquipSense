@@ -1383,6 +1383,53 @@ test_production_readiness_suppresses_unknown_compose_secret_details() {
     || fail "Compose 错误详情不应泄露未知环境变量值"
 }
 
+test_production_readiness_accepts_multiple_compose_files() {
+  local case_dir="$TEST_ROOT/production-readiness-overlay"
+  create_readiness_fixture "$case_dir" pass
+  : > "$case_dir/docker-compose.prod.yml"
+
+  local output
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      bash ./production-readiness.sh \
+        --compose-file "$case_dir/docker-compose.yml" \
+        --compose-file "$case_dir/docker-compose.prod.yml" 2>&1
+  )" || fail "多 Compose 文件的静态 readiness 不应失败"
+
+  assert_contains "$output" "Compose 配置解析通过"
+  grep -F -- "-f $case_dir/docker-compose.yml -f $case_dir/docker-compose.prod.yml config --quiet" \
+    "$case_dir/docker.calls" >/dev/null \
+    || fail "Compose 文件必须按基础文件再生产 overlay 的顺序传递"
+}
+
+test_production_readiness_rejects_symlink_compose_file() {
+  local case_dir="$TEST_ROOT/production-readiness-compose-symlink"
+  create_readiness_fixture "$case_dir" pass
+  ln -s docker-compose.yml "$case_dir/docker-compose.prod.yml"
+
+  local output
+  local result_code
+  set +e
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      bash ./production-readiness.sh \
+        --compose-file "$case_dir/docker-compose.yml" \
+        --compose-file "$case_dir/docker-compose.prod.yml" 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "Compose 文件符号链接不应通过 readiness"
+  assert_contains "$output" "符号链接"
+  [[ ! -s "$case_dir/docker.calls" ]] || fail "Compose 文件符号链接失败时不应访问 Docker"
+}
+
 test_bootstrap_production_secrets_generates_only_local_values() {
   local case_dir="$TEST_ROOT/bootstrap-production-secrets"
   mkdir -p "$case_dir"
@@ -3646,6 +3693,8 @@ case "${1:-all}" in
     test_production_readiness_rejects_unhealthy_runtime
     test_production_readiness_rejects_unavailable_docker
     test_production_readiness_suppresses_unknown_compose_secret_details
+    test_production_readiness_accepts_multiple_compose_files
+    test_production_readiness_rejects_symlink_compose_file
     ;;
   backup)
     test_postgres_custom_archive_reads_from_stdin
@@ -3741,6 +3790,8 @@ case "${1:-all}" in
     test_production_readiness_rejects_unhealthy_runtime
     test_production_readiness_rejects_unavailable_docker
     test_production_readiness_suppresses_unknown_compose_secret_details
+    test_production_readiness_accepts_multiple_compose_files
+    test_production_readiness_rejects_symlink_compose_file
     test_production_readiness_entrypoint_is_wired_and_read_only
     test_production_env_template_uses_https_default
     test_production_compose_wrapper_runs_preflight_before_start

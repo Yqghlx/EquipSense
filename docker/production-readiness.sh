@@ -20,21 +20,23 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ENV_FILE="${PRODUCTION_ENV_FILE:-${SCRIPT_DIR}/.env}"
-COMPOSE_FILE="${PRODUCTION_COMPOSE_FILE:-${SCRIPT_DIR}/docker-compose.yml}"
+COMPOSE_FILES=()
 DOCKER_BIN="${PRODUCTION_DOCKER_BIN:-docker}"
 RUNTIME_CHECK=false
 ERRORS=0
 DOCKER_READY=false
 COMPOSE_READY=false
+COMPOSE_FILES_VALID=true
 SENSITIVE_VALUES=()
 
 usage() {
   cat <<'EOF'
 用法：
-  production-readiness.sh [--env-file <路径>] [--runtime]
+  production-readiness.sh [--env-file <路径>] [--compose-file <路径> ...] [--runtime]
 
 选项：
   --env-file <路径>  指定生产环境变量文件，默认使用 docker/.env
+  --compose-file <路径>  指定 Compose 文件，可重复传入；默认使用 docker/docker-compose.yml
   --runtime          额外检查 Compose 中的服务是否运行且健康
   --help             显示帮助
 
@@ -121,10 +123,13 @@ run_captured() {
 run_compose_captured() {
   local output_variable="$1"
   shift
-  run_captured "$output_variable" "$DOCKER_BIN" compose \
-    --env-file "$ENV_FILE" \
-    -f "$COMPOSE_FILE" \
-    "$@"
+  local compose_command=("$DOCKER_BIN" compose --env-file "$ENV_FILE")
+  local compose_file
+  for compose_file in "${COMPOSE_FILES[@]}"; do
+    compose_command+=(-f "$compose_file")
+  done
+  compose_command+=("$@")
+  run_captured "$output_variable" "${compose_command[@]}"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -132,6 +137,11 @@ while [ "$#" -gt 0 ]; do
     --env-file)
       [ "$#" -ge 2 ] || { usage >&2; exit 2; }
       ENV_FILE="$2"
+      shift 2
+      ;;
+    --compose-file)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      COMPOSE_FILES+=("$2")
       shift 2
       ;;
     --runtime)
@@ -149,15 +159,25 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "${#COMPOSE_FILES[@]}" -eq 0 ]; then
+  COMPOSE_FILES=("${PRODUCTION_COMPOSE_FILE:-${SCRIPT_DIR}/docker-compose.yml}")
+fi
+
 if ! ENV_FILE="$(resolve_path "$ENV_FILE")"; then
   error "无法解析环境变量文件路径"
 else
   collect_sensitive_values
 fi
 
-if ! COMPOSE_FILE="$(resolve_path "$COMPOSE_FILE")"; then
-  error "无法解析 Compose 文件路径"
-fi
+for compose_index in "${!COMPOSE_FILES[@]}"; do
+  compose_path="${COMPOSE_FILES[$compose_index]}"
+  if ! compose_path="$(resolve_path "$compose_path")"; then
+    error "无法解析 Compose 文件路径"
+    COMPOSE_FILES_VALID=false
+  else
+    COMPOSE_FILES[$compose_index]="$compose_path"
+  fi
+done
 
 printf '生产只读自检开始\n'
 
@@ -169,11 +189,17 @@ else
   success "环境变量文件已找到"
 fi
 
-if [ ! -f "$COMPOSE_FILE" ]; then
-  error "Compose 文件不存在"
-else
-  success "Compose 文件已找到"
-fi
+for compose_file in "${COMPOSE_FILES[@]}"; do
+  if [ -L "$compose_file" ]; then
+    error "Compose 文件不得为符号链接"
+    COMPOSE_FILES_VALID=false
+  elif [ ! -f "$compose_file" ]; then
+    error "Compose 文件不存在"
+    COMPOSE_FILES_VALID=false
+  else
+    success "Compose 文件已找到"
+  fi
+done
 
 if [ ! -f "${SCRIPT_DIR}/validate-env.sh" ]; then
   error "缺少生产环境校验器 validate-env.sh"
@@ -200,7 +226,7 @@ fi
 
 # 先完成本地静态门禁；环境文件或证书无效时无需访问 Docker daemon，
 # 这样配置错误可以立即反馈，也避免 daemon 异常掩盖真正的部署问题。
-if [ "$validation_status" -ne 0 ]; then
+if [ "$validation_status" -ne 0 ] || [ "$COMPOSE_FILES_VALID" != true ]; then
   printf '生产只读自检失败：发现 %d 项问题\n' "$ERRORS" >&2
   exit 1
 fi
@@ -226,7 +252,7 @@ fi
 
 compose_output=""
 compose_status=1
-if [ "$DOCKER_READY" = true ] && [ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ -f "$COMPOSE_FILE" ]; then
+if [ "$DOCKER_READY" = true ] && [ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ "$COMPOSE_FILES_VALID" = true ]; then
   if run_compose_captured compose_output config --quiet; then
     COMPOSE_READY=true
     success "Compose 配置解析通过"

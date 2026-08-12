@@ -41,7 +41,7 @@
 - Consumes: 现有 `--env-file <路径>`、`--runtime`、`PRODUCTION_DOCKER_BIN`、`PRODUCTION_COMPOSE_FILE`。
 - Produces: `production-readiness.sh [--env-file <路径>] [--compose-file <路径> ...] [--runtime]`；未传 `--compose-file` 时保留单文件默认行为。
 
-- [ ] **Step 1: 写多文件和符号链接失败测试**
+- [x] **Step 1: 写多文件和符号链接失败测试**
 
 在 `create_readiness_fixture` 后增加测试。多文件测试必须创建空的 `docker-compose.prod.yml`，运行：
 
@@ -59,7 +59,7 @@ bash ./production-readiness.sh \
 
 第二个测试把 overlay 改为指向基础文件的符号链接，断言返回非零并包含“符号链接”，且 fake Docker 没有被调用。把两个测试加入 `readiness)` 和 `all)` 分支。
 
-- [ ] **Step 2: 运行测试确认先失败**
+- [x] **Step 2: 运行测试确认先失败**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh readiness
@@ -67,7 +67,7 @@ bash tests/scripts/production-scripts-test.sh readiness
 
 预期：新测试因当前脚本将 `--compose-file` 视为未知参数而失败；现有单文件测试仍通过。
 
-- [ ] **Step 3: 实现数组化 Compose 参数**
+- [x] **Step 3: 实现数组化 Compose 参数**
 
 将单值 `COMPOSE_FILE` 改为 `COMPOSE_FILES=()`；参数解析时对每个 `--compose-file` 执行 `COMPOSE_FILES+=("$2")`。未指定时使用 `${PRODUCTION_COMPOSE_FILE:-${SCRIPT_DIR}/docker-compose.yml}` 作为唯一文件。
 
@@ -76,7 +76,7 @@ bash tests/scripts/production-scripts-test.sh readiness
 ```bash
 compose_command=("$DOCKER_BIN" compose --env-file "$ENV_FILE")
 for compose_file in "${COMPOSE_FILES[@]}"; do
-  compose_command+=(--file "$compose_file")
+compose_command+=(-f "$compose_file")
 done
 compose_command+=("$@")
 run_captured "$output_variable" "${compose_command[@]}"
@@ -84,7 +84,7 @@ run_captured "$output_variable" "${compose_command[@]}"
 
 更新帮助文本，说明 `--compose-file` 可重复；静态配置解析、服务清单和运行态状态读取必须复用这组文件。
 
-- [ ] **Step 4: 运行 readiness 回归**
+- [x] **Step 4: 运行 readiness 回归**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh readiness
@@ -93,10 +93,11 @@ bash -n docker/production-readiness.sh tests/scripts/production-scripts-test.sh
 
 预期：所有 readiness 测试通过，Compose 错误脱敏测试仍不输出秘密值。
 
-- [ ] **Step 5: 提交 Task 1**
+- [x] **Step 5: 提交 Task 1**
 
 ```bash
-git add docker/production-readiness.sh tests/scripts/production-scripts-test.sh
+git add docker/production-readiness.sh tests/scripts/production-scripts-test.sh \
+  docs/superpowers/plans/2026-08-12-production-release-readiness-gate.md
 git commit -m "feat: support layered compose files in readiness gate"
 ```
 
