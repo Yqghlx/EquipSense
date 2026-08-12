@@ -36,6 +36,7 @@ public class AuthService : IAuthService
     private readonly IDistributedLockProvider _distributedLockProvider;
     private readonly MfaPolicyOptions _mfaPolicy;
     private readonly IPiiProtector _piiProtector;
+    private readonly ITenantContext _tenantContext;
 
     /// <summary>
     /// 连续登录失败达到此数值时自动锁定账户
@@ -154,7 +155,8 @@ public class AuthService : IAuthService
         IConfiguration configuration,
         ITotpSecretProtector totpSecretProtector,
         IDistributedLockProvider distributedLockProvider,
-        IPiiProtector piiProtector)
+        IPiiProtector piiProtector,
+        ITenantContext tenantContext)
     {
         _dbContext = dbContext;
         _jwtTokenService = jwtTokenService;
@@ -167,6 +169,7 @@ public class AuthService : IAuthService
         _totpSecretProtector = totpSecretProtector;
         _distributedLockProvider = distributedLockProvider;
         _piiProtector = piiProtector;
+        _tenantContext = tenantContext;
         _mfaPolicy = MfaPolicyOptions.FromConfiguration(configuration);
     }
 
@@ -329,6 +332,40 @@ public class AuthService : IAuthService
     /// </summary>
     private static bool HasConfiguredMfa(Core.Entities.User user)
         => user.MfaEnabled && !string.IsNullOrWhiteSpace(user.TotpSecret);
+
+    /// <summary>
+    /// 构造已认证用户的租户限定查询。
+    /// 这些方法由 JWT 已认证请求调用，用户 ID 来自令牌，但仍必须显式校验租户，
+    /// 防止服务层被错误参数调用时把当前租户的写操作落到其他租户用户上。
+    /// </summary>
+    /// <param name="userId">当前认证用户 ID。</param>
+    /// <returns>同时按用户 ID 和当前租户 ID 限定的用户查询。</returns>
+    private IQueryable<Core.Entities.User> QueryTenantUser(Guid userId)
+    {
+        EnsureCurrentUser(userId);
+        var tenantId = _tenantContext.TenantId;
+        return _dbContext.UnfilteredSet<Core.Entities.User>()
+            .Where(user => user.Id == userId && user.TenantId == tenantId);
+    }
+
+    /// <summary>
+    /// 校验服务调用方是否就是当前认证用户。
+    /// JWT 中的用户 ID 是控制器传入参数的权威来源；服务层再次校验可以防止未来新增调用方
+    /// 把同租户其他用户的 ID 误传给自助认证接口。空用户上下文仅用于登录前流程和无请求单元测试。
+    /// </summary>
+    /// <param name="userId">待操作的用户 ID。</param>
+    /// <exception cref="UnauthorizedAccessException">用户 ID 与当前认证身份不一致。</exception>
+    private void EnsureCurrentUser(Guid userId)
+    {
+        if (_tenantContext.UserId != Guid.Empty && _tenantContext.UserId != userId)
+        {
+            _logger.LogWarning(
+                "拒绝认证自助操作：请求用户 {RequestedUserId} 与当前身份 {CurrentUserId} 不一致",
+                userId,
+                _tenantContext.UserId);
+            throw new UnauthorizedAccessException("只能操作当前登录用户");
+        }
+    }
 
     /// <summary>
     /// 获取用户级刷新令牌变更锁。
@@ -712,8 +749,8 @@ public class AuthService : IAuthService
     /// </summary>
     public async Task<MfaSetupResponse> SetupMfaAsync(Guid userId)
     {
-        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Id == userId)
+        var user = await QueryTenantUser(userId)
+            .FirstOrDefaultAsync()
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         var secret = _totpService.GenerateSecret();
@@ -748,6 +785,9 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("验证码不能为空");
         }
 
+        // 先校验 JWT 身份，再访问按用户 ID 命名的 Redis 临时密钥，避免错误用户探测其他账户的 MFA 状态。
+        EnsureCurrentUser(userId);
+
         var setupKey = $"{MfaSetupKeyPrefix}{userId}";
         var secret = await _redisService.GetStringAsync(setupKey);
 
@@ -764,8 +804,8 @@ public class AuthService : IAuthService
         }
 
         // 验证通过：将密钥正式写入用户记录并启用 MFA
-        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Id == userId)
+        var user = await QueryTenantUser(userId)
+            .FirstOrDefaultAsync()
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         user.TotpSecret = _totpSecretProtector.Protect(secret);
@@ -798,6 +838,9 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("验证码不能为空");
         }
 
+        // 认证校验必须先于获取用户级锁，避免错误用户制造跨账户锁竞争。
+        EnsureCurrentUser(userId);
+
         // 重新生成会使旧恢复码全部失效，必须和恢复码消费共用同一把用户级锁。
         await using var recoveryLock = await _distributedLockProvider.AcquireAsync(
             $"{MfaRecoveryLockPrefix}{userId}",
@@ -808,8 +851,9 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("MFA 请求正在处理中，请稍后重试");
         }
 
-        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive)
+        var user = await QueryTenantUser(userId)
+            .Where(u => u.IsActive)
+            .FirstOrDefaultAsync()
             ?? throw new UnauthorizedAccessException("用户不存在或已停用");
 
         if (!HasConfiguredMfa(user) || string.IsNullOrWhiteSpace(user.TotpSecret))
@@ -853,6 +897,9 @@ public class AuthService : IAuthService
     /// </summary>
     public async Task DisableMfaAsync(Guid userId)
     {
+        // 认证校验必须先于获取用户级锁，避免错误用户制造跨账户锁竞争。
+        EnsureCurrentUser(userId);
+
         // 禁用 MFA 会清除恢复码，和恢复码登录/重新生成必须串行，避免并发请求产生状态覆盖。
         await using var recoveryLock = await _distributedLockProvider.AcquireAsync(
             $"{MfaRecoveryLockPrefix}{userId}",
@@ -863,8 +910,8 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("MFA 请求正在处理中，请稍后重试");
         }
 
-        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Id == userId)
+        var user = await QueryTenantUser(userId)
+            .FirstOrDefaultAsync()
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         if (_mfaPolicy.IsRequiredFor(user.Role))
@@ -890,6 +937,8 @@ public class AuthService : IAuthService
     /// <param name="userId">用户 ID</param>
     public async Task LogoutAsync(Guid userId, string? sessionId = null)
     {
+        EnsureCurrentUser(userId);
+
         if (string.IsNullOrWhiteSpace(sessionId))
         {
             await _redisService.RemoveRefreshTokenAsync(userId);
@@ -911,12 +960,15 @@ public class AuthService : IAuthService
     /// <exception cref="UnauthorizedAccessException">当前密码错误</exception>
     public async Task<AuthResponse> ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
     {
+        // 认证校验必须先于获取用户级锁，避免错误用户制造跨账户锁竞争。
+        EnsureCurrentUser(userId);
+
         // 改密会同时清理和重建刷新令牌索引，必须与登录/刷新共用用户级锁，
         // 否则并发刷新可能在旧会话清理后又把已吊销令牌写回 Redis。
         await using var refreshLock = await AcquireRefreshTokenMutationLockAsync(userId);
 
-        var user = await _dbContext.UnfilteredSet<Core.Entities.User>()
-            .FirstOrDefaultAsync(u => u.Id == userId)
+        var user = await QueryTenantUser(userId)
+            .FirstOrDefaultAsync()
             ?? throw new KeyNotFoundException($"用户 {userId} 不存在");
 
         if (!PasswordHasher.VerifyPassword(request.CurrentPassword, user.PasswordHash))

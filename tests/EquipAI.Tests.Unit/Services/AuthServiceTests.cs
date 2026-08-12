@@ -986,6 +986,182 @@ public class AuthServiceTests : IAsyncDisposable
     // ==================== ChangePasswordAsync ====================
 
     [Fact]
+    public async Task SetupMfaAsync_其他租户用户_不得生成其临时密钥()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("cross-tenant-mfa-setup", otherTenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var act = () => service.SetupMfaAsync(user.Id);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        _stubRedis.HasStringKeyStartingWith($"mfa_setup:{user.Id}").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SetupMfaAsync_当前用户上下文非空_应成功生成临时密钥()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>() as TestTenantContext;
+
+        var user = CreateTestUser("current-user-mfa-setup", _tenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        tenantContext!.UserId = user.Id;
+
+        var result = await service.SetupMfaAsync(user.Id);
+
+        result.Secret.Should().Be("JBSWY3DPEHPK3PXP");
+        _stubRedis.HasStringKeyStartingWith($"mfa_setup:{user.Id}").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ConfirmMfaSetupAsync_其他租户用户_不得写入Mfa配置()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("cross-tenant-mfa-confirm", otherTenantId, "password123");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var originalSecret = user.TotpSecret;
+
+        await _stubRedis.SetStringAsync($"mfa_setup:{user.Id}", "JBSWY3DPEHPK3PXP", TimeSpan.FromMinutes(10));
+
+        var act = () => service.ConfirmMfaSetupAsync(user.Id, "123456");
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        var persistedUser = await db.UnfilteredSet<User>().AsNoTracking().FirstAsync(u => u.Id == user.Id);
+        persistedUser.TotpSecret.Should().Be(originalSecret);
+        persistedUser.MfaEnabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task RegenerateMfaRecoveryCodesAsync_其他租户用户_不得替换恢复码()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("cross-tenant-mfa-recovery", otherTenantId, "password123");
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        user.MfaRecoveryCodes = "original-recovery-codes";
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var act = () => service.RegenerateMfaRecoveryCodesAsync(user.Id, "123456");
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        var persistedUser = await db.UnfilteredSet<User>().AsNoTracking().FirstAsync(u => u.Id == user.Id);
+        persistedUser.MfaRecoveryCodes.Should().Be("original-recovery-codes");
+    }
+
+    [Fact]
+    public async Task DisableMfaAsync_其他租户用户_不得清除Mfa配置()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var otherTenantId = Guid.NewGuid();
+        var user = CreateTestUser("cross-tenant-mfa-disable", otherTenantId, "password123", UserRole.Technician);
+        user.MfaEnabled = true;
+        user.TotpSecret = "JBSWY3DPEHPK3PXP";
+        user.MfaRecoveryCodes = "original-recovery-codes";
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var act = () => service.DisableMfaAsync(user.Id);
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        var persistedUser = await db.UnfilteredSet<User>().AsNoTracking().FirstAsync(u => u.Id == user.Id);
+        persistedUser.MfaEnabled.Should().BeTrue();
+        persistedUser.TotpSecret.Should().Be("JBSWY3DPEHPK3PXP");
+        persistedUser.MfaRecoveryCodes.Should().Be("original-recovery-codes");
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_其他租户用户_不得修改密码()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var otherTenantId = Guid.NewGuid();
+        const string currentPassword = "OldPassword123";
+        var user = CreateTestUser("cross-tenant-password", otherTenantId, currentPassword);
+        var originalHash = user.PasswordHash;
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var act = () => service.ChangePasswordAsync(user.Id, new ChangePasswordRequest
+        {
+            CurrentPassword = currentPassword,
+            NewPassword = "NewPassword456",
+        });
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        var persistedUser = await db.UnfilteredSet<User>().AsNoTracking().FirstAsync(u => u.Id == user.Id);
+        persistedUser.PasswordHash.Should().Be(originalHash);
+    }
+
+    [Fact]
+    public async Task ChangePasswordAsync_同租户其他用户_不得修改密码()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>() as TestTenantContext;
+
+        const string currentPassword = "OldPassword123";
+        var currentUser = CreateTestUser("current-auth-user", _tenantId, "current-password");
+        var targetUser = CreateTestUser("same-tenant-target", _tenantId, currentPassword);
+        var originalHash = targetUser.PasswordHash;
+        db.Users.AddRange(currentUser, targetUser);
+        await db.SaveChangesAsync();
+        tenantContext!.UserId = currentUser.Id;
+
+        var act = () => service.ChangePasswordAsync(targetUser.Id, new ChangePasswordRequest
+        {
+            CurrentPassword = currentPassword,
+            NewPassword = "NewPassword456",
+        });
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        var persistedUser = await db.UnfilteredSet<User>().AsNoTracking().FirstAsync(u => u.Id == targetUser.Id);
+        persistedUser.PasswordHash.Should().Be(originalHash);
+    }
+
+    [Fact]
+    public async Task LogoutAsync_其他用户_不得撤销其会话()
+    {
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>() as TestTenantContext;
+
+        var currentUser = CreateTestUser("logout-current-user", _tenantId, "password123");
+        var otherUser = CreateTestUser("logout-other-user", Guid.NewGuid(), "password123");
+        tenantContext!.UserId = currentUser.Id;
+        await _stubRedis.SetRefreshTokenAsync(otherUser.Id, "other-user-token", TimeSpan.FromDays(7));
+
+        var act = () => service.LogoutAsync(otherUser.Id);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+        _stubRedis.GetStoredRefreshToken(otherUser.Id).Should().Be("other-user-token");
+    }
+
+    [Fact]
     public async Task ChangePasswordAsync_正确密码_应更新哈希()
     {
         // Arrange：创建用户并记录旧密码哈希
@@ -1492,11 +1668,16 @@ public class AuthServiceTests : IAsyncDisposable
     /// </summary>
     private class TestTenantContext : ITenantContext
     {
-        public TestTenantContext(Guid tenantId) { TenantId = tenantId; }
+        public TestTenantContext(Guid tenantId, Guid userId = default)
+        {
+            TenantId = tenantId;
+            UserId = userId;
+        }
+
         public Guid TenantId { get; }
         public string IsolationMode { get; } = "shared";
         public bool IsSystemAdmin { get; } = false;
-        public Guid UserId { get; } = Guid.NewGuid();
+        public Guid UserId { get; set; }
     }
 
     /// <summary>
