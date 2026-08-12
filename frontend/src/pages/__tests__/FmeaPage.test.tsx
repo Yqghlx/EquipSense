@@ -85,11 +85,20 @@ describe('FmeaPage', () => {
     render(<FmeaPage />);
 
     expect(screen.getByRole('button', { name: 'fmea.create' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'fmea.edit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'fmea.editAction' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'fmea.create' }));
 
     expect(screen.getByText('fmea.formDescription')).toBeInTheDocument();
+  });
+
+  it('点击行编辑入口时回填当前 FMEA 条目', async () => {
+    const user = userEvent.setup();
+    render(<FmeaPage />);
+
+    await user.click(screen.getByRole('button', { name: 'fmea.editAction' }));
+
+    expect(screen.getByDisplayValue(mockEntry.failureMode)).toBeInTheDocument();
   });
 
   it('无写权限时不显示新建和编辑入口', () => {
@@ -103,6 +112,6 @@ describe('FmeaPage', () => {
     render(<FmeaPage />);
 
     expect(screen.queryByRole('button', { name: 'fmea.create' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'fmea.edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'fmea.editAction' })).not.toBeInTheDocument();
   });
 });
