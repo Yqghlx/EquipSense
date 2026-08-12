@@ -106,7 +106,7 @@ export default function TrendWarningsCard() {
           </div>
         )}
 
-        {!isLoading && isError && !data && (
+        {!isLoading && isError && (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -118,13 +118,13 @@ export default function TrendWarningsCard() {
           </div>
         )}
 
-        {!isLoading && !(isError && !data) && sortedWarnings.length === 0 && (
+        {!isLoading && !isError && sortedWarnings.length === 0 && (
           <p className="py-6 text-center text-sm text-muted-foreground">
             {t('dashboard.trendWarnings.empty')}
           </p>
         )}
 
-        {!isLoading && !(isError && !data) && sortedWarnings.length > 0 && (
+        {!isLoading && sortedWarnings.length > 0 && (
           <div className="space-y-2">
             {visibleWarnings.map((warning) => {
               const riskLevel = getRiskLevel(warning.daysToThreshold);

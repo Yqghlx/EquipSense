@@ -135,10 +135,10 @@ describe('TrendWarningsCard', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('首次加载失败时显示错误并支持重试', async () => {
+  it('缓存旧数据且加载失败时显示错误并保留旧数据', async () => {
     const refetch = vi.fn();
     mockedUseTrendWarnings.mockReturnValue({
-      data: undefined,
+      data: [createWarning({ deviceId: 'device-old', metric: 'pressure' })],
       isLoading: false,
       isError: true,
       refetch,
@@ -146,6 +146,9 @@ describe('TrendWarningsCard', () => {
 
     render(<TrendWarningsCard />);
     expect(screen.getByRole('alert')).toHaveTextContent('Trend warnings failed to load');
+    expect(screen.getByRole('button', { name: 'Retry trend warnings' })).toBeInTheDocument();
+    expect(screen.queryByText('No metrics are expected to exceed a threshold soon')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /device-old.*pressure/i })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Retry trend warnings' }));
     expect(refetch).toHaveBeenCalledOnce();
