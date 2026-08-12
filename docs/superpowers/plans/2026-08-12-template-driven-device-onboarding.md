@@ -223,7 +223,7 @@ dotnet test tests/EquipAI.Tests.Integration --filter "FullyQualifiedName~DeviceC
 
 预期：模板关联、完整规则字段、不可见模板、无规则模式、非法 JSON 回滚、重复编码和旧兼容路径全部通过。
 
-- [ ] **Step 5: 提交 Task 2**
+- [x] **Step 5: 提交 Task 2**
 
 ```bash
 git add src/EquipAI.Application/Devices/DeviceConfigService.cs \
