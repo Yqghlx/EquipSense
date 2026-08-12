@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ClipboardPenLine, Loader2 } from 'lucide-react';
 import { Badge } from '../ui/badge';
@@ -96,8 +96,19 @@ function FieldError({ id, message }: FieldErrorProps) {
   );
 }
 
+/**
+ * FMEA 表单弹窗外壳。
+ *
+ * 使用打开状态和条目 ID 组成稳定 key，让切换条目时由 React 重新初始化内部草稿，
+ * 避免在 effect 中同步 setState 导致级联渲染，也防止不同设备的故障信息串用。
+ */
+export default function FmeaFormDialog(props: FmeaFormDialogProps) {
+  const formKey = `${props.open ? 'open' : 'closed'}-${props.entry?.id ?? 'new'}`;
+  return <FmeaFormDialogContent key={formKey} {...props} />;
+}
+
 /** FMEA 新建/编辑表单，统一处理风险评分、校验和 API 提交。 */
-export default function FmeaFormDialog({ open, entry, onOpenChange }: FmeaFormDialogProps) {
+function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProps) {
   const { t } = useTranslation();
   const createMutation = useCreateFmeaEntry();
   const updateMutation = useUpdateFmeaEntry();
@@ -111,13 +122,6 @@ export default function FmeaFormDialog({ open, entry, onOpenChange }: FmeaFormDi
   const rpn = ratingsAreValid
     ? calculateFmeaRpn(Number(values.severity), Number(values.occurrence), Number(values.detectability))
     : null;
-
-  /** 弹窗切换条目时重新加载表单，防止草稿串到下一条记录。 */
-  useEffect(() => {
-    setValues(open ? toFormValues(entry) : { ...emptyFormValues });
-    setErrors({});
-    setSubmitError(undefined);
-  }, [entry, open]);
 
   /** 更新输入并即时清除该字段的旧错误。 */
   const updateField = (field: FmeaFormField, value: string) => {
