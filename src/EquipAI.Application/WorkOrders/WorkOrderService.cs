@@ -187,7 +187,9 @@ public class WorkOrderService : IWorkOrderService
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        // 全局过滤器是纵深防御；资源定位必须同时校验业务层传入的租户，避免上下文租户异常时跨租户读取。
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -205,8 +207,10 @@ public class WorkOrderService : IWorkOrderService
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 构建查询条件，全局查询过滤器已自动按租户隔离
-        var query = dbContext.WorkOrders.AsQueryable();
+        // 全局过滤器是纵深防御，分页总数和数据项都必须显式绑定业务租户。
+        var query = dbContext.WorkOrders
+            .Where(wo => wo.TenantId == tenantId)
+            .AsQueryable();
 
         // 按状态过滤（支持字符串传入，不区分大小写）
         if (!string.IsNullOrWhiteSpace(status)
@@ -252,7 +256,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -305,7 +310,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -338,7 +344,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -379,7 +386,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -409,7 +417,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -439,7 +448,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -472,7 +482,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
@@ -502,7 +513,8 @@ public class WorkOrderService : IWorkOrderService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = ResolveEventBus(scope.ServiceProvider);
 
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == id, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.Id == id && wo.TenantId == tenantId, ct);
         if (workOrder == null)
         {
             throw new KeyNotFoundException($"工单不存在: {id}");
