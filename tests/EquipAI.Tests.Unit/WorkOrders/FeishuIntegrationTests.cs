@@ -44,6 +44,30 @@ public class FeishuIntegrationTests
     }
 
     [Fact]
+    public async Task PushCreatedAsync_收到停机取消时应传播取消信号()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(f => f.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient());
+        var integration = new FeishuIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<FeishuIntegration>>());
+        var config = JsonSerializer.Serialize(new FeishuConfig
+        {
+            Enabled = true,
+            WebhookUrl = "https://example.test/robot"
+        });
+
+        var act = () => integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "测试工单", "High", config, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task PushCreatedAsync_应发送飞书InteractiveCard格式消息()
     {
         // 验证飞书集成在配置正确时能正常发送请求

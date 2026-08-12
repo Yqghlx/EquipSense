@@ -115,6 +115,43 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
             Times.Never, "Expired 租户被跳过，不应发送升级通知");
     }
 
+    /// <summary>
+    /// 后台扫描不能吞掉通知阶段的停机取消信号。
+    ///
+    /// Why：HostedService 的租户级异常隔离只适用于业务故障；取消必须传播给
+    /// LockedTimerService，确保应用能在容器停止超时前释放数据库连接和分布式锁。
+    /// </summary>
+    [Fact]
+    public async Task RunEscalationAsync_租户处理收到停机取消时应向宿主传播()
+    {
+        var tenantId = Guid.NewGuid();
+        using var cancellation = new CancellationTokenSource();
+
+        _notifyMock
+            .Setup(n => n.SendWorkOrderEscalatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(() =>
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(cancellation.Token);
+            });
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(MakeTenant(tenantId, TenantStatus.Active));
+            db.WorkOrders.Add(MakeOverdueWorkOrder(tenantId, WorkOrderPriority.Medium));
+            await db.SaveChangesAsync();
+        }
+
+        var hosted = _sp.GetRequiredService<SlaEscalationHostedService>();
+        var act = async () => await hosted.RunEscalationAsync(cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "租户级故障隔离不能把宿主停机信号转换成成功完成");
+    }
+
     /// <summary>构造租户（最小必填字段）</summary>
     private static Tenant MakeTenant(Guid id, TenantStatus status) => new()
     {

@@ -45,6 +45,11 @@ public class KnowledgeCaptureHandler : IEventHandler<WorkOrderStatusChangedEvent
             await _captureService.ProcessWorkOrderClosedAsync(
                 @event.TenantId, @event.WorkOrderId, ct);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通知识沉淀故障可以隔离，但停机取消必须向消息总线传播，避免工单关闭事件被错误确认。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "知识沉淀处理失败: WorkOrderId={WorkOrderId}", @event.WorkOrderId);
@@ -88,6 +93,11 @@ public class KnowledgeCaptureHandler : IEventHandler<WorkOrderStatusChangedEvent
                     await tracker.RecordAsync(analysis.RuleId.Value, wasAccurate, ct);
                 }
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 准确率追踪属于事件处理链的一部分，停机取消时交由消息总线重试，不能静默吞掉。
+            throw;
         }
         catch (Exception ex)
         {

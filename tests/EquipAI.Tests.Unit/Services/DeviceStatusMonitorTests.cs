@@ -170,6 +170,57 @@ public class DeviceStatusMonitorTests : IAsyncLifetime
             Times.Never, "阈值内的在线设备不应被误判离线，不应推送离线通知");
     }
 
+    [Fact]
+    public async Task CheckDeviceStatusAsync_设备在查询后收到遥测_不应被误标记离线或发送离线通知()
+    {
+        var tenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+        var staleAt = DateTime.UtcNow.AddMinutes(-5);
+        var refreshedAt = DateTime.UtcNow;
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(MakeTenant(tenantId));
+            db.Devices.Add(MakeDevice(deviceId, tenantId, DeviceStatus.Online, staleAt));
+            await db.SaveChangesAsync();
+
+            // 在“查询过期设备”和“批量更新状态”之间模拟遥测到达：
+            // 触发器把设备刷新为最新时间并取消这次过时的状态更新。
+            await using var triggerCommand = db.Database.GetDbConnection().CreateCommand();
+            triggerCommand.CommandText = $"""
+                CREATE TRIGGER simulate_device_refresh_race
+                BEFORE UPDATE OF status ON devices
+                WHEN NEW.status = 'Offline'
+                BEGIN
+                    UPDATE devices SET last_seen_at = '{refreshedAt:O}' WHERE id = OLD.id;
+                    SELECT RAISE(IGNORE);
+                END;
+                """;
+            await triggerCommand.ExecuteNonQueryAsync();
+        }
+
+        var monitor = new DeviceStatusMonitor(
+            _sp.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            new AlwaysAcquireLockProvider(),
+            _sp.GetRequiredService<ILogger<DeviceStatusMonitor>>());
+
+        var affected = await monitor.CheckDeviceStatusAsync(CancellationToken.None);
+
+        affected.Should().Be(0, "设备已在更新前恢复上报，不能把竞态中的过期快照算作实际离线");
+        _notifications.Verify(
+            n => n.SendDeviceOfflineAsync(tenantId, deviceId, It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never,
+            "恢复上报的设备不应收到错误的离线通知");
+
+        using var assertScope = _sp.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var device = await assertDb.Devices.IgnoreQueryFilters().SingleAsync(d => d.Id == deviceId);
+        device.Status.Should().Be(DeviceStatus.Online);
+        device.LastSeenAt.Should().BeAfter(staleAt);
+    }
+
     /// <summary>构造租户（最小必填字段）</summary>
     private static Tenant MakeTenant(Guid id) => new()
     {

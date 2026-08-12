@@ -216,6 +216,23 @@ public class RootCauseAnalysisHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_分析阶段收到停机取消时应传播取消信号()
+    {
+        var (db, analysisMock, _, _, handler) = CreateSut();
+        using var cts = new CancellationTokenSource();
+        analysisMock.Setup(a => a.AnalyzeAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<double>(), It.IsAny<MetricBaseline?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => cts.Cancel())
+            .ThrowsAsync(new OperationCanceledException());
+
+        var act = () => handler.HandleAsync(MakeAlertEvent(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task HandleAsync_有基线数据时应传递给AnalysisService()
     {
         var (db, analysisMock, _, _, handler) = CreateSut();

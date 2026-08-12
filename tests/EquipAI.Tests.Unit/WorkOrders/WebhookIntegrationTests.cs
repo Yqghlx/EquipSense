@@ -278,6 +278,29 @@ public class WebhookIntegrationTests
     }
 
     [Fact]
+    public async Task PushCreatedAsync_收到停机取消时应传播取消信号()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(f => f.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient());
+        var integration = new WebhookIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<WebhookIntegration>>());
+        var config = JsonSerializer.Serialize(new WebhookConfig
+        {
+            Url = "https://example.test/webhook"
+        });
+
+        var act = () => integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "测试工单", "High", config, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task PushCreatedAsync_Secret和SignatureSecret同时配置时_应同时添加两个头()
     {
         // Arrange

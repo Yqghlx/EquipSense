@@ -210,9 +210,11 @@ export default function RegisterPage() {
           id="tenantName"
           {...tenantForm.register('tenantName')}
           placeholder={t('register.tenantNamePlaceholder')}
+          aria-invalid={tenantForm.formState.errors.tenantName ? 'true' : undefined}
+          aria-describedby={tenantForm.formState.errors.tenantName ? 'tenantName-error' : undefined}
         />
         {tenantForm.formState.errors.tenantName && (
-          <p className="text-sm text-destructive">
+          <p id="tenantName-error" role="alert" className="text-sm text-destructive">
             {tenantForm.formState.errors.tenantName.message}
           </p>
         )}
@@ -223,9 +225,11 @@ export default function RegisterPage() {
           id="slug"
           {...tenantForm.register('slug')}
           placeholder={t('register.slugPlaceholder')}
+          aria-invalid={tenantForm.formState.errors.slug ? 'true' : undefined}
+          aria-describedby={tenantForm.formState.errors.slug ? 'slug-error' : undefined}
         />
         {tenantForm.formState.errors.slug && (
-          <p className="text-sm text-destructive">
+          <p id="slug-error" role="alert" className="text-sm text-destructive">
             {tenantForm.formState.errors.slug.message}
           </p>
         )}
@@ -251,9 +255,11 @@ export default function RegisterPage() {
           id="reg-username"
           {...accountForm.register('username')}
           placeholder={t('auth.username')}
+          aria-invalid={accountForm.formState.errors.username ? 'true' : undefined}
+          aria-describedby={accountForm.formState.errors.username ? 'reg-username-error' : undefined}
         />
         {accountForm.formState.errors.username && (
-          <p className="text-sm text-destructive">
+          <p id="reg-username-error" role="alert" className="text-sm text-destructive">
             {accountForm.formState.errors.username.message}
           </p>
         )}
@@ -265,9 +271,11 @@ export default function RegisterPage() {
           type="password"
           {...accountForm.register('password')}
           placeholder={t('auth.password')}
+          aria-invalid={accountForm.formState.errors.password ? 'true' : undefined}
+          aria-describedby={accountForm.formState.errors.password ? 'reg-password-error' : undefined}
         />
         {accountForm.formState.errors.password && (
-          <p className="text-sm text-destructive">
+          <p id="reg-password-error" role="alert" className="text-sm text-destructive">
             {accountForm.formState.errors.password.message}
           </p>
         )}
@@ -279,9 +287,11 @@ export default function RegisterPage() {
           type="password"
           {...accountForm.register('confirmPassword')}
           placeholder={t('register.confirmPassword')}
+          aria-invalid={accountForm.formState.errors.confirmPassword ? 'true' : undefined}
+          aria-describedby={accountForm.formState.errors.confirmPassword ? 'confirmPassword-error' : undefined}
         />
         {accountForm.formState.errors.confirmPassword && (
-          <p className="text-sm text-destructive">
+          <p id="confirmPassword-error" role="alert" className="text-sm text-destructive">
             {accountForm.formState.errors.confirmPassword.message}
           </p>
         )}
@@ -301,14 +311,16 @@ export default function RegisterPage() {
           type="email"
           {...accountForm.register('email')}
           placeholder={t('register.emailPlaceholder')}
+          aria-invalid={accountForm.formState.errors.email ? 'true' : undefined}
+          aria-describedby={accountForm.formState.errors.email ? 'email-error' : undefined}
         />
         {accountForm.formState.errors.email && (
-          <p className="text-sm text-destructive">
+          <p id="email-error" role="alert" className="text-sm text-destructive">
             {accountForm.formState.errors.email.message}
           </p>
         )}
       </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       <div className="flex gap-2">
         <Button type="button" variant="outline" className="flex-1" onClick={() => setStep(2)}>
           {t('common.previous')}

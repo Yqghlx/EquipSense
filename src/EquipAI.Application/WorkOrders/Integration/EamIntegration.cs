@@ -94,6 +94,11 @@ public class EamIntegration : IWorkOrderIntegration
             _logger.LogWarning("EAM 工单创建失败: Status={Status}", response.StatusCode);
             return null;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通网络故障可以降级，但宿主停机或消息处理超时取消必须传播给集成路由。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "EAM 工单创建异常: WorkOrderId={WorkOrderId}", workOrderId);
@@ -150,6 +155,11 @@ public class EamIntegration : IWorkOrderIntegration
             {
                 _logger.LogWarning("EAM 工单状态更新失败: Status={StatusCode}", response.StatusCode);
             }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通网络故障可以降级，但宿主停机或消息处理超时取消必须传播给集成路由。
+            throw;
         }
         catch (Exception ex)
         {

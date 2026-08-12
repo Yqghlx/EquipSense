@@ -162,6 +162,11 @@ public class WebhookIntegration : IWorkOrderIntegration
 
             return response.IsSuccessStatusCode ? responseBody : null;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通网络故障可以降级，但宿主停机或消息处理超时取消必须传播给集成路由。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Webhook 推送失败: Host={Host}", GetTargetHost(config.Url));

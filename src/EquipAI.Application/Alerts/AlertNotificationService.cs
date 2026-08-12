@@ -95,6 +95,11 @@ public class AlertNotificationService
                 else if (type == "feishu")
                     await PushFeishuAsync(@event, alert, deviceLabel, config!, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 机器人单次推送失败可以隔离，但停机或消息处理超时取消必须传播，避免告警事件被错误确认。
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "告警机器人推送失败: Type={Type}, AlertId={AlertId}", type, alert.Id);
@@ -144,6 +149,11 @@ public class AlertNotificationService
             }
 
             await db.SaveChangesAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 站内通知写入是告警通知链的一部分，取消时必须交由上层消息总线重试，不能静默降级。
+            throw;
         }
         catch (Exception ex)
         {

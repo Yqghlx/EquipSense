@@ -87,6 +87,11 @@ public class TelemetryCleanupService : LockedTimerService
 
             Logger.LogInformation("遥测数据清理完成，共清理 {Total} 条记录", totalDeleted);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 停机取消必须继续传播给 LockedTimerService，避免清理服务吞掉退出信号。
+            throw;
+        }
         catch (Exception ex)
         {
             Logger.LogError(ex, "遥测数据清理失败");

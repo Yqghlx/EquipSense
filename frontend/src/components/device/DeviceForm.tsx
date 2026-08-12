@@ -12,7 +12,7 @@ import type { Device, CreateDeviceRequest } from '../../types';
 const deviceSchema = z.object({
   deviceCode: z.string().min(1, 'device.deviceCodeRequired'),
   name: z.string().min(1, 'device.nameRequired'),
-  type: z.string().min(1, 'device.typeRequired'),
+  type: z.string({ error: 'device.typeRequired' }).min(1, 'device.typeRequired'),
   manufacturer: z.string().optional(),
   criticality: z.string().optional(),
   model: z.string().optional(),
@@ -69,37 +69,55 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       {/* 设备编码 */}
       <div className="space-y-2">
-        <Label>{t('device.deviceCode')}</Label>
-        <Input {...register('deviceCode')} placeholder={t('device.deviceCode')} />
-        {errors.deviceCode && <p className="text-sm text-destructive">{t(errors.deviceCode.message!)}</p>}
+        <Label htmlFor="deviceCode">{t('device.deviceCode')}</Label>
+        <Input
+          id="deviceCode"
+          {...register('deviceCode')}
+          placeholder={t('device.deviceCode')}
+          aria-invalid={errors.deviceCode ? 'true' : undefined}
+          aria-describedby={errors.deviceCode ? 'deviceCode-error' : undefined}
+        />
+        {errors.deviceCode && <p id="deviceCode-error" role="alert" className="text-sm text-destructive">{t(errors.deviceCode.message!)}</p>}
       </div>
 
       {/* 设备名称 */}
       <div className="space-y-2">
-        <Label>{t('device.name')}</Label>
-        <Input {...register('name')} placeholder={t('device.name')} />
-        {errors.name && <p className="text-sm text-destructive">{t(errors.name.message!)}</p>}
+        <Label htmlFor="deviceName">{t('device.name')}</Label>
+        <Input
+          id="deviceName"
+          {...register('name')}
+          placeholder={t('device.name')}
+          aria-invalid={errors.name ? 'true' : undefined}
+          aria-describedby={errors.name ? 'deviceName-error' : undefined}
+        />
+        {errors.name && <p id="deviceName-error" role="alert" className="text-sm text-destructive">{t(errors.name.message!)}</p>}
       </div>
 
       {/* 设备类型 */}
       <div className="space-y-2">
-        <Label>{t('device.type')}</Label>
+        <Label htmlFor="deviceType">{t('device.type')}</Label>
         <Select defaultValue={device?.type} onValueChange={(v) => { if (v) setValue('type', v); }}>
-          <SelectTrigger><SelectValue placeholder={t('device.type')} /></SelectTrigger>
+          <SelectTrigger
+            id="deviceType"
+            aria-invalid={errors.type ? 'true' : undefined}
+            aria-describedby={errors.type ? 'deviceType-error' : undefined}
+          >
+            <SelectValue placeholder={t('device.type')} />
+          </SelectTrigger>
           <SelectContent>
             {deviceTypes.map((type) => (
               <SelectItem key={type} value={type}>{type}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        {errors.type && <p className="text-sm text-destructive">{t(errors.type.message!)}</p>}
+        {errors.type && <p id="deviceType-error" role="alert" className="text-sm text-destructive">{t(errors.type.message!)}</p>}
       </div>
 
       {/* 关键等级（设备优先级，影响告警/工单排序） */}
       <div className="space-y-2">
-        <Label>{t('device.criticality')}</Label>
+        <Label htmlFor="deviceCriticality">{t('device.criticality')}</Label>
         <Select defaultValue={device?.criticality ?? 'Normal'} onValueChange={(v) => { if (v) setValue('criticality', v); }}>
-          <SelectTrigger><SelectValue placeholder={t('device.criticality')} /></SelectTrigger>
+          <SelectTrigger id="deviceCriticality"><SelectValue placeholder={t('device.criticality')} /></SelectTrigger>
           <SelectContent>
             {(['Critical', 'High', 'Normal', 'Low'] as const).map((c) => (
               <SelectItem key={c} value={c}>{c}</SelectItem>
@@ -110,38 +128,39 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
 
       {/* 设备型号 */}
       <div className="space-y-2">
-        <Label>{t('device.model')}</Label>
-        <Input {...register('model')} placeholder={t('device.modelPlaceholder')} />
+        <Label htmlFor="deviceModel">{t('device.model')}</Label>
+        <Input id="deviceModel" {...register('model')} placeholder={t('device.modelPlaceholder')} />
       </div>
 
       {/* 制造商 */}
       <div className="space-y-2">
-        <Label>{t('device.manufacturer')}</Label>
-        <Input {...register('manufacturer')} placeholder={t('device.manufacturer')} />
+        <Label htmlFor="deviceManufacturer">{t('device.manufacturer')}</Label>
+        <Input id="deviceManufacturer" {...register('manufacturer')} placeholder={t('device.manufacturer')} />
       </div>
 
       {/* 序列号（资产追踪） */}
       <div className="space-y-2">
-        <Label>{t('device.serialNumber')}</Label>
-        <Input {...register('serialNumber')} placeholder={t('device.serialNumber')} />
+        <Label htmlFor="deviceSerialNumber">{t('device.serialNumber')}</Label>
+        <Input id="deviceSerialNumber" {...register('serialNumber')} placeholder={t('device.serialNumber')} />
       </div>
 
       {/* 安装日期（质保起算） */}
       <div className="space-y-2">
-        <Label>{t('device.installDate')}</Label>
-        <Input type="date" {...register('installDate')} />
+        <Label htmlFor="deviceInstallDate">{t('device.installDate')}</Label>
+        <Input id="deviceInstallDate" type="date" {...register('installDate')} />
       </div>
 
       {/* 绑定网关编码（采集架构归属） */}
       <div className="space-y-2">
-        <Label>{t('device.gatewayId')}</Label>
-        <Input {...register('gatewayId')} placeholder={t('device.gatewayId')} />
+        <Label htmlFor="deviceGatewayId">{t('device.gatewayId')}</Label>
+        <Input id="deviceGatewayId" {...register('gatewayId')} placeholder={t('device.gatewayId')} />
       </div>
 
       {/* 每小时停机成本（ROI 核算/优先级）；setValueAs 把空值转 undefined（可选字段） */}
       <div className="space-y-2">
-        <Label>{t('device.downtimeCostPerHour')}</Label>
+        <Label htmlFor="downtimeCostPerHour">{t('device.downtimeCostPerHour')}</Label>
         <Input
+          id="downtimeCostPerHour"
           type="number"
           step="0.01"
           min="0"

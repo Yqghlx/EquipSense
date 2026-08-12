@@ -55,6 +55,31 @@ public class EamIntegrationTests
     }
 
     [Fact]
+    public async Task PushCreatedAsync_收到停机取消时应传播取消信号()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(f => f.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient());
+        var integration = new EamIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<EamIntegration>>());
+        var config = JsonSerializer.Serialize(new EamConfig
+        {
+            Enabled = true,
+            Type = "maximo",
+            Endpoint = "https://example.test"
+        });
+
+        var act = () => integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "测试工单", "High", config, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task PushCreatedAsync_应调用EAM创建工单API()
     {
         // 验证 EAM 集成在配置正确时能正常发起请求

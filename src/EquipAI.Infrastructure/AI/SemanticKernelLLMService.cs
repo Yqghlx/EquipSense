@@ -38,6 +38,25 @@ public class SemanticKernelLLMService : ILLMService
         _chatService = kernel.GetRequiredService<IChatCompletionService>();
     }
 
+    /// <summary>
+    /// 初始化可注入聊天服务的实例，供单元测试验证取消与超时边界。
+    /// </summary>
+    /// <param name="chatService">聊天完成服务替身。</param>
+    /// <param name="logger">日志记录器。</param>
+    /// <param name="apiKey">用于启用调用路径的测试密钥。</param>
+    /// <param name="timeoutSeconds">请求超时时间（秒）。</param>
+    internal SemanticKernelLLMService(
+        IChatCompletionService chatService,
+        ILogger<SemanticKernelLLMService> logger,
+        string apiKey,
+        int timeoutSeconds)
+    {
+        _chatService = chatService ?? throw new ArgumentNullException(nameof(chatService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _apiKey = apiKey;
+        _timeoutSeconds = timeoutSeconds;
+    }
+
     /// <inheritdoc />
     /// LLM 已配置（ApiKey 非空）即视为启用；未配置时上层降级规则匹配，属合法状态
     public bool IsConfigured => !string.IsNullOrWhiteSpace(_apiKey);
@@ -70,6 +89,11 @@ public class SemanticKernelLLMService : ILLMService
                 Confidence: null,
                 Success: true,
                 ErrorMessage: null);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 调用方或宿主主动取消必须继续传播，不能伪装成 LLM 超时并触发后续业务降级。
+            throw;
         }
         catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
         {

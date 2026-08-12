@@ -181,6 +181,18 @@ public class KnowledgeCaptureHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_收到停机取消时应传播取消信号()
+    {
+        var (db, tracker, handler) = CreateSut();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => handler.HandleAsync(CreateClosedEvent(Guid.NewGuid()), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task HandleAsync_工单无AnalysisId时不追踪准确率()
     {
         var (db, tracker, handler) = CreateSut();

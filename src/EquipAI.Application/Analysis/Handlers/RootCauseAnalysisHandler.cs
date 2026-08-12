@@ -133,6 +133,12 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
                     @event.AlertId, analysis, cancellationToken);
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // 普通分析故障可以降级记录，但宿主停机或消息处理超时取消必须继续传播，
+            // 让事件总线不确认当前消息，避免分析结果未完成却被错误视为已消费。
+            throw;
+        }
         catch (Exception ex)
         {
             // 分析失败不应阻塞告警流程，仅记录错误日志
@@ -202,6 +208,12 @@ public class RootCauseAnalysisHandler : IEventHandler<AlertTriggeredEvent>
             _logger.LogInformation(
                 "已从分析结果生成候选规则: PendingRuleId={PendingRuleId}, 置信度={Confidence:F2}",
                 pendingRule.Id, analysis.Confidence);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 候选规则写入属于当前事件处理的一部分，停机取消时必须交由消息总线重试，
+            // 不能因为降级日志而确认一个尚未完整处理的告警事件。
+            throw;
         }
         catch (Exception ex)
         {

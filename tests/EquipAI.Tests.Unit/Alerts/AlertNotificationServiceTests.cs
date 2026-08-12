@@ -44,6 +44,29 @@ public class AlertNotificationServiceTests
         return (db, svc);
     }
 
+    private static (AppDbContext db, AlertNotificationService svc) CreateWithHttpClient(
+        CancellationTokenSource cancellationSource)
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var services = new ServiceCollection();
+        services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddLogging();
+        services.AddScoped<ITenantContext>(_ => new TestTenantContext(Guid.Empty));
+        var sp = services.BuildServiceProvider();
+        var db = sp.GetRequiredService<AppDbContext>();
+
+        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        httpClientFactoryMock
+            .Setup(f => f.CreateClient("AlertIntegration"))
+            .Returns(new HttpClient(new CancellationTriggerHandler(cancellationSource)));
+
+        var svc = new AlertNotificationService(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            httpClientFactoryMock.Object,
+            Mock.Of<ILogger<AlertNotificationService>>());
+        return (db, svc);
+    }
+
     private static AlertTriggeredEvent MakeEvent(Guid alertId, Guid tenantId, string severity = "Critical") => new(
         EventId: Guid.NewGuid(),
         OccurredAt: DateTime.UtcNow,
@@ -200,6 +223,50 @@ public class AlertNotificationServiceTests
         n.Content.Should().Contain("PUMP-001", "站内通知应展示设备编码而非原始 UUID");
         n.Content.Should().NotContain(deviceId.ToString(),
             "不应在通知内容中展示不可读的设备 GUID（应显示 PUMP-001（一号泵））");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_机器人推送收到停机取消时应传播取消信号()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        using var cts = new CancellationTokenSource();
+        var (db, svc) = CreateWithHttpClient(cts);
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "取消传播测试租户",
+            Slug = $"cancel-{Guid.NewGuid():N}",
+            Settings = "{\"integrations\":{\"dingtalk\":{\"enabled\":true,\"webhookUrl\":\"https://example.test/robot\"}}}",
+        });
+        await db.SaveChangesAsync();
+
+        var act = () => svc.DispatchAsync(
+            MakeEvent(alertId, tenantId),
+            MakeAlert(alertId, tenantId),
+            cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>
+    /// 模拟外部机器人在请求过程中触发宿主取消，验证通知服务不会把取消当成普通推送故障吞掉。
+    /// </summary>
+    private sealed class CancellationTriggerHandler : HttpMessageHandler
+    {
+        private readonly CancellationTokenSource _cancellationSource;
+
+        public CancellationTriggerHandler(CancellationTokenSource cancellationSource)
+        {
+            _cancellationSource = cancellationSource;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _cancellationSource.Cancel();
+            throw new OperationCanceledException(_cancellationSource.Token);
+        }
     }
 
     private sealed class TestTenantContext : ITenantContext

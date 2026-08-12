@@ -39,6 +39,12 @@ public class WorkOrderIntegrationHandler : IEventHandler<WorkOrderStatusChangedE
                     eventMsg.TenantId, eventMsg.WorkOrderId, eventMsg.NewStatus, ct);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 外部集成的普通失败可以降级记录，但停机或超时取消必须传播，
+            // 让消息总线保留未完成的工单状态事件并按策略重试。
+            throw;
+        }
         catch (Exception ex)
         {
             // 集成推送失败不应阻断主流程，仅记录警告日志

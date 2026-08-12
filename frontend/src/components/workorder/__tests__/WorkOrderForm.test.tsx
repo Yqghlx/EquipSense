@@ -67,7 +67,7 @@ describe('WorkOrderForm', () => {
   // 校验测试
   // ==========================================================================
 
-  it('空必填字段提交应显示标题和类型校验错误', async () => {
+  it('空必填字段提交应显示各字段校验错误', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     const onCancel = vi.fn();
@@ -81,9 +81,39 @@ describe('WorkOrderForm', () => {
     await waitFor(() => {
       expect(screen.getByText('workorder.titleRequired')).toBeInTheDocument();
     });
+    expect(screen.getByText('workorder.typeRequired')).toBeInTheDocument();
+    expect(screen.getByText('workorder.priorityRequired')).toBeInTheDocument();
+    expect(screen.getByText('workorder.deviceRequired')).toBeInTheDocument();
 
     // onSubmit 不应被调用
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('必填字段校验错误应关联到对应控件', async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    const onCancel = vi.fn();
+
+    render(<WorkOrderForm onSubmit={onSubmit} onCancel={onCancel} />);
+
+    await user.click(screen.getByText('common.save'));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('workorder.titlePlaceholder')).toHaveAttribute('aria-invalid', 'true');
+    });
+
+    expect(screen.getByPlaceholderText('workorder.titlePlaceholder')).toHaveAttribute('aria-describedby', 'workOrderTitle-error');
+    expect(screen.getAllByRole('combobox')[0]).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByRole('combobox')[0]).toHaveAttribute('aria-describedby', 'workOrderType-error');
+    expect(screen.getAllByRole('combobox')[1]).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByRole('combobox')[1]).toHaveAttribute('aria-describedby', 'workOrderPriority-error');
+    expect(screen.getAllByRole('combobox')[2]).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByRole('combobox')[2]).toHaveAttribute('aria-describedby', 'workOrderDevice-error');
+    expect(screen.getByText('workorder.titleRequired')).toHaveAttribute('id', 'workOrderTitle-error');
+    expect(screen.getByText('workorder.titleRequired')).toHaveAttribute('role', 'alert');
+    expect(document.getElementById('workOrderType-error')).toHaveAttribute('role', 'alert');
+    expect(document.getElementById('workOrderPriority-error')).toHaveAttribute('role', 'alert');
+    expect(document.getElementById('workOrderDevice-error')).toHaveAttribute('role', 'alert');
   });
 
   // ==========================================================================

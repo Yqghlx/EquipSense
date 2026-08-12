@@ -418,23 +418,8 @@ try
     eventBus.Subscribe<WorkOrderCreatedEvent, WorkOrderNotificationHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderNotificationHandler>();
 
-    // 优雅停机：接收 SIGTERM/SIGINT 后，依次断开 MQTT 连接、等待在途请求完成
-    // .NET Host 默认提供 5 秒 ShutdownTimeout，可通过 --shutdownTimeoutSeconds 或 Docker stop --time 调整
-    var lifetime = app.Services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
-    lifetime.ApplicationStopping.Register(() =>
-    {
-        Log.Information("收到停机信号，开始优雅关闭...");
-        // 异步操作同步化：ApplicationStopping 回调不支持 async，用 Wait 阻塞等待（停机时间受 ShutdownTimeout 约束）
-        try
-        {
-            var mqttClient = app.Services.GetRequiredService<EquipAI.Infrastructure.Messaging.MqttClientService>();
-            mqttClient.DisconnectAsync().Wait(TimeSpan.FromSeconds(5));
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "优雅停机过程中 MQTT 断开失败（非致命）");
-        }
-    });
+    // MQTT 的连接生命周期由 MqttBackgroundService.StopAsync 统一管理。
+    // 不再额外注册 ApplicationStopping 同步回调，避免重复断开、停机竞态和 sync-over-async 阻塞。
 
     // 中间件管线（顺序很重要，决定请求的处理流程）
     // 1. 全局异常处理 — 最外层捕获所有未处理异常

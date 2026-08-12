@@ -119,6 +119,56 @@ public class GatewayHeartbeatMonitorTests : IAsyncLifetime
         _signalRMock.Verify(x => x.SendGatewayOfflineAsync(It.IsAny<Guid>(), alreadyOfflineId, It.IsAny<string>(), It.IsAny<string>()), Times.Never);
     }
 
+    [Fact]
+    public async Task 网关在查询后恢复心跳_不应被误标记离线或发送离线通知()
+    {
+        var tenantId = Guid.NewGuid();
+        var gatewayId = Guid.NewGuid();
+        var staleAt = DateTime.UtcNow.AddMinutes(-5);
+        var refreshedAt = DateTime.UtcNow;
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Gateways.Add(new Gateway
+            {
+                Id = gatewayId,
+                TenantId = tenantId,
+                GatewayId = "gw-race",
+                Name = "竞态网关",
+                Status = "online",
+                LastHeartbeatAt = staleAt,
+            });
+            await db.SaveChangesAsync();
+
+            // 模拟查询过期网关后、状态更新前收到心跳：触发器刷新时间并取消过期更新。
+            await using var triggerCommand = db.Database.GetDbConnection().CreateCommand();
+            triggerCommand.CommandText = $"""
+                CREATE TRIGGER simulate_gateway_refresh_race
+                BEFORE UPDATE OF Status ON gateways
+                WHEN NEW.Status = 'offline'
+                BEGIN
+                    UPDATE gateways SET LastHeartbeatAt = '{refreshedAt:O}' WHERE Id = OLD.Id;
+                    SELECT RAISE(IGNORE);
+                END;
+                """;
+            await triggerCommand.ExecuteNonQueryAsync();
+        }
+
+        await CreateMonitor().CheckHeartbeatsAsync();
+
+        var invocations = _signalRMock.Invocations
+            .Where(i => i.Method.Name == nameof(ISignalRNotificationService.SendGatewayOfflineAsync))
+            .ToList();
+        invocations.Should().BeEmpty("恢复心跳的网关不应收到错误的离线通知");
+
+        using var assertScope = _sp.CreateScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var gateway = await assertDb.UnfilteredSet<Gateway>().SingleAsync(g => g.Id == gatewayId);
+        gateway.Status.Should().Be("online");
+        gateway.LastHeartbeatAt.Should().BeAfter(staleAt);
+    }
+
     /// <summary>
     /// 后台 scope 的租户上下文 — 无 HTTP 上下文时 DI 回退分支，TenantId=Guid.Empty
     /// </summary>

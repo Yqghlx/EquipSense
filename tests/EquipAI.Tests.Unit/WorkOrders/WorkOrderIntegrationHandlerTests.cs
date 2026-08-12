@@ -65,6 +65,18 @@ public class WorkOrderIntegrationHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_收到停机取消时应传播取消信号()
+    {
+        var (db, handler) = CreateSut();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var act = () => handler.HandleAsync(MakeEvent("Closed", Guid.NewGuid()), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task HandleAsync_非PendingDispatch状态不应抛出异常()
     {
         var (db, handler) = CreateSut();

@@ -90,6 +90,29 @@ public class DingTalkIntegrationTests
     }
 
     [Fact]
+    public async Task PushCreatedAsync_收到停机取消时应传播取消信号()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(f => f.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient());
+        var integration = new DingTalkIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<DingTalkIntegration>>());
+        var config = JsonSerializer.Serialize(new DingTalkConfig
+        {
+            WebhookUrl = "https://example.test/robot"
+        });
+
+        var act = () => integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "测试工单", "High", config, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task PushStatusChangedAsync_应不抛出异常()
     {
         var logger = new Mock<ILogger<DingTalkIntegration>>();

@@ -145,6 +145,21 @@ public class OeeServiceTests : IDisposable
         result.Oee.Should().Be(0);
     }
 
+    [Fact]
+    public async Task CalculatePerformanceAsync_收到取消时应继续传播取消()
+    {
+        // 数据库查询取消代表宿主停机或请求已结束，不能被当成普通故障降级为 0，
+        // 否则后台任务会在停机期间继续执行后续计算并制造误导性结果。
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var service = new OeeService(_db, LoggerFactory.Create(_ => { }).CreateLogger<OeeService>());
+
+        var action = () => service.CalculatePerformanceAsync(_tenantId, cts.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     // =========================================================================
     // 正常路径
     // =========================================================================

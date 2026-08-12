@@ -453,6 +453,43 @@ public class SlaManagementServiceTests : IAsyncDisposable
             "通知失败后仍应继续处理其他工单");
     }
 
+    /// <summary>
+    /// 停机取消不能被“单条通知失败”的容错逻辑吞掉。
+    ///
+    /// Why：普通网络/存储异常应隔离单条通知，但应用停止时的
+    /// OperationCanceledException 必须继续向上冒泡，否则后台服务会在停机窗口内继续处理剩余工单。
+    /// </summary>
+    [Fact]
+    public async Task CheckAndEscalateAsync_通知收到停机取消时应传播取消信号()
+    {
+        var db = GetDb();
+        var notifyMock = new Mock<ISignalRNotificationService>();
+        using var cancellation = new CancellationTokenSource();
+        notifyMock
+            .Setup(x => x.SendWorkOrderEscalatedAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(() =>
+            {
+                cancellation.Cancel();
+                throw new OperationCanceledException(cancellation.Token);
+            });
+
+        var service = CreateServiceWithNotifications(db, notifyMock);
+        var workOrder = CreateWorkOrder(
+            WorkOrderPriority.Low,
+            WorkOrderStatus.Assigned,
+            DateTime.UtcNow.AddHours(-73));
+        workOrder.TenantId = _tenantId;
+        db.WorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+
+        var act = async () => await service.CheckAndEscalateAsync(_tenantId, cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "停机取消必须离开通知容错边界并交给宿主负责结束后台服务");
+    }
+
     // =========================================================================
     // GetSummaryAsync — 按 SLA 状态分组统计
     // =========================================================================

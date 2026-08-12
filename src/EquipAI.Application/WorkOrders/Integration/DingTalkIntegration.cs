@@ -173,6 +173,11 @@ public class DingTalkIntegration : IWorkOrderIntegration
                 GetTargetHost(url), response.StatusCode);
             return response.IsSuccessStatusCode ? body : null;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通网络故障可以降级，但宿主停机或消息处理超时取消必须传播给集成路由。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "钉钉推送失败: Host={Host}", GetTargetHost(url));

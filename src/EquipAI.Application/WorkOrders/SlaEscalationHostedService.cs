@@ -72,6 +72,11 @@ public class SlaEscalationHostedService : LockedTimerService
             {
                 totalEscalated += await slaService.CheckAndEscalateAsync(tenantId, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 租户级业务故障可以隔离，但宿主停机信号必须交回 LockedTimerService 结束本轮工作。
+                throw;
+            }
             catch (Exception ex)
             {
                 Logger.LogError(ex, "租户 {TenantId} 的 SLA 升级失败", tenantId);

@@ -143,6 +143,11 @@ public class SlaManagementService
                             tenantId, wo.Id, wo.WorkOrderCode, wo.Title,
                             oldPriority.ToString(), wo.Priority.ToString());
                     }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        // 普通通知故障可以隔离，但宿主停机取消必须继续传播，避免后台服务拖延退出。
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         // 单条通知失败不应阻塞整体流程（其他工单仍需处理）

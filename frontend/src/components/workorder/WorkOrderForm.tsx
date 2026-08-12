@@ -12,9 +12,9 @@ import type { CreateWorkOrderRequest } from '../../types';
 /** 工单表单校验规则 */
 const workOrderSchema = z.object({
   title: z.string().min(1, 'workorder.titleRequired'),
-  type: z.string().min(1, 'workorder.typeRequired'),
-  priority: z.string().min(1, 'workorder.priorityRequired'),
-  deviceId: z.string().min(1, 'workorder.deviceRequired'),
+  type: z.string({ error: 'workorder.typeRequired' }).min(1, 'workorder.typeRequired'),
+  priority: z.string({ error: 'workorder.priorityRequired' }).min(1, 'workorder.priorityRequired'),
+  deviceId: z.string({ error: 'workorder.deviceRequired' }).min(1, 'workorder.deviceRequired'),
   description: z.string().optional(),
   dueDate: z.string().optional(),
 });
@@ -58,17 +58,29 @@ export function WorkOrderForm({ onSubmit, onCancel, loading, devices = [] }: Wor
     <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-4">
       {/* 标题 */}
       <div className="space-y-2">
-        <Label>{t('workorder.titleField')}</Label>
-        <Input {...register('title')} placeholder={t('workorder.titlePlaceholder')} />
-        {errors.title && <p className="text-sm text-destructive">{t(errors.title.message!)}</p>}
+        <Label htmlFor="workOrderTitle">{t('workorder.titleField')}</Label>
+        <Input
+          id="workOrderTitle"
+          {...register('title')}
+          placeholder={t('workorder.titlePlaceholder')}
+          aria-invalid={errors.title ? 'true' : undefined}
+          aria-describedby={errors.title ? 'workOrderTitle-error' : undefined}
+        />
+        {errors.title && <p id="workOrderTitle-error" role="alert" className="text-sm text-destructive">{t(errors.title.message!)}</p>}
       </div>
 
       {/* 类型和优先级 */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>{t('workorder.type')}</Label>
+          <Label htmlFor="workOrderType">{t('workorder.type')}</Label>
           <Select onValueChange={(v) => { if (v != null) setValue('type', String(v)); }}>
-            <SelectTrigger><SelectValue placeholder={t('workorder.selectType')} /></SelectTrigger>
+            <SelectTrigger
+              id="workOrderType"
+              aria-invalid={errors.type ? 'true' : undefined}
+              aria-describedby={errors.type ? 'workOrderType-error' : undefined}
+            >
+              <SelectValue placeholder={t('workorder.selectType')} />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="corrective">{t('workorder.typeOptions.corrective')}</SelectItem>
               <SelectItem value="preventive">{t('workorder.typeOptions.preventive')}</SelectItem>
@@ -76,12 +88,18 @@ export function WorkOrderForm({ onSubmit, onCancel, loading, devices = [] }: Wor
               <SelectItem value="inspection">{t('workorder.typeOptions.inspection')}</SelectItem>
             </SelectContent>
           </Select>
-          {errors.type && <p className="text-sm text-destructive">{t(errors.type.message!)}</p>}
+          {errors.type && <p id="workOrderType-error" role="alert" className="text-sm text-destructive">{t(errors.type.message!)}</p>}
         </div>
         <div className="space-y-2">
-          <Label>{t('workorder.priority')}</Label>
+          <Label htmlFor="workOrderPriority">{t('workorder.priority')}</Label>
           <Select onValueChange={(v) => { if (v != null) setValue('priority', String(v)); }}>
-            <SelectTrigger><SelectValue placeholder={t('workorder.selectPriority')} /></SelectTrigger>
+            <SelectTrigger
+              id="workOrderPriority"
+              aria-invalid={errors.priority ? 'true' : undefined}
+              aria-describedby={errors.priority ? 'workOrderPriority-error' : undefined}
+            >
+              <SelectValue placeholder={t('workorder.selectPriority')} />
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="critical">{t('alert.critical')}</SelectItem>
               <SelectItem value="high">{t('alert.high')}</SelectItem>
@@ -89,34 +107,40 @@ export function WorkOrderForm({ onSubmit, onCancel, loading, devices = [] }: Wor
               <SelectItem value="low">{t('alert.low')}</SelectItem>
             </SelectContent>
           </Select>
-          {errors.priority && <p className="text-sm text-destructive">{t(errors.priority.message!)}</p>}
+          {errors.priority && <p id="workOrderPriority-error" role="alert" className="text-sm text-destructive">{t(errors.priority.message!)}</p>}
         </div>
       </div>
 
       {/* 关联设备 */}
       <div className="space-y-2">
-        <Label>{t('workorder.device')}</Label>
+        <Label htmlFor="workOrderDevice">{t('workorder.device')}</Label>
         <Select onValueChange={(v) => { if (v != null) setValue('deviceId', String(v)); }}>
-          <SelectTrigger><SelectValue placeholder={t('workorder.selectDevice')} /></SelectTrigger>
+          <SelectTrigger
+            id="workOrderDevice"
+            aria-invalid={errors.deviceId ? 'true' : undefined}
+            aria-describedby={errors.deviceId ? 'workOrderDevice-error' : undefined}
+          >
+            <SelectValue placeholder={t('workorder.selectDevice')} />
+          </SelectTrigger>
           <SelectContent>
             {devices.map((d) => (
               <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
             ))}
           </SelectContent>
         </Select>
-        {errors.deviceId && <p className="text-sm text-destructive">{t(errors.deviceId.message!)}</p>}
+        {errors.deviceId && <p id="workOrderDevice-error" role="alert" className="text-sm text-destructive">{t(errors.deviceId.message!)}</p>}
       </div>
 
       {/* 描述 */}
       <div className="space-y-2">
-        <Label>{t('workorder.description')}</Label>
-        <Textarea {...register('description')} placeholder={t('workorder.descriptionPlaceholder')} rows={3} />
+        <Label htmlFor="workOrderDescription">{t('workorder.description')}</Label>
+        <Textarea id="workOrderDescription" {...register('description')} placeholder={t('workorder.descriptionPlaceholder')} rows={3} />
       </div>
 
       {/* 截止日期 */}
       <div className="space-y-2">
-        <Label>{t('workorder.dueDate')}</Label>
-        <Input type="date" {...register('dueDate')} />
+        <Label htmlFor="workOrderDueDate">{t('workorder.dueDate')}</Label>
+        <Input id="workOrderDueDate" type="date" {...register('dueDate')} />
       </div>
 
       {/* 操作按钮 */}

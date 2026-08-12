@@ -117,6 +117,15 @@ public sealed class RabbitMqEventBus :
                 _options.Port,
                 _subscriptions.Count);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Volatile.Write(ref _ready, 0);
+            Interlocked.Exchange(ref _lifecycleState, 0);
+            await DisposeBrokerResourcesAsync();
+            // 宿主在启动阶段主动取消属于正常生命周期，不应污染故障告警或触发错误页。
+            _logger.LogInformation("RabbitMQ 事件总线启动已被宿主取消");
+            throw;
+        }
         catch (Exception exception)
         {
             Volatile.Write(ref _ready, 0);
@@ -209,6 +218,20 @@ public sealed class RabbitMqEventBus :
         bool lifetimeCancellationRequested) =>
         lifetimeCancellationRequested && exception is OperationCanceledException;
 
+    /// <summary>
+    /// 判断是否应把 Inbox 处理记录为失败。正常停机取消会让 broker 重投未确认消息，
+    /// 不应污染失败指标，也不应在数据库中留下误导性的业务失败状态。
+    /// </summary>
+    internal static bool ShouldRecordInboxFailure(
+        Exception exception,
+        bool lifetimeCancellationRequested) =>
+        !ShouldLeaveUnackedForShutdown(Unwrap(exception), lifetimeCancellationRequested);
+
+    /// <summary>
+    /// 判断连接关闭是否属于应用正常停机。正常停机不应产生错误级别的连接告警。
+    /// </summary>
+    internal static bool ShouldLogConnectionShutdownAsError(bool stopping) => !stopping;
+
     private ConnectionFactory CreateConnectionFactory() => new()
     {
         HostName = _options.Host,
@@ -228,10 +251,20 @@ public sealed class RabbitMqEventBus :
         connection.ConnectionShutdownAsync += (_, eventArgs) =>
         {
             Volatile.Write(ref _ready, 0);
-            _logger.LogError(
-                "RabbitMQ 连接已关闭：{ReplyCode} {ReplyText}",
-                eventArgs.ReplyCode,
-                eventArgs.ReplyText);
+            if (ShouldLogConnectionShutdownAsError(Volatile.Read(ref _lifecycleState) == 2))
+            {
+                _logger.LogError(
+                    "RabbitMQ 连接已关闭：{ReplyCode} {ReplyText}",
+                    eventArgs.ReplyCode,
+                    eventArgs.ReplyText);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "RabbitMQ 连接已关闭：{ReplyCode} {ReplyText}",
+                    eventArgs.ReplyCode,
+                    eventArgs.ReplyText);
+            }
             return Task.CompletedTask;
         };
         connection.ConnectionRecoveryErrorAsync += (_, eventArgs) =>
@@ -404,13 +437,8 @@ public sealed class RabbitMqEventBus :
         }
         catch (Exception exception)
         {
-            BusinessMetrics.InboxFailures
-                .WithLabels(registration.HandlerType.FullName ?? registration.HandlerType.Name)
-                .Inc();
             var rootException = Unwrap(exception);
-            if (ShouldLeaveUnackedForShutdown(
-                    rootException,
-                    _lifetimeCancellation.IsCancellationRequested))
+            if (!ShouldRecordInboxFailure(rootException, _lifetimeCancellation.IsCancellationRequested))
             {
                 // 不 ack/nack：StopAsync 随后关闭通道，broker 会把未确认消息原样重投，
                 // 不增加 x-death 计数，也不会把正常部署停机误判为业务失败。
@@ -420,6 +448,9 @@ public sealed class RabbitMqEventBus :
                     registration.HandlerType.Name);
                 return;
             }
+            BusinessMetrics.InboxFailures
+                .WithLabels(registration.HandlerType.FullName ?? registration.HandlerType.Name)
+                .Inc();
             var rejectedCount = RabbitMqRetryCountReader.GetRejectedCount(
                 eventArgs.BasicProperties.Headers,
                 mainQueue);
@@ -518,7 +549,10 @@ public sealed class RabbitMqEventBus :
         }
         catch (Exception exception)
         {
-            if (inboxStore is not null && inboxClaim is { Status: InboxClaimStatus.Claimed })
+            var rootException = Unwrap(exception);
+            if (inboxStore is not null
+                && inboxClaim is { Status: InboxClaimStatus.Claimed }
+                && ShouldRecordInboxFailure(rootException, _lifetimeCancellation.IsCancellationRequested))
             {
                 try
                 {
@@ -526,7 +560,7 @@ public sealed class RabbitMqEventBus :
                         typedEvent.EventId,
                         handlerKey,
                         inboxClaim.LockToken,
-                        exception.Message,
+                        rootException.Message,
                         CancellationToken.None);
                 }
                 catch (Exception markFailedException)

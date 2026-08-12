@@ -81,15 +81,29 @@ public class DeviceStatusMonitor : LockedTimerService
             return 0;
 
         var offlineIds = offlineDevices.Select(d => d.Id).ToList();
+        // 更新条件必须重复 Status + LastSeenAt：设备可能在上面的快照查询之后刚好收到遥测，
+        // 若只按 ID 更新，会把已经恢复通信的设备错误改成 Offline，造成仪表盘和离线通知双重误报。
         var affected = await dbContext.Devices
             .IgnoreQueryFilters()
-            .Where(d => offlineIds.Contains(d.Id))
+            .Where(d => offlineIds.Contains(d.Id)
+                     && d.Status == DeviceStatus.Online
+                     && (d.LastSeenAt == null || d.LastSeenAt < cutoff))
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DeviceStatus.Offline), ct);
+
+        // ExecuteUpdateAsync 只返回行数，不能直接返回实际改变的设备；重新读取当前仍处于 Offline 且时间戳未刷新
+        // 的设备，避免把查询与更新之间已经恢复上报的设备发送成离线通知。
+        var affectedDevices = await dbContext.Devices
+            .IgnoreQueryFilters()
+            .Where(d => offlineIds.Contains(d.Id)
+                     && d.Status == DeviceStatus.Offline
+                     && (d.LastSeenAt == null || d.LastSeenAt < cutoff))
+            .Select(d => new { d.Id, d.TenantId, d.DeviceCode, d.Name })
+            .ToListAsync(ct);
 
         // 逐设备推送离线通知（按租户隔离 + 持久化通知 + Web Push），让运维实时感知设备通信中断。
         // 原实现只改状态不发通知，且设备离线不产生遥测故不触发阈值告警 → 运维完全不知情。
         // 单设备通知失败不阻塞其他设备（catch 仅告警）。
-        foreach (var device in offlineDevices)
+        foreach (var device in affectedDevices)
         {
             try
             {

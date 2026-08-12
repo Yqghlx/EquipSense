@@ -54,14 +54,29 @@ public class GatewayHeartbeatMonitor : LockedTimerService
 
         if (expiredGateways.Count == 0) return;
 
-        foreach (var gateway in expiredGateways)
+        var expiredGatewayIds = expiredGateways.Select(g => g.Id).ToList();
+
+        // 更新条件必须重复 Status + LastHeartbeatAt：网关可能在上面的快照查询之后刚好收到心跳，
+        // 若只按 ID 更新，会把已经恢复通信的网关错误改成 offline，造成状态和通知双重误报。
+        var affected = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
+            .Where(g => expiredGatewayIds.Contains(g.Id)
+                     && g.Status == "online"
+                     && g.LastHeartbeatAt < threshold)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.Status, "offline"), ct);
+
+        // 只为实际仍处于超时 offline 状态的网关发送通知；查询与更新之间恢复心跳的网关会被排除。
+        var affectedGateways = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
+            .Where(g => expiredGatewayIds.Contains(g.Id)
+                     && g.Status == "offline"
+                     && g.LastHeartbeatAt < threshold)
+            .ToListAsync(ct);
+
+        foreach (var gateway in affectedGateways)
         {
-            gateway.Status = "offline";
             Logger.LogInformation("网关 {GatewayId}（{Name}）心跳超时，标记为 offline", gateway.GatewayId, gateway.Name);
 
             // 推送网关离线通知（P0 工业：网关是数据采集入口，离线=该网关下设备数据断，运维需立即知晓）。
-            // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强），
-            // 且与持久化通知/Web Push 解耦（推送服务的隔离由 SendGatewayOfflineAsync 内部保证）。
+            // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强）。
             try
             {
                 await signalR.SendGatewayOfflineAsync(gateway.TenantId, gateway.Id, gateway.GatewayId, gateway.Name);
@@ -72,6 +87,6 @@ public class GatewayHeartbeatMonitor : LockedTimerService
             }
         }
 
-        await dbContext.SaveChangesAsync(ct);
+        Logger.LogInformation("本轮已将 {Count} 个超时网关标记为 offline", affected);
     }
 }

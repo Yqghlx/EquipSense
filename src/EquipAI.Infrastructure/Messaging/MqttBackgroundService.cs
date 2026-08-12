@@ -38,6 +38,11 @@ public class MqttBackgroundService : BackgroundService
         {
             await _mqttClient.ConnectAsync(stoppingToken);
         }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // 宿主主动停机时，连接取消是正常生命周期事件，不应被记录为 MQTT 故障。
+            return;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "MQTT 初始连接失败，后台服务将依赖自动重连机制");

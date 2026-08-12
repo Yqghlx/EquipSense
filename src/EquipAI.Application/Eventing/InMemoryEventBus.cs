@@ -178,6 +178,12 @@ public class InMemoryEventBus : IEventBusTransport, IDisposable
                         }
                     }
                 }
+                catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+                {
+                    // 停机取消当前处理器后立即结束消费者，不再调用同一事件的后续处理器。
+                    // 这样可避免开发/应急 InMemory 降级路径在 SIGTERM 期间继续产生副作用。
+                    return;
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "处理事件 {EventType} 时处理器 {HandlerType} 发生异常 (EventId: {EventId})",

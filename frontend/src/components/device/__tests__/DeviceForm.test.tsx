@@ -110,11 +110,35 @@ describe('DeviceForm', () => {
         expect(screen.getByText('device.deviceCodeRequired')).toBeInTheDocument();
       });
       expect(screen.getByText('device.nameRequired')).toBeInTheDocument();
-      // device.type 字段通过 Base UI Select 管理，其校验错误由 Select 组件内部的 hidden input 触发，
-      // 错误消息格式为 "Invalid input" 而非 Zod schema 定义的 message key，此处不验证该字段
+      expect(screen.getByText('device.typeRequired')).toBeInTheDocument();
 
       // onSubmit 不应被调用
       expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it('必填字段校验错误应关联到对应控件', async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn();
+      const onCancel = vi.fn();
+
+      render(<DeviceForm onSubmit={onSubmit} onCancel={onCancel} />);
+
+      await user.click(screen.getByText('common.save'));
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('device.deviceCode')).toHaveAttribute('aria-invalid', 'true');
+      });
+
+      expect(screen.getByPlaceholderText('device.deviceCode')).toHaveAttribute('aria-describedby', 'deviceCode-error');
+      expect(screen.getByPlaceholderText('device.name')).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByPlaceholderText('device.name')).toHaveAttribute('aria-describedby', 'deviceName-error');
+      expect(screen.getAllByRole('combobox')[0]).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getAllByRole('combobox')[0]).toHaveAttribute('aria-describedby', 'deviceType-error');
+      expect(screen.getByText('device.deviceCodeRequired')).toHaveAttribute('id', 'deviceCode-error');
+      expect(screen.getByText('device.deviceCodeRequired')).toHaveAttribute('role', 'alert');
+      expect(screen.getByText('device.nameRequired')).toHaveAttribute('id', 'deviceName-error');
+      expect(screen.getByText('device.nameRequired')).toHaveAttribute('role', 'alert');
+      expect(document.getElementById('deviceType-error')).toHaveAttribute('role', 'alert');
     });
 
     it('点击取消应调用 onCancel', async () => {

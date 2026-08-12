@@ -25,6 +25,33 @@ public class TestEventHandler : IEventHandler<TestEvent>
     }
 }
 
+/// <summary>停机时等待取消的测试处理器，用于验证消费者不会继续调用同一事件的后续处理器。</summary>
+public sealed class ShutdownAwareTestEventHandler : IEventHandler<TestEvent>
+{
+    public static TaskCompletionSource<bool> Started { get; set; } = CreateCompletionSource();
+
+    public Task HandleAsync(TestEvent @event, CancellationToken ct = default)
+    {
+        Started.TrySetResult(true);
+        return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+    }
+
+    private static TaskCompletionSource<bool> CreateCompletionSource() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+}
+
+/// <summary>停机取消后不应再被调用的后续处理器。</summary>
+public sealed class FollowupTestEventHandler : IEventHandler<TestEvent>
+{
+    public static int InvocationCount;
+
+    public Task HandleAsync(TestEvent @event, CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref InvocationCount);
+        return Task.CompletedTask;
+    }
+}
+
 public class InMemoryEventBusTests : IDisposable
 {
     private readonly ServiceProvider _serviceProvider;
@@ -62,6 +89,38 @@ public class InMemoryEventBusTests : IDisposable
         var testEvent = new TestEvent(Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), "无订阅者");
         var act = () => _eventBus.PublishAsync(testEvent);
         await act.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// 停机取消当前处理器后，不得继续执行同一事件的后续处理器。
+    ///
+    /// Why：InMemory 总线只用于开发/应急降级，但仍必须遵守停机边界；否则 SIGTERM 期间可能继续发送
+    /// 通知、写数据库或调用外部系统，延长退出并产生重复副作用。
+    /// </summary>
+    [Fact]
+    public async Task 停机取消当前处理器后_不得继续调用后续处理器()
+    {
+        using var services = new ServiceCollection()
+            .AddSingleton<ShutdownAwareTestEventHandler>()
+            .AddSingleton<FollowupTestEventHandler>()
+            .AddLogging()
+            .BuildServiceProvider();
+        var logger = services.GetRequiredService<ILogger<InMemoryEventBus>>();
+        using var bus = new InMemoryEventBus(services, logger);
+
+        ShutdownAwareTestEventHandler.Started = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        FollowupTestEventHandler.InvocationCount = 0;
+        bus.Subscribe<TestEvent, ShutdownAwareTestEventHandler>();
+        bus.Subscribe<TestEvent, FollowupTestEventHandler>();
+
+        await bus.PublishAsync(new TestEvent(Guid.NewGuid(), DateTime.UtcNow, Guid.NewGuid(), "停机取消"));
+        await ShutdownAwareTestEventHandler.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        bus.Dispose();
+
+        FollowupTestEventHandler.InvocationCount.Should().Be(0,
+            "当前处理器收到停机取消后，事件的其他处理器不应再产生副作用");
     }
 
     public void Dispose()

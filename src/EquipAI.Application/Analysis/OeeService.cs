@@ -108,7 +108,7 @@ public class OeeService
     ///
     /// 返回值元组：(性能比率, 用于计算的样本数量)。样本数量供上层判断是否数据不足。
     /// </summary>
-    private async Task<(double performance, int sampleCount)> CalculatePerformanceAsync(Guid tenantId, CancellationToken ct)
+    internal async Task<(double performance, int sampleCount)> CalculatePerformanceAsync(Guid tenantId, CancellationToken ct)
     {
         try
         {
@@ -129,6 +129,11 @@ public class OeeService
 
             var avgFlow = recentFlows.Average();
             return (Math.Clamp(avgFlow / NominalAirFlow, 0, 1.0), recentFlows.Count);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机或请求取消必须继续向上传播，不能被误判为 TimescaleDB 故障并降级为 0。
+            throw;
         }
         catch (Exception ex)
         {

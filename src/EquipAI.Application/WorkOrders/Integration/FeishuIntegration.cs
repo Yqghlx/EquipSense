@@ -151,6 +151,11 @@ public class FeishuIntegration : IWorkOrderIntegration
             _logger.LogWarning("飞书配置不完整，缺少 WebhookUrl 或 AppId/AppSecret");
             return null;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 普通网络故障可以降级，但宿主停机或消息处理超时取消必须传播给集成路由。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "飞书推送失败");
