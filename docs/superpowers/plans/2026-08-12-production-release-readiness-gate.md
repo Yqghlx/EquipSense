@@ -182,13 +182,13 @@ git commit -m "feat: gate deployments with production readiness"
 - Consumes: Task 2 的 `run_readiness_gate`。
 - Produces: 目标版本健康检查后、回滚健康检查后和同 tag 幂等路径都执行 `run_readiness_gate --runtime`；只有成功后才写 `.last-deployed-tag`。
 
-- [ ] **Step 1: 写运行态失败和回滚失败测试**
+- [x] **Step 1: 写运行态失败和回滚失败测试**
 
 扩展 readiness 替身，使 `--runtime` 调用按 `DEPLOY_READINESS_RUNTIME_CODES` 的逗号序列返回，并记录 `DEPLOY_READINESS_LOG`。新增两个场景：`1,0` 表示目标运行态失败、回滚运行态成功；`1,1` 表示目标和回滚都失败。两者都断言返回非零、旧 tag 保留，前者包含“回滚验证通过”，后者包含“严重”。
 
 同 tag 测试增加运行态成功断言，并增加运行态失败场景，确保不健康的既有服务不会被误报为幂等成功。
 
-- [ ] **Step 2: 运行测试确认先失败**
+- [x] **Step 2: 运行测试确认先失败**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh deploy
@@ -196,7 +196,7 @@ bash tests/scripts/production-scripts-test.sh deploy
 
 预期：新增测试因部署脚本尚未调用运行态 readiness 而失败。
 
-- [ ] **Step 3: 接入三个运行态节点**
+- [x] **Step 3: 接入三个运行态节点**
 
 目标版本现有应用探针通过后调用：
 
@@ -209,7 +209,7 @@ fi
 
 同 tag 分支只有应用探针和运行态 readiness 都成功才输出幂等成功。`rollback` 在应用探针通过后调用同一门禁；失败时输出严重故障并返回非零。保持现有 `MUTATION_STARTED`、`handle_failure`、原始失败状态和版本记录原子替换，不在失败路径写入目标 tag。
 
-- [ ] **Step 4: 运行完整部署回归**
+- [x] **Step 4: 运行完整部署回归**
 
 ```bash
 bash tests/scripts/production-scripts-test.sh deploy
@@ -218,10 +218,11 @@ bash -n docker/deploy-production.sh tests/scripts/production-scripts-test.sh
 
 预期：目标失败进入回滚，回滚 readiness 失败保持严重状态；无历史版本时不伪造回滚 tag；状态展示失败不撤销已完成记账。
 
-- [ ] **Step 5: 提交 Task 3**
+- [x] **Step 5: 提交 Task 3**
 
 ```bash
-git add docker/deploy-production.sh tests/scripts/production-scripts-test.sh
+git add docker/deploy-production.sh tests/scripts/production-scripts-test.sh \
+  docs/superpowers/plans/2026-08-12-production-release-readiness-gate.md
 git commit -m "feat: verify runtime readiness after deploy and rollback"
 ```
 

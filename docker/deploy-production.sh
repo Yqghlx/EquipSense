@@ -114,7 +114,12 @@ rollback() {
   fi
 
   if wait_for_health "回滚版本 $CURRENT_TAG " "$DEPLOY_ROLLBACK_INITIAL_DELAY_SECONDS"; then
-    printf '✅ 回滚验证通过：当前版本仍为 %s。\n' "$CURRENT_TAG" >&2
+    if ! run_readiness_gate --runtime; then
+      printf '🚨 严重：回滚后的全量运行态 readiness 失败；请立即按运维剧本人工处置。\n' >&2
+      return 1
+    fi
+    printf '✅ 回滚验证通过：应用探针和全量运行态 readiness 均通过，当前版本仍为 %s。\n' \
+      "$CURRENT_TAG" >&2
     return 0
   fi
 
@@ -239,6 +244,9 @@ printf '=== 部署版本 %s（当前：%s）===\n' "$TARGET_TAG" "${CURRENT_TAG:
 
 if [[ "$CURRENT_TAG" = "$TARGET_TAG" ]]; then
   if wait_for_health "当前版本 $TARGET_TAG " 0; then
+    if ! run_readiness_gate --runtime; then
+      fatal "当前记录版本应用探针通过，但全量运行态 readiness 失败"
+    fi
     trap - ERR
     printf '=== 当前版本已健康，无需重复部署：%s ===\n' "$TARGET_TAG"
     exit 0
@@ -260,6 +268,11 @@ MUTATION_STARTED=true
 
 if ! wait_for_health "目标版本 $TARGET_TAG " "$DEPLOY_INITIAL_DELAY_SECONDS"; then
   printf '目标版本健康检查失败。\n' >&2
+  false
+fi
+
+if ! run_readiness_gate --runtime; then
+  printf '目标版本全量运行态 readiness 失败。\n' >&2
   false
 fi
 

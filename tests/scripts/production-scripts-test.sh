@@ -2989,6 +2989,50 @@ test_deploy_health_failure_rolls_back_and_verifies_health() {
     || fail "目标失败后必须再次探测回滚版本健康"
 }
 
+test_deploy_runtime_readiness_failure_rolls_back_and_preserves_version() {
+  local case_dir="$TEST_ROOT/deploy-runtime-readiness-rollback"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=200,200 \
+    DEPLOY_READINESS_RUNTIME_CODES=1,0 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "目标版本运行态 readiness 失败时部署必须返回非零"
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "1.0.0" ]] \
+    || fail "运行态 readiness 失败后不得写入目标版本"
+  assert_contains "$output" "回滚验证通过"
+  [[ "$(grep -c -- '--runtime' "$case_dir/readiness.log")" = "2" ]] \
+    || fail "目标版本和回滚版本都必须执行运行态 readiness"
+}
+
+test_deploy_rollback_readiness_failure_is_critical() {
+  local case_dir="$TEST_ROOT/deploy-rollback-readiness-critical"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=200,200 \
+    DEPLOY_READINESS_RUNTIME_CODES=1,1 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "回滚 readiness 失败时部署必须返回非零"
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "1.0.0" ]] \
+    || fail "回滚 readiness 失败时不得覆盖历史版本记录"
+  assert_contains "$output" "严重"
+}
+
 test_deploy_frontend_health_failure_also_rolls_back() {
   local case_dir="$TEST_ROOT/deploy-frontend-health-rollback"
   create_deploy_fixtures "$case_dir"
@@ -3038,14 +3082,38 @@ test_deploy_same_healthy_tag_is_idempotent() {
   printf '%s\n' '2.0.0' > "$case_dir/.last-deployed-tag"
 
   local output
-  if ! output="$(DEPLOY_CURL_CODES=200 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"; then
+  if ! output="$(DEPLOY_CURL_CODES=200 DEPLOY_READINESS_RUNTIME_CODES=0 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"; then
     printf '%s\n' "$output" >&2
     fail "同版本且健康时部署应幂等成功"
   fi
 
   assert_contains "$output" "无需重复部署"
+  grep -q -- '--runtime' "$case_dir/readiness.log" \
+    || fail "同版本且健康时必须执行运行态 readiness"
   ! grep -Eq '^2\.0\.0\|(login|.* (pull|up) )' "$case_dir/docker.log" \
     || fail "同版本且健康时不应登录仓库、拉取镜像或重建服务"
+}
+
+test_deploy_same_tag_runtime_readiness_failure_is_not_idempotent_success() {
+  local case_dir="$TEST_ROOT/deploy-idempotent-readiness-failure"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '2.0.0' > "$case_dir/.last-deployed-tag"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_CURL_CODES=200 DEPLOY_READINESS_RUNTIME_CODES=1 \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "同版本运行态 readiness 失败时不得幂等成功"
+  [[ "$output" != *"无需重复部署"* ]] \
+    || fail "同版本运行态 readiness 失败时不得报告无需重复部署"
+  ! grep -Eq '^2\.0\.0\|(login|.* (pull|up) )' "$case_dir/docker.log" \
+    || fail "同版本运行态 readiness 失败时不应修改服务"
 }
 
 test_deploy_compose_failure_rolls_back() {
@@ -3764,9 +3832,12 @@ case "${1:-all}" in
     test_deploy_uses_edge_port_from_env_for_health_check
     test_deploy_final_status_display_failure_does_not_reverse_success
     test_deploy_health_failure_rolls_back_and_verifies_health
+    test_deploy_runtime_readiness_failure_rolls_back_and_preserves_version
+    test_deploy_rollback_readiness_failure_is_critical
     test_deploy_frontend_health_failure_also_rolls_back
     test_deploy_edgegateway_health_failure_also_rolls_back
     test_deploy_same_healthy_tag_is_idempotent
+    test_deploy_same_tag_runtime_readiness_failure_is_not_idempotent_success
     test_deploy_compose_failure_rolls_back
     test_deploy_without_history_never_rolls_back_to_unknown_tag
     test_deploy_rollback_health_failure_is_critical
@@ -3882,9 +3953,12 @@ case "${1:-all}" in
     test_deploy_uses_edge_port_from_env_for_health_check
     test_deploy_final_status_display_failure_does_not_reverse_success
     test_deploy_health_failure_rolls_back_and_verifies_health
+    test_deploy_runtime_readiness_failure_rolls_back_and_preserves_version
+    test_deploy_rollback_readiness_failure_is_critical
     test_deploy_frontend_health_failure_also_rolls_back
     test_deploy_edgegateway_health_failure_also_rolls_back
     test_deploy_same_healthy_tag_is_idempotent
+    test_deploy_same_tag_runtime_readiness_failure_is_not_idempotent_success
     test_deploy_compose_failure_rolls_back
     test_deploy_without_history_never_rolls_back_to_unknown_tag
     test_deploy_rollback_health_failure_is_critical
