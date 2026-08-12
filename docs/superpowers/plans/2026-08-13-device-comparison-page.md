@@ -126,7 +126,7 @@ Mock 设备、模板、告警规则和对比 hook，覆盖英文标题/表头、
 - Modify: `frontend/src/i18n/en.json`
 - Test: Task 3 files
 
-- [ ] **Step 1: 实现查询 hook 的规范化与启用边界**
+- [x] **Step 1: 实现查询 hook 的规范化与启用边界**
 
 对 `deviceIds` 去重、排序后写入 query key 和 URL；`deviceType`、`metric`、`hours`、2–5 个 ID 不完整时 `enabled=false`。设备列表 hook 新增可选 `keyword` 和 `enabled`，同时保证旧调用默认行为不变。
 
@@ -142,19 +142,19 @@ normalizedDeviceIds.forEach((id) => search.append('deviceIds', id));
 
 `useDevices` 必须将 `query.deviceType` 写入 URL 的 `type`，将 `query.keyword` 写入 URL 的 `keyword`；未传 `options.enabled` 时保持原有启用行为。
 
-- [ ] **Step 2: 实现页面筛选状态和候选选择**
+- [x] **Step 2: 实现页面筛选状态和候选选择**
 
 加载模板/实际类型并去重；按类型查询最多 100 台设备，搜索框映射 `keyword`；支持 2–5 台选择，达到 5 台后禁用其它复选框。指标自由输入并用告警规则提供 datalist 建议，规则查询失败不阻断页面。
 
-- [ ] **Step 3: 实现结果、错误和空态**
+- [x] **Step 3: 实现结果、错误和空态**
 
 结果展示群体均值、标准差、窗口、设备名称/编码、平均/最新/最小/最大值、样本数、Z-Score 和异常 Badge；设备行导航到详情。区分加载、无候选、样本不足、请求失败和缓存错误；所有按钮和表格状态具备可访问语义。
 
-- [ ] **Step 4: 注册路由、导航和双语资源**
+- [x] **Step 4: 注册路由、导航和双语资源**
 
 添加懒加载 `/device-comparison` 路由和侧边栏 `deviceComparison` 入口，补齐静态 i18n 键；不改变现有导航权限模型，页面自身按 `device:read` 阻止无权限查询。
 
-- [ ] **Step 5: 运行前端聚焦测试确认绿灯**
+- [x] **Step 5: 运行前端聚焦测试确认绿灯**
 
 运行 `cd frontend && npm test -- --run src/pages/__tests__/DeviceComparisonPage.i18n.test.tsx src/hooks/__tests__/useDeviceComparison.test.tsx src/hooks/__tests__/useDevices.test.tsx`。
 
