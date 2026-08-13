@@ -42,6 +42,13 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
         cancellationToken.ThrowIfCancellationRequested();
         if (!_options.Enabled)
         {
+            Interlocked.Exchange(
+                ref _current,
+                new WafRuleSnapshot(
+                    "disabled",
+                    "disabled",
+                    [],
+                    DateTimeOffset.UtcNow));
             _started = true;
             return Task.CompletedTask;
         }

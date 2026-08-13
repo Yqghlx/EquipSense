@@ -19,23 +19,29 @@ public class WafMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<WafMiddleware> _logger;
+    private readonly IWafRuleProvider _ruleProvider;
 
-    public WafMiddleware(RequestDelegate next, ILogger<WafMiddleware> logger)
+    public WafMiddleware(
+        RequestDelegate next,
+        ILogger<WafMiddleware> logger,
+        IWafRuleProvider ruleProvider)
     {
         _next = next;
         _logger = logger;
+        _ruleProvider = ruleProvider;
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
         var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var path = context.Request.Path.Value ?? "";
+        var snapshot = _ruleProvider.Current;
 
         // 1. 检查 URL + QueryString
         var urlInput = path + context.Request.QueryString.Value;
-        if (IsMalicious(urlInput))
+        if (TryDetect(urlInput, snapshot, "URL/QueryString", out var urlDetection))
         {
-            await BlockAsync(context, ip, path, "URL/QueryString");
+            await BlockAsync(context, ip, path, urlDetection);
             return;
         }
 
@@ -50,9 +56,9 @@ public class WafMiddleware
                 var body = await reader.ReadToEndAsync();
                 context.Request.Body.Position = 0;
 
-                if (IsMalicious(body))
+                if (TryDetect(body, snapshot, "RequestBody", out var bodyDetection))
                 {
-                    await BlockAsync(context, ip, path, "RequestBody");
+                    await BlockAsync(context, ip, path, bodyDetection);
                     return;
                 }
             }
@@ -65,10 +71,45 @@ public class WafMiddleware
     internal static bool IsMalicious(string input)
         => WafRuleCatalog.IsBuiltInMalicious(input);
 
-    /// <summary>阻断恶意请求并记录安全审计日志</summary>
-    private async Task BlockAsync(HttpContext context, string ip, string path, string source)
+    /// <summary>
+    /// 使用不可变快照按固定顺序寻找首个命中规则。
+    /// </summary>
+    internal static bool TryDetect(
+        string input,
+        WafRuleSnapshot snapshot,
+        string source,
+        out WafDetection detection)
     {
-        _logger.LogWarning("🚫 WAF 拦截恶意请求: IP={IP}, Path={Path}, Source={Source}", ip, path, source);
+        if (!string.IsNullOrEmpty(input))
+        {
+            foreach (var rule in snapshot.Rules)
+            {
+                if (rule.IsMatch(input))
+                {
+                    detection = new WafDetection(rule.Id, rule.Category, source);
+                    return true;
+                }
+            }
+        }
+
+        detection = null!;
+        return false;
+    }
+
+    /// <summary>阻断恶意请求并记录不含请求正文的安全审计日志</summary>
+    private async Task BlockAsync(
+        HttpContext context,
+        string ip,
+        string path,
+        WafDetection detection)
+    {
+        _logger.LogWarning(
+            "🚫 WAF 拦截恶意请求: IP={IP}, Path={Path}, RuleId={RuleId}, Category={Category}, Source={Source}",
+            ip,
+            path,
+            detection.RuleId,
+            detection.Category,
+            detection.Source);
 
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         context.Response.ContentType = "application/json";

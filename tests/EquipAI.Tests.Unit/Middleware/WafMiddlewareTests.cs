@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Collections.Immutable;
 
 namespace EquipAI.Tests.Unit.Middleware;
 
@@ -20,12 +21,14 @@ namespace EquipAI.Tests.Unit.Middleware;
 public class WafMiddlewareTests
 {
     private readonly Mock<RequestDelegate> _nextMock = new();
+    private readonly Mock<ILogger<WafMiddleware>> _loggerMock = new();
     private readonly WafMiddleware _middleware;
 
     public WafMiddlewareTests()
     {
-        var logger = Mock.Of<ILogger<WafMiddleware>>();
-        _middleware = new WafMiddleware(_nextMock.Object, logger);
+        var provider = new Mock<IWafRuleProvider>();
+        provider.SetupGet(value => value.Current).Returns(CreateSnapshot());
+        _middleware = new WafMiddleware(_nextMock.Object, _loggerMock.Object, provider.Object);
     }
 
     // =========================================================================
@@ -266,4 +269,72 @@ public class WafMiddlewareTests
         body.Should().Contain("\"code\":403", "拦截响应应含统一错误码");
         body.Should().Contain("请求被安全策略拦截", "拦截响应应含可读消息");
     }
+
+    /// <summary>
+    /// 外部字面量规则命中 URL 时应和内置规则一样阻断请求。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_外部contains规则命中URL_返回403()
+    {
+        var next = new Mock<RequestDelegate>();
+        var provider = new Mock<IWafRuleProvider>();
+        provider.SetupGet(value => value.Current).Returns(CreateSnapshot(
+            new WafCompiledRule(
+                "custom-rule",
+                "sql-injection",
+                "测试扩展规则",
+                input => input.Contains("new-attack-marker", StringComparison.OrdinalIgnoreCase))));
+        var middleware = new WafMiddleware(next.Object, _loggerMock.Object, provider.Object);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/devices";
+        context.Request.QueryString = new QueryString("?search=new-attack-marker");
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        next.Verify(value => value(It.IsAny<HttpContext>()), Times.Never);
+    }
+
+    /// <summary>
+    /// 外部规则命中请求体时应阻断，并且结构化日志不得包含请求正文。
+    /// </summary>
+    [Fact]
+    public async Task InvokeAsync_外部规则命中请求体_日志只包含规则标识不包含正文()
+    {
+        var next = new Mock<RequestDelegate>();
+        var logger = new Mock<ILogger<WafMiddleware>>();
+        var provider = new Mock<IWafRuleProvider>();
+        provider.SetupGet(value => value.Current).Returns(CreateSnapshot(
+            new WafCompiledRule(
+                "custom-body-rule",
+                "xss",
+                "测试请求体规则",
+                input => input.Contains("new-attack-marker", StringComparison.OrdinalIgnoreCase))));
+        var middleware = new WafMiddleware(next.Object, logger.Object, provider.Object);
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Request.Path = "/api/v1/devices";
+        context.Request.ContentType = "application/json";
+        var body = "{\"name\":\"new-attack-marker\",\"secret\":\"secret-body-payload\"}";
+        var bodyBytes = System.Text.Encoding.UTF8.GetBytes(body);
+        context.Request.Body = new MemoryStream(bodyBytes);
+        context.Request.ContentLength = bodyBytes.Length;
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        var logState = logger.Invocations
+            .Select(invocation => invocation.Arguments[2]?.ToString())
+            .Single(state => state?.Contains("custom-body-rule", StringComparison.Ordinal) == true);
+        logState.Should().Contain("custom-body-rule");
+        logState.Should().NotContain("secret-body-payload");
+        logState.Should().NotContain("new-attack-marker");
+    }
+
+    private static WafRuleSnapshot CreateSnapshot(params WafCompiledRule[] externalRules)
+        => new(
+            "test",
+            "test",
+            WafRuleCatalog.CreateBuiltInRules().AddRange(externalRules),
+            DateTimeOffset.UtcNow);
 }

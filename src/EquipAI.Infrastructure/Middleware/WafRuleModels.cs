@@ -29,3 +29,8 @@ public sealed record WafRuleSnapshot(
     string Sha256,
     ImmutableArray<WafCompiledRule> Rules,
     DateTimeOffset LoadedAtUtc);
+
+/// <summary>
+/// WAF 命中结果，只包含可安全写入审计日志的标识信息。
+/// </summary>
+public sealed record WafDetection(string RuleId, string Category, string Source);

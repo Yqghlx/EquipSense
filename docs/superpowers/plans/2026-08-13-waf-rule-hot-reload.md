@@ -144,38 +144,38 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 - Modify: src/EquipAI.WebAPI/appsettings.json
 - Modify: src/EquipAI.WebAPI/appsettings.Production.json
 - Test: tests/EquipAI.Tests.Unit/Middleware/WafMiddlewareTests.cs
-- Create or modify: tests/EquipAI.Tests.Unit/Web/ProductionConfigurationTests.cs
+- Create: tests/EquipAI.Tests.Unit/Security/WafRuleConfigurationTests.cs
 
 **Interfaces:**
 - WafMiddleware 构造函数接收 IWafRuleProvider，并在 URL/query/body 检查时读取当前 snapshot。
 - WafRuleConfiguration.ValidateForEnvironment(IConfiguration, string) 在生产要求 RulesPath 是绝对路径且 RequireExternalRules=true；非生产允许空路径。
 - 命中日志使用结构化 RuleId、Category、Source，不记录 query/body/pattern。
 
-- [ ] Step 1: 写请求链路和配置门禁失败测试
+- [x] Step 1: 写请求链路和配置门禁失败测试
 
 新增外部 contains URL 命中、外部 regex JSON body 命中、provider 更新后下一请求使用新 revision、logger state 只有 RuleId/Category/Source 且没有 payload、Production 缺失/相对路径/关闭 RequireExternalRules 时抛异常、Development 空规则路径可启动的测试。
 
-- [ ] Step 2: 运行测试确认失败
+- [x] Step 2: 运行测试确认失败
 
     dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~WafMiddlewareTests|FullyQualifiedName~ProductionConfigurationTests" --no-restore
 
 预期：新 provider 注入和配置门禁尚未存在而失败。
 
-- [ ] Step 3: 修改 middleware 为快照匹配并增加结构化审计
+- [x] Step 3: 修改 middleware 为快照匹配并增加结构化审计
 
 将 URL/body 检查归一到 TryDetect(string input, WafRuleSnapshot snapshot, out WafDetection detection)。先按固定顺序遍历不可变规则，返回首个命中；空输入直接放行。BlockAsync 只向日志提供 RuleId、Category、Source，响应继续返回统一 403 JSON；不把完整 URL、query、body 或 pattern 写日志。
 
-- [ ] Step 4: 增加配置读取和启动前验证
+- [x] Step 4: 增加配置读取和启动前验证
 
 在 Program.cs 注册基础设施前读取 Security:Waf 并调用 WafRuleConfiguration.ValidateForEnvironment；appsettings.json 明确开发缺省，appsettings.Production.json 明确生产强制值；Docker 环境变量在 Task 4 覆盖路径和开关。
 
-- [ ] Step 5: 运行请求、配置和 WAF 全部单测
+- [x] Step 5: 运行请求、配置和 WAF 全部单测
 
     dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~WafMiddlewareTests|FullyQualifiedName~WafRuleLoaderTests|FullyQualifiedName~WafRuleProviderTests|FullyQualifiedName~ProductionConfigurationTests" --no-restore
 
 预期：全部通过，内置基线和外部规则均有证据。
 
-- [ ] Step 6: 提交请求链路子任务
+- [x] Step 6: 提交请求链路子任务
 
     git add src/EquipAI.Infrastructure/Middleware/WafMiddleware.cs src/EquipAI.WebAPI/Program.cs src/EquipAI.WebAPI/appsettings.json src/EquipAI.WebAPI/appsettings.Production.json tests/EquipAI.Tests.Unit/Middleware/WafMiddlewareTests.cs tests/EquipAI.Tests.Unit/Web/ProductionConfigurationTests.cs
     git commit -m "feat(security): apply versioned waf rules to requests"

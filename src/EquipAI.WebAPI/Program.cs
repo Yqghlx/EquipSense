@@ -56,6 +56,12 @@ try
     // 这样登录限流不会把所有用户误判成同一个 Docker 代理地址。
     builder.Services.AddTrustedForwardedHeaders(builder.Configuration);
 
+    // 生产环境必须启用 WAF 并从绝对路径加载外部规则；实际文件存在性、权限和内容
+    // 由 WafRuleProvider 在 HostedService 启动阶段再次校验，避免只通过配置门禁却没有规则。
+    WafRuleConfiguration.ValidateForEnvironment(
+        builder.Configuration,
+        builder.Environment.EnvironmentName);
+
     // 在注册任何事件发布后台服务前完成配置校验，避免未知 Provider 或生产弱配置静默降级。
     MfaPolicyValidator.ValidateForEnvironment(
         builder.Configuration,
