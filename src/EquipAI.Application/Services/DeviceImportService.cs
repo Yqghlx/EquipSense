@@ -94,6 +94,9 @@ public sealed partial class DeviceImportService
 
         await executionStrategy.ExecuteAsync(async () =>
         {
+            // 执行策略重试时，上一轮回滚留下的跟踪实体和结果计数都必须清理，
+            // 否则同一批设备可能被重复加入，返回的 Imported/Skipped 也会被累加。
+            _dbContext.ChangeTracker.Clear();
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
             try
             {
@@ -103,6 +106,7 @@ public sealed partial class DeviceImportService
             catch (Exception)
             {
                 await transaction.RollbackAsync(ct);
+                _dbContext.ChangeTracker.Clear();
                 throw;
             }
         });

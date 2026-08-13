@@ -3,16 +3,25 @@
 > 基线生成时间：2026-06-14（历史基线）
 > 检查范围：对照行业落地产品（PTC ThingWorx / Siemens MindSphere / IBM Maximo / Uptake），核验项目在实际工业场景部署使用的完备性。
 
-> **当前状态说明（2026-08-13）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）；同时完成推送订阅、通知偏好和知识规则导出的当前用户/租户纵深隔离，并修复 Vite 8 下 PWA Service Worker 构建的 `inlineDynamicImports` 弃用警告。按仓库命令实测，当前全量后端单测 1619/1619、默认后端集成 183 总数（177 通过、6 跳过、0 失败）、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1105 个键完全对齐，Vitest 85 个测试文件/489 个测试全部通过，生产构建 precache 133 entries 且无 PWA 弃用警告。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
+> **当前状态说明（2026-08-13）**：本文保留历史功能盘点作为基线；当前质量门禁以仓库实际测试结果为准。本轮补充完成设备对比页面首版闭环：独立 `/device-comparison` 路由与侧边栏入口、设备类型/指标/时间窗口/2–5 台设备筛选、统计快照、权限控制、错误与缓存刷新失败提示、样本不足与空态区分、中英文资源，以及后端可选重复 `deviceIds` 过滤契约（不传时保持同类型全量对比旧语义）；同时完成推送订阅、通知偏好和知识规则导出的当前用户/租户纵深隔离，并修复 Vite 8 下 PWA Service Worker 构建的 `inlineDynamicImports` 弃用警告。按仓库命令实测，当前全量后端单测 1658/1658、默认后端集成 184 总数（178 通过、6 跳过、0 失败）、Release build 0 warning、生产脚本测试通过；前端 `check:i18n` 校验 1104 个键完全对齐，Vitest 85 个测试文件/490 个测试全部通过，生产构建 precache 133 entries 且无 PWA 弃用警告。以上结果仅证明代码、脚本和当前门禁通过，不代表项目已全面生产就绪：真实生产凭据与正式 TLS/MQTT 证书、生产等价备份恢复演练、MFA/PII 密钥治理、现场 OPC UA/Modbus 联调、容量/压测与最终上线门禁仍未完成。当前 `docker/.env` 仍有 24 个配置问题，连同运行时 TLS/MQTT 文件检查共报告 27 个发布门禁问题，修复前不得上线。
+
+> **租户配额一致性增量（2026-08-13，最新候选状态）**：用户创建、普通设备创建、快速注册和批量导入现在都在服务层执行配额兜底；关系型数据库按真实有效设备/启用用户数量进行事务内原子预留，修复计数漂移、并发超卖、重复导入误报、批量导入因历史计数器偏大而误拒绝和 `0=不限` 误判，并统一返回 403 配额语义。真实 PostgreSQL 双事务实验证明，把 `FOR UPDATE` 和计数放在同一条 `UPDATE` 中仍会受语句旧快照影响而超卖；当前实现先用独立语句锁定租户行，再以新的 READ COMMITTED 快照计数和更新。批量导入也在去重查询前取得同一把锁，旧实现的 8 路同文件并发曾稳定复现为 7 个 HTTP 500 + 1 个 200，修复后为 8 个 200 且仅新增 1 台设备。当前后端全量单元 1658/1658、集成测试为 178 通过/6 跳过/0 失败、Release 构建 0 警告/0 错误。
+
+> **E2E 复验状态（2026-08-13，当前镜像绿灯）**：首次用当前配额实现运行 433 个 E2E 时为 356 通过、76 失败、1 条架构性跳过。实时后端堆栈确认共同根因不是隔离容量耗尽，而是原生配额 SQL 使用了未加引号的 `tenants.id`，生产 PostgreSQL 的租户主键实际为区分大小写的 `"Id"`；SQLite 关系型测试不区分该大小写，因而此前假绿。修正大小写引用后先得到 432 通过、1 跳过的基线；随后新增“并发创建不得超卖”和“同文件并发导入不得 500”两条真实 PostgreSQL 回归，并按上述双语句锁定方案修复。最终重建当前 backend/frontend/edgegateway 三镜像，以 2 workers 运行 **435 条 E2E，434 通过、1 个架构性条件跳过、0 失败（16.3 分钟）**。`int.MaxValue` 容量仍严格限制在 `SEED_DEMO_DATA=full` 且 `EQUIPAI_ISOLATED_E2E=true` 的临时隔离租户，普通生产租户保持真实套餐上限。
 
 > **备份恢复完整性增量（2026-08-13）**：`backup.sh` 现在为每个成功批次原子生成 `backup-manifest_*.tsv`，记录启用组件的文件名、大小和 SHA-256；`restore.sh --confirm` 在停服、Docker 或 AWS 副作用前验证清单，串批次、篡改和缺少清单的确认恢复均 fail-closed，历史备份仅可显式使用 `--legacy`。`production-scripts-test.sh all`、脚本语法检查和当前提交的真实隔离 Docker 演练均已通过：演练完成 PostgreSQL custom dump、附件卷恢复和恢复后健康检查，RTO 为 2 秒；Redis 因该场景未启用而明确跳过。真实生产等价存储、密钥管理、Redis 恢复和正式 RTO/RPO 演练仍属于部署侧上线前置条件。
 
 > **本轮发布门禁补充（2026-08-13）**：`production-readiness.sh` 已支持按顺序叠加基础 Compose 与生产 overlay，并接入 `deploy-production.sh` 的部署前静态检查、目标版本/同 tag/回滚后的全量运行态检查；目标版本只有在应用探针和全量 readiness 均通过后才写入版本记录，回滚 readiness 失败保持严重失败。`bash tests/scripts/production-scripts-test.sh readiness|deploy|setup|ci|all`、Shell 语法检查和差异检查均通过。真实工作区复核仍以非零退出报告 27 个问题，未修改 `docker/.env`。
 
-> **WAF 规则热更新增量（2026-08-13）**：新增受约束的版本化 JSON loader、不可变快照 provider、目录监听/防抖、非法版本保留旧快照、生产缺失或配置不安全时 fail-closed，以及不记录请求正文/查询参数的结构化审计；内置 SQL 注入、路径遍历、命令注入和 XSS 基线始终启用。规则通过生产 Compose 只读挂载，文件权限为容器非 root 用户可读且组/其他用户不可写。全量后端门禁随后暴露宿主清理阶段的重复释放缺陷，已补充回归测试并使 provider 释放幂等；最终结果为 WAF 聚焦单测 68/68、后端单元 1615/1615、默认集成 183 总数（177 通过、6 跳过、0 失败）、Release 构建 0 warning/0 error、生产脚本契约通过。用包含最终修复的当前后端镜像运行 `SMOKE_RUN_E2E=true`，433 个 E2E 为 432 通过、1 个架构性条件跳过、0 失败。正式生产规则制品的来源审查、审批、最小权限确认和一次有效更新/回滚演练仍未完成，不得将本段隔离环境证据视为生产验收。
-> **边缘网关生命周期增量（2026-08-13）**：修复初始设备配置在 HostedService 注册与启动阶段重复应用的问题；`DeviceManager` 对动态配置整批变更加串行门，避免刷新竞态重复停止/替换采集器；删除设备、配置变更和网关停机均等待采集任务结束并释放 OPC UA/Modbus 协议适配器；MQTT 上传收到停机取消时立即传播且不再写入离线缓冲。新增设备管理器并发/资源释放、采集器幂等释放和上传取消回归测试。当前后端单元 1619/1619、默认集成 183 总数（177 通过、6 跳过、0 失败）、Release 构建 0 warning/0 error、生产脚本测试通过；重建当前边缘网关镜像后执行隔离 `SMOKE_RUN_E2E=false`，镜像启动、迁移、完整演示数据、边缘缓存、健康探针、HTTPS 和 API 反向代理均通过。该验证仍不替代真实 PLC/OPC UA/Modbus 现场联调。
+> **WAF 规则热更新增量（2026-08-13）**：新增受约束的版本化 JSON loader、不可变快照 provider、目录监听/防抖、非法版本保留旧快照、生产缺失或配置不安全时 fail-closed，以及不记录请求正文/查询参数的结构化审计；内置 SQL 注入、路径遍历、命令注入和 XSS 基线始终启用。规则通过生产 Compose 只读挂载，文件权限为容器非 root 用户可读且组/其他用户不可写。全量后端门禁随后暴露宿主清理阶段的重复释放缺陷，已补充回归测试并使 provider 释放幂等；当时的 WAF 聚焦单测 68/68、后端单元 1615/1615、默认集成 183 总数（177 通过、6 跳过、0 失败）、Release 构建 0 warning/0 error、生产脚本契约均通过；当时包含最终 WAF 修复的后端镜像运行 `SMOKE_RUN_E2E=true`，433 个 E2E 为 432 通过、1 个架构性条件跳过、0 失败。正式生产规则制品的来源审查、审批、最小权限确认和一次有效更新/回滚演练仍未完成，不得将本段隔离环境证据视为生产验收。
+> **边缘网关生命周期增量（2026-08-13）**：修复初始设备配置在 HostedService 注册与启动阶段重复应用的问题；`DeviceManager` 对动态配置整批变更加串行门，避免刷新竞态重复停止/替换采集器；删除设备、配置变更和网关停机均等待采集任务结束并释放 OPC UA/Modbus 协议适配器；MQTT 上传收到停机取消时立即传播且不再写入离线缓冲。新增设备管理器并发/资源释放、采集器幂等释放和上传取消回归测试。当前后端单元 1658/1658、默认集成 184 总数（178 通过、6 跳过、0 失败）、Release 构建 0 warning/0 error、生产脚本测试通过；重建当前边缘网关镜像后执行隔离 `SMOKE_RUN_E2E=false`，镜像启动、迁移、完整演示数据、边缘缓存、健康探针、HTTPS 和 API 反向代理均通过。该验证仍不替代真实 PLC/OPC UA 现场联调。
+> **告警邮件可靠投递增量（2026-08-13）**：`alert.email` 已接入 `email_notification_deliveries` 持久化队列，告警站内通知和邮件任务同一次保存；worker 采用数据库租约、重试退避、死信、停用/偏好取消、保留期清理和 Prometheus pending/sent/failure/dead-letter 指标。同一告警事件使用 `EventId` 作为收件人级幂等键并由数据库唯一索引兜底，通知保存失败会继续抛出并交由 RabbitMQ Inbox 重试，不再错误确认；发送前会按 token 原子续租，租约最短 30 秒，SMTP 单次发送上限 10 秒。SMTP 未配置时不领取任务、不消耗重试次数；前端只开放告警邮件，工单/系统邮件明确禁用。普通 SMTP 仍存在“服务器已接受、进程在标记 Sent 前退出”的至少一次投递窗口，无法承诺严格 exactly-once；真实 SMTP 凭据、TLS/发件域名和到达率验收仍属于部署侧上线前置条件。
 
-> 本轮新增验证：根因分析、知识沉淀、工单外部集成和告警通知的普通故障降级不会吞掉宿主停机/处理超时取消，取消会继续传播给消息总线；集成连接测试同样区分普通外部失败和宿主/请求取消，避免停机期间把未完成请求伪装成失败结果；外部工单创建接口返回 null/非 2xx 时不再被路由器误记为成功，会按指数退避重试并在最终失败时写入 Failed 日志；状态变更适配器返回 `false` 时同样进入重试并记录 Failed，状态路由复用最近一次成功创建推送的 ExternalId，EAM 等系统可以定位外部工单；告警钉钉/飞书机器人现在校验 HTTP 与业务响应，非 2xx 或明确业务错误最多重试 3 次，连续失败记录最终错误，避免告警静默丢失；OEE 遥测查询与 LLM 调用区分主动取消和内部超时；设备离线与网关心跳监控采用条件更新，避免状态快照之后刚恢复通信的对象被误标记离线或误发通知；RabbitMQ 启动阶段收到宿主取消时不再记录严重启动故障，正常停机连接关闭记录为信息日志，停机取消不会污染 Inbox 失败指标或失败状态；注册、设备、工单、登录/MFA、密码恢复和用户管理表单校验错误现在通过 `aria-invalid`、`aria-describedby` 和告警语义准确关联输入框，下拉框必填校验也复用中英文业务提示；新增证书生命周期监控，后端只读 Nginx/MQTT 公钥并暴露到期时间、剩余天数和读取状态，Prometheus 增加 30 天 warning、7 天 critical 与监控不可用告警；新增受隔离授权保护的 `SEED_DEMO_DATA=full` 完整演示模式，可幂等生成固定 10 台设备、24 小时遥测、5 条告警和 4 张工单；真实 PostgreSQL smoke 暴露并修复了完整演示事务未包裹 Npgsql 重试执行策略的问题，修复后 runtime smoke 与 433 个 Production E2E 均为 432 通过、1 个架构性条件跳过、0 失败；本轮通知中心收件人按活动用户展开、取消令牌贯穿 SignalR 与后台处理链的回归，以及最新后端 Release 构建、生产脚本和镜像运行时 smoke 均已复验通过。
+> **CI 发布失败关闭增量（2026-08-13）**：main 的 `latest` 发布现在等待后端、前端、Production runtime smoke、备份恢复、K6 和 E2E；版本标签发布等待后端、前端、Production runtime smoke、备份恢复和 K6。backend/frontend/edgegateway 先加载到 runner，6 个 Trivy Action 调用固定为经核实的 v0.36.0 完整提交 SHA，三张镜像全部通过 HIGH/CRITICAL 扫描后才写入 GHCR；K6 与 E2E 的后端/前端等待超时改为明确非零退出。生产脚本全量回归、Shell 语法、CI YAML 解析和差异检查均通过。多个同引用 workflow run 仍可能并发并回写旧 `latest`，其取消策略尚待确认，因此本段不能证明跨运行发布顺序已闭环。
+
+> **独立复审与待决项（2026-08-13）**：针对并发导入、通知持久化异常、事件重放幂等和邮件租约到期窗口完成第二轮独立静态复审，复审结论为没有仍未解决的 Critical/Important 问题；该结论不覆盖随后新增的 CI 发布批次，后者仍待独立复审。Production 未配置 `OTEL_EXPORTER_OTLP_ENDPOINT` 时，当前代码会退回 Console exporter；是改为“生产禁用 exporter 并记录简洁日志”，还是“Production 缺少 OTLP 即拒绝启动”，仍需产品/运维确认，当前候选未擅自改变该行为。同引用 CI 并发策略同样待确认。
+
+> 本轮新增验证：根因分析、知识沉淀、工单外部集成和告警通知的普通故障降级不会吞掉宿主停机/处理超时取消，取消会继续传播给消息总线；集成连接测试同样区分普通外部失败和宿主/请求取消，避免停机期间把未完成请求伪装成失败结果；外部工单创建接口返回 null/非 2xx 时不再被路由器误记为成功，会按指数退避重试并在最终失败时写入 Failed 日志；状态变更适配器返回 `false` 时同样进入重试并记录 Failed，状态路由复用最近一次成功创建推送的 ExternalId，EAM 等系统可以定位外部工单；告警钉钉/飞书机器人现在校验 HTTP 与业务响应，非 2xx 或明确业务错误最多重试 3 次，连续失败记录最终错误，避免告警静默丢失；OEE 遥测查询与 LLM 调用区分主动取消和内部超时；设备离线与网关心跳监控采用条件更新，避免状态快照之后刚恢复通信的对象被误标记离线或误发通知；RabbitMQ 启动阶段收到宿主取消时不再记录严重启动故障，正常停机连接关闭记录为信息日志，停机取消不会污染 Inbox 失败指标或失败状态；注册、设备、工单、登录/MFA、密码恢复和用户管理表单校验错误现在通过 `aria-invalid`、`aria-describedby` 和告警语义准确关联输入框，下拉框必填校验也复用中英文业务提示；新增证书生命周期监控，后端只读 Nginx/MQTT 公钥并暴露到期时间、剩余天数和读取状态，Prometheus 增加 30 天 warning、7 天 critical 与监控不可用告警；新增受隔离授权保护的 `SEED_DEMO_DATA=full` 完整演示模式，可幂等生成固定 10 台设备、24 小时遥测、5 条告警和 4 张工单；当前真实 PostgreSQL Production runtime smoke 与 435 条完整 E2E 已在修复后的当前镜像复验为 434 通过、1 个架构性条件跳过、0 失败；本轮通知中心收件人按活动用户展开、取消令牌贯穿 SignalR 与后台处理链的回归，以及最新后端 Release 构建、生产脚本和镜像运行时 smoke 均已复验通过。
 
 ## 一、项目规模
 
@@ -21,9 +30,9 @@
 | 后端代码行（Core+Application+Infrastructure+WebAPI） | 51,534 行 |
 | 后端 API 端点 | 135 个（25 个 Controller） |
 | 前端页面 | 30 个 |
-| 单元测试 | 1619/1619 个（后端）+ 489/489 个（前端） |
-| 集成测试 | 183 个用例（34 个文件） |
-| E2E 测试 | 433 个用例（Playwright，历史隔离 Production 基线） |
+| 单元测试 | 1658/1658 个（后端）+ 490/490 个（前端） |
+| 集成测试 | 184 个用例（35 个文件） |
+| E2E 测试 | 435 个用例（Playwright；当前隔离 Production 镜像 434 通过、1 跳过、0 失败） |
 | 压力测试 | 13 个 JS/TS 文件（11 个 K6 场景 + 2 个共享 config） |
 
 ## 二、功能完备性核验（对照行业产品）
@@ -43,7 +52,7 @@
 | **知识库** | 规则双表（knowledge_rules / pending_rules）+ 版本管理 + 冲突检测 | 单测 |
 | **审计日志全覆盖** ✨ | 全局 AuditActionFilter 自动拦截所有增删改 + 语义化标注 | E2E（Create/Update/Login 全记录） |
 | **设备健康度 + OEE** ✨ | 加权评分（告警40%+状态30%+质量30%）+ 可用率×性能×质量 | 单测 + API |
-| **告警多渠道通知** ✨ | 站内通知按运维角色分发 + 钉钉/飞书机器人主动推送 | E2E（按角色分发 + mock webhook 捕获 2 个推送请求 Status=OK） |
+| **告警多渠道通知** ✨ | 站内通知按运维角色分发 + 钉钉/飞书机器人主动推送 + 可重试告警邮件队列 | 单测/集成测试（邮件队列租约、重试、死信、事务一致性）+ E2E（机器人 mock） |
 | **数据导出** ✨ | 告警/审计日志 CSV（UTF-8 BOM Excel 兼容） | E2E（文件内容验证） |
 | **密码重置** ✨ | 忘记密码→邮件重置链接→重置密码，防邮箱枚举，token 一次性 | E2E（全流程验证） |
 | **PWA 离线** ✨ | Service Worker + offline.html fallback + manifest 图标 | 构建产出 + preview 验证 |
@@ -81,13 +90,13 @@
 |------|------|------|
 | 容器化 | ✅ | docker-compose.yml（12 个长期运行服务 + Jaeger 卷初始化服务）+ 后端/前端/边缘网关多阶段 Dockerfile |
 | 反向代理 | ✅ | Nginx（TLS 终止、静态资源、API/WebSocket 代理） |
-| 配置管理 | ✅（代码）/ ⚠️（当前环境） | `.env.example` 覆盖 PG/Redis/MQTT/JWT/MFA/PII/AutoMapper/LLM/SMTP/VAPID/TLS/监控；`compose-production.sh` 已接入启动前门禁；当前 `.env` 尚有 27 项未通过门禁 |
+| 配置管理 | ✅（代码）/ ⚠️（当前环境） | `.env.example` 覆盖 PG/Redis/MQTT/JWT/MFA/PII/AutoMapper/LLM/SMTP/告警邮件队列/VAPID/TLS/监控；`compose-production.sh` 已接入启动前门禁；当前 `.env` 尚有 27 项未通过门禁 |
 | 数据持久化 | ✅ | TimescaleDB 7天压缩 + 90天保留 + 连续聚合；工单附件使用 `attachments_data` 命名卷并纳入备份 |
 | 迁移自动化 | ✅ | 启动自动 MigrateAsync + 种子初始化；迁移元数据可发现性有单测，MFA 迁移已在真实 PostgreSQL 验证 |
 | 健康检查 | ✅ | 三级探针（startup/liveness/ready），含 PG+Redis+MQTT+LLM |
 | 日志聚合 | ✅ | Serilog + Seq 结构化日志 |
-| 指标监控 | ✅ | Prometheus /metrics + Grafana 仪表盘 + 29 个后端自定义指标；证书到期时间/剩余天数/读取状态已接入告警；Jaeger trace 默认持久化到 Badger 卷 |
-| CI/CD | ✅ | GitHub Actions（测试、NuGet/npm/Trivy 阻断扫描、backend/frontend/edgegateway 三镜像构建、Production 容器 runtime smoke、E2E、部署前置门禁、原子版本记录和失败回滚） |
+| 指标监控 | ✅ | Prometheus /metrics + Grafana 仪表盘 + 33 个后端自定义指标（含告警邮件 pending/sent/failure/dead-letter）；证书到期时间/剩余天数/读取状态已接入告警；Jaeger trace 默认持久化到 Badger 卷 |
+| CI/CD | ✅（单次运行）/ ⚠️（并发策略待确认） | GitHub Actions（测试、NuGet/npm/固定 SHA Trivy 阻断扫描、三镜像全部扫描后发布、Production runtime smoke、E2E、K6、部署前置门禁、原子版本记录和失败回滚）；同引用 run 的取消策略尚未落地 |
 
 ## 四、安全设计核验
 
@@ -105,7 +114,7 @@
 | 用户联系方式 PII 加密 | ✅（AES-256-GCM 密文 + HMAC 盲索引；生产密钥和历史迁移仍需验收） |
 | 密码重置防邮箱枚举 | ✅ |
 | 审计日志全操作可追溯 | ✅ |
-| 依赖漏洞扫描失败关闭 | ✅（NuGet/npm/Trivy；npm 漏洞源不可用时阻断） |
+| 依赖漏洞扫描失败关闭 | ✅（NuGet/npm/固定 SHA Trivy；npm 漏洞源不可用时阻断，三张镜像全部扫描成功后才发布） |
 | AutoMapper 15+ 许可证门禁 | ✅（代码与部署脚本）；⚠️ 当前生产密钥待配置 |
 
 ## 五、历史提交记录（功能基线）
@@ -143,20 +152,20 @@
 |------|------|
 | 后端编译 | ✅ 0 警告（TreatWarningsAsErrors=true） |
 | 后端代码质量 | ✅ 0 stub/TODO/NotImplemented |
-| 后端单元测试 | ✅ 全量 1619/1619 通过；边缘网关生命周期聚焦 18/18 通过 |
-| 后端集成测试 | ✅ 默认 183 总数：177 通过、6 条件跳过、0 失败；设备对比聚焦 12/12 通过 |
+| 后端单元测试 | ✅ 全量 1658/1658 通过；边缘网关生命周期聚焦 18/18 通过；告警通知/邮件聚焦 31/31 通过 |
+| 后端集成测试 | ✅ 默认 184 总数：178 通过、6 条件跳过、0 失败；邮件告警事务聚焦通过 |
 | 前端代码质量 | ✅ 0 TODO/FIXME/console.log |
 | 前端类型检查 | ✅ 0 错误（TypeScript strict） |
-| 前端单元测试 | ✅ 85 个测试文件、489/489 通过 |
-| E2E 测试 | ✅ 当前提交 Production 三镜像 433 个场景：432 通过、1 个架构性条件跳过、0 失败；main/tag 已接入 Production 全量门禁 |
-| i18n 完整性 | ✅ 1105 个键在中英文资源中完全对齐 |
+| 前端单元测试 | ✅ 85 个测试文件、490/490 通过 |
+| E2E 测试 | ✅ 当前 Production 三镜像完整 435 项验收为 434 通过、1 个架构性条件跳过、0 失败（2 workers，16.3 分钟） |
+| i18n 完整性 | ✅ 1104 个键在中英文资源中完全对齐 |
 | 生产构建 | ✅ PWA SW 产出 + precache 133 entries + 边缘网关镜像可复现构建；已修复 Vite 8 下 PWA `inlineDynamicImports` 弃用 warning |
 | 生产配置 | ✅ appsettings.Production.json |
 | WAF 规则热更新 | ✅ WAF loader/provider、请求匹配、配置 fail-closed、结构化脱敏审计、只读挂载和规则契约均已验证；正式制品审批与更新/回滚演练仍为部署侧条件 |
 | 依赖审计 | ✅ NuGet 全解决方案无已知漏洞；npm 全量审计 0 漏洞；审计服务失败会阻断 |
-| 生产脚本/启动门禁 | ✅ 三镜像发布/滚动回滚/蓝绿切换、环境校验、独立凭据与 TLS/MQTT 证书 fail-closed 检查、证书生命周期指标/告警契约、应用种子账户启动校验、边缘网关租户/持久化路径校验、WAF 规则只读挂载/外部规则强制加载、Production runtime smoke 与默认全量 E2E 门禁、带批次 SHA-256 清单的备份恢复和 CI 契约行为测试通过；本轮新增有序 Compose overlay、部署前静态 readiness、目标版本/同 tag/回滚后全量运行态 readiness 及失败保留旧版本记录的行为测试；本机隔离 smoke 已用当前提交本地构建的三镜像和固定 digest 基础层通过，固定 digest 的 CI runner 仍需按发布流水线验证 |
+| 生产脚本/启动门禁 | ⚠️ 三镜像发布/滚动回滚/蓝绿切换、环境校验、独立凭据与 TLS/MQTT 证书 fail-closed 检查、证书生命周期指标/告警契约、应用种子账户启动校验、边缘网关租户/持久化路径校验、WAF 规则只读挂载/外部规则强制加载、Production runtime smoke、带批次 SHA-256 清单的备份恢复和 CI 契约行为测试通过；当前三镜像默认全量 E2E 为 434 通过、1 个架构性条件跳过、0 失败；本轮新增有序 Compose overlay、部署前静态 readiness、目标版本/同 tag/回滚后全量运行态 readiness 及失败保留旧版本记录的行为测试；本机隔离 smoke 已用当前工作区本地构建的三镜像和固定 digest 基础层通过，固定 digest 的 CI runner 仍需按发布流水线验证 |
 
-> 2026-08-13 Task 5 分层验证摘要：WAF 聚焦单测 68/68；边缘网关生命周期聚焦 18/18；后端全量单元 1619/1619；默认后端集成 183 总数（177 通过、6 跳过、0 失败）；`dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false` 0 warning/0 error；`bash -n docker/backup.sh docker/restore.sh tests/scripts/production-runtime-smoke.sh tests/scripts/production-scripts-test.sh` 和 `bash tests/scripts/production-scripts-test.sh all` 通过；重建当前边缘网关镜像后执行 `SMOKE_RUN_E2E=false bash tests/scripts/production-runtime-smoke.sh` 通过，镜像启动、迁移、完整演示数据、边缘网关缓存、健康探针、HTTPS/API 反向代理均正常。本轮未修改 `docker/.env`。
+> 2026-08-13 Task 5 分层验证摘要：WAF 聚焦单测 70/70；边缘网关生命周期聚焦 18/18；告警通知/邮件聚焦 31/31；后端全量单元 1658/1658；默认后端集成 184 总数（178 通过、6 跳过、0 失败）；`dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false` 0 warning/0 error；`bash -n docker/backup.sh docker/restore.sh tests/scripts/production-runtime-smoke.sh tests/scripts/production-scripts-test.sh` 和 `bash tests/scripts/production-scripts-test.sh all` 通过；前端类型检查、Lint、i18n、490 个 Vitest 用例和生产构建全部通过。随后重建当前三镜像并完成真实 PostgreSQL Production runtime smoke：435 个 E2E 为 434 通过、1 个架构性条件跳过、0 失败。本轮未修改 `docker/.env`。
 
 > 本轮安全边界复核提交：`4210c31` 将推送订阅注册/注销绑定当前用户和租户，`cf81c57` 将通知偏好读写绑定当前用户和租户，`c2acbd1` 将知识规则 JSON/CSV 导出绑定显式租户参数；各项均有负向回归测试和独立审查证据。
 
@@ -188,4 +197,4 @@
 
 **EquipSense 代码库已达到生产候选版本的质量基线，但当前部署环境尚未达到可上线状态。** 核心闭环、租户隔离、可靠消息、迁移、工单完整性、供应链 fail-closed、部署回滚和可观测性已有自动化证据；真实 PostgreSQL、RabbitMQ 和关键浏览器流程也已验证。
 
-上线前仍必须清零当前部署检查的 27 个门禁问题（其中 `docker/.env` 配置问题 24 个、TLS/MQTT 运行时证书问题 3 个），注入 PII/TOTP 密钥、AutoMapper 许可证与全部生产凭据，替换正式 TLS/MQTT 证书，并完成隔离恢复演练、容量基线以及钉钉/飞书与 OPC UA/Modbus 的现场联调。Production 镜像全量 E2E 已在隔离环境通过并接入 main/tag 门禁，但不替代真实凭据、正式证书和现场环境验收。以上属于明确的发布条件，不应以“代码已实现”替代真实环境验收。
+上线前仍必须清零当前部署检查的 27 个门禁问题（其中 `docker/.env` 配置问题 24 个、TLS/MQTT 运行时证书问题 3 个），注入 PII/TOTP 密钥、AutoMapper 许可证与全部生产凭据，替换正式 TLS/MQTT 证书，并完成隔离恢复演练、容量基线以及钉钉/飞书与 OPC UA/Modbus 的现场联调；同时需要确认 Production 空 OTLP 端点和同引用 CI 并发的最终策略。当前 Production 三镜像已在隔离环境达到 434 通过、1 个架构性条件跳过、0 失败，但这不能替代真实凭据、正式证书、真实外部服务和现场设备验收。以上属于明确的发布条件，不应以“代码已实现”替代真实环境验收。

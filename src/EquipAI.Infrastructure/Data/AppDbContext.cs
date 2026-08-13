@@ -192,6 +192,11 @@ public class AppDbContext : DbContext
     public DbSet<Core.Entities.Notification> Notifications => Set<Core.Entities.Notification>();
 
     /// <summary>
+    /// 告警邮件投递任务表。
+    /// </summary>
+    public DbSet<Core.Entities.EmailNotificationDelivery> EmailNotificationDeliveries => Set<Core.Entities.EmailNotificationDelivery>();
+
+    /// <summary>
     /// 工单附件表
     /// </summary>
     public DbSet<Core.Entities.WorkOrderAttachment> WorkOrderAttachments => Set<Core.Entities.WorkOrderAttachment>();

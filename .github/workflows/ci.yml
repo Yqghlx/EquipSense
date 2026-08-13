@@ -253,7 +253,8 @@ jobs:
     name: Docker 构建与推送
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [backend, frontend]
+    # latest 属于可消费发布标签，必须等待本次 main 推送的全部质量门禁成功。
+    needs: [backend, frontend, production-smoke, backup-restore-rehearsal, load-test, e2e]
     permissions:
       contents: read
       packages: write
@@ -304,35 +305,36 @@ jobs:
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 构建并推送后端镜像
+      # 先加载到 runner 本地供 Trivy 扫描；任何镜像未通过前都不能写入 GHCR。
+      - name: 构建并加载待扫描后端镜像
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.backend
-          push: true
+          load: true
           tags: ${{ steps.meta-backend.outputs.tags }}
 
-      - name: 构建并推送前端镜像
+      - name: 构建并加载待扫描前端镜像
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.frontend
-          push: true
+          load: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
 
-      - name: 构建并推送边缘网关镜像
+      - name: 构建并加载待扫描边缘网关镜像
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.edgegateway
-          push: true
+          load: true
           tags: ${{ steps.meta-edgegateway.outputs.tags }}
 
       # ========================================================
       # 安全扫描：Trivy 扫描镜像已知漏洞（CVE）— HIGH/CRITICAL 阻断
       # ========================================================
       - name: Trivy 扫描后端镜像
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:sha-${{ steps.sha.outputs.short }}
           format: table
@@ -341,7 +343,7 @@ jobs:
           severity: HIGH,CRITICAL
 
       - name: Trivy 扫描前端镜像
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:sha-${{ steps.sha.outputs.short }}
           format: table
@@ -350,13 +352,38 @@ jobs:
           severity: HIGH,CRITICAL
 
       - name: Trivy 扫描边缘网关镜像
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway:sha-${{ steps.sha.outputs.short }}
           format: table
           exit-code: '1'
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+      # 三张本地镜像全部通过后才发布；Buildx 复用上述构建缓存，不重复执行镜像层。
+      - name: 发布后端镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+
+      - name: 发布前端镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+
+      - name: 发布边缘网关镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.edgegateway
+          push: true
+          tags: ${{ steps.meta-edgegateway.outputs.tags }}
 
   # ============================================================================
   # Production 容器运行时 smoke（PR、main 和版本 tag 均执行）
@@ -421,7 +448,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     # 即使 tag 推送绕过了 main 分支，也必须先通过完整后端/前端/恢复质量门禁。
-    needs: [backend, frontend, production-smoke, backup-restore-rehearsal]
+    needs: [backend, frontend, production-smoke, backup-restore-rehearsal, load-test]
     permissions:
       contents: read
       packages: write
@@ -472,33 +499,34 @@ jobs:
       - name: 设置 Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: 构建并推送后端镜像
+      # 版本标签同样先在本地扫描，避免失败版本或 latest 提前进入 GHCR。
+      - name: 构建并加载待扫描后端镜像
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.backend
-          push: true
+          load: true
           tags: ${{ steps.meta-backend.outputs.tags }}
 
-      - name: 构建并推送前端镜像
+      - name: 构建并加载待扫描前端镜像
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.frontend
-          push: true
+          load: true
           tags: ${{ steps.meta-frontend.outputs.tags }}
 
-      - name: 构建并推送边缘网关镜像
+      - name: 构建并加载待扫描边缘网关镜像
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile.edgegateway
-          push: true
+          load: true
           tags: ${{ steps.meta-edgegateway.outputs.tags }}
 
       # 发布版本也跑 Trivy 扫描，避免发布已知漏洞镜像
       - name: Trivy 扫描后端镜像
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend:${{ steps.meta-backend.outputs.version }}
           format: table
@@ -507,7 +535,7 @@ jobs:
           severity: HIGH,CRITICAL
 
       - name: Trivy 扫描前端镜像
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend:${{ steps.meta-frontend.outputs.version }}
           format: table
@@ -516,13 +544,38 @@ jobs:
           severity: HIGH,CRITICAL
 
       - name: Trivy 扫描边缘网关镜像
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway:${{ steps.meta-edgegateway.outputs.version }}
           format: table
           exit-code: '1'
           ignore-unfixed: true
           severity: HIGH,CRITICAL
+
+      # 所有版本镜像通过扫描后才写入 semver、major/minor 和 latest 标签。
+      - name: 发布后端版本镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.backend
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+
+      - name: 发布前端版本镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+
+      - name: 发布边缘网关版本镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.edgegateway
+          push: true
+          tags: ${{ steps.meta-edgegateway.outputs.tags }}
 
       # 生成 GitHub Release（自动从 tag 名提取版本号，CHANGELOG.md 作为正文）
       - name: 创建 GitHub Release
@@ -596,7 +649,8 @@ jobs:
   load-test:
     name: K6 性能回归
     runs-on: ubuntu-latest
-    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'pull_request'
+    # tag 可能不来自已验证的 main；版本发布也必须重新执行性能回归。
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v')
     needs: [backend]  # 仅依赖后端测试（不需要前端构建）
 
     services:
@@ -657,14 +711,7 @@ jobs:
           DISABLE_RATE_LIMITING: "true"
         run: |
           SEED_ADMIN_PASSWORD="$LOADTEST_PASSWORD" dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
-          for i in $(seq 1 45); do
-            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
-              echo "后端服务已启动"
-              break
-            fi
-            echo "等待后端启动... ($i/45)"
-            sleep 2
-          done
+          bash scripts/wait-for-http.sh "http://localhost:8080/health" 45 2 "后端服务"
 
       - name: 检查压测工具凭据卫生
         run: |
@@ -785,29 +832,15 @@ jobs:
           SEED_TENANT2_ACCOUNT: "true"
         run: |
           dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
-          # 等待后端健康检查通过（最多 90 秒）
-          for i in $(seq 1 45); do
-            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
-              echo "后端服务已启动"
-              break
-            fi
-            echo "等待后端启动... ($i/45)"
-            sleep 2
-          done
+          # 等待后端健康检查通过（最多约 90 秒），超时必须阻断后续 E2E。
+          bash scripts/wait-for-http.sh "http://localhost:8080/health" 45 2 "后端服务"
 
       - name: 启动前端开发服务器
         working-directory: frontend
         run: |
           npx vite --host 0.0.0.0 --port 5173 &
-          # 等待前端服务就绪（最多 30 秒）
-          for i in $(seq 1 15); do
-            if curl -sf http://localhost:5173 > /dev/null 2>&1; then
-              echo "前端服务已启动"
-              break
-            fi
-            echo "等待前端启动... ($i/15)"
-            sleep 2
-          done
+          # 等待前端服务就绪（最多约 30 秒），超时必须阻断后续 E2E。
+          bash ../scripts/wait-for-http.sh "http://localhost:5173" 15 2 "前端服务"
 
       - name: 运行 E2E 测试
         working-directory: frontend

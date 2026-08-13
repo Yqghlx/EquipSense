@@ -211,6 +211,7 @@ curl http://localhost:8080/api/v1/system/info
 | `ALERT_WEBHOOK_URL` | Alertmanager 外部告警 Webhook；未配置时降级为仅在监控面板保留 | - | 否 |
 | `JAEGER_SPAN_STORAGE_TYPE` | Jaeger trace 存储类型；单机生产默认 `badger` | `badger` | 否 |
 | `JAEGER_BADGER_EPHEMERAL` | Badger 是否临时存储；生产必须关闭 | `false` | 否 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 后端 OTLP gRPC 端点；当前留空会退回 Console exporter | 空 | 待生产策略确认 |
 | `MQTT_PORT` | MQTT 对外端口 | `8883` | 否 |
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
@@ -231,6 +232,10 @@ curl http://localhost:8080/api/v1/system/info
 | `PII_ENCRYPTION_KEY` | Base64 编码的 32 字节 AES-256-GCM 用户邮箱/手机号密钥，必须与 TOTP 密钥独立并由外部密钥管理系统保存 | - | 生产环境必填 |
 | `AUTOMAPPER_LICENSE_KEY` | AutoMapper 15+ 供应商签发的许可证密钥，通过密钥管理系统注入 | - | 生产环境必填 |
 | `LLM_API_KEY` | LLM API 密钥 | 空 | 否 |
+| `EMAIL_DELIVERY_ENABLED` | 告警邮件持久化投递 worker 开关；关闭后任务保留在队列中 | `true` | 否 |
+| `EMAIL_DELIVERY_POLL_INTERVAL_SECONDS` / `EMAIL_DELIVERY_BATCH_SIZE` | 邮件 worker 轮询间隔和单轮领取上限 | `5` / `50` | 否 |
+| `EMAIL_DELIVERY_LEASE_SECONDS` / `EMAIL_DELIVERY_MAX_ATTEMPTS` | 邮件任务租约时长（不得小于 30 秒）和最大尝试次数 | `60` / `5` | 否 |
+| `EMAIL_DELIVERY_MAX_BACKOFF_SECONDS` / `EMAIL_DELIVERY_RETENTION_DAYS` | 失败退避上限和已结束任务保留天数 | `300` / `90` | 否 |
 | `LLM_MODEL` | LLM 模型 | `qwen-plus` | 否 |
 | `LLM_ENDPOINT` | LLM 端点 | DashScope | 否 |
 | `VAPID__PUBLICKEY` | Web Push 公钥 | - | 是 |
@@ -303,7 +308,7 @@ digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和�
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
 backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
 健康探针、观察者账户登录、受保护 API、HTTPS 和 Nginx API 代理。PR 执行快速门禁；main 推送和
-版本 tag 还会在同一组 Production 镜像中执行默认 433 个业务 E2E；当前仅保留 1 个有明确架构原因的条件跳过点，本次隔离 Production smoke 实际为 432 通过、1 跳过、0 失败。Smoke Compose
+版本 tag 还会在同一组 Production 镜像中执行默认 435 个业务 E2E。2026-08-13 使用当前工作区构建的三镜像、真实 PostgreSQL 和 CI 并发度完成隔离 Production smoke，结果为 434 通过、1 个架构性条件跳过、0 失败（16.3 分钟）。Smoke Compose
 会清除固定容器名、移除基础设施宿主端口绑定，并为应用探针分配独立端口，可与本机已有基础设施
 或并发 smoke 任务并行运行。
 Smoke Compose 仅在临时隔离数据库中显式设置 `SEED_DEMO_DATA=full`，用于提供固定的 10 台演示设备、遥测、告警、工单以及跨租户验收所需的测试租户；该开关不会进入生产 Compose。
@@ -335,7 +340,7 @@ CI 会执行 `frontend/scripts/check-production-audit.mjs`，对生产依赖中�
 
 ## 功能配置（按需启用）
 
-### SMTP 邮件（密码重置必需）
+### SMTP 邮件（密码重置和告警邮件必需）
 
 密码重置流程依赖邮件发送重置链接。在 `docker/.env` 配置 SMTP 后即可启用：
 
@@ -349,7 +354,13 @@ SMTP_PASSWORD=your_password
 SMTP_ENABLE_SSL=true
 ```
 
-> 未配置 SMTP 时，密码重置请求仍会记录审计日志，但不会发送邮件。
+> 未配置 SMTP 时，密码重置请求仍会记录审计日志，但不会发送邮件；已开启告警邮件的任务会持久化为 Pending，SMTP 恢复后由 worker 自动继续投递，不会消耗重试次数。
+
+告警邮件投递使用 `email_notification_deliveries` 持久化队列，支持数据库租约、失败退避、死信和 90 天清理。相同告警 `EventId` 按租户、用户唯一，事件重放不会重复创建逻辑邮件任务；通知持久化失败会交由 RabbitMQ Inbox 重试。worker 在调用 SMTP 前按 token 原子续租，租约配置不得低于 30 秒，单次 SMTP 发送超时为 10 秒。前端只允许开启告警邮件；工单邮件和系统邮件目前保持关闭。Prometheus 指标包括 `equipai_email_delivery_pending`、`equipai_email_delivery_sent_total`、`equipai_email_delivery_failures_total` 和 `equipai_email_delivery_dead_letters_total`。
+
+SMTP 是至少一次投递：如果邮件服务器已经接受消息，而进程在把任务标记为 Sent 前退出，重试可能产生重复邮件。需要严格去重时，应使用支持提供方幂等键/投递回执的邮件 API；当前原生 SMTP 实现不宣称 exactly-once。上线前必须用真实账号验证 TLS、发件域名、退信/死信告警和抽样到达率。
+
+> 可观测性策略待决：当前 Production 未设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 时会启用 Console exporter。正式上线前需明确采用“生产空端点时禁用 exporter 并记录简洁日志”或“Production 缺少 OTLP 端点即拒绝启动”；在决策落地前，部署侧应显式配置 `http://jaeger:4317`，避免高频 trace/metric 写入容器日志。
 
 ### 钉钉/飞书告警机器人推送
 

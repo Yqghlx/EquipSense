@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
 using FluentAssertions;
+using EquipAI.Core.Exceptions;
 using EquipAI.Infrastructure.Middleware;
 
 namespace EquipAI.Tests.Unit.Middleware;
@@ -159,6 +160,26 @@ public class ExceptionHandlingMiddlewareTests
         // Assert — 验证响应体中的 code 和 message
         response.GetProperty("code").GetInt32().Should().Be((int)HttpStatusCode.Conflict);
         response.GetProperty("message").GetString().Should().Be("操作冲突");
+    }
+
+    #endregion
+
+    #region ResourceQuotaExceededException → 403
+
+    [Fact]
+    public async Task ResourceQuotaExceededException_应返回403并保留用户提示()
+    {
+        // 配额由服务层原子预留时可能直接抛出，HTTP 层应与预检查中间件保持同一语义。
+        var response = await ExecuteMiddlewareAsync(mockNext =>
+        {
+            mockNext
+                .Setup(next => next(It.IsAny<HttpContext>()))
+                .ThrowsAsync(new ResourceQuotaExceededException("device"));
+        });
+
+        _context.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        response.GetProperty("code").GetInt32().Should().Be(StatusCodes.Status403Forbidden);
+        response.GetProperty("message").GetString().Should().Contain("设备");
     }
 
     #endregion

@@ -115,6 +115,40 @@ public class DeviceConfigControllerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task QuickRegister_达到设备配额_应拒绝且不写入设备()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var tenant = await db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantA);
+        tenant.MaxDevices = 1;
+        tenant.CurrentDeviceCount = 0;
+        db.Devices.Add(new Device
+        {
+            TenantId = _tenantA,
+            DeviceCode = "ALREADY-FULL-001",
+            Name = "已占用配额的设备",
+            Type = "电机"
+        });
+        await db.SaveChangesAsync();
+
+        var service = new DeviceConfigService(db, tenantContext);
+        var act = () => service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            DeviceCode = "OVER-LIMIT-001",
+            Name = "超额设备",
+            DeviceType = "电机"
+        });
+
+        var exception = await FluentActions.Awaiting(act).Should().ThrowAsync<DeviceConfigException>();
+        exception.Which.Code.Should().Be("QUOTA_EXCEEDED");
+        (await db.UnfilteredSet<Device>().CountAsync(d => d.DeviceCode == "OVER-LIMIT-001"))
+            .Should().Be(0);
+        (await db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantA))
+            .CurrentDeviceCount.Should().Be(tenant.CurrentDeviceCount);
+    }
+
+    [Fact]
     public async Task QuickRegister_使用系统模板并应用默认规则_应保存模板关联和完整规则语义()
     {
         using var scope = _sp.CreateScope();

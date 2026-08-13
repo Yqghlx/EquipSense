@@ -1,7 +1,9 @@
 using EquipAI.Core.Constants;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Exceptions;
 using EquipAI.Core.Interfaces;
+using EquipAI.Application.Services;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -99,6 +101,7 @@ public class DeviceConfigService
                 catch
                 {
                     await transaction.RollbackAsync(ct);
+                    DetachPendingChanges();
                     throw;
                 }
             });
@@ -200,12 +203,16 @@ public class DeviceConfigService
         // 避免两个并发注册请求读到同一个旧值后发生丢失更新；事务回滚时该更新也会回滚。
         if (_dbContext.Database.IsRelational())
         {
-            var affected = await _dbContext.UnfilteredSet<Tenant>()
-                .Where(t => t.Id == tenantId)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(t => t.CurrentDeviceCount, t => t.CurrentDeviceCount + 1), ct);
+            var affected = await TenantQuotaSql.TryReserveDeviceSlotsAsync(
+                _dbContext, tenantId, 1, ct);
             if (affected == 0)
-                throw new DeviceConfigException("TENANT_NOT_FOUND", "当前租户不存在，无法注册设备。");
+            {
+                var tenantExists = await _dbContext.UnfilteredSet<Tenant>()
+                    .AnyAsync(t => t.Id == tenantId, ct);
+                throw tenantExists
+                    ? new DeviceConfigException("QUOTA_EXCEEDED", "已超出设备配额，请升级计划。")
+                    : new DeviceConfigException("TENANT_NOT_FOUND", "当前租户不存在，无法注册设备。");
+            }
         }
         else
         {
@@ -213,6 +220,9 @@ public class DeviceConfigService
                 .SingleOrDefaultAsync(t => t.Id == tenantId, ct);
             if (tenant is null)
                 throw new DeviceConfigException("TENANT_NOT_FOUND", "当前租户不存在，无法注册设备。");
+
+            if (tenant.MaxDevices > 0 && tenant.CurrentDeviceCount >= tenant.MaxDevices)
+                throw new DeviceConfigException("QUOTA_EXCEEDED", "已超出设备配额，请升级计划。");
 
             tenant.CurrentDeviceCount++;
         }
@@ -309,29 +319,7 @@ public class DeviceConfigService
     /// 判断数据库异常是否由设备租户内唯一编码约束引起。
     /// </summary>
     internal static bool IsDeviceCodeUniqueViolation(DbUpdateException exception)
-    {
-        for (var current = (Exception?)exception; current is not null; current = current.InnerException)
-        {
-            if (current is PostgresException postgres
-                && postgres.SqlState == "23505"
-                && (string.IsNullOrWhiteSpace(postgres.ConstraintName)
-                    || postgres.ConstraintName.Contains("devices", StringComparison.OrdinalIgnoreCase)
-                    || postgres.ConstraintName.Contains("device_code", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            // SQLite 集成测试无法提供 PostgreSQL 的 SQLSTATE，使用其稳定的唯一约束文本补齐回归覆盖。
-            if (current.Message.Contains("IX_devices_tenant_id_device_code", StringComparison.OrdinalIgnoreCase)
-                || (current.Message.Contains("devices.tenant_id", StringComparison.OrdinalIgnoreCase)
-                    && current.Message.Contains("devices.device_code", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => DatabaseConstraintDetector.IsDeviceCodeUniqueViolation(exception);
 
     /// <summary>
     /// 唯一约束失败回滚后清理当前上下文中尚未落库的变更。

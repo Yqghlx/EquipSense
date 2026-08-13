@@ -66,6 +66,12 @@ public class DataSeeder
         var seedDemoData = DemoDataSeedingPolicy.ShouldSeedDemoData(
             _hostEnvironment.IsProduction(),
             configuredDemoData);
+        var isolatedFullDemo = seedDemoData
+            && DemoDataSeedingPolicy.IsFullDemoData(configuredDemoData)
+            && string.Equals(
+                Environment.GetEnvironmentVariable("EQUIPAI_ISOLATED_E2E")?.Trim(),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
 
         if (!seedDemoData)
         {
@@ -74,7 +80,7 @@ public class DataSeeder
                 DemoDataSeedingPolicy.EnvironmentVariableName);
         }
 
-        await SeedTenantsAsync(seedDemoData);
+        await SeedTenantsAsync(seedDemoData, isolatedFullDemo);
         await SeedAdminUserAsync(seedDemoData);
         await SeedDeviceTypeTemplatesAsync();
         await SeedSampleDeviceAndAlertRulesAsync(seedDemoData);
@@ -116,8 +122,13 @@ public class DataSeeder
     /// 系统租户（全零 GUID）用于存放行业预置模板和共享资源
     /// 默认租户（1111... GUID）用于开发和演示
     /// </summary>
-    private async Task SeedTenantsAsync(bool seedDemoData)
+    private async Task SeedTenantsAsync(bool seedDemoData, bool isolatedFullDemo)
     {
+        // 完整 E2E 会在同一个隔离租户中并行创建大量临时资源；该容量只在临时隔离验收中启用，
+        // 避免测试用例因为真实套餐配额提前结束，同时不改变普通开发和生产租户的套餐边界。
+        var seededMaxDevices = isolatedFullDemo ? int.MaxValue : 50;
+        var seededMaxUsers = isolatedFullDemo ? int.MaxValue : 20;
+
         // 系统租户
         var systemTenantExists = await _dbContext.Tenants
             .IgnoreQueryFilters()
@@ -162,8 +173,8 @@ public class DataSeeder
                 Slug = "default",
                 Plan = TenantPlan.Trial,
                 IsolationMode = TenantIsolationMode.Shared,
-                MaxDevices = 50,
-                MaxUsers = 20,
+                MaxDevices = seededMaxDevices,
+                MaxUsers = seededMaxUsers,
                 DataRetentionDays = 90,
                 IsActive = true,
                 Status = TenantStatus.Active,
@@ -175,6 +186,14 @@ public class DataSeeder
 
             _dbContext.Tenants.Add(defaultTenant);
             _logger.LogInformation("已创建默认租户（ID: {TenantId}）", defaultTenantId);
+        }
+        else if (isolatedFullDemo)
+        {
+            // 隔离 smoke 可能复用已初始化的测试数据库；幂等修正容量，保证重跑不会回到 50/20。
+            var defaultTenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                .FirstAsync(t => t.Id == defaultTenantId);
+            defaultTenant.MaxDevices = seededMaxDevices;
+            defaultTenant.MaxUsers = seededMaxUsers;
         }
 
         // 第二租户（用于 E2E 跨租户隔离测试）只允许在演示/隔离验收环境创建。
@@ -198,8 +217,8 @@ public class DataSeeder
                 Slug = "tenant-b",
                 Plan = TenantPlan.Trial,
                 IsolationMode = TenantIsolationMode.Shared,
-                MaxDevices = 50,
-                MaxUsers = 20,
+                MaxDevices = seededMaxDevices,
+                MaxUsers = seededMaxUsers,
                 DataRetentionDays = 90,
                 IsActive = true,
                 Status = TenantStatus.Active,
@@ -211,6 +230,13 @@ public class DataSeeder
 
             _dbContext.Tenants.Add(secondTenant);
             _logger.LogInformation("已创建测试租户B（ID: {TenantId}）", secondTenantId);
+        }
+        else if (isolatedFullDemo)
+        {
+            var secondTenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                .FirstAsync(t => t.Id == secondTenantId);
+            secondTenant.MaxDevices = seededMaxDevices;
+            secondTenant.MaxUsers = seededMaxUsers;
         }
 
         await _dbContext.SaveChangesAsync();

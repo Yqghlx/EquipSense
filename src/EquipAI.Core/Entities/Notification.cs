@@ -23,6 +23,12 @@ public class Notification : BaseEntity
     /// <summary>关联实体 ID（告警或工单 ID）</summary>
     public Guid? RelatedId { get; set; }
 
+    /// <summary>
+    /// 产生该通知的集成事件 ID；为空表示通知不是由可靠事件总线创建。
+    /// 同一事件重投时用于按租户和用户幂等去重。
+    /// </summary>
+    public Guid? SourceEventId { get; set; }
+
     /// <summary>关联链接（前端路由路径）</summary>
     public string? Link { get; set; }
 

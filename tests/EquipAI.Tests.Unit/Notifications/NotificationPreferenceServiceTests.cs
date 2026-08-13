@@ -12,7 +12,7 @@ namespace EquipAI.Tests.Unit.Notifications;
 
 /// <summary>
 /// 通知偏好服务单元测试。
-/// 重点验证安全默认值、用户筛选和邮件通道不可用策略，避免设置保存后在分发链路中被忽略。
+/// 重点验证安全默认值、用户筛选和仅告警邮件通道可用策略，避免设置保存后在分发链路中被忽略。
 /// </summary>
 public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
 {
@@ -35,10 +35,10 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// 空配置和历史配置都应使用安全默认值：实时与浏览器推送开启，邮件关闭。
+    /// 空配置应使用安全默认值：实时与浏览器推送开启，邮件关闭；历史显式告警邮件配置应保留。
     /// </summary>
     [Fact]
-    public async Task GetEnabledUserIdsAsync_空配置默认开启实时和推送但关闭邮件()
+    public async Task GetEnabledUserIdsAsync_空配置默认开启实时和推送但显式告警邮件可用()
     {
         var defaultUser = CreateUser(_tenantId, "default-user", "{}");
         var legacyEmailUser = CreateUser(
@@ -54,7 +54,7 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
         (await _service.GetEnabledUserIdsAsync(_tenantId, candidates, "alert", "push"))
             .Should().BeEquivalentTo(candidates);
         (await _service.GetEnabledUserIdsAsync(_tenantId, candidates, "alert", "email"))
-            .Should().BeEmpty();
+            .Should().BeEquivalentTo([legacyEmailUser.Id]);
     }
 
     /// <summary>
@@ -125,10 +125,10 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// 邮件通道尚未接入告警投递，更新接口必须强制保存为不可用，避免前端显示虚假的成功状态。
+    /// 只有告警邮件通道可用；工单和系统邮件仍必须强制关闭，避免展示未实现能力。
     /// </summary>
     [Fact]
-    public async Task UpdateAsync_应将邮件通道规范化为关闭()
+    public async Task UpdateAsync_应只保留告警邮件通道()
     {
         var user = CreateUser(_tenantId, "update-user", "{}");
         await SeedAsync(user);
@@ -143,13 +143,13 @@ public sealed class NotificationPreferenceServiceTests : IAsyncDisposable
                 System = new ChannelPreference { SignalR = false, Push = false, Email = true },
             });
 
-        result.Alert.Email.Should().BeFalse();
+        result.Alert.Email.Should().BeTrue();
         result.WorkOrder.Email.Should().BeFalse();
         result.System.Email.Should().BeFalse();
 
         var persisted = await _service.GetAsync(user.Id);
         persisted.Alert.SignalR.Should().BeFalse();
-        persisted.Alert.Email.Should().BeFalse();
+        persisted.Alert.Email.Should().BeTrue();
         persisted.WorkOrder.Push.Should().BeFalse();
         persisted.WorkOrder.Email.Should().BeFalse();
         persisted.System.Email.Should().BeFalse();

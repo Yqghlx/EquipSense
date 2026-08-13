@@ -80,8 +80,10 @@ public class AuthServiceTests : IAsyncDisposable
         services.AddSingleton<ITotpSecretProtector, StubTotpSecretProtector>();
         // 使用真实 PII 保护器验证认证查询不会依赖数据库中的联系方式明文。
         services.AddSingleton<IPiiProtector>(new EquipAI.Infrastructure.Security.PiiProtector(_configuration));
-        // 注册邮件服务（测试中 SendAsync 会因无 SMTP 配置进入 catch，不影响测试逻辑）
+        // 注册邮件服务（测试不配置 SMTP，密码恢复只验证令牌与审计行为，不访问网络）
         services.Configure<EquipAI.Application.Notifications.SmtpOptions>(_ => { });
+        services.AddScoped<EquipAI.Application.Notifications.ISmtpMailSender,
+            EquipAI.Application.Notifications.SmtpMailSender>();
         services.AddScoped<EquipAI.Application.Notifications.SmtpEmailNotificationService>();
         services.AddScoped<AuthService>();
 

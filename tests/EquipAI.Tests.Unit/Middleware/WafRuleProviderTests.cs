@@ -113,6 +113,18 @@ public sealed class WafRuleProviderTests : IDisposable
         act.Should().NotThrow();
     }
 
+    [Fact]
+    public async Task StopAsync_在Dispose后调用_不应抛出异常()
+    {
+        // WebApplicationFactory 释放宿主时可能再次调用 HostedService.StopAsync；停止路径必须容忍先发生的容器释放。
+        var provider = CreateProvider(CreateOptions("missing.json"), "Development");
+        provider.Dispose();
+
+        var act = () => provider.StopAsync(CancellationToken.None);
+
+        await act.Should().NotThrowAsync();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

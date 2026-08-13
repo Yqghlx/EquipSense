@@ -322,6 +322,30 @@ public class DeviceServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task CreateDeviceAsync_达到设备配额_应拒绝且不写入设备()
+    {
+        // 服务层必须独立兜底，避免绕过 HTTP 配额中间件的入口造成超卖。
+        await SeedTenantAsync(currentDeviceCount: 1);
+        var tenant = await _db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantId);
+        tenant.MaxDevices = 1;
+        await _db.SaveChangesAsync();
+
+        var act = () => _sut.CreateDeviceAsync(new CreateDeviceRequest
+        {
+            DeviceCode = "DEV-OVER-LIMIT",
+            Name = "超额设备",
+            Type = "电机"
+        }, _tenantId);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*设备*上限*");
+        (await _db.Devices.IgnoreQueryFilters().CountAsync()).Should().Be(0,
+            "配额拒绝不能留下超额设备");
+        (await _db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantId))
+            .CurrentDeviceCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task CreateDeviceAsync_显式租户与上下文不一致_唯一性检查应使用显式租户()
     {
         // Arrange：构造一个当前上下文属于其他租户的服务，验证服务层 tenantId 参数优先于上下文租户。

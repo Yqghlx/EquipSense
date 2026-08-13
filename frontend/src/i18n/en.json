@@ -216,7 +216,7 @@
     "viewDetails": "View details",
     "preferences": {
       "title": "Notification preferences",
-      "description": "Customize how you receive each notification type",
+      "description": "Customize how you receive each notification type; alert email requires SMTP, while work order and system email are not available yet",
       "loading": "Loading...",
       "table": {
         "type": "Notification type",
@@ -236,8 +236,10 @@
         "push": "Browser push",
         "pushDescription": "Push notifications when the browser is closed",
         "email": "Email notifications",
-        "emailDescription": "Email alert delivery is not available yet",
-        "emailUnavailable": "Email alert delivery is not available yet"
+        "emailDescription": "Alert email requires SMTP before it can be sent",
+        "emailUnavailable": "Email notifications are not available yet",
+        "emailUnavailableWorkorder": "Work order email is not available yet",
+        "emailUnavailableSystem": "System email is not available yet"
       },
       "push": {
         "unsupported": "This browser does not support push notifications. The browser push channel is unavailable.",

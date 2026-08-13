@@ -231,29 +231,29 @@ public class NotificationPreferenceService
     }
 
     /// <summary>
-    /// 规范化持久化配置，邮件告警尚未接入投递链路，因此始终标记为不可用。
+    /// 规范化持久化配置：告警邮件已经接入可靠投递队列，工单和系统邮件仍未实现。
     /// 创建新对象而不是修改调用方对象，避免 API 层复用请求对象时产生隐式副作用。
     /// </summary>
     private static NotificationPreferences Normalize(NotificationPreferences prefs)
     {
         return new NotificationPreferences
         {
-            Alert = NormalizeChannel(prefs.Alert),
-            WorkOrder = NormalizeChannel(prefs.WorkOrder),
-            System = NormalizeChannel(prefs.System),
+            Alert = NormalizeChannel(prefs.Alert, allowEmail: true),
+            WorkOrder = NormalizeChannel(prefs.WorkOrder, allowEmail: false),
+            System = NormalizeChannel(prefs.System, allowEmail: false),
         };
     }
 
     /// <summary>
-    /// 复制单个渠道配置并关闭邮件选项。
+    /// 复制单个渠道配置，并按通知类型决定邮件选项是否可用。
     /// </summary>
-    private static ChannelPreference NormalizeChannel(ChannelPreference prefs)
+    private static ChannelPreference NormalizeChannel(ChannelPreference prefs, bool allowEmail)
     {
         return new ChannelPreference
         {
             SignalR = prefs.SignalR,
             Push = prefs.Push,
-            Email = false,
+            Email = allowEmail && prefs.Email,
         };
     }
 }

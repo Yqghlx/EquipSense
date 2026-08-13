@@ -231,6 +231,14 @@ services:
       Smtp__Username: "${SMTP_USERNAME:-}"
       Smtp__Password: "${SMTP_PASSWORD:-}"
       Smtp__EnableSsl: "${SMTP_ENABLE_SSL:-true}"
+      # 告警邮件队列：SMTP 未配置时任务保持 Pending，不消耗重试次数。
+      EmailDelivery__Enabled: "${EMAIL_DELIVERY_ENABLED:-true}"
+      EmailDelivery__PollIntervalSeconds: "${EMAIL_DELIVERY_POLL_INTERVAL_SECONDS:-5}"
+      EmailDelivery__BatchSize: "${EMAIL_DELIVERY_BATCH_SIZE:-50}"
+      EmailDelivery__LeaseSeconds: "${EMAIL_DELIVERY_LEASE_SECONDS:-60}"
+      EmailDelivery__MaxAttempts: "${EMAIL_DELIVERY_MAX_ATTEMPTS:-5}"
+      EmailDelivery__MaxBackoffSeconds: "${EMAIL_DELIVERY_MAX_BACKOFF_SECONDS:-300}"
+      EmailDelivery__RetentionDays: "${EMAIL_DELIVERY_RETENTION_DAYS:-90}"
       BEHIND_PROXY: "${BEHIND_PROXY:-true}"
       # 仅信任 Docker 内部反向代理网段注入的 X-Forwarded-*，避免客户端伪造来源 IP。
       TRUSTED_PROXY_NETWORKS: "${TRUSTED_PROXY_NETWORKS:-172.16.0.0/12}"

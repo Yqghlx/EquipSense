@@ -137,12 +137,146 @@ public class SubscriptionServiceTests : IAsyncDisposable
             MaxDevices = 3,
             CurrentDeviceCount = 3,
         });
+        for (var i = 0; i < 3; i++)
+        {
+            db.Devices.Add(new Device
+            {
+                TenantId = tenantId,
+                DeviceCode = $"LIMIT-{i}",
+                Name = $"已满设备{i}",
+                Type = "电机"
+            });
+        }
         await db.SaveChangesAsync();
 
         var service = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
         var canCreate = await service.CanCreateResourceAsync(tenantId, "device");
 
         canCreate.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CanCreateResourceAsync_计数器偏大但真实数量未满_不应误拦截()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+
+        db.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "计数漂移租户",
+            Slug = $"drift-high-{tenantId:N}",
+            Plan = TenantPlan.Basic,
+            MaxDevices = 2,
+            CurrentDeviceCount = 2,
+        });
+        db.Devices.Add(new Device
+        {
+            TenantId = tenantId,
+            DeviceCode = "DRIFT-001",
+            Name = "真实设备",
+            Type = "电机"
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+        var canCreate = await service.CanCreateResourceAsync(tenantId, "device");
+
+        canCreate.Should().BeTrue("真实设备数只有 1 台，历史偏大的计数器不能阻断创建");
+    }
+
+    [Fact]
+    public async Task CanCreateResourceAsync_计数器偏小但真实数量已满_不应放行()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+
+        db.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "计数偏小租户",
+            Slug = $"drift-low-{tenantId:N}",
+            Plan = TenantPlan.Basic,
+            MaxDevices = 2,
+            CurrentDeviceCount = 0,
+        });
+        for (var i = 0; i < 2; i++)
+        {
+            db.Devices.Add(new Device
+            {
+                TenantId = tenantId,
+                DeviceCode = $"DRIFT-FULL-{i}",
+                Name = $"满额设备{i}",
+                Type = "电机"
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+        var canCreate = await service.CanCreateResourceAsync(tenantId, "device");
+
+        canCreate.Should().BeFalse("真实设备数已达到上限，偏小计数器不能放行创建");
+    }
+
+    [Fact]
+    public async Task CanCreateResourceAsync_用户配额只统计启用用户()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+
+        db.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "用户席位租户",
+            Slug = $"active-users-{tenantId:N}",
+            Plan = TenantPlan.Basic,
+            MaxUsers = 1,
+            CurrentUserCount = 1,
+        });
+        db.Users.Add(new User
+        {
+            TenantId = tenantId,
+            Username = "inactive-seat",
+            PasswordHash = "test-hash",
+            IsActive = false,
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+        var canCreate = await service.CanCreateResourceAsync(tenantId, "user");
+
+        canCreate.Should().BeTrue("停用用户不再占用可用席位");
+    }
+
+    [Theory]
+    [InlineData("device")]
+    [InlineData("user")]
+    public async Task CanCreateResourceAsync_零配额表示不限(string resourceType)
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+
+        db.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "不限配额租户",
+            Slug = $"unlimited-{tenantId:N}",
+            Plan = TenantPlan.Enterprise,
+            MaxDevices = 0,
+            MaxUsers = 0,
+            CurrentDeviceCount = int.MaxValue,
+            CurrentUserCount = int.MaxValue,
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<ISubscriptionService>();
+        var canCreate = await service.CanCreateResourceAsync(tenantId, resourceType);
+
+        canCreate.Should().BeTrue("PlanDto 约定 0 表示不限，不能被误判为已用尽");
     }
 
     /// <summary>

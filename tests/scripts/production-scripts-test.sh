@@ -169,7 +169,9 @@ test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit() {
   assert_contains "$seeder_content" 'DemoDataSeedingPolicy.EnsureFullDemoDataAllowed'
   assert_contains "$seeder_content" 'FullDemoDataSeeder'
   assert_contains "$seeder_content" 'DemoDataSeedingPolicy.IsFullDemoData'
-  assert_contains "$seeder_content" 'await SeedTenantsAsync(seedDemoData);'
+  assert_contains "$seeder_content" 'await SeedTenantsAsync(seedDemoData, isolatedFullDemo);'
+  assert_contains "$seeder_content" 'var seededMaxDevices = isolatedFullDemo ? int.MaxValue : 50;'
+  assert_contains "$seeder_content" 'var seededMaxUsers = isolatedFullDemo ? int.MaxValue : 20;'
   assert_contains "$seeder_content" 'await SeedSampleDeviceAndAlertRulesAsync(seedDemoData);'
   assert_contains "$env_example" 'SEED_DEMO_DATA=false'
 }
@@ -209,6 +211,30 @@ test_validate_env_rejects_invalid_rate_limiting_config() {
   [[ "$result_code" -ne 0 ]] || fail "非法限流参数不应通过生产环境校验"
   assert_contains "$output" "RATE_LIMITING_AUTH_PERMIT_LIMIT 必须是大于 0 的整数"
   assert_contains "$output" "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"
+}
+
+test_validate_env_rejects_invalid_email_delivery_config() {
+  local env_file="$TEST_ROOT/invalid-email-delivery.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' \
+    'EMAIL_DELIVERY_ENABLED=maybe' \
+    'EMAIL_DELIVERY_BATCH_SIZE=0' \
+    'EMAIL_DELIVERY_LEASE_SECONDS=10' \
+    'EMAIL_DELIVERY_MAX_BACKOFF_SECONDS=-1' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非法邮件投递队列配置不应通过生产环境校验"
+  assert_contains "$output" "EMAIL_DELIVERY_ENABLED 必须是 true 或 false"
+  assert_contains "$output" "EMAIL_DELIVERY_BATCH_SIZE 必须是大于 0 的整数"
+  assert_contains "$output" "EMAIL_DELIVERY_LEASE_SECONDS 不能小于 30"
+  assert_contains "$output" "EMAIL_DELIVERY_MAX_BACKOFF_SECONDS 必须是大于等于 0 的整数"
 }
 
 test_validate_env_rejects_relative_local_attachment_path() {
@@ -3377,13 +3403,160 @@ test_deploy_rollback_health_failure_is_critical() {
 }
 
 test_release_waits_for_quality_gates() {
+  local docker_block
+  docker_block="$(sed -n '/^  docker:/,/^  production-smoke:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$docker_block" "needs: [backend, frontend, production-smoke, backup-restore-rehearsal, load-test, e2e]"
+
   local release_block
   release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  assert_contains "$release_block" "needs: [backend, frontend, production-smoke, backup-restore-rehearsal]"
+  assert_contains "$release_block" "needs: [backend, frontend, production-smoke, backup-restore-rehearsal, load-test]"
+
+  local load_block
+  load_block="$(sed -n '/^  load-test:/,/^  e2e:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  assert_contains "$load_block" "startsWith(github.ref, 'refs/tags/v')"
 
   local deploy_block
   deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$deploy_block" "needs: [release]"
+}
+
+test_ci_scans_all_images_before_registry_publish() {
+  local job_name job_block first_scan_line last_scan_line first_push_line
+  local load_before_scan push_before_all_scans push_after_all_scans
+
+  for job_name in docker release; do
+    if [[ "$job_name" == "docker" ]]; then
+      job_block="$(sed -n '/^  docker:/,/^  production-smoke:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+    else
+      job_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+    fi
+
+    first_scan_line="$(printf '%s\n' "$job_block" | grep -n 'Trivy 扫描后端镜像' | head -n 1 | cut -d: -f1)"
+    last_scan_line="$(printf '%s\n' "$job_block" | grep -n 'severity: HIGH,CRITICAL' | tail -n 1 | cut -d: -f1)"
+    first_push_line="$(printf '%s\n' "$job_block" | grep -n '^[[:space:]]*push: true$' | head -n 1 | cut -d: -f1)"
+
+    [[ -n "$first_scan_line" && -n "$last_scan_line" && -n "$first_push_line" ]] \
+      || fail "$job_name 镜像 job 必须包含本地构建、三镜像扫描和最终推送阶段"
+
+    load_before_scan="$(
+      printf '%s\n' "$job_block" \
+        | sed -n "1,$((first_scan_line - 1))p" \
+        | grep -c '^[[:space:]]*load: true$' \
+        || true
+    )"
+    push_before_all_scans="$(
+      printf '%s\n' "$job_block" \
+        | sed -n "1,${last_scan_line}p" \
+        | grep -c '^[[:space:]]*push: true$' \
+        || true
+    )"
+    push_after_all_scans="$(
+      printf '%s\n' "$job_block" \
+        | sed -n "$((last_scan_line + 1)),\$p" \
+        | grep -c '^[[:space:]]*push: true$' \
+        || true
+    )"
+
+    [[ "$load_before_scan" -eq 3 ]] \
+      || fail "$job_name 镜像 job 必须先把三张待发布镜像加载到本地供 Trivy 扫描"
+    [[ "$push_before_all_scans" -eq 0 ]] \
+      || fail "$job_name 镜像 job 在三张镜像全部通过 Trivy 前不得写入镜像仓库"
+    [[ "$push_after_all_scans" -eq 3 ]] \
+      || fail "$job_name 镜像 job 只能在三张镜像全部通过 Trivy 后执行三次发布"
+  done
+}
+
+test_ci_trivy_action_is_pinned_to_verified_commit() {
+  local ci_content pinned_ref_count
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  pinned_ref_count="$(
+    grep -cF \
+      'uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0' \
+      "$PROJECT_ROOT/.github/workflows/ci.yml" \
+      || true
+  )"
+
+  [[ "$pinned_ref_count" -eq 6 ]] \
+    || fail "六个 Trivy 扫描步骤都必须锁定到经核实的 v0.36.0 完整 commit SHA"
+  [[ "$ci_content" != *'aquasecurity/trivy-action@master'* ]] \
+    || fail "具有 GHCR 写权限的 job 不得执行可变 master 分支上的 Trivy action"
+}
+
+test_wait_for_http_retries_until_endpoint_is_ready() {
+  local case_dir="$TEST_ROOT/wait-for-http-ready"
+  mkdir -p "$case_dir/bin"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'count=0' \
+    '[[ -f "$WAIT_TEST_COUNTER" ]] && count="$(cat "$WAIT_TEST_COUNTER")"' \
+    'count=$((count + 1))' \
+    'printf '\''%s\n'\'' "$count" > "$WAIT_TEST_COUNTER"' \
+    '(( count >= 3 ))' > "$case_dir/bin/curl"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/sleep"
+  chmod +x "$case_dir/bin/curl" "$case_dir/bin/sleep"
+
+  local output
+  output="$(
+    PATH="$case_dir/bin:$PATH" \
+    WAIT_TEST_COUNTER="$case_dir/counter" \
+      bash "$PROJECT_ROOT/scripts/wait-for-http.sh" \
+        "http://127.0.0.1:8080/health" 3 0 "测试服务"
+  )" || fail "HTTP 就绪等待器应在第 3 次探测成功后返回 0"
+
+  [[ "$(cat "$case_dir/counter")" = "3" ]] \
+    || fail "HTTP 就绪等待器必须重试到端点真正成功"
+  assert_contains "$output" "测试服务已就绪"
+}
+
+test_wait_for_http_fails_closed_after_timeout() {
+  local case_dir="$TEST_ROOT/wait-for-http-timeout"
+  mkdir -p "$case_dir/bin"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf '\''probe\n'\'' >> "$WAIT_TEST_COUNTER"' \
+    'exit 22' > "$case_dir/bin/curl"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 0' > "$case_dir/bin/sleep"
+  chmod +x "$case_dir/bin/curl" "$case_dir/bin/sleep"
+
+  local output result_code
+  set +e
+  output="$(
+    PATH="$case_dir/bin:$PATH" \
+    WAIT_TEST_COUNTER="$case_dir/counter" \
+      bash "$PROJECT_ROOT/scripts/wait-for-http.sh" \
+        "http://127.0.0.1:8080/health" 2 0 "测试服务" 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] \
+    || fail "HTTP 端点在重试窗口内始终不可用时必须阻断 CI"
+  [[ "$(wc -l < "$case_dir/counter" | tr -d ' ')" = "2" ]] \
+    || fail "HTTP 就绪等待器必须严格遵守最大探测次数"
+  assert_contains "$output" "等待测试服务启动超时"
+}
+
+test_ci_service_startup_uses_fail_closed_http_waiter() {
+  local load_block e2e_block
+  load_block="$(sed -n '/^  load-test:/,/^  e2e:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  e2e_block="$(sed -n '/^  e2e:/,$p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+
+  assert_contains "$load_block" 'bash scripts/wait-for-http.sh "http://localhost:8080/health" 45 2 "后端服务"'
+  assert_contains "$e2e_block" 'bash scripts/wait-for-http.sh "http://localhost:8080/health" 45 2 "后端服务"'
+  assert_contains "$e2e_block" 'bash ../scripts/wait-for-http.sh "http://localhost:5173" 15 2 "前端服务"'
+
+  [[ "$load_block" != *'for i in $(seq 1 45)'* ]] \
+    || fail "K6 后端启动不得保留超时后返回 0 的内联等待循环"
+  [[ "$e2e_block" != *'for i in $(seq 1 45)'* ]] \
+    || fail "E2E 后端启动不得保留超时后返回 0 的内联等待循环"
+  [[ "$e2e_block" != *'for i in $(seq 1 15)'* ]] \
+    || fail "E2E 前端启动不得保留超时后返回 0 的内联等待循环"
 }
 
 test_legacy_e2e_requires_explicit_credentials_and_is_non_destructive() {
@@ -3659,6 +3832,8 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "/api/v1/auth/login"
   assert_contains "$smoke_script" "/api/v1/auth/me"
   assert_contains "$smoke_script" "SMOKE_EDGEGATEWAY_IMAGE"
+  assert_contains "$smoke_script" '${BACKEND_IMAGE}、${FRONTEND_IMAGE} 和 ${EDGEGATEWAY_IMAGE}'
+  assert_contains "$smoke_script" "trap 'cleanup \"\$?\"' EXIT"
   assert_contains "$smoke_script" "SMOKE_PORT_BASE"
   assert_contains "$smoke_script" "SMOKE_PG_PORT"
   assert_contains "$smoke_script" "lsof"
@@ -3702,6 +3877,32 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_block" "docker build"
   assert_contains "$smoke_block" "npm ci"
   assert_contains "$smoke_block" "SMOKE_RUN_E2E"
+}
+
+test_production_runtime_smoke_failure_preserves_exit_status() {
+  local case_dir="$TEST_ROOT/runtime-smoke-failure-status"
+  local smoke_output smoke_status=0
+  mkdir -p "$case_dir/bin"
+
+  # 只模拟镜像不存在；脚本应在 Docker 调用失败后保持非零退出码，不能被清理 trap 吞掉。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'exit 1' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  if smoke_output="$(
+    PATH="$case_dir/bin:$PATH" \
+    SMOKE_RUN_E2E=false \
+    SMOKE_PORT_BASE=59991 \
+    bash "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh" 2>&1
+  )"; then
+    fail "Production runtime smoke 镜像检查失败时必须返回非零退出码"
+  else
+    smoke_status=$?
+  fi
+
+  (( smoke_status != 0 )) || fail "Production runtime smoke 清理 trap 吞掉了失败退出码"
+  assert_contains "$smoke_output" "找不到本地 smoke 镜像"
 }
 
 test_rabbitmq_healthcheck_uses_service_account() {
@@ -3914,6 +4115,61 @@ test_frontend_offline_queue_is_session_scoped() {
   assert_contains "$offline_hook" 'offlineQueue.getAll(ownerKey)'
 }
 
+test_notification_preference_card_email_contract_is_type_specific() {
+  local card_content zh_content en_content test_content
+  card_content="$(cat "$PROJECT_ROOT/frontend/src/components/settings/NotificationPreferenceCard.tsx")"
+  zh_content="$(cat "$PROJECT_ROOT/frontend/src/i18n/zh.json")"
+  en_content="$(cat "$PROJECT_ROOT/frontend/src/i18n/en.json")"
+  test_content="$(cat "$PROJECT_ROOT/frontend/src/components/settings/__tests__/NotificationPreferenceCard.i18n.test.tsx")"
+
+  assert_contains "$card_content" "function isEmailChannelAvailable(type: keyof NotificationPreferences)"
+  assert_contains "$card_content" "return type === 'alert';"
+  assert_contains "$card_content" "function getEmailUnavailableReasonKey(type: keyof NotificationPreferences)"
+  assert_contains "$card_content" "notifications.preferences.channels.emailUnavailableWorkorder"
+  assert_contains "$card_content" "notifications.preferences.channels.emailUnavailableSystem"
+  assert_contains "$card_content" "email: type === 'alert' ? !allOn : false"
+  assert_contains "$card_content" "const allOn = isRowFullyEnabled(type, current);"
+  assert_contains "$card_content" "aria-describedby={isEmail ? emailDescriptionId : undefined}"
+
+  assert_contains "$zh_content" "告警邮件需先配置 SMTP"
+  assert_contains "$zh_content" "告警邮件需配置 SMTP 后才可发送"
+  assert_contains "$zh_content" "工单邮件暂未开放"
+  assert_contains "$zh_content" "系统邮件暂未开放"
+  assert_contains "$en_content" "Alert email requires SMTP"
+  assert_contains "$en_content" "Alert email requires SMTP before it can be sent"
+  assert_contains "$en_content" "Work order email is not available yet"
+  assert_contains "$en_content" "System email is not available yet"
+
+  assert_contains "$test_content" "点击告警邮件开关应提交 email 打开状态"
+  assert_contains "$test_content" "告警行“全部”开关应包含 email"
+  assert_contains "$test_content" "工单和系统邮件应禁用且全部开关不伪造 email"
+}
+
+test_alert_email_delivery_contract_is_registered_and_persistent() {
+  local service_content appsettings_content production_content compose_content migration_content worker_content
+  service_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/Extensions/ServiceCollectionExtensions.cs")"
+  appsettings_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/appsettings.json")"
+  production_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/appsettings.Production.json")"
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  migration_content="$(cat "$PROJECT_ROOT"/src/EquipAI.Infrastructure/Data/Migrations/*_AddEmailNotificationDeliveries.cs)"
+  worker_content="$(cat "$PROJECT_ROOT/src/EquipAI.Application/Notifications/EmailNotificationDispatcher.cs")"
+
+  assert_contains "$service_content" 'services.AddOptions<EmailDeliveryOptions>()'
+  assert_contains "$service_content" '.Bind(configuration.GetSection(EmailDeliveryOptions.SectionName))'
+  assert_contains "$service_content" '.ValidateOnStart();'
+  assert_contains "$service_content" 'services.AddScoped<EmailNotificationDeliveryStore>();'
+  assert_contains "$service_content" 'services.AddHostedService<EmailNotificationDispatcher>();'
+  assert_contains "$service_content" 'services.AddScoped<ISmtpMailSender, SmtpMailSender>();'
+  assert_contains "$appsettings_content" '"EmailDelivery": {'
+  assert_contains "$production_content" '"EmailDelivery": {'
+  assert_contains "$compose_content" 'EmailDelivery__Enabled: "${EMAIL_DELIVERY_ENABLED:-true}"'
+  assert_contains "$migration_content" 'name: "email_notification_deliveries"'
+  assert_contains "$migration_content" 'IX_email_notification_deliveries_notification_id'
+  assert_contains "$worker_content" 'SMTP 未配置，告警邮件任务暂不领取'
+  assert_contains "$worker_content" 'store.TryRenewLeaseAsync('
+  assert_contains "$worker_content" 'BusinessMetrics.EmailDeliveryDeadLetters.Inc();'
+}
+
 test_frontend_service_worker_handles_owner_scoped_background_sync() {
   local vite_config
   vite_config="$(cat "$PROJECT_ROOT/frontend/vite.config.ts")"
@@ -4023,6 +4279,7 @@ case "${1:-all}" in
     test_validate_env_accepts_complete_config
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
+    test_validate_env_rejects_invalid_email_delivery_config
     test_validate_env_rejects_relative_local_attachment_path
     test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
@@ -4129,6 +4386,11 @@ case "${1:-all}" in
     ;;
   ci)
     test_release_waits_for_quality_gates
+    test_ci_scans_all_images_before_registry_publish
+    test_ci_trivy_action_is_pinned_to_verified_commit
+    test_wait_for_http_retries_until_endpoint_is_ready
+    test_wait_for_http_fails_closed_after_timeout
+    test_ci_service_startup_uses_fail_closed_http_waiter
     test_legacy_e2e_requires_explicit_credentials_and_is_non_destructive
     test_backup_restore_rehearsal_is_wired
     test_postgres_custom_archive_reads_from_stdin
@@ -4144,6 +4406,7 @@ case "${1:-all}" in
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
+    test_production_runtime_smoke_failure_preserves_exit_status
     test_waf_rule_reload_contract
     test_rabbitmq_healthcheck_uses_service_account
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
@@ -4156,6 +4419,7 @@ case "${1:-all}" in
     test_bluegreen_state_files_are_atomic
     test_frontend_service_worker_does_not_cache_authenticated_api
     test_frontend_offline_queue_is_session_scoped
+    test_alert_email_delivery_contract_is_registered_and_persistent
     test_frontend_service_worker_handles_owner_scoped_background_sync
     test_frontend_auth_session_clears_sensitive_state
     ;;
@@ -4166,6 +4430,7 @@ case "${1:-all}" in
     test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
+    test_validate_env_rejects_invalid_email_delivery_config
     test_validate_env_rejects_relative_local_attachment_path
     test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
@@ -4253,6 +4518,11 @@ case "${1:-all}" in
     test_deploy_without_history_never_rolls_back_to_unknown_tag
     test_deploy_rollback_health_failure_is_critical
     test_release_waits_for_quality_gates
+    test_ci_scans_all_images_before_registry_publish
+    test_ci_trivy_action_is_pinned_to_verified_commit
+    test_wait_for_http_retries_until_endpoint_is_ready
+    test_wait_for_http_fails_closed_after_timeout
+    test_ci_service_startup_uses_fail_closed_http_waiter
     test_legacy_e2e_requires_explicit_credentials_and_is_non_destructive
     test_backup_restore_rehearsal_is_wired
     test_ci_build_disables_unreliable_build_servers
@@ -4266,6 +4536,7 @@ case "${1:-all}" in
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
+    test_production_runtime_smoke_failure_preserves_exit_status
     test_waf_rule_reload_contract
     test_rabbitmq_healthcheck_uses_service_account
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
@@ -4283,6 +4554,8 @@ case "${1:-all}" in
     test_production_internal_ports_bind_loopback_by_default
     test_frontend_service_worker_does_not_cache_authenticated_api
     test_frontend_offline_queue_is_session_scoped
+    test_notification_preference_card_email_contract_is_type_specific
+    test_alert_email_delivery_contract_is_registered_and_persistent
     test_frontend_service_worker_handles_owner_scoped_background_sync
     test_frontend_auth_session_clears_sensitive_state
     test_development_internal_ports_bind_loopback_by_default

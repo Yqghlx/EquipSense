@@ -261,6 +261,32 @@ public class UserServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task CreateUserAsync_达到用户配额_应拒绝且不写入用户()
+    {
+        // 配额检查不能只依赖 HTTP 中间件：后台任务或其他入口直接调用服务时也必须保持席位不变量。
+        using var scope = _sp.CreateScope();
+        var service = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        await CreateTenantAsync(db, _tenantId);
+        var tenant = await db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantId);
+        tenant.MaxUsers = 1;
+        tenant.CurrentUserCount = 1;
+        await db.SaveChangesAsync();
+
+        var act = () => service.CreateUserAsync(
+            new CreateUserRequest { Username = "over-limit-user", Password = "Password123" },
+            _tenantId);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*用户*上限*");
+        (await db.Users.IgnoreQueryFilters().CountAsync()).Should().Be(0,
+            "配额拒绝必须与用户写入处于同一事务边界，不能留下超额用户");
+        (await db.UnfilteredSet<Tenant>().SingleAsync(t => t.Id == _tenantId))
+            .CurrentUserCount.Should().Be(1);
+    }
+
+    [Fact]
     public async Task CreateUserAsync_重复用户名_应抛出InvalidOperationException()
     {
         // Arrange

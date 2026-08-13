@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Mail;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -57,13 +56,23 @@ public class SmtpOptions
 public class SmtpEmailNotificationService
 {
     private readonly SmtpOptions _options;
+    private readonly ISmtpMailSender _sender;
     private readonly ILogger<SmtpEmailNotificationService> _logger;
 
-    public SmtpEmailNotificationService(IOptions<SmtpOptions> options, ILogger<SmtpEmailNotificationService> logger)
+    public SmtpEmailNotificationService(
+        IOptions<SmtpOptions> options,
+        ISmtpMailSender sender,
+        ILogger<SmtpEmailNotificationService> logger)
     {
         _options = options.Value;
+        _sender = sender;
         _logger = logger;
     }
+
+    /// <summary>
+    /// SMTP 配置是否足以尝试发送邮件。
+    /// </summary>
+    public bool IsConfigured => _options.IsConfigured;
 
     /// <summary>
     /// 发送邮件
@@ -71,16 +80,23 @@ public class SmtpEmailNotificationService
     /// <param name="to">收件人邮箱</param>
     /// <param name="subject">邮件主题</param>
     /// <param name="htmlBody">HTML 正文</param>
-    public async Task SendAsync(string to, string subject, string htmlBody)
+    /// <param name="ct">取消令牌</param>
+    /// <returns>SMTP 已接受发送时返回 true；配置缺失、地址无效或普通发送异常时返回 false。</returns>
+    public async Task<bool> SendAsync(
+        string to,
+        string subject,
+        string htmlBody,
+        CancellationToken ct = default)
     {
         if (!_options.IsConfigured)
         {
-            _logger.LogWarning("SMTP 未配置，跳过邮件发送（收件人：{To}，主题：{Subject}）", to, subject);
-            return;
+            _logger.LogWarning("SMTP 未配置，跳过邮件发送");
+            return false;
         }
 
         try
         {
+            var recipient = new MailAddress(to);
             using var message = new MailMessage
             {
                 From = new MailAddress(_options.FromEmail, _options.FromName),
@@ -88,21 +104,21 @@ public class SmtpEmailNotificationService
                 Body = htmlBody,
                 IsBodyHtml = true,
             };
-            message.To.Add(to);
+            message.To.Add(recipient);
 
-            using var client = new SmtpClient(_options.Host, _options.Port)
-            {
-                EnableSsl = _options.EnableSsl,
-                Credentials = new NetworkCredential(_options.Username, _options.Password),
-                Timeout = 10000,
-            };
-
-            await client.SendMailAsync(message);
-            _logger.LogInformation("邮件已发送：{To}，主题：{Subject}", to, subject);
+            await _sender.SendAsync(message, ct);
+            _logger.LogInformation("邮件已发送");
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 停机或请求取消不能被伪装成普通 SMTP 故障，否则 worker 可能错误确认任务。
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "邮件发送失败：{To}，主题：{Subject}", to, subject);
+            _logger.LogError(ex, "邮件发送失败");
+            return false;
         }
     }
 }

@@ -378,6 +378,38 @@ public class DeviceImportServiceTests
     }
 
     [Fact]
+    public async Task ExecuteImportAsync_重复设备不应消耗剩余配额()
+    {
+        // 导入文件可能包含客户重复上传的完整清单；已存在的编码会被跳过，不应因为配额已满而误报整批失败。
+        var tenant = new Tenant
+        {
+            Id = _tenantId,
+            Name = "测试租户",
+            MaxDevices = 1,
+            CurrentDeviceCount = 1,
+        };
+        _db.Add(tenant);
+        _db.Devices.Add(new Device
+        {
+            TenantId = _tenantId,
+            DeviceCode = "EXIST-001",
+            Name = "已有",
+            Type = "泵",
+            Status = DeviceStatus.Offline,
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await _sut.ExecuteImportAsync(
+            "device_code,name,type\nEXIST-001,重复设备,泵\n",
+            "devices.csv", _tenantId, Guid.NewGuid(), default);
+
+        result.Imported.Should().Be(0);
+        result.Skipped.Should().BeGreaterThanOrEqualTo(1);
+        result.Errors.Should().NotContain(e => e.Message.Contains("配额"));
+        (await _db.Devices.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
     public void GenerateCsvTemplate_应包含所有必填列和示例()
     {
         // Act

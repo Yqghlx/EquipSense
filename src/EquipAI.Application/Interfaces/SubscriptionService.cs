@@ -63,7 +63,7 @@ public class SubscriptionService : ISubscriptionService
             .CountAsync(d => d.TenantId == tenantId, ct);
 
         var userCount = await db.UnfilteredSet<Core.Entities.User>()
-            .CountAsync(u => u.TenantId == tenantId, ct);
+            .CountAsync(u => u.TenantId == tenantId && u.IsActive, ct);
 
         return new SubscriptionInfo
         {
@@ -138,13 +138,18 @@ public class SubscriptionService : ISubscriptionService
             return false;
         }
 
-        // 使用 CurrentDeviceCount/CurrentUserCount 字段判断配额（避免 COUNT 查询）
+        // 计数器仅用于展示和快速诊断，可能因历史导入、修复脚本或异常回滚而漂移。
+        // HTTP 预检查必须以真实有效行数为准；最终创建仍由服务层的事务预留再次兜底。
         return resourceType.ToLowerInvariant() switch
         {
             // 检查设备数是否已达上限
-            "device" => tenant.CurrentDeviceCount < tenant.MaxDevices,
+            "device" => tenant.MaxDevices <= 0
+                || await db.UnfilteredSet<Core.Entities.Device>()
+                    .CountAsync(d => d.TenantId == tenantId, ct) < tenant.MaxDevices,
             // 检查用户数是否已达上限
-            "user" => tenant.CurrentUserCount < tenant.MaxUsers,
+            "user" => tenant.MaxUsers <= 0
+                || await db.UnfilteredSet<Core.Entities.User>()
+                    .CountAsync(u => u.TenantId == tenantId && u.IsActive, ct) < tenant.MaxUsers,
             // 未知资源类型默认允许（保持前向兼容）
             _ => true
         };

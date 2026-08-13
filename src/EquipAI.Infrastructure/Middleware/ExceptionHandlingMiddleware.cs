@@ -1,4 +1,5 @@
 using System.Net;
+using EquipAI.Core.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
@@ -55,6 +56,8 @@ public class ExceptionHandlingMiddleware
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "未授权的访问"),
             // 404：资源不存在
             KeyNotFoundException => (HttpStatusCode.NotFound, "请求的资源不存在"),
+            // 403：租户资源配额已用尽
+            ResourceQuotaExceededException quota => (HttpStatusCode.Forbidden, quota.Message),
             // 409：业务冲突（如重复创建、状态不允许的操作）
             InvalidOperationException => (HttpStatusCode.Conflict, "操作冲突"),
             // 400：请求参数错误

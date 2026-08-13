@@ -41,6 +41,7 @@ public class DeviceConfigController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult> QuickRegister([FromBody] QuickRegisterRequest request, CancellationToken ct = default)
     {
@@ -73,6 +74,12 @@ public class DeviceConfigController : ControllerBase
                     details = (object?)null
                 }),
                 "DUPLICATE_CODE" => Conflict(new
+                {
+                    code = exception.Code,
+                    message = exception.Message,
+                    details = (object?)null
+                }),
+                "QUOTA_EXCEEDED" => StatusCode(StatusCodes.Status403Forbidden, new
                 {
                     code = exception.Code,
                     message = exception.Message,

@@ -4,6 +4,7 @@ using EquipAI.Core.Models;
 using EquipAI.Application.DTOs.Devices;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Exceptions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -128,17 +129,67 @@ public class DeviceService : IDeviceService
         device.TenantId = tenantId;
         device.Status = DeviceStatus.Offline;
 
-        _dbContext.Devices.Add(device);
-
-        // 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
-        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
-            .FirstOrDefaultAsync(t => t.Id == tenantId);
-        if (tenant != null)
+        // 配额不能只依赖 HTTP 中间件：直接调用服务的入口也必须受保护。
+        // 关系型数据库使用带条件的原子递增，并与设备写入共用事务，避免并发请求超卖设备席位。
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+        try
         {
-            tenant.CurrentDeviceCount++;
-        }
+            await executionStrategy.ExecuteAsync(async () =>
+            {
+                if (!_dbContext.Database.IsRelational())
+                {
+                    // InMemory provider 不支持事务；保留同样的配额不变量供单元测试验证。
+                    var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                        .FirstOrDefaultAsync(t => t.Id == tenantId);
+                    if (tenant != null)
+                    {
+                        if (tenant.MaxDevices > 0 && tenant.CurrentDeviceCount >= tenant.MaxDevices)
+                            throw new ResourceQuotaExceededException("device");
 
-        await _dbContext.SaveChangesAsync();
+                        tenant.CurrentDeviceCount++;
+                    }
+
+                    _dbContext.Devices.Add(device);
+                    await _dbContext.SaveChangesAsync();
+                    return true;
+                }
+
+                _dbContext.ChangeTracker.Clear();
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                try
+                {
+                    var affected = await TenantQuotaSql.TryReserveDeviceSlotsAsync(
+                        _dbContext, tenantId, 1, CancellationToken.None);
+
+                    if (affected == 0)
+                    {
+                        var tenantExists = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                            .AnyAsync(t => t.Id == tenantId);
+                        throw tenantExists
+                            ? new ResourceQuotaExceededException("device")
+                            : new InvalidOperationException("当前租户不存在，无法创建设备");
+                    }
+
+                    _dbContext.Devices.Add(device);
+                    await _dbContext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return true;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    _dbContext.ChangeTracker.Clear();
+                    throw;
+                }
+            });
+        }
+        catch (DbUpdateException exception)
+            when (DatabaseConstraintDetector.IsDeviceCodeUniqueViolation(exception))
+        {
+            // 先查后写无法消除并发窗口；唯一索引冲突应返回可理解的 409，而不是暴露为 500。
+            _dbContext.ChangeTracker.Clear();
+            throw new InvalidOperationException($"设备编码 '{request.DeviceCode}' 在当前租户内已存在", exception);
+        }
 
         // 设备创建（资产登记）必须留痕审计：工业资产台账是 ISO 55000 资产管理 / IEC 62443 安全合规的基础，
         // 新增设备不可追溯则无法核对资产清单（是否有未经登记的设备接入监控）。

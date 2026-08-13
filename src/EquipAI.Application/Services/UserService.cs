@@ -4,6 +4,7 @@ using EquipAI.Core.Models;
 using EquipAI.Application.DTOs.Users;
 using EquipAI.Application.Interfaces;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Exceptions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Identity;
@@ -114,17 +115,71 @@ public class UserService : IUserService
         user.PasswordHash = PasswordHasher.HashPassword(request.Password);
         user.MustChangePassword = true;
 
-        _dbContext.Users.Add(user);
-
-        // 维护租户 CurrentUserCount（使用 UnfilteredSet 跨租户查询）
-        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
-            .FirstOrDefaultAsync(t => t.Id == tenantId);
-        if (tenant != null)
+        // 配额不能只依赖 HTTP 中间件：后台任务、测试工具或未来新增入口可能直接调用服务。
+        // 关系型数据库使用“带条件的原子递增”并与用户写入放在同一事务，避免并发请求同时读到同一旧计数而超卖席位。
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+        try
         {
-            tenant.CurrentUserCount++;
-        }
+            await executionStrategy.ExecuteAsync(async () =>
+            {
+                if (!_dbContext.Database.IsRelational())
+                {
+                    // InMemory provider 不支持事务；保留等价的检查顺序供单元测试验证业务不变量。
+                    var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                        .FirstOrDefaultAsync(t => t.Id == tenantId);
+                    if (tenant != null)
+                    {
+                        if (tenant.MaxUsers > 0 && tenant.CurrentUserCount >= tenant.MaxUsers)
+                            throw new ResourceQuotaExceededException("user");
 
-        await _dbContext.SaveChangesAsync();
+                        tenant.CurrentUserCount++;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("当前租户不存在，无法创建用户");
+                    }
+
+                    _dbContext.Users.Add(user);
+                    await _dbContext.SaveChangesAsync();
+                    return true;
+                }
+
+                _dbContext.ChangeTracker.Clear();
+                await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                try
+                {
+                    var affected = await TenantQuotaSql.TryReserveUserSlotsAsync(
+                        _dbContext, tenantId, 1, CancellationToken.None);
+
+                    if (affected == 0)
+                    {
+                        var tenantExists = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                            .AnyAsync(t => t.Id == tenantId);
+                        throw tenantExists
+                            ? new ResourceQuotaExceededException("user")
+                            : new InvalidOperationException("当前租户不存在，无法创建用户");
+                    }
+
+                    _dbContext.Users.Add(user);
+                    await _dbContext.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return true;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    _dbContext.ChangeTracker.Clear();
+                    throw;
+                }
+            });
+        }
+        catch (DbUpdateException exception)
+            when (DatabaseConstraintDetector.IsUsernameUniqueViolation(exception))
+        {
+            // 预检查无法消除并发窗口；唯一索引是最终边界，转换为稳定的 409 业务冲突而非 500。
+            _dbContext.ChangeTracker.Clear();
+            throw new InvalidOperationException($"用户名 '{request.Username}' 已存在", exception);
+        }
 
         // 用户创建属安全敏感操作，留痕审计（谁在何时创建了哪个用户），满足可审计性要求
         await _auditLogService.LogAsync(tenantId, "Create", "User",

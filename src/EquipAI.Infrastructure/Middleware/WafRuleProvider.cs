@@ -43,6 +43,7 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
     /// <inheritdoc />
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         if (!_options.Enabled)
         {
@@ -53,7 +54,7 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
                     "disabled",
                     [],
                     DateTimeOffset.UtcNow));
-            _started = true;
+            Volatile.Write(ref _started, true);
             return Task.CompletedTask;
         }
 
@@ -69,7 +70,7 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
             StartWatcher(_options.RulesPath);
         }
 
-        _started = true;
+        Volatile.Write(ref _started, true);
         _logger.LogInformation(
             "WAF 规则加载成功：Revision={Revision}, RuleCount={RuleCount}, Sha256={Sha256}",
             snapshot.Revision,
@@ -81,14 +82,37 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _stopCancellation.Cancel();
+        // WebApplicationFactory 等宿主可能在容器释放后再次调用 StopAsync；
+        // 停止必须是幂等的，否则二次 Cancel 已释放的 CTS 会把测试/停机变成失败。
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _stopCancellation.Cancel();
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
         _watcher?.Dispose();
         _watcher = null;
 
         Task? pendingReload;
         lock (_debounceLock)
         {
-            _debounceCancellation?.Cancel();
+            try
+            {
+                _debounceCancellation?.Cancel();
+            }
+            catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0)
+            {
+                // Dispose 已经接管生命周期，当前 StopAsync 只需继续收敛状态。
+            }
+
             pendingReload = _pendingReload;
         }
 
@@ -102,9 +126,13 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
             {
                 // 宿主主动取消停止等待，不能将正常停机记录为故障。
             }
+            catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0)
+            {
+                // 容器释放与宿主停止并发时，待处理重载可能已随同步资源一起释放。
+            }
         }
 
-        _started = false;
+        Volatile.Write(ref _started, false);
     }
 
     /// <summary>
@@ -156,6 +184,7 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
             return;
         }
 
+        Volatile.Write(ref _started, false);
         _stopCancellation.Cancel();
         _watcher?.Dispose();
         _watcher = null;
@@ -208,7 +237,9 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
 
     private void ScheduleReload()
     {
-        if (!_started || _stopCancellation.IsCancellationRequested)
+        if (!Volatile.Read(ref _started)
+            || Volatile.Read(ref _disposed) != 0
+            || _stopCancellation.IsCancellationRequested)
         {
             return;
         }
@@ -235,6 +266,10 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
         catch (OperationCanceledException)
         {
             // 连续文件事件或正常停机取消旧任务是预期行为。
+        }
+        catch (ObjectDisposedException) when (Volatile.Read(ref _disposed) != 0)
+        {
+            // 宿主释放和防抖任务收尾并发时，同步资源已释放属于正常停止路径。
         }
         finally
         {

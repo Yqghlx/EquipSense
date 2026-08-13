@@ -4,6 +4,8 @@
  * 覆盖多用户/多窗口并发场景：
  * - 多标签页同时编辑同一设备
  * - 快速连续创建多个设备
+ * - 租户设备配额在并发创建时不超卖
+ * - 相同批量导入并发执行时保持幂等
  * - 删除被引用的设备
  * - 工单状态并发变更
  * - 同时触发多个 AI 分析
@@ -120,6 +122,115 @@ test.describe('并发操作', () => {
     }
 
     expect(errors).toEqual([]);
+  });
+
+  test('租户设备配额在并发创建时不得超卖', async ({ page }) => {
+    const token = await getToken(page);
+    const suffix = Date.now().toString(36);
+    const tenantResponse = await page.request.post(`${BASE_URL}/api/v1/admin/tenants`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        name: `并发配额租户-${suffix}`,
+        slug: `quota-concurrency-${suffix}`,
+        plan: 'basic',
+        maxDevices: 1,
+        maxUsers: 1,
+      },
+    });
+    const tenantResponseText = await tenantResponse.text();
+    expect(tenantResponse.status(), tenantResponseText).toBe(201);
+    const tenant = JSON.parse(tenantResponseText) as { id?: string };
+    expect(tenant.id).toBeTruthy();
+
+    // 多个请求要在第一笔事务提交前进入配额 SQL。旧实现把锁行和统计压在同一条 UPDATE，
+    // 等待行锁的请求会沿用旧快照并全部通过；独立 FOR UPDATE 后只能有一个请求成功。
+    const requestCount = 8;
+    const responses = await Promise.all(
+      Array.from({ length: requestCount }, (_, index) => page.request.post(`${BASE_URL}/api/v1/devices`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'X-Tenant-Id': tenant.id!,
+        },
+        data: {
+          deviceCode: `QUOTA-CONCURRENT-${suffix}-${index}`,
+          name: `并发配额设备-${index}`,
+          type: '电机',
+        },
+      })),
+    );
+    const statuses = responses.map((response) => response.status());
+
+    expect(statuses.filter((status) => status === 201), `实际状态：${statuses.join(', ')}`).toHaveLength(1);
+    expect(statuses.filter((status) => status === 403), `实际状态：${statuses.join(', ')}`)
+      .toHaveLength(requestCount - 1);
+
+    const devicesResponse = await page.request.get(`${BASE_URL}/api/v1/devices?page=1&pageSize=20`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenant.id!,
+      },
+    });
+    const devicesResponseText = await devicesResponse.text();
+    expect(devicesResponse.status(), devicesResponseText).toBe(200);
+    const devices = JSON.parse(devicesResponseText) as { total?: number };
+    expect(devices.total).toBe(1);
+  });
+
+  test('相同设备文件并发导入时应只新增一次且不返回500', async ({ page }) => {
+    const token = await getToken(page);
+    const suffix = Date.now().toString(36);
+    const tenantResponse = await page.request.post(`${BASE_URL}/api/v1/admin/tenants`, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      data: {
+        name: `并发导入租户-${suffix}`,
+        slug: `import-concurrency-${suffix}`,
+        plan: 'basic',
+        maxDevices: 20,
+        maxUsers: 1,
+      },
+    });
+    const tenantResponseText = await tenantResponse.text();
+    expect(tenantResponse.status(), tenantResponseText).toBe(201);
+    const tenant = JSON.parse(tenantResponseText) as { id?: string };
+    expect(tenant.id).toBeTruthy();
+
+    const deviceCode = `IMPORT-CONCURRENT-${suffix}`;
+    const csv = Buffer.from(`device_code,name,type\n${deviceCode},并发导入设备,电机\n`);
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => page.request.post(`${BASE_URL}/api/v1/devices/import`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Tenant-Id': tenant.id!,
+        },
+        multipart: {
+          file: {
+            name: 'concurrent-devices.csv',
+            mimeType: 'text/csv',
+            buffer: csv,
+          },
+        },
+      })),
+    );
+    const statuses = responses.map((response) => response.status());
+    expect(statuses, `实际状态：${statuses.join(', ')}`).toEqual(Array(8).fill(200));
+
+    const results = await Promise.all(responses.map((response) => response.json() as Promise<{
+      imported?: number;
+      skipped?: number;
+    }>));
+    expect(results.reduce((sum, result) => sum + (result.imported ?? 0), 0)).toBe(1);
+
+    const devicesResponse = await page.request.get(`${BASE_URL}/api/v1/devices?page=1&pageSize=20`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenant.id!,
+      },
+    });
+    const devicesResponseText = await devicesResponse.text();
+    expect(devicesResponse.status(), devicesResponseText).toBe(200);
+    const devices = JSON.parse(devicesResponseText) as { total?: number };
+    expect(devices.total).toBe(1);
   });
 
   // ==========================================================================

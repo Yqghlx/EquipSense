@@ -216,7 +216,7 @@
     "viewDetails": "查看详情",
     "preferences": {
       "title": "通知偏好设置",
-      "description": "按通知类型和渠道自定义接收方式",
+      "description": "按通知类型和渠道自定义接收方式；告警邮件需先配置 SMTP，工单和系统邮件暂未开放",
       "loading": "加载中...",
       "table": {
         "type": "通知类型",
@@ -236,8 +236,10 @@
         "push": "浏览器推送",
         "pushDescription": "浏览器未打开时推送通知",
         "email": "邮件通知",
-        "emailDescription": "邮件告警投递暂未开放",
-        "emailUnavailable": "邮件告警投递暂未开放"
+        "emailDescription": "告警邮件需配置 SMTP 后才可发送",
+        "emailUnavailable": "邮件通知暂未开放",
+        "emailUnavailableWorkorder": "工单邮件暂未开放",
+        "emailUnavailableSystem": "系统邮件暂未开放"
       },
       "push": {
         "unsupported": "当前浏览器不支持推送通知，浏览器推送渠道不可用",

@@ -201,6 +201,26 @@ public static class BusinessMetrics
             new CounterConfiguration { LabelNames = new[] { "result" } });
 
     // ========================================================================
+    // 告警邮件投递指标
+    // ========================================================================
+
+    /// <summary>当前待投递告警邮件任务数。</summary>
+    public static readonly Gauge EmailDeliveryPending = Prometheus.Metrics
+        .CreateGauge("equipai_email_delivery_pending", "当前待投递告警邮件任务数");
+
+    /// <summary>SMTP 已接受发送的告警邮件任务总数。</summary>
+    public static readonly Counter EmailDeliverySent = Prometheus.Metrics
+        .CreateCounter("equipai_email_delivery_sent_total", "SMTP 已接受发送的告警邮件任务总数");
+
+    /// <summary>告警邮件普通投递失败总数（包括进入下一次重试的失败）。</summary>
+    public static readonly Counter EmailDeliveryFailures = Prometheus.Metrics
+        .CreateCounter("equipai_email_delivery_failures_total", "告警邮件普通投递失败总数");
+
+    /// <summary>达到重试上限并进入死信的告警邮件任务总数。</summary>
+    public static readonly Counter EmailDeliveryDeadLetters = Prometheus.Metrics
+        .CreateCounter("equipai_email_delivery_dead_letters_total", "进入死信的告警邮件任务总数");
+
+    // ========================================================================
     // 事务消息指标
     // ========================================================================
 

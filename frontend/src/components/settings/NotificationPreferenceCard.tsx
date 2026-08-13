@@ -19,10 +19,47 @@ const notifTypes = [
 
 /** 通知渠道定义 */
 const channels = [
-  { key: 'signalr' as const, labelKey: 'notifications.preferences.channels.signalr', descKey: 'notifications.preferences.channels.signalrDescription', available: true },
-  { key: 'push' as const, labelKey: 'notifications.preferences.channels.push', descKey: 'notifications.preferences.channels.pushDescription', available: true },
-  { key: 'email' as const, labelKey: 'notifications.preferences.channels.email', descKey: 'notifications.preferences.channels.emailDescription', available: false },
+  { key: 'signalr' as const, labelKey: 'notifications.preferences.channels.signalr', descKey: 'notifications.preferences.channels.signalrDescription' },
+  { key: 'push' as const, labelKey: 'notifications.preferences.channels.push', descKey: 'notifications.preferences.channels.pushDescription' },
+  { key: 'email' as const, labelKey: 'notifications.preferences.channels.email', descKey: 'notifications.preferences.channels.emailDescription' },
 ] as const;
+
+/** 获取邮件渠道在当前通知类型下的可用性。 */
+function isEmailChannelAvailable(type: keyof NotificationPreferences) {
+  return type === 'alert';
+}
+
+/** 获取邮件渠道不可用时的辅助说明键。 */
+function getEmailUnavailableReasonKey(type: keyof NotificationPreferences) {
+  if (type === 'workorder') {
+    return 'notifications.preferences.channels.emailUnavailableWorkorder';
+  }
+
+  return 'notifications.preferences.channels.emailUnavailableSystem';
+}
+
+/** 判断某一行的「全部」开关是否已经全部打开。 */
+function isRowFullyEnabled(type: keyof NotificationPreferences, rowPrefs: NotificationPreferences[keyof NotificationPreferences]) {
+  return rowPrefs.signalr && rowPrefs.push && (type !== 'alert' || rowPrefs.email);
+}
+
+/** 判断当前通知类型下的某个渠道是否允许切换。 */
+function canToggleChannel(
+  type: keyof NotificationPreferences,
+  channel: keyof ChannelPreference,
+  pushSupported: boolean,
+  permission: NotificationPermission | 'default',
+) {
+  if (channel === 'signalr') {
+    return true;
+  }
+
+  if (channel === 'push') {
+    return pushSupported && permission !== 'denied';
+  }
+
+  return isEmailChannelAvailable(type);
+}
 
 /**
  * 通知偏好设置卡片
@@ -50,8 +87,7 @@ export function NotificationPreferenceCard({
 
   /** 切换单个渠道开关 */
   const toggleChannel = (type: keyof NotificationPreferences, channel: keyof ChannelPreference) => {
-    // 邮件告警尚未接入投递链路，前端不能提交一个看似成功但永远不会发送的开关状态。
-    if (!prefs || channel === 'email') return;
+    if (!prefs || !canToggleChannel(type, channel, pushSupported, permission)) return;
     const updated = { ...prefs };
     updated[type] = { ...updated[type], [channel]: !updated[type][channel] };
     updateMutation.mutate(updated);
@@ -61,10 +97,13 @@ export function NotificationPreferenceCard({
   const toggleRow = (type: keyof NotificationPreferences) => {
     if (!prefs) return;
     const current = prefs[type];
-    // “全部”只覆盖已实现的实时和浏览器推送渠道，邮件固定保持关闭。
-    const allOn = current.signalr && current.push;
+    const allOn = isRowFullyEnabled(type, current);
     const updated = { ...prefs };
-    updated[type] = { signalr: !allOn, push: !allOn, email: false };
+    updated[type] = {
+      signalr: !allOn,
+      push: !allOn,
+      email: type === 'alert' ? !allOn : false,
+    };
     updateMutation.mutate(updated);
   };
 
@@ -91,7 +130,7 @@ export function NotificationPreferenceCard({
             <TableBody>
               {notifTypes.map((nt) => {
                 const rowPrefs = prefs[nt.key];
-                const allOn = rowPrefs.signalr && rowPrefs.push;
+                const allOn = isRowFullyEnabled(nt.key, rowPrefs);
                 return (
                   <TableRow key={nt.key}>
                     <TableCell>
@@ -101,21 +140,24 @@ export function NotificationPreferenceCard({
                       </div>
                     </TableCell>
                     {channels.map((ch) => {
-                      const isPush = ch.key === 'push';
                       const isEmail = ch.key === 'email';
-                      const emailDescriptionId = `notification-email-unavailable-${nt.key}`;
-                      const disabled = !ch.available
-                        || (isPush && (!pushSupported || permission === 'denied'));
+                      const isChannelEnabled = canToggleChannel(nt.key, ch.key, pushSupported, permission);
+                      const emailDescriptionId = `notification-email-description-${nt.key}`;
+                      const emailDescriptionKey = isEmail
+                        ? (isEmailChannelAvailable(nt.key)
+                          ? 'notifications.preferences.channels.emailDescription'
+                          : getEmailUnavailableReasonKey(nt.key))
+                        : undefined;
                       return (
                         <TableCell key={ch.key} className="text-center">
                           {isEmail && (
                             <span id={emailDescriptionId} className="sr-only">
-                              {t('notifications.preferences.channels.emailUnavailable')}
+                              {t(emailDescriptionKey ?? 'notifications.preferences.channels.emailDescription')}
                             </span>
                           )}
                           <Switch
-                            checked={isEmail ? false : rowPrefs[ch.key]}
-                            disabled={disabled || updateMutation.isPending}
+                            checked={rowPrefs[ch.key]}
+                            disabled={!isChannelEnabled || updateMutation.isPending}
                             aria-label={t('notifications.preferences.toggleChannel', {
                               type: t(nt.labelKey),
                               channel: t(ch.labelKey),

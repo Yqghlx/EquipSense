@@ -122,7 +122,8 @@ for smoke_port in "$BACKEND_PORT" "$FRONTEND_PORT" "$EDGE_PORT"; do
 done
 
 cleanup() {
-  local exit_code="$?"
+  # 由 EXIT trap 在调用前显式传入退出码，避免清理函数内部命令覆盖失败状态。
+  local exit_code="$1"
   trap - EXIT
 
   if [[ "$COMPOSE_READY" = true ]]; then
@@ -131,7 +132,7 @@ cleanup() {
   rm -rf -- "$SMOKE_ROOT"
   exit "$exit_code"
 }
-trap cleanup EXIT
+trap 'cleanup "$?"' EXIT
 
 for required_command in docker openssl awk curl jq; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
@@ -147,7 +148,8 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
 fi
 
 if ! docker image inspect "$BACKEND_IMAGE" "$FRONTEND_IMAGE" "$EDGEGATEWAY_IMAGE" >/dev/null 2>&1; then
-  fatal "找不到本地 smoke 镜像，请先构建 $BACKEND_IMAGE、$FRONTEND_IMAGE 和 $EDGEGATEWAY_IMAGE"
+  # 中文标点可能被 Bash 当作变量名的一部分；使用花括号避免 set -u 将错误提示本身变成二次故障。
+  fatal "找不到本地 smoke 镜像，请先构建 ${BACKEND_IMAGE}、${FRONTEND_IMAGE} 和 ${EDGEGATEWAY_IMAGE}"
 fi
 
 mkdir -p "$RUNTIME_DOCKER/ssl" "$RUNTIME_DOCKER/mqtt-certs" "$RUNTIME_DOCKER/mqtt-ca" "$RUNTIME_DOCKER/mosquitto_passwd" "$RUNTIME_DOCKER/rabbitmq" "$RUNTIME_DOCKER/prometheus" "$RUNTIME_DOCKER/grafana/provisioning/datasources" "$RUNTIME_DOCKER/grafana/provisioning/dashboards" "$RUNTIME_DOCKER/waf-rules"

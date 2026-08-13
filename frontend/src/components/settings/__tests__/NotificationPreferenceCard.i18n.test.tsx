@@ -8,7 +8,7 @@ import type { NotificationPreferences } from '../../../hooks/useNotificationPref
 /** 通知偏好设置测试使用的英文翻译。 */
 const translations: Record<string, string> = {
   'notifications.preferences.title': 'Notification preferences',
-  'notifications.preferences.description': 'Customize how you receive each notification type',
+  'notifications.preferences.description': 'Customize how you receive each notification type; alert email requires SMTP, while work order and system email are not available yet',
   'notifications.preferences.loading': 'Loading...',
   'notifications.preferences.table.type': 'Notification type',
   'notifications.preferences.table.all': 'All',
@@ -23,8 +23,10 @@ const translations: Record<string, string> = {
   'notifications.preferences.channels.push': 'Browser push',
   'notifications.preferences.channels.pushDescription': 'Push notifications when the browser is closed',
   'notifications.preferences.channels.email': 'Email notifications',
-  'notifications.preferences.channels.emailDescription': 'Email alert delivery is not available yet',
-  'notifications.preferences.channels.emailUnavailable': 'Email alert delivery is not available yet',
+  'notifications.preferences.channels.emailDescription': 'Alert email requires SMTP before it can be sent',
+  'notifications.preferences.channels.emailUnavailable': 'Email notifications are not available yet',
+  'notifications.preferences.channels.emailUnavailableWorkorder': 'Work order email is not available yet',
+  'notifications.preferences.channels.emailUnavailableSystem': 'System email is not available yet',
   'notifications.preferences.push.unsupported': 'This browser does not support push notifications. The browser push channel is unavailable.',
   'notifications.preferences.push.title': 'Browser push subscription',
   'notifications.preferences.push.subscribed': 'Subscribed; browser push notifications are ready',
@@ -92,12 +94,15 @@ describe('通知偏好设置英文界面', () => {
     renderCard();
 
     expect(screen.getByText('Notification preferences')).toBeInTheDocument();
-    expect(screen.getByText('Customize how you receive each notification type')).toBeInTheDocument();
+    expect(screen.getByText('Customize how you receive each notification type; alert email requires SMTP, while work order and system email are not available yet'))
+      .toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Notification type' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Realtime push' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Browser push' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Email notifications' })).toBeInTheDocument();
-    expect(screen.getAllByText('Email alert delivery is not available yet')).toHaveLength(3);
+    expect(screen.getByText('Alert email requires SMTP before it can be sent')).toBeInTheDocument();
+    expect(screen.getByText('Work order email is not available yet')).toBeInTheDocument();
+    expect(screen.getByText('System email is not available yet')).toBeInTheDocument();
     expect(screen.getByText('Alert notifications')).toBeInTheDocument();
     expect(screen.getByText('Work order notifications')).toBeInTheDocument();
     expect(screen.getByText('System notifications')).toBeInTheDocument();
@@ -107,34 +112,60 @@ describe('通知偏好设置英文界面', () => {
     expect(document.body.textContent).not.toMatch(/[\u3400-\u9fff]/);
   });
 
-  it('点击渠道开关应保留现有更新行为并提供英文无障碍名称', async () => {
+  it('点击告警邮件开关应提交 email 打开状态', async () => {
     const user = userEvent.setup();
     renderCard();
 
-    await user.click(screen.getByRole('switch', { name: 'Toggle Alert notifications via Realtime push' }));
+    const alertEmailSwitch = screen.getByRole('switch', { name: 'Toggle Alert notifications via Email notifications' });
+    expect(alertEmailSwitch).toHaveAccessibleDescription('Alert email requires SMTP before it can be sent');
+    expect(alertEmailSwitch).not.toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(alertEmailSwitch);
 
     expect(mockUpdate).toHaveBeenCalledWith({
-      alert: { signalr: false, push: true, email: false },
+      alert: { signalr: true, push: true, email: true },
       workorder: mockPreferences.workorder,
       system: mockPreferences.system,
     });
   });
 
-  it('邮件渠道应明确禁用且整行开关不能开启邮件', async () => {
+  it('告警行“全部”开关应包含 email', async () => {
     const user = userEvent.setup();
     renderCard();
 
-    const emailSwitch = screen.getByRole('switch', {
-      name: 'Toggle Alert notifications via Email notifications',
+    await user.click(screen.getByRole('switch', { name: 'Toggle all Alert notifications channels' }));
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      alert: { signalr: true, push: true, email: true },
+      workorder: mockPreferences.workorder,
+      system: mockPreferences.system,
     });
-    expect(emailSwitch).toHaveAttribute('aria-disabled', 'true');
-    await user.click(emailSwitch);
+  });
+
+  it('工单和系统邮件应禁用且全部开关不伪造 email', async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    const workorderEmailSwitch = screen.getByRole('switch', {
+      name: 'Toggle Work order notifications via Email notifications',
+    });
+    expect(workorderEmailSwitch).toHaveAttribute('aria-disabled', 'true');
+    expect(workorderEmailSwitch).toHaveAccessibleDescription('Work order email is not available yet');
+    await user.click(workorderEmailSwitch);
     expect(mockUpdate).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('switch', { name: 'Toggle all Alert notifications channels' }));
+    const systemEmailSwitch = screen.getByRole('switch', {
+      name: 'Toggle System notifications via Email notifications',
+    });
+    expect(systemEmailSwitch).toHaveAttribute('aria-disabled', 'true');
+    expect(systemEmailSwitch).toHaveAccessibleDescription('System email is not available yet');
+    await user.click(systemEmailSwitch);
+    expect(mockUpdate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('switch', { name: 'Toggle all Work order notifications channels' }));
     expect(mockUpdate).toHaveBeenCalledWith({
-      alert: { signalr: false, push: false, email: false },
-      workorder: mockPreferences.workorder,
+      alert: mockPreferences.alert,
+      workorder: { signalr: false, push: false, email: false },
       system: mockPreferences.system,
     });
   });

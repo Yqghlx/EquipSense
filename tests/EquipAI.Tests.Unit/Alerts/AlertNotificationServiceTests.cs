@@ -1,4 +1,5 @@
 using EquipAI.Application.Alerts;
+using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
@@ -6,6 +7,7 @@ using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -24,14 +26,21 @@ namespace EquipAI.Tests.Unit.Alerts;
 public class AlertNotificationServiceTests
 {
     private static async Task<(AppDbContext db, AlertNotificationService svc)> CreateAsync(
-        Func<AppDbContext, Task>? seed = null)
+        Func<AppDbContext, Task>? seed = null,
+        IInterceptor? interceptor = null)
     {
         var dbName = Guid.NewGuid().ToString();
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
+        services.AddDbContext<AppDbContext>(options =>
+        {
+            options.UseInMemoryDatabase(dbName);
+            if (interceptor is not null)
+                options.AddInterceptors(interceptor);
+        });
         services.AddLogging();
         services.AddHttpClient("AlertIntegration");
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(Guid.Empty));
+        services.AddScoped<NotificationPreferenceService>();
         var sp = services.BuildServiceProvider();
         var db = sp.GetRequiredService<AppDbContext>();
 
@@ -53,6 +62,7 @@ public class AlertNotificationServiceTests
         services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
         services.AddLogging();
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(Guid.Empty));
+        services.AddScoped<NotificationPreferenceService>();
         var sp = services.BuildServiceProvider();
         var db = sp.GetRequiredService<AppDbContext>();
 
@@ -79,6 +89,7 @@ public class AlertNotificationServiceTests
         services.AddDbContext<AppDbContext>(o => o.UseInMemoryDatabase(dbName));
         services.AddLogging();
         services.AddScoped<ITenantContext>(_ => new TestTenantContext(Guid.Empty));
+        services.AddScoped<NotificationPreferenceService>();
         var sp = services.BuildServiceProvider();
         var db = sp.GetRequiredService<AppDbContext>();
 
@@ -143,6 +154,140 @@ public class AlertNotificationServiceTests
         notifications.Should().HaveCount(3, "仅 SystemAdmin/MaintenanceLead/Technician 应收到告警通知");
         notifications.All(n => n.Type == "alert").Should().BeTrue();
         notifications.All(n => n.RelatedId == alertId).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Alert_Email_Preference_Should_Enqueue_Only_Eligible_Users()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var optedInUserId = Guid.NewGuid();
+        var noEmailUserId = Guid.NewGuid();
+        var optedOutUserId = Guid.NewGuid();
+        var inactiveUserId = Guid.NewGuid();
+        var (db, svc) = await CreateAsync(async ctx =>
+        {
+            await ctx.Users.AddRangeAsync(
+                new User
+                {
+                    Id = optedInUserId,
+                    TenantId = tenantId,
+                    Role = UserRole.Technician,
+                    Username = "email-opted-in",
+                    PasswordHash = "x",
+                    Email = "opted-in@example.com",
+                    NotificationPrefs = "{\"alert\":{\"email\":true}}",
+                },
+                new User
+                {
+                    Id = noEmailUserId,
+                    TenantId = tenantId,
+                    Role = UserRole.MaintenanceLead,
+                    Username = "email-missing",
+                    PasswordHash = "x",
+                    NotificationPrefs = "{\"alert\":{\"email\":true}}",
+                },
+                new User
+                {
+                    Id = optedOutUserId,
+                    TenantId = tenantId,
+                    Role = UserRole.SystemAdmin,
+                    Username = "email-opted-out",
+                    PasswordHash = "x",
+                    Email = "opted-out@example.com",
+                    NotificationPrefs = "{\"alert\":{\"email\":false}}",
+                },
+                new User
+                {
+                    Id = inactiveUserId,
+                    TenantId = tenantId,
+                    Role = UserRole.Technician,
+                    Username = "email-inactive",
+                    PasswordHash = "x",
+                    Email = "inactive@example.com",
+                    IsActive = false,
+                    NotificationPrefs = "{\"alert\":{\"email\":true}}",
+                });
+            await ctx.SaveChangesAsync();
+        });
+
+        await svc.DispatchAsync(MakeEvent(alertId, tenantId), MakeAlert(alertId, tenantId));
+
+        var notifications = await db.Notifications
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId)
+            .ToListAsync();
+        notifications.Should().HaveCount(3);
+        notifications.Select(item => item.Id).Should().OnlyHaveUniqueItems();
+
+        var deliveries = await db.EmailNotificationDeliveries
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId)
+            .ToListAsync();
+        deliveries.Should().ContainSingle();
+        deliveries[0].UserId.Should().Be(optedInUserId);
+        deliveries[0].NotificationId.Should().Be(
+            notifications.Single(item => item.UserId == optedInUserId).Id);
+    }
+
+    [Fact]
+    public async Task 同一告警事件重放不应重复创建站内通知或邮件任务()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var (db, svc) = await CreateAsync(async ctx =>
+        {
+            ctx.Users.Add(new User
+            {
+                Id = userId,
+                TenantId = tenantId,
+                Role = UserRole.Technician,
+                Username = "event-idempotency-user",
+                PasswordHash = "x",
+                Email = "event-idempotency@example.com",
+                NotificationPrefs = "{\"alert\":{\"email\":true}}",
+            });
+            await ctx.SaveChangesAsync();
+        });
+        var @event = MakeEvent(alertId, tenantId);
+        var alert = MakeAlert(alertId, tenantId);
+
+        await svc.DispatchAsync(@event, alert);
+        await svc.DispatchAsync(@event, alert);
+
+        (await db.Notifications.IgnoreQueryFilters()
+                .Where(item => item.TenantId == tenantId && item.UserId == userId)
+                .ToListAsync())
+            .Should().ContainSingle();
+        (await db.EmailNotificationDeliveries.IgnoreQueryFilters()
+                .Where(item => item.TenantId == tenantId && item.UserId == userId)
+                .ToListAsync())
+            .Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task 站内通知数据库写入失败时应传播异常以触发事件重试()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var interceptor = new NotificationSaveFailureInterceptor();
+        var (_, svc) = await CreateAsync(async ctx =>
+        {
+            ctx.Users.Add(new User
+            {
+                TenantId = tenantId,
+                Role = UserRole.SystemAdmin,
+                Username = "notification-save-failure-user",
+                PasswordHash = "x",
+            });
+            await ctx.SaveChangesAsync();
+        }, interceptor);
+        interceptor.Enabled = true;
+
+        var act = () => svc.DispatchAsync(MakeEvent(alertId, tenantId), MakeAlert(alertId, tenantId));
+
+        await act.Should().ThrowAsync<DbUpdateException>();
     }
 
     [Theory]
@@ -492,5 +637,28 @@ public class AlertNotificationServiceTests
         public string IsolationMode => "Database";
         public bool IsSystemAdmin => false;
         public Guid UserId => Guid.Empty;
+    }
+
+    /// <summary>
+    /// 仅在测试显式开启后模拟通知事务保存失败，验证事件不能被错误确认。
+    /// </summary>
+    private sealed class NotificationSaveFailureInterceptor : SaveChangesInterceptor
+    {
+        public bool Enabled { get; set; }
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Enabled
+                && eventData.Context?.ChangeTracker.Entries<Notification>()
+                    .Any(entry => entry.State == EntityState.Added) == true)
+            {
+                throw new DbUpdateException("模拟站内通知数据库写入失败");
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }

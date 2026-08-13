@@ -1,4 +1,5 @@
 using AutoMapper;
+using System.Net;
 using System.Security.Cryptography;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.DTOs.Users;
@@ -1064,12 +1065,13 @@ public class AuthService : IAuthService
         await _redisService.SetStringAsync(key, user.Id.ToString(), TimeSpan.FromMinutes(PasswordResetTokenMinutes));
 
         // 发送重置邮件（失败仅记录日志，不中断流程）
-        var resetLink = resetUrlTemplate.Replace("{token}", token);
+        var resetLink = WebUtility.HtmlEncode(resetUrlTemplate.Replace("{token}", token));
+        var displayName = WebUtility.HtmlEncode(user.DisplayName ?? user.Username);
         var subject = "【EquipSense】密码重置";
         var htmlBody = $@"
 <div style='font-family:sans-serif;max-width:480px;margin:0 auto'>
   <h2 style='color:#1e40af'>密码重置</h2>
-  <p>您好 {user.DisplayName ?? user.Username}，</p>
+  <p>您好 {displayName}，</p>
   <p>我们收到了您的密码重置请求。请点击下方按钮重置密码：</p>
   <p style='margin:24px 0'>
     <a href='{resetLink}' style='display:inline-block;padding:10px 24px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px'>重置密码</a>
@@ -1083,8 +1085,20 @@ public class AuthService : IAuthService
 
         try
         {
-            await _emailService.SendAsync(recipientEmail, subject, htmlBody);
-            _logger.LogInformation("密码重置邮件已发送: UserId={UserId}", user.Id);
+            var sent = await _emailService.SendAsync(recipientEmail, subject, htmlBody, ct);
+            if (sent)
+            {
+                _logger.LogInformation("密码重置邮件已发送: UserId={UserId}", user.Id);
+            }
+            else
+            {
+                _logger.LogWarning("密码重置邮件未发送: UserId={UserId}", user.Id);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 请求或宿主取消必须继续传播，避免继续写入“已完成”审计或掩盖停机信号。
+            throw;
         }
         catch (Exception ex)
         {

@@ -150,6 +150,29 @@ else
     fi
   done
 
+  # 告警邮件 worker 的参数会直接影响租约和重试行为；在启动前拒绝非法值，
+  # 避免把配置错误推迟到运行态后才表现为任务长期堆积或立即重试。
+  email_delivery_enabled="$(read_env_value EMAIL_DELIVERY_ENABLED)"
+  if [ -n "$email_delivery_enabled" ] \
+    && ! [[ "$email_delivery_enabled" =~ ^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|0|1)$ ]]; then
+    error "EMAIL_DELIVERY_ENABLED 必须是 true 或 false"
+  fi
+  for key in EMAIL_DELIVERY_POLL_INTERVAL_SECONDS EMAIL_DELIVERY_BATCH_SIZE EMAIL_DELIVERY_LEASE_SECONDS EMAIL_DELIVERY_MAX_ATTEMPTS EMAIL_DELIVERY_RETENTION_DAYS; do
+    value="$(read_env_value "$key")"
+    if [ -n "$value" ] && ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+      error "$key 必须是大于 0 的整数"
+    fi
+  done
+  email_delivery_lease="$(read_env_value EMAIL_DELIVERY_LEASE_SECONDS)"
+  if [[ "$email_delivery_lease" =~ ^[1-9][0-9]*$ ]] \
+    && (( 10#$email_delivery_lease < 30 )); then
+    error "EMAIL_DELIVERY_LEASE_SECONDS 不能小于 30"
+  fi
+  email_delivery_backoff="$(read_env_value EMAIL_DELIVERY_MAX_BACKOFF_SECONDS)"
+  if [ -n "$email_delivery_backoff" ] && ! [[ "$email_delivery_backoff" =~ ^[0-9]+$ ]]; then
+    error "EMAIL_DELIVERY_MAX_BACKOFF_SECONDS 必须是大于等于 0 的整数"
+  fi
+
   rate_limiting_window="$(read_env_value RATE_LIMITING_WINDOW)"
   if [ -n "$rate_limiting_window" ] && ! [[ "$rate_limiting_window" =~ ^[0-9]{2}:[0-9]{2}:[0-9]{2}$ ]]; then
     error "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"

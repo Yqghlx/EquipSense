@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
@@ -188,6 +189,7 @@ public class AlertNotificationService
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var preferenceService = scope.ServiceProvider.GetRequiredService<NotificationPreferenceService>();
 
             var severityText = @event.Severity switch
             {
@@ -198,27 +200,65 @@ public class AlertNotificationService
             };
 
             // 给租户内所有运维相关用户发通知（维保主管 + 技术员 + 系统管理员）
-            var recipientIds = await db.UnfilteredSet<User>()
+            var recipients = await db.UnfilteredSet<User>()
                 .Where(u => u.TenantId == @event.TenantId
                             && u.IsActive
                             && (u.Role == UserRole.SystemAdmin
                                 || u.Role == UserRole.MaintenanceLead
                                 || u.Role == UserRole.Technician))
-                .Select(u => u.Id)
+                .Select(u => new { u.Id, u.Email })
                 .ToListAsync(ct);
 
-            foreach (var userId in recipientIds)
+            var recipientIds = recipients.Select(user => user.Id).ToArray();
+            var emailEnabledUserIds = await preferenceService.GetEnabledUserIdsAsync(
+                @event.TenantId,
+                recipientIds,
+                "alert",
+                "email",
+                ct);
+            var existingRecipientIds = recipientIds.Length == 0
+                ? []
+                : (await db.Notifications
+                    .IgnoreQueryFilters()
+                    .Where(item => item.TenantId == @event.TenantId
+                        && item.SourceEventId == @event.EventId
+                        && recipientIds.Contains(item.UserId))
+                    .Select(item => item.UserId)
+                    .ToListAsync(ct))
+                .ToHashSet();
+
+            foreach (var recipient in recipients)
             {
-                db.Notifications.Add(new Notification
+                // RabbitMQ Inbox 的“处理完成”标记晚于业务事务提交；若进程在两者之间退出，
+                // 同一 EventId 会重投。先查稳定事件键可避免重复站内通知和邮件任务。
+                if (existingRecipientIds.Contains(recipient.Id))
+                    continue;
+
+                var notification = new Notification
                 {
                     TenantId = @event.TenantId,
-                    UserId = userId,
+                    UserId = recipient.Id,
                     Type = "alert",
                     Title = $"[{severityText}] 设备告警：{@event.Metric} 异常",
                     Content = $"设备 {deviceLabel} 的指标 {@event.Metric} 当前值 {@event.Value}，触发 {@event.Severity} 级别告警。",
                     RelatedId = alert.Id,
+                    SourceEventId = @event.EventId,
                     Link = $"/alerts?alertId={alert.Id}",
-                });
+                };
+                db.Notifications.Add(notification);
+
+                // 邮件任务与站内通知使用同一 DbContext、同一次 SaveChanges 提交，
+                // 确保不会出现“邮件已入队但站内通知不存在”或反向的孤儿记录。
+                if (emailEnabledUserIds.Contains(recipient.Id)
+                    && !string.IsNullOrWhiteSpace(recipient.Email))
+                {
+                    db.EmailNotificationDeliveries.Add(new EmailNotificationDelivery
+                    {
+                        TenantId = @event.TenantId,
+                        UserId = recipient.Id,
+                        NotificationId = notification.Id,
+                    });
+                }
             }
 
             await db.SaveChangesAsync(ct);
@@ -230,7 +270,10 @@ public class AlertNotificationService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "站内通知持久化失败: AlertId={AlertId}", alert.Id);
+            // 站内通知和邮件任务是可靠事件处理的一部分。吞掉数据库错误会让 Inbox
+            // 把事件标记为成功并永久丢失通知；上抛后由消息总线按同一 EventId 重试。
+            _logger.LogError(ex, "站内通知持久化失败，将交由事件总线重试: AlertId={AlertId}", alert.Id);
+            throw;
         }
     }
 

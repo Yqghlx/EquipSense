@@ -679,6 +679,71 @@ namespace EquipAI.Infrastructure.Data.Migrations
                     b.ToTable("device_type_templates", (string)null);
                 });
 
+            modelBuilder.Entity("EquipAI.Core.Entities.EmailNotificationDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempt_count");
+
+                    b.Property<DateTime>("AvailableAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("available_at");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)")
+                        .HasColumnName("last_error");
+
+                    b.Property<Guid?>("LockToken")
+                        .HasColumnType("uuid")
+                        .HasColumnName("lock_token");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_until");
+
+                    b.Property<Guid>("NotificationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("notification_id");
+
+                    b.Property<DateTime?>("SentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("sent_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NotificationId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("Status", "AvailableAt", "LockedUntil", "CreatedAt");
+
+                    b.ToTable("email_notification_deliveries", (string)null);
+                });
+
             modelBuilder.Entity("EquipAI.Core.Entities.FaultCase", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1269,6 +1334,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("related_id");
 
+                    b.Property<Guid?>("SourceEventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("source_event_id");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -1294,6 +1363,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                     b.HasIndex("TenantId", "UserId");
 
                     b.HasIndex("UserId", "IsRead");
+
+                    b.HasIndex("TenantId", "UserId", "SourceEventId")
+                        .IsUnique()
+                        .HasFilter("source_event_id IS NOT NULL");
 
                     b.ToTable("notifications", (string)null);
                 });
@@ -1632,6 +1705,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("mfa_enabled");
 
+                    b.Property<string>("MfaRecoveryCodes")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("mfa_recovery_codes");
+
                     b.Property<bool>("MustChangePassword")
                         .HasColumnType("boolean")
                         .HasColumnName("must_change_password");
@@ -1681,10 +1758,6 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(200)")
                         .HasColumnName("totp_secret");
 
-                    b.Property<string>("MfaRecoveryCodes")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("mfa_recovery_codes");
-
                     b.Property<string>("Username")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -1693,15 +1766,18 @@ namespace EquipAI.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Username")
-                        .IsUnique()
-                        .HasDatabaseName("IX_users_username");
-
                     b.HasIndex("EmailLookupHash")
                         .HasDatabaseName("IX_users_email_lookup_hash");
 
                     b.HasIndex("PhoneLookupHash")
                         .HasDatabaseName("IX_users_phone_lookup_hash");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("IX_users_tenant_id");
+
+                    b.HasIndex("Username")
+                        .IsUnique()
+                        .HasDatabaseName("IX_users_username");
 
                     b.ToTable("users", (string)null);
                 });

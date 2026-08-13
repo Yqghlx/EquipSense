@@ -130,6 +130,11 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasIndex(e => e.PhoneLookupHash)
             .HasDatabaseName("IX_users_phone_lookup_hash");
 
+        // 后台认证、通知和租户管理均按 tenant_id 限定用户范围；保留独立租户索引，
+        // 避免这些显式租户查询只能依赖全局用户名或联系方式索引。
+        builder.HasIndex(e => e.TenantId)
+            .HasDatabaseName("IX_users_tenant_id");
+
         // 外键关系 — 租户删除时禁止级联（Restrict），防止误删租户导致用户数据丢失
         builder.HasOne(e => e.Tenant)
             .WithMany(e => e.Users)

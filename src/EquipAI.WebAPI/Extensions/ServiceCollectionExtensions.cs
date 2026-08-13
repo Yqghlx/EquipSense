@@ -221,6 +221,18 @@ public static class ServiceCollectionExtensions
 
         // SMTP 邮件通知配置
         services.Configure<SmtpOptions>(configuration.GetSection("Smtp"));
+        // 告警邮件持久化投递队列配置；SMTP 未配置时 worker 会保持任务 Pending，不消耗重试次数。
+        services.AddOptions<EmailDeliveryOptions>()
+            .Bind(configuration.GetSection(EmailDeliveryOptions.SectionName))
+            .Validate(options => options.PollIntervalSeconds > 0, "邮件投递轮询间隔必须大于 0")
+            .Validate(options => options.BatchSize > 0, "邮件投递批次大小必须大于 0")
+            .Validate(
+                options => options.LeaseSeconds >= EmailDeliveryOptions.MinimumLeaseSeconds,
+                $"邮件投递租约不能小于 {EmailDeliveryOptions.MinimumLeaseSeconds} 秒")
+            .Validate(options => options.MaxAttempts > 0, "邮件投递最大尝试次数必须大于 0")
+            .Validate(options => options.MaxBackoffSeconds >= 0, "邮件投递最大退避不能小于 0")
+            .Validate(options => options.RetentionDays > 0, "邮件投递保留天数必须大于 0")
+            .ValidateOnStart();
 
         // 事件总线实现必须由统一解析器确定，未知值直接失败，避免配置拼写错误静默降级。
         // RabbitMQ 总线以同一单例暴露为业务接口、托管服务和就绪状态，保证生命周期一致。
@@ -527,8 +539,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<NotificationPreferenceService>();
         services.AddScoped<NotificationService>();
 
-        // SMTP 邮件通知服务 — 通过 SMTP 协议发送告警/工单邮件（需配置 Smtp 节）
+        // SMTP 邮件通知服务 — 密码重置仍可直接调用，告警邮件由持久化 worker 异步投递。
         services.AddScoped<SmtpEmailNotificationService>();
+        services.AddScoped<ISmtpMailSender, SmtpMailSender>();
+        services.AddScoped<EmailNotificationDeliveryStore>();
+        services.AddHostedService<EmailNotificationDispatcher>();
 
         // 事件处理器
         services.AddScoped<TelemetryEventHandler>();
