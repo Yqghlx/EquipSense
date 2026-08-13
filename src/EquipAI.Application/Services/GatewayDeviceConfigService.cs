@@ -153,6 +153,11 @@ public class GatewayDeviceConfigService
                 }, true);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 请求取消或宿主停机不是网关故障，必须继续传播，避免取消的 HTTP 请求回退为新的业务校验。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "代理连接测试到网关 {GatewayId} 失败，回退到配置校验", gateway.GatewayId);

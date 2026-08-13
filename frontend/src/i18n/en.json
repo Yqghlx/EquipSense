@@ -1441,7 +1441,14 @@
     "detectability": "Detectability (D)",
     "rpn": "RPN",
     "knowledgeRuleId": "Related Rule",
-    "knowledgeRuleIdPlaceholder": "Optional: enter an existing knowledge rule ID",
+    "knowledgeRulePlaceholder": "Optional: choose a knowledge rule",
+    "noKnowledgeRule": "No related knowledge rule",
+    "systemPreset": "System preset",
+    "disabledRule": "Disabled",
+    "unavailableSelectedRule": "Current related rule (details unavailable)",
+    "knowledgeRuleLoading": "Loading available rules...",
+    "knowledgeRuleLoadFailed": "Rules could not be loaded; you can save without a relation.",
+    "knowledgeRuleHint": "Optional: choose a rule for this device type. System presets are also available.",
     "ratingInvalid": "Each score must be an integer from 1 to 10",
     "editAction": "Edit FMEA entry",
     "enableAction": "Enable FMEA entry",
@@ -1461,8 +1468,7 @@
     "recommendedActionTooLong": "Recommended action must be 1000 characters or fewer",
     "severityRequired": "Severity is required (1-10)",
     "occurrenceRequired": "Occurrence is required (1-10)",
-    "detectabilityRequired": "Detectability is required (1-10)",
-    "knowledgeRuleIdInvalid": "Related rule ID is not a valid GUID"
+    "detectabilityRequired": "Detectability is required (1-10)"
   },
   "workOrders": {
     "reports": "Work Order Reports",

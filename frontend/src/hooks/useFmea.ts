@@ -41,8 +41,41 @@ export interface CreateFmeaEntryRequest {
   knowledgeRuleId?: string;
 }
 
+/** FMEA 表单可关联的知识规则摘要。 */
+export interface FmeaKnowledgeRuleOption {
+  /** 知识规则 ID。 */
+  id: string;
+  /** 规则适用的设备类型。 */
+  deviceType: string;
+  /** 规则名称。 */
+  name: string;
+  /** 规则是否启用。 */
+  enabled: boolean;
+  /** 是否为系统租户提供的行业预置规则。 */
+  isSystemPreset: boolean;
+}
+
 // UpdateFmeaEntryRequest 与 CreateFmeaEntryRequest 字段完全一致，直接复用类型别名
 export type UpdateFmeaEntryRequest = CreateFmeaEntryRequest;
+
+/**
+ * 获取 FMEA 表单可关联的知识规则摘要。
+ * 规则选项是只读查询，实际关联权限仍由后端 FMEA 服务最终校验。
+ */
+export function useFmeaKnowledgeRuleOptions(
+  params: { deviceType?: string; selectedRuleId?: string },
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['fmea-knowledge-rule-options', params],
+    queryFn: async () => {
+      const { data } = await api.get<FmeaKnowledgeRuleOption[]>('/fmea/knowledge-rules', { params });
+      return data;
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: 60_000,
+  });
+}
 
 /**
  * 获取 FMEA 条目列表（分页）

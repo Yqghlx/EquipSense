@@ -45,8 +45,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 1675 xUnit 测试 |
-| Integration test | ~120s | 191 个测试（185 通过、6 个条件跳过，含真实 RabbitMQ 场景） |
+| Unit test | ~30s | 1692 xUnit 测试 |
+| Integration test | ~120s | 193 个测试（187 通过、6 个条件跳过，含真实 RabbitMQ 场景） |
 | NuGet vuln | ~20s | 已纳入阻断门禁 |
 | **合计** | **~5min** | |
 
@@ -60,7 +60,7 @@ workflow_dispatch: true  # 手动触发
 | tsc --noEmit | ~30s | strict: true, 0 error |
 | check:i18n | ~5s | key 完整性 |
 | ESLint | ~30s | `--max-warnings 1` |
-| vitest | ~30s | 490 测试 |
+| vitest | ~30s | 494 测试 |
 | vite build | ~60s | 分包构建 |
 | **合计** | **~3.5min** | |
 
@@ -205,4 +205,4 @@ timeout: 60s
 | 技术债务 | [13-技术债务与改进路线图](./13-技术债务与改进路线图.md) |
 
 ---
-*本文档属于 EquipSense 项目评估体系 · 复核日期：2026-08-13 · 版本：v4.06*
+*本文档属于 EquipSense 项目评估体系 · 复核日期：2026-08-13 · 版本：v4.12*

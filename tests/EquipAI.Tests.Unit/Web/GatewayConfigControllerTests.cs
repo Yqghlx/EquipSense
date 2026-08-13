@@ -43,13 +43,25 @@ public class GatewayConfigControllerTests
     }
 
     /// <summary>构造带 AuthKey 配置的控制器，HttpContext 预置认证头</summary>
-    private static GatewayConfigController CreateController(AppDbContext db, bool withAuthHeader = true)
+    private static GatewayConfigController CreateController(
+        AppDbContext db,
+        bool withAuthHeader = true,
+        IHttpClientFactory? httpClientFactory = null,
+        string? gatewayHost = null)
     {
+        var configurationValues = new Dictionary<string, string?>
+        {
+            ["Gateway:AuthKey"] = AuthKey,
+        };
+        if (gatewayHost is not null)
+        {
+            configurationValues["Gateway:Host"] = gatewayHost;
+            configurationValues["Gateway:HealthPort"] = "8081";
+            configurationValues["Gateway:AllowedHosts:0"] = gatewayHost;
+        }
+
         var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Gateway:AuthKey"] = AuthKey,
-            })
+            .AddInMemoryCollection(configurationValues)
             .Build();
 
         var httpContext = new DefaultHttpContext();
@@ -67,7 +79,7 @@ public class GatewayConfigControllerTests
         return new GatewayConfigController(
             service,
             endpointPolicy,
-            Mock.Of<IHttpClientFactory>(),
+            httpClientFactory ?? Mock.Of<IHttpClientFactory>(),
             config,
             NullLogger<GatewayConfigController>.Instance)
         {
@@ -166,6 +178,26 @@ public class GatewayConfigControllerTests
         devices.Should().HaveCount(2);
     }
 
+    [Fact]
+    public async Task 网关状态代理收到取消时应传播取消而不是返回离线()
+    {
+        var db = await CreateDbAsync();
+        using var httpClient = new HttpClient(new CancellationHandler());
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(item => item.CreateClient("GatewayProxy")).Returns(httpClient);
+        var controller = CreateController(
+            db,
+            httpClientFactory: factory.Object,
+            gatewayHost: "10.20.0.15");
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var act = () => controller.GetGatewayStatus(cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     /// <summary>测试用租户上下文</summary>
     private sealed class TestTenantContext : ITenantContext
     {
@@ -174,5 +206,13 @@ public class GatewayConfigControllerTests
         public string IsolationMode => "Database";
         public bool IsSystemAdmin => false;
         public Guid UserId => Guid.Empty;
+    }
+
+    private sealed class CancellationHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(new OperationCanceledException(cancellationToken));
     }
 }

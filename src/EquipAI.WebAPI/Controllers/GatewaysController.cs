@@ -132,6 +132,11 @@ public class GatewaysController : ControllerBase
                 message = $"网关返回 HTTP {(int)response.StatusCode}",
             });
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 请求取消或宿主停机不是网关离线，必须传播取消，避免继续返回误导性的离线结果。
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "无法连接网关状态端点: {Host}:{Port}", gateway.Host, gateway.HealthPort);

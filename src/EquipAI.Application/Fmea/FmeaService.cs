@@ -12,6 +12,11 @@ namespace EquipAI.Application.Fmea;
 /// </summary>
 public class FmeaService
 {
+    /// <summary>
+    /// 规则选择器最多返回的条目数，避免表单打开时加载不受控的数据量。
+    /// </summary>
+    private const int MaxKnowledgeRuleOptions = 100;
+
     private readonly AppDbContext _db;
     private readonly ITenantContext _tenantContext;
 
@@ -69,6 +74,54 @@ public class FmeaService
             .ToListAsync();
 
         return (items, total);
+    }
+
+    /// <summary>
+    /// 获取 FMEA 表单可关联的知识规则摘要。
+    /// 只返回当前租户和系统租户的规则；编辑停用 FMEA 时通过 selectedRuleId 保留原关联，
+    /// 避免用户仅打开并保存表单就意外解除一条已经存在的关系。
+    /// </summary>
+    public async Task<List<FmeaKnowledgeRuleOptionResponse>> GetKnowledgeRuleOptionsAsync(
+        string? deviceType = null,
+        Guid? selectedRuleId = null,
+        CancellationToken ct = default)
+    {
+        var normalizedDeviceType = string.IsNullOrWhiteSpace(deviceType)
+            ? null
+            : deviceType.Trim();
+
+        var query = _db.KnowledgeRules
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(rule => (rule.TenantId == _tenantContext.TenantId
+                    || rule.TenantId == SystemConstants.SystemTenantId)
+                && (rule.Enabled
+                    || (selectedRuleId.HasValue && rule.Id == selectedRuleId.Value)));
+
+        if (normalizedDeviceType is not null)
+        {
+            query = query.Where(rule => rule.DeviceType == normalizedDeviceType
+                || rule.DeviceType == "*"
+                || (selectedRuleId.HasValue && rule.Id == selectedRuleId.Value));
+        }
+
+        return await query
+            .OrderByDescending(rule => selectedRuleId.HasValue && rule.Id == selectedRuleId.Value)
+            .ThenByDescending(rule => rule.TenantId == _tenantContext.TenantId)
+            .ThenByDescending(rule => normalizedDeviceType != null
+                && rule.DeviceType == normalizedDeviceType)
+            .ThenBy(rule => rule.Name)
+            .ThenBy(rule => rule.Id)
+            .Take(MaxKnowledgeRuleOptions)
+            .Select(rule => new FmeaKnowledgeRuleOptionResponse
+            {
+                Id = rule.Id,
+                DeviceType = rule.DeviceType,
+                Name = rule.Name,
+                Enabled = rule.Enabled,
+                IsSystemPreset = rule.TenantId == SystemConstants.SystemTenantId,
+            })
+            .ToListAsync(ct);
     }
 
     /// <summary>

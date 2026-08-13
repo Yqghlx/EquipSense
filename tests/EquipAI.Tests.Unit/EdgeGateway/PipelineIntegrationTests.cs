@@ -86,7 +86,7 @@ public class PipelineIntegrationTests
         metrics.GetGauge(GatewayMetrics.Names.BufferQueueDepth).Should().Be(2);
 
         buffer.DequeueBatch(1);
-        // 注意：DequeueBatch 没有更新 metrics（仅 Enqueue 时更新）
+        // DequeueBatch 会同步更新队列深度；详细边界由 LocalBufferTests 覆盖。
     }
 
     [Fact]

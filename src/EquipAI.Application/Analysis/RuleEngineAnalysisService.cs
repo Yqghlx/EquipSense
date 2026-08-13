@@ -1,4 +1,5 @@
 using System.Text.Json;
+using EquipAI.Core.Constants;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,11 @@ namespace EquipAI.Application.Analysis;
 /// </summary>
 public class RuleEngineAnalysisService : IRuleEngineAnalysisService
 {
+    /// <summary>
+    /// 单次诊断最多带回的 FMEA 条目数，避免低质量或重复配置导致分析响应无限膨胀。
+    /// </summary>
+    private const int MaxFmeaMatches = 3;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<RuleEngineAnalysisService> _logger;
 
@@ -53,6 +59,7 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
 
         // 查询所有启用的规则：同租户 + 系统租户（通用规则），且设备类型匹配或为通配符
         var rules = await db.UnfilteredSet<Core.Entities.KnowledgeRule>()
+            .AsNoTracking()
             .Where(r => (r.TenantId == tenantId || r.TenantId == Guid.Empty)
                 && r.Enabled
                 && (r.DeviceType == deviceType || r.DeviceType == "*"))
@@ -61,11 +68,19 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
         _logger.LogDebug("查到 {Count} 条候选规则（设备类型={DeviceType}，指标={Metric}）",
             rules.Count, deviceType, metric);
 
-        foreach (var rule in rules)
+        // 数据库未承诺查询顺序；明确排序后，同一告警在重启、主从切换或执行计划变化时仍得到一致诊断。
+        // 租户自定义规则优先于系统规则，随后偏好精确设备类型，再以置信度、创建时间和 ID 消除并列。
+        foreach (var rule in rules
+            .OrderByDescending(r => r.TenantId == tenantId)
+            .ThenByDescending(r => r.DeviceType == deviceType)
+            .ThenByDescending(r => r.ConfidenceWeight)
+            .ThenByDescending(r => r.CreatedAt)
+            .ThenBy(r => r.Id))
         {
             if (TryMatchConditions(rule.Conditions, metric, value))
             {
                 _logger.LogInformation("规则匹配成功: {RuleName} (RuleId={RuleId})", rule.Name, rule.Id);
+                var fmeaMatches = await GetFmeaMatchesAsync(db, tenantId, rule.Id, ct);
 
                 return new RuleMatchResult(
                     RuleId: rule.Id,
@@ -73,13 +88,48 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
                     Conclusion: rule.Conclusion,
                     RecommendedActions: rule.RecommendedActions,
                     CheckSteps: rule.CheckSteps,
-                    ConfidenceWeight: (double)rule.ConfidenceWeight);
+                    ConfidenceWeight: (double)rule.ConfidenceWeight,
+                    FmeaMatches: fmeaMatches);
             }
         }
 
         _logger.LogDebug("未找到匹配规则（设备={DeviceId}，指标={Metric}，值={Value}）",
             deviceId, metric, value);
         return null;
+    }
+
+    /// <summary>
+    /// 查询与已命中知识规则关联的 FMEA 条目。
+    /// 当前租户条目优先于系统共享条目，随后按 RPN 降序排列；这样客户自定义的维护经验不会被
+    /// 同一规则下的系统通用建议覆盖，同时高风险模式会优先呈现给维修人员。
+    /// </summary>
+    private static async Task<IReadOnlyList<FmeaMatchResult>> GetFmeaMatchesAsync(
+        AppDbContext db,
+        Guid tenantId,
+        Guid ruleId,
+        CancellationToken ct)
+    {
+        var entries = await db.UnfilteredSet<Core.Entities.FmeaEntry>()
+            .AsNoTracking()
+            .Where(e => e.KnowledgeRuleId == ruleId
+                && e.IsEnabled
+                && (e.TenantId == tenantId || e.TenantId == SystemConstants.SystemTenantId))
+            .ToListAsync(ct);
+
+        return entries
+            .OrderByDescending(e => e.TenantId == tenantId)
+            .ThenByDescending(e => e.Rpn)
+            .ThenBy(e => e.Id)
+            .Take(MaxFmeaMatches)
+            .Select(e => new FmeaMatchResult(
+                e.Id,
+                e.FailureMode,
+                e.Cause,
+                e.Effect,
+                e.Detection,
+                e.RecommendedAction,
+                e.Rpn))
+            .ToList();
     }
 
     /// <summary>

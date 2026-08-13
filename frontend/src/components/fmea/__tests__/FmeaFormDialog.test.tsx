@@ -1,8 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FmeaFormDialog from '../FmeaFormDialog';
-import type { FmeaEntry } from '../../../hooks/useFmea';
+import {
+  useFmeaKnowledgeRuleOptions,
+  type FmeaEntry,
+} from '../../../hooks/useFmea';
 
 const mocks = vi.hoisted(() => ({
   createMutateAsync: vi.fn(),
@@ -23,7 +26,14 @@ const translations: Record<string, string> = {
   'fmea.occurrence': '发生频率 (O)',
   'fmea.detectability': '可检测性 (D)',
   'fmea.knowledgeRuleId': '关联规则',
-  'fmea.knowledgeRuleIdPlaceholder': '可选：输入规则 ID',
+  'fmea.knowledgeRulePlaceholder': '可选：选择知识规则',
+  'fmea.noKnowledgeRule': '不关联知识规则',
+  'fmea.systemPreset': '行业预置',
+  'fmea.disabledRule': '已停用',
+  'fmea.unavailableSelectedRule': '当前关联规则（详情不可用）',
+  'fmea.knowledgeRuleLoading': '正在加载规则...',
+  'fmea.knowledgeRuleLoadFailed': '规则列表加载失败，可继续不关联保存。',
+  'fmea.knowledgeRuleHint': '可选：选择当前设备类型的知识规则，系统预置规则也可关联。',
   'fmea.deviceTypeRequired': '请输入设备类型',
   'fmea.failureModeRequired': '请输入故障模式',
   'fmea.causeRequired': '请输入故障原因',
@@ -35,7 +45,6 @@ const translations: Record<string, string> = {
   'fmea.detectabilityRequired': '请输入可检测性 (1-10)',
   'fmea.ratingInvalid': '评分必须是 1-10 的整数',
   'fmea.deviceTypeTooLong': '设备类型长度不能超过 100 个字符',
-  'fmea.knowledgeRuleIdInvalid': '关联规则 ID 格式无效',
   'fmea.rpnPreview': 'RPN',
   'fmea.submitFailed': '保存失败，请检查后重试。',
   'common.cancel': '取消',
@@ -56,6 +65,7 @@ vi.mock('../../../hooks/useFmea', () => ({
     mutateAsync: mocks.updateMutateAsync,
     isPending: false,
   })),
+  useFmeaKnowledgeRuleOptions: vi.fn(),
 }));
 
 const mockEntry: FmeaEntry = {
@@ -94,6 +104,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.createMutateAsync.mockResolvedValue({ id: 'fmea-created' });
   mocks.updateMutateAsync.mockResolvedValue({ id: mockEntry.id });
+  vi.mocked(useFmeaKnowledgeRuleOptions).mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+  } as unknown as ReturnType<typeof useFmeaKnowledgeRuleOptions>);
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe('FmeaFormDialog', () => {
@@ -187,7 +206,7 @@ describe('FmeaFormDialog', () => {
     expect(screen.getByLabelText('故障模式')).toHaveValue('轴承磨损');
   });
 
-  it('同步后端字段长度并校验关联规则 ID', async () => {
+  it('同步后端字段长度并阻止设备类型超长提交', async () => {
     const user = userEvent.setup();
     render(<FmeaFormDialog open entry={null} onOpenChange={vi.fn()} />);
 
@@ -196,13 +215,71 @@ describe('FmeaFormDialog', () => {
 
     await fillRequiredFields(user);
     fireEvent.change(screen.getByLabelText('设备类型'), { target: { value: 'a'.repeat(101) } });
-    await user.type(screen.getByLabelText('关联规则'), 'not-a-guid');
     await user.click(screen.getByRole('button', { name: '保存' }));
 
     expect(screen.getByText('设备类型长度不能超过 100 个字符')).toHaveAttribute('role', 'alert');
-    expect(screen.getByLabelText('关联规则')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByLabelText('关联规则')).toHaveAttribute('aria-describedby', 'fmea-knowledge-rule-id-error');
-    expect(screen.getByText('关联规则 ID 格式无效')).toHaveAttribute('role', 'alert');
     expect(mocks.createMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('规则选择器选择规则后提交关联 ID', async () => {
+    const user = userEvent.setup();
+    const ruleOption = {
+      id: '11111111-1111-4111-8111-111111111111',
+      deviceType: '泵',
+      name: '泵振动异常规则',
+      enabled: true,
+      isSystemPreset: false,
+    };
+    vi.mocked(useFmeaKnowledgeRuleOptions).mockReturnValue({
+      data: [ruleOption],
+      isLoading: false,
+      isError: false,
+    } as ReturnType<typeof useFmeaKnowledgeRuleOptions>);
+    render(<FmeaFormDialog open entry={null} onOpenChange={vi.fn()} />);
+
+    expect(screen.getByLabelText('设备类型')).toHaveProperty('maxLength', 100);
+    expect(screen.getByLabelText('建议措施')).toHaveProperty('maxLength', 1000);
+
+    await fillRequiredFields(user);
+    const ruleSelect = screen.getByRole('combobox', { name: '关联规则' });
+    ruleSelect.focus();
+    await user.keyboard('{ArrowDown}');
+    await user.click(screen.getByRole('option', { name: /泵振动异常规则/ }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(mocks.createMutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ knowledgeRuleId: ruleOption.id }),
+    ));
+  });
+
+  it('规则选择器可以清除可选关联', async () => {
+    const user = userEvent.setup();
+    const ruleOption = {
+      id: '22222222-2222-4222-8222-222222222222',
+      deviceType: '泵',
+      name: '泵温度异常规则',
+      enabled: true,
+      isSystemPreset: true,
+    };
+    vi.mocked(useFmeaKnowledgeRuleOptions).mockReturnValue({
+      data: [ruleOption],
+      isLoading: false,
+      isError: false,
+    } as ReturnType<typeof useFmeaKnowledgeRuleOptions>);
+    render(<FmeaFormDialog open entry={null} onOpenChange={vi.fn()} />);
+
+    await fillRequiredFields(user);
+    const ruleSelect = screen.getByRole('combobox', { name: '关联规则' });
+    ruleSelect.focus();
+    await user.keyboard('{ArrowDown}');
+    await user.click(screen.getByRole('option', { name: /泵温度异常规则/ }));
+    ruleSelect.focus();
+    await user.keyboard('{ArrowDown}');
+    await user.click(screen.getByRole('option', { name: '不关联知识规则' }));
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(mocks.createMutateAsync).toHaveBeenCalledWith(
+      expect.not.objectContaining({ knowledgeRuleId: expect.anything() }),
+    ));
   });
 });

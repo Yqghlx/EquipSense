@@ -15,12 +15,19 @@ public record BufferEntry(string Topic, byte[] Payload);
 public class LocalBuffer : IAsyncDisposable
 {
     private readonly ConcurrentQueue<BufferEntry> _queue = new();
+    /// <summary>
+    /// 保护容量检查、驱逐、入队和出队之间的复合操作，避免并发采集突破有界队列。
+    /// </summary>
+    private readonly object _queueLock = new();
     private readonly int _capacity;
     private readonly SqliteBufferStore? _offlineStore;
     private readonly GatewayMetrics? _metrics;
 
     public LocalBuffer(int capacity = 10000, SqliteBufferStore? offlineStore = null, GatewayMetrics? metrics = null)
     {
+        if (capacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "内存缓冲容量必须大于 0");
+
         _capacity = capacity;
         _offlineStore = offlineStore;
         _metrics = metrics;
@@ -29,7 +36,16 @@ public class LocalBuffer : IAsyncDisposable
     /// <summary>
     /// 当前缓冲区中的消息数量
     /// </summary>
-    public int Count => _queue.Count;
+    public int Count
+    {
+        get
+        {
+            lock (_queueLock)
+            {
+                return _queue.Count;
+            }
+        }
+    }
 
     /// <summary>
     /// 入队一条消息。
@@ -44,33 +60,49 @@ public class LocalBuffer : IAsyncDisposable
     /// </summary>
     public async Task EnqueueAsync(string topic, byte[] payload)
     {
-        while (_queue.Count >= _capacity)
+        List<BufferEntry>? evictedEntries = null;
+
+        // Count、驱逐和入队必须在同一临界区完成；否则多个采集器可能同时看到空位，
+        // 在各自入队后突破容量上限。临界区只操作内存，避免磁盘 I/O 阻塞其它采集器。
+        lock (_queueLock)
         {
-            if (_queue.TryDequeue(out var evicted))
+            while (_queue.Count >= _capacity)
             {
-                if (_offlineStore is not null)
+                if (!_queue.TryDequeue(out var evicted))
+                    break;
+
+                evictedEntries ??= [];
+                evictedEntries.Add(evicted);
+            }
+
+            _queue.Enqueue(new BufferEntry(topic, payload));
+            _metrics?.SetGauge(GatewayMetrics.Names.BufferQueueDepth, _queue.Count);
+        }
+
+        if (evictedEntries is null)
+            return;
+
+        foreach (var evicted in evictedEntries)
+        {
+            if (_offlineStore is not null)
+            {
+                try
                 {
-                    try
-                    {
-                        await _offlineStore.StoreAsync(evicted.Topic, evicted.Payload);
-                    }
-                    catch (Exception)
-                    {
-                        // SQLite 持久化失败（如磁盘满），只能放弃这条消息。
-                        // 记录到 metrics 让运维感知到数据丢失风险。
-                        _metrics?.Increment(GatewayMetrics.Names.BufferDroppedTotal);
-                    }
+                    await _offlineStore.StoreAsync(evicted.Topic, evicted.Payload);
                 }
-                else
+                catch (Exception)
                 {
-                    // 未配置 offlineStore，内存缓冲是唯一存储，丢弃即永久丢失。
+                    // SQLite 持久化失败（如磁盘满），只能放弃这条消息。
+                    // 记录到 metrics 让运维感知到数据丢失风险。
                     _metrics?.Increment(GatewayMetrics.Names.BufferDroppedTotal);
                 }
             }
+            else
+            {
+                // 未配置 offlineStore，内存缓冲是唯一存储，丢弃即永久丢失。
+                _metrics?.Increment(GatewayMetrics.Names.BufferDroppedTotal);
+            }
         }
-
-        _queue.Enqueue(new BufferEntry(topic, payload));
-        _metrics?.SetGauge(GatewayMetrics.Names.BufferQueueDepth, _queue.Count);
     }
 
     /// <summary>
@@ -79,12 +111,18 @@ public class LocalBuffer : IAsyncDisposable
     public List<BufferEntry> DequeueBatch(int maxCount)
     {
         var batch = new List<BufferEntry>();
-        for (var i = 0; i < maxCount; i++)
+        lock (_queueLock)
         {
-            if (!_queue.TryDequeue(out var entry))
-                break;
-            batch.Add(entry);
+            for (var i = 0; i < maxCount; i++)
+            {
+                if (!_queue.TryDequeue(out var entry))
+                    break;
+                batch.Add(entry);
+            }
+
+            _metrics?.SetGauge(GatewayMetrics.Names.BufferQueueDepth, _queue.Count);
         }
+
         return batch;
     }
 
@@ -104,7 +142,12 @@ public class LocalBuffer : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
-        _queue.Clear();
+        lock (_queueLock)
+        {
+            _queue.Clear();
+            _metrics?.SetGauge(GatewayMetrics.Names.BufferQueueDepth, 0);
+        }
+
         return ValueTask.CompletedTask;
     }
 }

@@ -740,13 +740,23 @@ public class DataSeeder
         if (fmeaExists) return;
 
         var defaultTenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var knowledgeRuleIds = await _dbContext.KnowledgeRules
+            .IgnoreQueryFilters()
+            .Where(rule => rule.TenantId == SystemConstants.SystemTenantId
+                && rule.DeviceType == "空压机")
+            .ToDictionaryAsync(rule => rule.Name, rule => rule.Id);
+
+        // 新部署的演示 FMEA 直接关联到对应的系统知识规则，使告警命中规则后能展示结构化维护依据。
+        // 未找到规则时保留 null，兼容精简播种或管理员删除预置规则的环境，不阻塞 FMEA 初始化。
+        Guid? GetKnowledgeRuleId(string ruleName) =>
+            knowledgeRuleIds.TryGetValue(ruleName, out var ruleId) ? ruleId : null;
 
         var entries = new[]
         {
             // 空压机
-            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "电机过载", Cause = "负载过大或冷却不足", Effect = "电机烧毁导致停机", Detection = "电流 > 180A 持续 5 分钟", RecommendedAction = "减小负载，检查冷却系统", Severity = 8, Occurrence = 4, Detectability = 3, Rpn = 96 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "电机过载", Cause = "负载过大或冷却不足", Effect = "电机烧毁导致停机", Detection = "电流 > 180A 持续 5 分钟", RecommendedAction = "减小负载，检查冷却系统", Severity = 8, Occurrence = 4, Detectability = 3, Rpn = 96, KnowledgeRuleId = GetKnowledgeRuleId("电机电流过高诊断") },
             new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "排气压力异常", Cause = "气阀泄漏或滤芯堵塞", Effect = "产气效率下降", Detection = "排气压力 < 0.5MPa 或 > 1.1MPa", RecommendedAction = "检查气阀密封，更换滤芯", Severity = 6, Occurrence = 5, Detectability = 2, Rpn = 60 },
-            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "油温过高", Cause = "润滑油不足或冷却器失效", Effect = "润滑油变质加速磨损", Detection = "油温 > 90°C", RecommendedAction = "补充润滑油，清洗冷却器", Severity = 7, Occurrence = 3, Detectability = 2, Rpn = 42 },
+            new FmeaEntry { TenantId = defaultTenantId, DeviceType = "空压机", FailureMode = "油温过高", Cause = "润滑油不足或冷却器失效", Effect = "润滑油变质加速磨损", Detection = "油温 > 90°C", RecommendedAction = "补充润滑油，清洗冷却器", Severity = 7, Occurrence = 3, Detectability = 2, Rpn = 42, KnowledgeRuleId = GetKnowledgeRuleId("油温过高诊断") },
             // 离心泵
             new FmeaEntry { TenantId = defaultTenantId, DeviceType = "离心泵", FailureMode = "轴承磨损", Cause = "润滑不足或对中不良", Effect = "振动增大导致密封失效", Detection = "振动 > 7mm/s", RecommendedAction = "检查润滑和对中，必要时更换轴承", Severity = 7, Occurrence = 5, Detectability = 3, Rpn = 105 },
             new FmeaEntry { TenantId = defaultTenantId, DeviceType = "离心泵", FailureMode = "密封泄漏", Cause = "密封件老化或磨损", Effect = "介质泄漏环境污染", Detection = "目视检查或泄漏检测器", RecommendedAction = "更换机械密封件", Severity = 8, Occurrence = 3, Detectability = 4, Rpn = 96 },

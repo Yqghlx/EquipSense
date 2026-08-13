@@ -6,6 +6,7 @@ using EquipAI.EdgeGateway.Pipeline;
 using EquipAI.EdgeGateway.Protocols;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace EquipAI.Tests.Unit.EdgeGateway;
@@ -292,6 +293,61 @@ public sealed class HealthEndpointsTests
         }
     }
 
+    [Fact]
+    public async Task 停机取消连接测试时不应记录请求处理失败日志()
+    {
+        var port = GetFreePort();
+        var adapter = new CancellationAwareProtocolAdapter();
+        var logger = new CapturingLogger<HealthEndpoints>();
+        var options = new GatewayOptions { AuthKey = "gateway-secret" };
+        using var serviceProvider = new ServiceCollection().BuildServiceProvider();
+        var endpoints = new HealthEndpoints(
+            logger,
+            options,
+            new GatewayMetrics(),
+            (_, _) => adapter,
+            serviceProvider,
+            port);
+        using var requestCancellation = new CancellationTokenSource();
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", options.AuthKey);
+
+        await endpoints.StartAsync(requestCancellation.Token);
+        try
+        {
+            using var healthResponse = await GetWithRetryAsync(
+                client,
+                $"http://127.0.0.1:{port}/health");
+            healthResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var requestTask = client.PostAsJsonAsync(
+                $"http://127.0.0.1:{port}/test-connection",
+                new { protocol = "modbus-tcp", connectionString = "127.0.0.1:502" });
+            await adapter.WaitForConnectionStartedAsync();
+
+            requestCancellation.Cancel();
+            await endpoints.StopAsync(CancellationToken.None);
+
+            try
+            {
+                using var response = await requestTask;
+            }
+            catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+            {
+                // 监听器在停机时关闭，客户端收到连接中断属于预期结果。
+            }
+
+            logger.Messages.Should().NotContain(
+                message => message.Contains("处理健康检查请求失败", StringComparison.Ordinal),
+                "宿主取消不是健康端点请求故障，不应在停机期间记录误导性错误");
+        }
+        finally
+        {
+            requestCancellation.Cancel();
+            await endpoints.StopAsync(CancellationToken.None);
+        }
+    }
+
     private static async Task<HttpResponseMessage> GetWithRetryAsync(
         HttpClient client,
         string requestUri)
@@ -340,6 +396,57 @@ public sealed class HealthEndpointsTests
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+
+    /// <summary>
+    /// 模拟协议驱动在收到宿主取消后退出连接测试。
+    /// </summary>
+    private sealed class CancellationAwareProtocolAdapter : IProtocolAdapter
+    {
+        private readonly TaskCompletionSource<bool> _started =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public string ProtocolType => "modbus-tcp";
+
+        public bool IsConnected => false;
+
+        public Task ConnectAsync(DeviceConfig config, CancellationToken ct)
+        {
+            _started.TrySetResult(true);
+            return Task.Delay(Timeout.InfiniteTimeSpan, ct);
+        }
+
+        public Task<List<DataPoint>> ReadAsync(string[] pointIds, CancellationToken ct)
+            => Task.FromResult(new List<DataPoint>());
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public Task WaitForConnectionStartedAsync()
+            => _started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    /// <summary>
+    /// 记录健康端点日志，验证宿主取消不会走普通错误分支。
+    /// </summary>
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => NullLogger.Instance.BeginScope(state);
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+        }
     }
 
     private sealed class BlockingProtocolAdapter : IProtocolAdapter

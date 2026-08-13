@@ -21,14 +21,20 @@ git clone <仓库地址> && cd EquipSense
 cp docker/.env.example docker/.env
 ```
 
-为减少手工遗漏，可先运行本地凭据初始化工具。它只生成数据库、缓存、消息队列、MQTT、种子账户、JWT、MFA、PII、网关和监控所需的随机值；不会生成许可证、真实租户 UUID、生产域名或任何证书。命令在这些人工配置尚未完成时返回非零是预期行为，生成的密钥仍会安全保留在权限为 `600` 的 `docker/.env` 中，随后应纳入密钥管理系统并完成备份恢复策略：
+推荐让生产初始化入口显式同步模板默认项并执行本地凭据 bootstrap，以减少旧 `.env` 漂移和手工遗漏。它只追加白名单中的非秘密默认值，并生成数据库、缓存、消息队列、MQTT、种子账户、JWT、MFA、PII、网关和监控所需的随机值；不会生成许可证、真实租户 UUID、生产域名或任何证书。外部配置尚未完成时返回非零是预期行为，生成的密钥仍会安全保留在权限为 `600` 的 `docker/.env` 中，随后应纳入密钥管理系统并完成备份恢复策略：
 
 ```bash
 cd docker
-./bootstrap-production-secrets.sh
+./setup.sh --sync-template-defaults
 ```
 
-如果门禁报告重复键，可显式追加 `--repair-identical-duplicates` 只归一化值完全相同的重复项；值冲突的 `JWT_SECRET`、`REDIS_PASSWORD` 等仍会拒绝自动选择，必须由部署者依据密钥管理记录人工清理。该工具不会覆盖已有有效凭据，也不会打印凭据值。
+如果门禁报告重复键，可在确认值完全相同后追加 `--repair-identical-duplicates` 只归一化同值重复项：
+
+```bash
+./setup.sh --sync-template-defaults --repair-identical-duplicates
+```
+
+值冲突的 `JWT_SECRET`、`REDIS_PASSWORD` 等仍会拒绝自动选择，必须由部署者依据密钥管理记录人工清理。同步只追加缺失的非秘密白名单键，已有键（包括空值和非法值）永不覆盖；许可证、租户、域名、Web Push 发件身份、证书路径、SMTP/LLM/OTLP 凭据和证书不会从模板复制。默认运行 `./setup.sh` 不会自动改写已有 `.env`；需要只补齐随机值时，才直接运行 `./bootstrap-production-secrets.sh --env-file .env`。
 
 编辑 `docker/.env`，填写以下必需配置：
 
@@ -74,19 +80,20 @@ WAF_REQUIRE_EXTERNAL_RULES=true
 DOMAIN=your-domain.com
 ```
 
-生产部署先将正式 Nginx/MQTT 证书放入 `docker/ssl/` 和 `docker/mqtt-certs/`，再确认 `docker/.env` 中的必填项已替换占位值并创建 MQTT 密码文件：
+生产部署先将正式 Nginx/MQTT 证书放入 `docker/ssl/` 和 `docker/mqtt-certs/`，再确认 `docker/.env` 中的外部必填项已替换占位值并完成最终门禁：
 
 ```bash
 cd docker
-./setup.sh   # 占位凭据或证书未就绪时返回非零，这是预期行为
 nano .env    # 填写许可证、真实租户、域名和其它部署专属配置
 ./setup.sh   # 生产环境不会自动生成自签名证书；配置通过后会创建/校验 MQTT 密码文件
 cd ..
 ```
 
+如果模板同步、bootstrap 或校验失败，先按输出中的“模板基线 / 本机随机凭据 / 重复键 / 外部生产配置 / TLS/MQTT / Docker/Compose”类别整改，再重跑 `setup.sh`；不要把“模板默认值已同步”或“本地随机凭据已生成”当作“生产环境可以上线”。
+
 开发/测试只启动基础设施时使用 `docker-compose.dev.yml`；如需测试完整 Compose 的 TLS 挂载链路，可按“TLS 证书配置”中的自签名方案单独运行 `generate-cert.sh` 和 `generate-mqtt-cert.sh`，但不得将其用于生产环境。
 
-`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝所有直接挂载/执行运行时文件的符号链接，`compose-production.sh` 也拒绝符号链接形式的 `.env`、Compose 文件和校验器入口，避免仅打印 warning 后误报配置成功或把认证/配置文件解析到非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。使用 `--sync-template-defaults` 或 `--bootstrap-local-secrets` 时，初始化失败会在生成 MQTT 密码文件和处理证书前立即退出；未传这两个参数时不会自动改写 `.env`。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝所有直接挂载/执行运行时文件的符号链接，`compose-production.sh` 也拒绝符号链接形式的 `.env`、Compose 文件和校验器入口，避免仅打印 warning 后误报配置成功或把认证/配置文件解析到非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
 
 WAF 规则文件位于 `docker/waf-rules/rules.json`，生产 Compose 以只读方式挂载到 `/etc/equipai/waf`，并通过 `WAF_RULES_PATH` 与 `WAF_REQUIRE_EXTERNAL_RULES=true` 强制应用加载。规则制品更新必须先在同目录临时文件中完成结构/安全校验和 `sha256sum` 记录，再备份旧文件并使用同目录 `mv` 原子替换；发布后核对后端日志中的 revision、规则数量和 SHA-256。失败或误报时使用已审查备份按同一流程回滚。应用不接受 HTTP 或数据库规则编辑，外部规则不能关闭内置 WAF 基线；正式环境仍需由部署方完成制品审批、最小权限及一次有效更新/回滚演练。
 
@@ -111,7 +118,7 @@ bash docker/production-readiness.sh \
 
 自检返回非零时不得继续发布；输出只包含变量名、文件名、服务名和错误类别，不包含 `.env` 的实际值。
 
-`bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；它通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
+`bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；启用 `--sync-template-defaults` 时只从同目录 `.env.example` 追加非秘密白名单键，通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`，失败时只输出变量名和整改类别。其“外部生产配置”和 TLS/MQTT 提示是人工交付项，不会被脚本伪造。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
 
 > 注意：生产 Compose 操作请从仓库根目录使用 `docker/compose-production.sh`。该入口会自动加载 `docker/.env`；恢复脚本等需要自行接收环境文件的工具仍必须显式传入 `--env-file docker/.env`。
 

@@ -3,6 +3,9 @@ using EquipAI.EdgeGateway.Persistence;
 using EquipAI.EdgeGateway.Pipeline;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Moq;
+using MQTTnet;
+using MQTTnet.Client;
 using System.Text.Json;
 
 namespace EquipAI.Tests.Unit.Pipeline;
@@ -11,7 +14,8 @@ public class CloudUploaderTests
 {
     private static CloudUploader CreateUploader(
         SqliteBufferStore? offlineStore = null,
-        LocalBuffer? localBuffer = null)
+        LocalBuffer? localBuffer = null,
+        IMqttClient? mqttClient = null)
     {
         var logger = LoggerFactory.Create(_ => { }).CreateLogger<CloudUploader>();
         var options = new GatewayOptions
@@ -19,7 +23,12 @@ public class CloudUploaderTests
             TenantId = "test-tenant",
             MqttBroker = "localhost:1883"
         };
-        return new CloudUploader(logger, options, offlineStore, localBuffer);
+        return new CloudUploader(
+            logger,
+            options,
+            offlineStore,
+            localBuffer,
+            mqttClientFactory: mqttClient is null ? null : () => mqttClient);
     }
 
     [Fact]
@@ -139,6 +148,163 @@ public class CloudUploaderTests
         // 未连接 MQTT，数据应保留在 store 中
         var pending = await store.GetPendingAsync(10);
         pending.Should().HaveCount(1);
+        await store.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task 并发回放同一批积压消息不得重复发布()
+    {
+        var store = new SqliteBufferStore(":memory:");
+        await store.InitializeAsync();
+        await store.StoreAsync("test/topic", """{"data":1}"""u8.ToArray());
+
+        var firstPublishStarted = new TaskCompletionSource<object?>
+            (TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondPublishStarted = new TaskCompletionSource<object?>
+            (TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstPublish = new TaskCompletionSource<object?>
+            (TaskCreationOptions.RunContinuationsAsynchronously);
+        var publishCount = 0;
+        var mqttClient = new Mock<IMqttClient>();
+        mqttClient.SetupGet(client => client.IsConnected).Returns(true);
+        mqttClient
+            .Setup(client => client.ConnectAsync(
+                It.IsAny<MqttClientOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MqttClientConnectResult)null!);
+        mqttClient
+            .Setup(client => client.PublishAsync(
+                It.IsAny<MqttApplicationMessage>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                var call = Interlocked.Increment(ref publishCount);
+                if (call == 1)
+                {
+                    firstPublishStarted.TrySetResult(null);
+                    await releaseFirstPublish.Task;
+                }
+                else
+                {
+                    secondPublishStarted.TrySetResult(null);
+                }
+
+                return null!;
+            });
+
+        var uploader = CreateUploader(store, mqttClient: mqttClient.Object);
+        await uploader.ConnectAsync(CancellationToken.None);
+        var firstReplay = uploader.ReplayOfflineDataAsync(CancellationToken.None);
+        await firstPublishStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var secondReplay = uploader.ReplayOfflineDataAsync(CancellationToken.None);
+        var secondPublishBeforeFirstCompleted =
+            await Task.WhenAny(secondPublishStarted.Task, Task.Delay(TimeSpan.FromMilliseconds(500)));
+
+        secondPublishBeforeFirstCompleted.Should().NotBe(
+            secondPublishStarted.Task,
+            "第二次回放必须等待第一批完成，不能发布同一条积压消息");
+        secondReplay.IsCompleted.Should().BeFalse(
+            "第二次回放应在第一批释放前等待回放闸门");
+
+        releaseFirstPublish.TrySetResult(null);
+        await Task.WhenAll(firstReplay, secondReplay);
+
+        publishCount.Should().Be(1);
+        (await store.GetPendingAsync(10)).Should().BeEmpty();
+
+        await uploader.DisposeAsync();
+        await store.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task 等待回放闸门时取消应立即退出且不得额外发布()
+    {
+        var store = new SqliteBufferStore(":memory:");
+        await store.InitializeAsync();
+        await store.StoreAsync("test/topic", """{"data":1}"""u8.ToArray());
+
+        var firstPublishStarted = new TaskCompletionSource<object?>
+            (TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirstPublish = new TaskCompletionSource<object?>
+            (TaskCreationOptions.RunContinuationsAsynchronously);
+        var publishCount = 0;
+        var mqttClient = new Mock<IMqttClient>();
+        mqttClient.SetupGet(client => client.IsConnected).Returns(true);
+        mqttClient
+            .Setup(client => client.ConnectAsync(
+                It.IsAny<MqttClientOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MqttClientConnectResult)null!);
+        mqttClient
+            .Setup(client => client.PublishAsync(
+                It.IsAny<MqttApplicationMessage>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                Interlocked.Increment(ref publishCount);
+                firstPublishStarted.TrySetResult(null);
+                await releaseFirstPublish.Task;
+                return null!;
+            });
+
+        var uploader = CreateUploader(store, mqttClient: mqttClient.Object);
+        await uploader.ConnectAsync(CancellationToken.None);
+        var firstReplay = uploader.ReplayOfflineDataAsync(CancellationToken.None);
+        await firstPublishStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        using var cancellation = new CancellationTokenSource();
+        var secondReplay = uploader.ReplayOfflineDataAsync(cancellation.Token);
+        cancellation.Cancel();
+
+        var secondReplayAction = async () => await secondReplay;
+        await secondReplayAction.Should().ThrowAsync<OperationCanceledException>();
+
+        releaseFirstPublish.TrySetResult(null);
+        await firstReplay;
+
+        publishCount.Should().Be(1);
+        (await store.GetPendingAsync(10)).Should().BeEmpty();
+
+        await uploader.DisposeAsync();
+        await store.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task 回放发布失败时应保留积压记录()
+    {
+        var store = new SqliteBufferStore(":memory:");
+        await store.InitializeAsync();
+        await store.StoreAsync("test/topic", """{"data":1}"""u8.ToArray());
+
+        var mqttClient = new Mock<IMqttClient>();
+        mqttClient.SetupGet(client => client.IsConnected).Returns(true);
+        mqttClient
+            .Setup(client => client.ConnectAsync(
+                It.IsAny<MqttClientOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MqttClientConnectResult)null!);
+        mqttClient
+            .SetupSequence(client => client.PublishAsync(
+                It.IsAny<MqttApplicationMessage>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("模拟 MQTT 发布失败"))
+            .ReturnsAsync((MqttClientPublishResult)null!);
+
+        var uploader = CreateUploader(store, mqttClient: mqttClient.Object);
+        await uploader.ConnectAsync(CancellationToken.None);
+
+        var act = () => uploader.ReplayOfflineDataAsync(CancellationToken.None);
+        await act.Should().NotThrowAsync();
+
+        var pending = await store.GetPendingAsync(10);
+        pending.Should().ContainSingle();
+
+        var retry = () => uploader.ReplayOfflineDataAsync(CancellationToken.None);
+        await retry.Should().NotThrowAsync();
+        (await store.GetPendingAsync(10)).Should().BeEmpty();
+
+        await uploader.DisposeAsync();
         await store.DisposeAsync();
     }
 

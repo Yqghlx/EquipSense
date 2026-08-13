@@ -80,8 +80,8 @@ public class RootCauseAnalysisEngine : IAnalysisService
         else if (await _ruleEngineService.MatchRuleAsync(tenantId, deviceId, metric, value, ct) is { } ruleMatch)
         {
             level = AnalysisLevel.L2;
-            rootCause = ruleMatch.Conclusion;
-            suggestion = ruleMatch.RecommendedActions ?? "请参考知识库推荐措施";
+            rootCause = EnrichRootCauseWithFmea(ruleMatch.Conclusion, ruleMatch.FmeaMatches);
+            suggestion = EnrichSuggestionWithFmea(ruleMatch.RecommendedActions, ruleMatch.FmeaMatches);
             confidence = ruleMatch.ConfidenceWeight;
             matchedRuleId = ruleMatch.RuleId;
             rawResponse = ruleMatch.CheckSteps;
@@ -144,6 +144,47 @@ public class RootCauseAnalysisEngine : IAnalysisService
             ProcessingTimeMs = (long)elapsed.TotalMilliseconds,
             CompletedAt = DateTime.UtcNow
         };
+    }
+
+    /// <summary>
+    /// 把结构化 FMEA 上下文并入规则诊断结论。
+    /// FMEA 是规则命中后的可追溯维护依据，不参与置信度计算，避免维护人员编辑条目时意外改变
+    /// 已验证知识规则的判定权重；没有 FMEA 时返回原始结论，保持既有输出兼容。
+    /// </summary>
+    private static string EnrichRootCauseWithFmea(
+        string conclusion,
+        IReadOnlyList<FmeaMatchResult>? fmeaMatches)
+    {
+        if (fmeaMatches is not { Count: > 0 })
+            return conclusion;
+
+        var details = string.Join(
+            "\n",
+            fmeaMatches.Select(match =>
+                $"- 故障模式：{match.FailureMode}；可能原因：{match.Cause}；影响：{match.Effect}；检测：{match.Detection}"));
+
+        return $"{conclusion}\n\nFMEA 参考：\n{details}";
+    }
+
+    /// <summary>
+    /// 把 FMEA 建议追加到规则建议后面。
+    /// 保留原知识规则文本（可能是 JSON 数组），并将 FMEA 建议单独分段，避免破坏已有调用方解析。
+    /// </summary>
+    private static string EnrichSuggestionWithFmea(
+        string? recommendedActions,
+        IReadOnlyList<FmeaMatchResult>? fmeaMatches)
+    {
+        var fmeaActions = fmeaMatches is { Count: > 0 }
+            ? string.Join("\n", fmeaMatches.Select(match => $"- {match.RecommendedAction}"))
+            : string.Empty;
+
+        if (string.IsNullOrWhiteSpace(fmeaActions))
+            return recommendedActions ?? "请参考知识库推荐措施";
+
+        var fmeaSection = $"FMEA 建议措施：\n{fmeaActions}";
+        return string.IsNullOrWhiteSpace(recommendedActions)
+            ? fmeaSection
+            : $"{recommendedActions}\n\n{fmeaSection}";
     }
 
     /// <summary>

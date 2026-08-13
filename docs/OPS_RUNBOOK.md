@@ -23,13 +23,50 @@ bash docker/production-readiness.sh \
 
 该入口失败时只会报告变量名、证书文件、服务名和错误类别，不会打印密钥；修复后必须重新执行，不能用 `--runtime` 失败时的旧状态替代检查。
 
-### 0.1 生产种子数据边界
+### 0.1 生产初始化失败处置
+
+首次部署或凭据轮换时，推荐显式执行：
+
+```bash
+# 升级历史 .env：追加白名单非秘密默认项并补齐本机随机值
+bash docker/setup.sh --sync-template-defaults
+
+# 如果已确认重复键的值完全相同，才允许显式归一化
+bash docker/setup.sh --sync-template-defaults --repair-identical-duplicates
+
+# 只补齐本机随机值，不从模板追加默认项
+bash docker/setup.sh --bootstrap-local-secrets
+```
+
+运行同步前应先按组织密钥管理策略备份 `.env`，并按脚本输出的整改类别处理：
+
+1. `模板基线`：修复 `.env.example` 缺键、重复键或占位默认值；模板错误时 `.env` 不应被修改。
+2. `本机随机凭据`：确认生成后的 `docker/.env` 权限为 `600`，将值纳入密钥管理系统，再重新运行 setup。
+3. `重复键`：同值重复键才可使用修复参数；冲突键必须依据密钥管理记录人工合并，不能依赖 Compose 的“最后一项”行为。
+4. `外部生产配置`：补齐 AutoMapper 许可证、真实租户 UUID、域名、SMTP、LLM、OTLP 等部署专属项。
+5. `TLS/MQTT`：预置正式证书、私钥和 CA 链，检查有效期、主机名、权限和证书-私钥匹配。
+6. `Docker/Compose`：修复依赖、挂载文件或权限后，重新运行只读 readiness；不要在静态门禁失败时启动服务。
+
+整改后的复验顺序为：
+
+```bash
+bash docker/validate-env.sh docker/.env --check-runtime-files
+bash docker/production-readiness.sh \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml
+docker/compose-production.sh config
+```
+
+上述命令仍不会替代真实 SMTP/OTLP 投递、证书轮换、备份恢复和回滚演练；这些必须在上线验收中单独留存证据。日志和工单不得记录任何密码、密钥、许可证或恢复码。
+
+### 0.2 生产种子数据边界
 
 Production 默认将 `SEED_DEMO_DATA` 设为 `false`，首次启动只准备系统租户、引导账户、行业模板和诊断知识，不会创建 `AC-001` 示例设备或测试租户。`true`/`1` 是兼容的最小隔离验收种子，`full` 是包含 10 台设备、24 小时遥测、告警和工单的完整演示集；普通生产门禁会拒绝所有显式演示模式，只有临时隔离 smoke 使用的 Compose 覆盖才会设置为 `full`。
 
 升级既有数据库不会自动删除历史示例数据。若发现生产库存在 `AC-001`、`tenant-b` 或 `tenant2admin`，先备份并记录审计，再按租户、设备、告警规则和用户关联关系执行审批后的人工清理。
 
-### 0.2 WAF 规则更新与回滚
+### 0.3 WAF 规则更新与回滚
 
 生产 WAF 规则来自后端只读挂载的 `docker/waf-rules/rules.json`，应用内置的 SQL 注入、路径遍历、命令注入和 XSS 基线永远不能被外部文件关闭。规则文件不是 HTTP 或数据库管理 API，变更必须经过制品审查和部署权限控制。
 
@@ -243,6 +280,26 @@ curl --fail --silent "http://127.0.0.1:${BACKEND_PORT:-8080}/metrics" | grep -E 
    docker logs equipai-edgegateway | grep -i "mqtt\|connect"
 4. 确认 MQTT 认证（MQTT_USERNAME / MQTT_PASSWORD）
 ```
+
+#### 2.4.1 边缘网关断网缓冲积压或丢弃
+
+```
+症状：边缘网关 /metrics 中 edgegateway_buffer_queue_depth 持续接近容量，或
+      edgegateway_buffer_dropped_total 持续增长
+排查：
+1. 读取网关 /status 和 /metrics，记录 queue_depth、buffer_dropped_total、replay_messages_total
+2. 检查 GATEWAY_BUFFER_PATH 所在持久化卷是否可写、剩余空间是否充足、SQLite 文件权限是否正确
+3. 检查 MQTT 连接和后端接收日志；恢复后 replay_messages_total 应增长且 dropped_total 不应继续增长
+4. 不要只提高 Gateway__BufferSize 掩盖故障；当前内存队列有界，溢出消息依赖本地 SQLite 7 天缓存
+5. 如果 SQLite 已损坏或磁盘已满，先保留现场文件和指标，再按现场数据保全流程处理；确认恢复后重新观察 /health 和 /metrics
+```
+
+并发采集时 `LocalBuffer` 会保持配置容量上限，SQLite 共享连接会串行化写入、回放和清理；
+同一单例 `CloudUploader` 的离线回放会把“读取积压 → MQTT 发布 → 标记已发送 → 清理”作为一个
+互斥批次执行，避免多个设备采集器重复发布同一条遥测。观察
+`edgegateway_replay_messages_total` 的增长应与实际恢复发送量一致。
+这些保护覆盖单进程网关，不等同于多进程共享 SQLite 的消息租约；后者必须另行设计 claim/租约
+机制。它们也不替代真实断网超过 7 天、磁盘耗尽和 PLC/OPC UA/Modbus 联调演练。
 
 ### 2.5 SignalR 实时推送失效
 

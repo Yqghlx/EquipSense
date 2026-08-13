@@ -9,6 +9,7 @@
 # 使用方式：
 #   cd docker && ./bootstrap-production-secrets.sh
 #   ./docker/bootstrap-production-secrets.sh --env-file ./docker/.env
+#   ./docker/bootstrap-production-secrets.sh --env-file ./docker/.env --sync-template-defaults
 #
 # 安全边界：
 #   - 只替换空值或明确的占位值，永不覆盖已有有效凭据。
@@ -22,17 +23,72 @@ umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
+TEMPLATE_FILE="${SCRIPT_DIR}/.env.example"
 TEMP_FILE=""
 LOCK_DIR=""
 REPAIR_IDENTICAL_DUPLICATES=false
+SYNC_TEMPLATE_DEFAULTS=false
 GENERATED_VALUE=""
 GENERATED_COUNT=0
+SYNCED_DEFAULT_COUNT=0
 USED_VALUES=()
 SEEN_KEYS=()
 GENERATED_KEYS=()
 GENERATED_VALUES=()
 MISSING_KEYS=()
 MISSING_VALUES=()
+
+# 仅允许追加不含秘密、租户身份或真实域名绑定的生产默认项；新增键必须先经过
+# 白名单审查，避免把未来加入 .env.example 的敏感字段误复制到已有环境文件。
+SYNCABLE_TEMPLATE_KEYS=(
+  ASPNETCORE_ENVIRONMENT
+  EVENTBUS_PROVIDER
+  ALLOW_INMEMORY_EVENTBUS_IN_PRODUCTION
+  EVENTBUS_OUTBOX_ENABLED
+  EVENTBUS_OUTBOX_POLL_INTERVAL_SECONDS
+  EVENTBUS_OUTBOX_BATCH_SIZE
+  EVENTBUS_OUTBOX_LEASE_SECONDS
+  EVENTBUS_OUTBOX_MAX_BACKOFF_SECONDS
+  EVENTBUS_OUTBOX_RETENTION_DAYS
+  RABBITMQ_IMAGE
+  RABBITMQ_USER
+  RABBITMQ_PORT
+  RABBITMQ_MGMT_PORT
+  GATEWAY_ID
+  GATEWAY_BUFFER_PATH
+  GATEWAY_BACKEND_URL
+  GATEWAY_ALLOWED_HOSTS
+  GATEWAY_UPLOAD_INTERVAL
+  EDGE_PORT
+  EDGE_BLUEGREEN_PORT
+  INTERNAL_BIND_ADDRESS
+  PUBLIC_BIND_ADDRESS
+  BACKEND_PORT
+  FRONTEND_PORT
+  FILE_STORAGE_PROVIDER
+  FILE_STORAGE_BASE_PATH
+  WAF_RULES_PATH
+  WAF_REQUIRE_EXTERNAL_RULES
+  JAEGER_SPAN_STORAGE_TYPE
+  JAEGER_BADGER_EPHEMERAL
+  OTEL_EXPORTER_OTLP_ENDPOINT
+  SMTP_PORT
+  SMTP_FROM_NAME
+  SMTP_ENABLE_SSL
+  EMAIL_DELIVERY_ENABLED
+  EMAIL_DELIVERY_POLL_INTERVAL_SECONDS
+  EMAIL_DELIVERY_BATCH_SIZE
+  EMAIL_DELIVERY_LEASE_SECONDS
+  EMAIL_DELIVERY_MAX_ATTEMPTS
+  EMAIL_DELIVERY_MAX_BACKOFF_SECONDS
+  EMAIL_DELIVERY_RETENTION_DAYS
+  BEHIND_PROXY
+  TRUSTED_PROXY_NETWORKS
+  OUTBOUND_HTTP_ALLOW_PRIVATE_NETWORKS
+  LLM_MODEL
+  LLM_ENDPOINT
+  SEED_DEMO_DATA
+)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -42,11 +98,13 @@ NC='\033[0m'
 usage() {
   cat <<'EOF'
 用法：
-  bootstrap-production-secrets.sh [--env-file <路径>]
+  bootstrap-production-secrets.sh [--env-file <路径>] [--sync-template-defaults]
 
 说明：
   只生成本机随机凭据，不覆盖已有有效值；供应商许可证、真实租户 UUID、
   生产域名和 TLS/MQTT 证书必须由部署方另行配置。
+  --sync-template-defaults 会从同目录 .env.example 追加缺失的白名单非秘密默认项，
+  不会覆盖已有键，也不会同步密码、密钥、许可证、租户或域名。
   可选的 --repair-identical-duplicates 只会归一化值完全相同的重复键；
   发现冲突值时仍会拒绝修改环境文件。
 EOF
@@ -64,6 +122,74 @@ success() {
   printf '%b%s%b\n' "${GREEN}" "$*" "${NC}"
 }
 
+is_syncable_template_key() {
+  local candidate="$1"
+  local sync_key
+  for sync_key in "${SYNCABLE_TEMPLATE_KEYS[@]}"; do
+    [ "$candidate" = "$sync_key" ] && return 0
+  done
+  return 1
+}
+
+read_template_value() {
+  local expected_key="$1"
+  awk -F= -v key="$expected_key" \
+    '$1 == key { print substr($0, index($0, "=") + 1); exit }' \
+    "$TEMPLATE_FILE"
+}
+
+has_template_placeholder_marker() {
+  case "$1" in
+    *"请修改"*|*"PLEASE_CHANGE"*|*"CHANGE_ME"*|*"SET_VIA_ENVIRONMENT"*|*"change-me"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+validate_sync_template() {
+  [ -f "$TEMPLATE_FILE" ] || fail "模板文件不存在：$TEMPLATE_FILE"
+  [ ! -L "$TEMPLATE_FILE" ] || fail "拒绝使用符号链接模板文件：$TEMPLATE_FILE"
+  [ -r "$TEMPLATE_FILE" ] || fail "模板文件不可读：$TEMPLATE_FILE"
+
+  local sync_key
+  local template_key_count
+  local template_value
+  for sync_key in "${SYNCABLE_TEMPLATE_KEYS[@]}"; do
+    is_syncable_template_key "$sync_key" || fail "模板同步白名单校验失败：未知键 $sync_key"
+    template_key_count="$(awk -F= -v key="$sync_key" \
+      '$1 == key { count++ } END { print count + 0 }' "$TEMPLATE_FILE")"
+    [ "$template_key_count" -eq 1 ] \
+      || fail "模板基线错误：$sync_key 必须在 .env.example 中恰好定义一次"
+    template_value="$(read_template_value "$sync_key")"
+    [ -n "$template_value" ] \
+      || fail "模板基线错误：$sync_key 不得为空"
+    ! has_template_placeholder_marker "$template_value" \
+      || fail "模板基线错误：$sync_key 仍为占位值"
+  done
+}
+
+print_remediation_hints() {
+  local validation_output="$1"
+
+  printf '%b整改提示：%b\n' "${YELLOW}" "${NC}"
+  if [ "$GENERATED_COUNT" -gt 0 ] || [[ "$validation_output" == *"必填环境变量"* ]]; then
+    if [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+      printf '  - 本机随机凭据：可再次运行 setup.sh --sync-template-defaults；已有有效值不会被覆盖。\n'
+    else
+      printf '  - 本机随机凭据：可再次运行 setup.sh --bootstrap-local-secrets；已有有效值不会被覆盖。\n'
+    fi
+  fi
+  if [[ "$validation_output" == *"重复定义"* ]] || [[ "$validation_output" == *"重复键"* ]]; then
+    printf '  - 重复键：仅值完全相同时可显式使用 --repair-identical-duplicates；冲突值必须人工清理。\n'
+  fi
+  printf '  - 外部生产配置：许可证、真实租户 UUID、域名、SMTP、LLM 和 OTLP 等必须由部署方或密钥管理系统提供。\n'
+  printf '  - TLS/MQTT：请预置正式证书、私钥和 CA 链，再运行 setup.sh 或 validate-env.sh .env --check-runtime-files。\n'
+  printf '  - Docker/Compose：请确认依赖、挂载文件和权限后重新运行 setup.sh 或 production-readiness.sh。\n'
+}
+
 fail() {
   error "$*"
   exit 1
@@ -78,6 +204,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --repair-identical-duplicates)
       REPAIR_IDENTICAL_DUPLICATES=true
+      shift
+      ;;
+    --sync-template-defaults)
+      SYNC_TEMPLATE_DEFAULTS=true
       shift
       ;;
     --help|-h)
@@ -104,6 +234,10 @@ fi
 [ -r "$ENV_FILE" ] || fail "环境变量文件不可读：$ENV_FILE"
 [ -f "${SCRIPT_DIR}/validate-env.sh" ] || fail "缺少同目录环境变量校验器：${SCRIPT_DIR}/validate-env.sh"
 command -v openssl >/dev/null 2>&1 || fail "未找到 openssl，无法生成安全随机凭据"
+
+if [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+  validate_sync_template
+fi
 
 # Compose 对重复键采用最后一项；继续编辑会让部署结果依赖文件顺序。
 # 默认仍然全部拒绝；只有显式开启修复时，才允许删除值完全相同的重复行。
@@ -140,6 +274,7 @@ if [ -n "$DUPLICATE_KEY_DETAILS" ]; then
   done <<< "$DUPLICATE_KEY_DETAILS"
 
   if [ "$has_conflicting_duplicate" = true ] || [ "$REPAIR_IDENTICAL_DUPLICATES" != true ]; then
+    print_remediation_hints "重复键 ${DUPLICATE_KEY_DETAILS}"
     exit 1
   fi
   warn "已启用同值重复键归一化，仅保留每个键的首次定义"
@@ -343,6 +478,27 @@ if [ "${#MISSING_KEYS[@]}" -gt 0 ]; then
   done
 fi
 
+if [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+  SYNCED_KEYS=()
+  SYNCED_VALUES=()
+  for sync_key in "${SYNCABLE_TEMPLATE_KEYS[@]}"; do
+    if ! key_was_seen "$sync_key"; then
+      sync_value="$(read_template_value "$sync_key")"
+      SYNCED_KEYS+=("$sync_key")
+      SYNCED_VALUES+=("$sync_value")
+      SEEN_KEYS+=("$sync_key")
+      SYNCED_DEFAULT_COUNT=$((SYNCED_DEFAULT_COUNT + 1))
+    fi
+  done
+
+  if [ "$SYNCED_DEFAULT_COUNT" -gt 0 ]; then
+    printf '\n# 以下非秘密默认项由 bootstrap-production-secrets.sh 从 .env.example 追加\n' >> "$TEMP_FILE"
+    for index in "${!SYNCED_KEYS[@]}"; do
+      printf '%s=%s\n' "${SYNCED_KEYS[$index]}" "${SYNCED_VALUES[$index]}" >> "$TEMP_FILE"
+    done
+  fi
+fi
+
 # 临时文件与原文件位于同一目录，mv 在同一文件系统内是原子的；替换后再次收紧权限。
 chmod 600 "$TEMP_FILE"
 mv "$TEMP_FILE" "$ENV_FILE"
@@ -353,13 +509,18 @@ if [ "$GENERATED_COUNT" -eq 0 ]; then
 else
   success "已生成 ${GENERATED_COUNT} 个本地随机凭据（不会在日志中显示具体值）"
 fi
+if [ "$SYNCED_DEFAULT_COUNT" -gt 0 ]; then
+  success "已追加 ${SYNCED_DEFAULT_COUNT} 个非秘密模板默认项（不会覆盖已有键）"
+fi
 
 set +e
-bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE"
+VALIDATION_OUTPUT="$(bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE" 2>&1)"
 VALIDATION_STATUS=$?
 set -e
+printf '%s\n' "$VALIDATION_OUTPUT"
 
 if [ "$VALIDATION_STATUS" -ne 0 ]; then
+  print_remediation_hints "$VALIDATION_OUTPUT"
   warn "仍需人工配置或验收生产专属项；脚本已保留安全生成的本地凭据，但不会误报可上线"
   exit "$VALIDATION_STATUS"
 fi

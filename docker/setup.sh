@@ -11,7 +11,8 @@
 #
 # 使用方式：
 #   cd docker && ./setup.sh
-#   cd docker && ./bootstrap-production-secrets.sh  # 仅补齐本地可随机生成的凭据
+#   cd docker && ./setup.sh --bootstrap-local-secrets  # 显式补齐本地可随机生成的凭据
+#   cd docker && ./setup.sh --sync-template-defaults  # 同步白名单默认项并补齐本地凭据
 #
 # 前置条件：
 #   - 已安装 Docker 和 Docker Compose
@@ -22,6 +23,58 @@ set -euo pipefail
 
 # 脚本所在目录（即 docker/）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 参数必须在任何 Docker 探测或 .env 写入前解析，避免错误调用留下半初始化环境。
+BOOTSTRAP_LOCAL_SECRETS=false
+SYNC_TEMPLATE_DEFAULTS=false
+REPAIR_IDENTICAL_DUPLICATES=false
+
+usage() {
+    cat <<'EOF'
+用法：
+  setup.sh [--bootstrap-local-secrets] [--sync-template-defaults] [--repair-identical-duplicates]
+
+说明：
+  默认只校验并准备生产运行时文件，不自动改写已有 .env。
+  --bootstrap-local-secrets 会补齐本机可安全生成的随机凭据；许可证、真实租户、
+  生产域名和 TLS/MQTT 证书仍必须由部署方另行配置。
+  --sync-template-defaults 会在 bootstrap 流程中追加 .env.example 的白名单非秘密默认项。
+  --repair-identical-duplicates 只能与 bootstrap 或模板同步一起使用，且只修复值完全相同的重复键。
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --bootstrap-local-secrets)
+            BOOTSTRAP_LOCAL_SECRETS=true
+            shift
+            ;;
+        --sync-template-defaults)
+            SYNC_TEMPLATE_DEFAULTS=true
+            shift
+            ;;
+        --repair-identical-duplicates)
+            REPAIR_IDENTICAL_DUPLICATES=true
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            echo "错误：未知参数：$1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [ "$REPAIR_IDENTICAL_DUPLICATES" = true ] \
+    && [ "$BOOTSTRAP_LOCAL_SECRETS" != true ] \
+    && [ "$SYNC_TEMPLATE_DEFAULTS" != true ]; then
+    echo "错误：--repair-identical-duplicates 只能与 --bootstrap-local-secrets 一起使用；也可通过 --sync-template-defaults 显式进入 bootstrap" >&2
+    exit 2
+fi
 
 # 颜色输出
 RED='\033[0;31m'
@@ -125,6 +178,7 @@ else
         warn "    - REDIS_PASSWORD（Redis 密码）"
         warn "    - JWT_SECRET（JWT 签名密钥，至少 32 字符）"
         warn "    - GRAFANA_PASSWORD（Grafana 管理员密码）"
+        warn "  也可以先运行 ./setup.sh --sync-template-defaults 同步安全默认项并补齐本机随机凭据"
     else
         error ".env.example 模板文件不存在: ${ENV_EXAMPLE}"
         exit 1
@@ -139,6 +193,35 @@ if [ ! -f "${SCRIPT_DIR}/validate-env.sh" ]; then
     exit 1
 fi
 
+if [ "$BOOTSTRAP_LOCAL_SECRETS" = true ] || [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+    if [ ! -x "${SCRIPT_DIR}/bootstrap-production-secrets.sh" ]; then
+        error "缺少可执行的本地凭据初始化工具: ${SCRIPT_DIR}/bootstrap-production-secrets.sh"
+        exit 1
+    fi
+
+    bootstrap_args=(--env-file "${ENV_FILE}")
+    if [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+        bootstrap_args+=(--sync-template-defaults)
+    fi
+    if [ "$REPAIR_IDENTICAL_DUPLICATES" = true ]; then
+        bootstrap_args+=(--repair-identical-duplicates)
+    fi
+
+    if ! bash "${SCRIPT_DIR}/bootstrap-production-secrets.sh" "${bootstrap_args[@]}"; then
+        if [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+            error "本地凭据/模板默认值初始化失败；请根据上方脱敏整改提示修复后重新运行 setup.sh"
+        else
+            error "本地凭据初始化失败；请根据上方脱敏整改提示修复后重新运行 setup.sh"
+        fi
+        exit 1
+    fi
+    if [ "$SYNC_TEMPLATE_DEFAULTS" = true ]; then
+        success "本地随机凭据和模板默认值初始化完成，继续执行生产专属配置和运行时门禁"
+    else
+        success "本地随机凭据初始化完成，继续执行生产专属配置和运行时门禁"
+    fi
+fi
+
 # validate-env.sh 是 Production-only 门禁；这里提前给出明确错误，避免
 # Development/Testing 配置先走到证书生成逻辑后才得到令人困惑的校验失败。
 environment_name="$(read_env_value ASPNETCORE_ENVIRONMENT)"
@@ -150,7 +233,7 @@ fi
 
 if ! bash "${SCRIPT_DIR}/validate-env.sh" "${ENV_FILE}"; then
     error "环境变量校验未通过，请编辑 ${ENV_FILE} 后重新运行 setup.sh"
-    warn "如仅缺少本地随机凭据，可先运行 ${SCRIPT_DIR}/bootstrap-production-secrets.sh；许可证、租户 UUID、域名和证书仍需人工配置"
+    warn "如仅缺少本地随机凭据，可重新运行 setup.sh --bootstrap-local-secrets；许可证、租户 UUID、域名和证书仍需人工配置"
     exit 1
 fi
 

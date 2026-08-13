@@ -65,5 +65,6 @@ public class FmeaEntryConfiguration : IEntityTypeConfiguration<FmeaEntry>
         builder.HasIndex(e => e.DeviceType);
         builder.HasIndex(e => e.Rpn);
         builder.HasIndex(e => e.IsEnabled);
+        builder.HasIndex(e => new { e.TenantId, e.KnowledgeRuleId, e.IsEnabled });
     }
 }

@@ -719,8 +719,15 @@ public record DeviceConfig(
 ### 4.4 断网保护
 
 ```
-正常：采集 → 标准化 → 内存环形队列(10000) → MQTT上报 → 确认 → 清除
+正常：采集 → 标准化 → 有界内存环形队列(10000) → MQTT上报 → 确认 → 清除
 断网：采集 → 标准化 → 内存队列满 → SQLite(7天) → 恢复后回放 → MQTT上报
+
+LocalBuffer 的容量检查、FIFO 驱逐和入队在同一短临界区完成，避免多个设备采集器并发时突破
+内存上限；被驱逐消息在锁外写入 SQLite。SQLite 单例的初始化、写入、回放查询、标记、清理
+和释放通过同一异步闸门串行化，出队和释放同步更新网关缓冲深度指标。单例
+`CloudUploader` 对完整的离线回放批次加异步闸门，串行保护读取积压、MQTT 发布、发送标记和
+清理，避免多个设备采集器在网络恢复时重复发布同一条消息；该保护范围是单进程实例，不替代
+跨进程消息租约。
 ```
 
 ---
@@ -1118,6 +1125,8 @@ WorkOrderCompletedEvent
   有匹配规则？                 → Level 2 规则诊断
   都没有？                     → Level 1 LLM对话诊断
 ```
+
+规则命中后可通过 `KnowledgeRuleId` 关联 FMEA 故障模式库：诊断只读取当前租户或系统租户的启用条目，当前租户条目优先、按 RPN 降序最多取 3 条，并将故障模式、原因、影响、检测方式和维护建议作为可追溯上下文呈现；没有关联条目时保持原规则输出。FMEA 页面通过 `GET /api/v1/fmea/knowledge-rules` 提供当前设备类型的规则选择器，返回最小摘要并允许系统预置规则，服务端写入时仍执行租户归属校验。
 
 ### 8.2 分析引擎
 
@@ -2443,6 +2452,17 @@ volumes:
 | PUT | /api/v1/knowledge/pending-rules/{id}/reject | 驳回候选规则 |
 | GET | /api/v1/knowledge/cases | 故障案例列表 |
 | POST | /api/v1/knowledge/import | 导入行业知识库 |
+
+### FMEA 故障模式库
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/fmea | 分页查询当前租户 FMEA 条目 |
+| GET | /api/v1/fmea/knowledge-rules?deviceType=&selectedRuleId= | 获取 FMEA 表单可关联的当前租户/系统预置规则摘要，最多 100 条；编辑中的停用规则可通过 `selectedRuleId` 保留 |
+| POST | /api/v1/fmea | 创建 FMEA 条目 |
+| PUT | /api/v1/fmea/{id} | 更新 FMEA 条目 |
+| PUT | /api/v1/fmea/{id}/toggle | 启用或停用 FMEA 条目 |
+| DELETE | /api/v1/fmea/{id} | 删除 FMEA 条目 |
 
 ### 报表
 

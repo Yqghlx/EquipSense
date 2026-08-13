@@ -30,10 +30,32 @@ public interface IRuleEngineAnalysisService
 /// <param name="RecommendedActions">推荐处理措施（JSON 数组格式）</param>
 /// <param name="CheckSteps">检查步骤（JSON 格式）</param>
 /// <param name="ConfidenceWeight">置信度权重（0-1），用于分析引擎加权计算</param>
+/// <param name="FmeaMatches">与规则关联且当前租户可见的 FMEA 故障模式</param>
 public record RuleMatchResult(
     Guid RuleId,
     string RuleName,
     string Conclusion,
     string? RecommendedActions,
     string? CheckSteps,
-    double ConfidenceWeight);
+    double ConfidenceWeight,
+    IReadOnlyList<FmeaMatchResult>? FmeaMatches = null);
+
+/// <summary>
+/// 与知识规则关联的 FMEA 故障模式摘要。
+/// 只返回诊断链路需要的字段，避免把完整实体或租户元数据暴露给上层。
+/// </summary>
+/// <param name="Id">FMEA 条目 ID</param>
+/// <param name="FailureMode">故障模式</param>
+/// <param name="Cause">可能原因</param>
+/// <param name="Effect">故障影响</param>
+/// <param name="Detection">检测方式</param>
+/// <param name="RecommendedAction">建议措施</param>
+/// <param name="Rpn">风险优先级数</param>
+public record FmeaMatchResult(
+    Guid Id,
+    string FailureMode,
+    string Cause,
+    string Effect,
+    string Detection,
+    string RecommendedAction,
+    int Rpn);

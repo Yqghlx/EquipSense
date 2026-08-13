@@ -1441,7 +1441,14 @@
     "detectability": "可检测性 (D)",
     "rpn": "RPN",
     "knowledgeRuleId": "关联规则",
-    "knowledgeRuleIdPlaceholder": "可选：输入已存在的知识规则 ID",
+    "knowledgeRulePlaceholder": "可选：选择知识规则",
+    "noKnowledgeRule": "不关联知识规则",
+    "systemPreset": "行业预置",
+    "disabledRule": "已停用",
+    "unavailableSelectedRule": "当前关联规则（详情不可用）",
+    "knowledgeRuleLoading": "正在加载可关联规则...",
+    "knowledgeRuleLoadFailed": "规则列表加载失败，可继续不关联保存。",
+    "knowledgeRuleHint": "可选：选择当前设备类型的知识规则，系统预置规则也可关联。",
     "ratingInvalid": "评分必须是 1-10 的整数",
     "editAction": "编辑 FMEA 条目",
     "enableAction": "启用 FMEA 条目",
@@ -1461,8 +1468,7 @@
     "recommendedActionTooLong": "建议措施长度不能超过 1000 个字符",
     "severityRequired": "请输入严重度 (1-10)",
     "occurrenceRequired": "请输入发生频率 (1-10)",
-    "detectabilityRequired": "请输入可检测性 (1-10)",
-    "knowledgeRuleIdInvalid": "关联规则 ID 格式无效"
+    "detectabilityRequired": "请输入可检测性 (1-10)"
   },
   "workOrders": {
     "reports": "工单报表",

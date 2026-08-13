@@ -23,6 +23,14 @@ public class CloudUploader : IAsyncDisposable
     private readonly LocalBuffer? _localBuffer;
     private readonly GatewayMetrics? _metrics;
     private readonly MqttFactory _mqttFactory = new();
+    /// <summary>
+    /// MQTT 客户端工厂；生产环境使用 MQTTnet 默认工厂，测试可注入可控客户端。
+    /// </summary>
+    private readonly Func<IMqttClient> _mqttClientFactory;
+    /// <summary>
+    /// 串行化完整的离线回放批次，防止多个设备采集器重复发布同一条积压消息。
+    /// </summary>
+    private readonly SemaphoreSlim _replayGate = new(1, 1);
     private IMqttClient? _mqttClient;
     private bool _disposed;
 
@@ -43,18 +51,22 @@ public class CloudUploader : IAsyncDisposable
     /// <param name="options">网关配置选项</param>
     /// <param name="offlineStore">可选的 SQLite 离线缓冲存储</param>
     /// <param name="localBuffer">可选的内存本地缓冲区</param>
+    /// <param name="metrics">可选的网关指标记录器</param>
+    /// <param name="mqttClientFactory">可选的 MQTT 客户端工厂，未提供时使用 MQTTnet 默认工厂</param>
     public CloudUploader(
         ILogger<CloudUploader> logger,
         GatewayOptions options,
         SqliteBufferStore? offlineStore = null,
         LocalBuffer? localBuffer = null,
-        GatewayMetrics? metrics = null)
+        GatewayMetrics? metrics = null,
+        Func<IMqttClient>? mqttClientFactory = null)
     {
         _logger = logger;
         _options = options;
         _offlineStore = offlineStore;
         _localBuffer = localBuffer;
         _metrics = metrics;
+        _mqttClientFactory = mqttClientFactory ?? (() => _mqttFactory.CreateMqttClient());
     }
 
     /// <summary>
@@ -62,7 +74,7 @@ public class CloudUploader : IAsyncDisposable
     /// </summary>
     public async Task ConnectAsync(CancellationToken ct)
     {
-        _mqttClient = _mqttFactory.CreateMqttClient();
+        _mqttClient = _mqttClientFactory();
 
         await _mqttClient.ConnectAsync(BuildMqttClientOptions(), ct);
         _logger.LogInformation("MQTT 已连接: {Broker}", _options.MqttBroker);
@@ -204,41 +216,50 @@ public class CloudUploader : IAsyncDisposable
     /// <summary>
     /// 回放离线缓冲数据
     /// 在线时从 SQLite 取出积压消息逐条发送，发送成功后标记已发送
-    /// 遇到发送失败或断网则停止回放，等待下次恢复后继续
+    /// 遇到发送失败或断网则停止回放，等待下次恢复后继续；同一单例内的完整批次串行执行
     /// </summary>
     /// <param name="ct">取消令牌</param>
     public async Task ReplayOfflineDataAsync(CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-
-        if (_offlineStore is null || !IsOnline) return;
-
-        var pending = await _offlineStore.GetPendingAsync(100);
-        foreach (var record in pending)
+        await _replayGate.WaitAsync(ct);
+        try
         {
-            if (!IsOnline || ct.IsCancellationRequested) break;
-            try
+            ct.ThrowIfCancellationRequested();
+
+            if (_offlineStore is null || !IsOnline) return;
+
+            var pending = await _offlineStore.GetPendingAsync(100);
+            foreach (var record in pending)
             {
-                var mqttMessage = new MqttApplicationMessageBuilder()
-                    .WithTopic(record.Topic)
-                    .WithPayload(record.Payload)
-                    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-                    .Build();
-                await _mqttClient!.PublishAsync(mqttMessage, ct);
-                await _offlineStore.MarkAsSentAsync(record.Id);
-                _metrics?.Increment(GatewayMetrics.Names.ReplayMessagesTotal);
+                if (!IsOnline || ct.IsCancellationRequested) break;
+                try
+                {
+                    var mqttMessage = new MqttApplicationMessageBuilder()
+                        .WithTopic(record.Topic)
+                        .WithPayload(record.Payload)
+                        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+                        .Build();
+                    await _mqttClient!.PublishAsync(mqttMessage, ct);
+                    await _offlineStore.MarkAsSentAsync(record.Id);
+                    _metrics?.Increment(GatewayMetrics.Names.ReplayMessagesTotal);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "回放离线数据失败，停止回放");
+                    break;
+                }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "回放离线数据失败，停止回放");
-                break;
-            }
+
+            await _offlineStore.CleanupOldAsync();
         }
-        await _offlineStore.CleanupOldAsync();
+        finally
+        {
+            _replayGate.Release();
+        }
     }
 
     /// <summary>

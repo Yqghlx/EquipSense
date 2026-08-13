@@ -213,6 +213,10 @@ public class HealthEndpoints : BackgroundService
                     break;
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机取消不是健康端点故障，监听器关闭后无需再写入 500 响应或记录错误日志。
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "处理健康检查请求失败: {Path}", path);
@@ -356,6 +360,11 @@ public class HealthEndpoints : BackgroundService
                 message = $"连接测试成功（{protocol}），耗时 {sw.ElapsedMilliseconds}ms",
                 latencyMs = sw.ElapsedMilliseconds
             }, 200, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // 宿主停机取消必须继续向上传播，避免被转换成普通的“连接失败”业务响应。
+            throw;
         }
         catch (Exception ex)
         {

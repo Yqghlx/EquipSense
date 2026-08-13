@@ -6,6 +6,7 @@ import {
   useCreateFmeaEntry,
   useDeleteFmeaEntry,
   useFmeaEntries,
+  useFmeaKnowledgeRuleOptions,
   useToggleFmeaEntry,
   useUpdateFmeaEntry,
 } from '../../hooks/useFmea';
@@ -18,6 +19,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../hooks/useFmea', () => ({
   useFmeaEntries: vi.fn(),
+  useFmeaKnowledgeRuleOptions: vi.fn(),
   useCreateFmeaEntry: vi.fn(),
   useUpdateFmeaEntry: vi.fn(),
   useDeleteFmeaEntry: vi.fn(),
@@ -70,6 +72,11 @@ beforeEach(() => {
     mutateAsync: vi.fn(),
     isPending: false,
   } as unknown as ReturnType<typeof useCreateFmeaEntry>);
+  vi.mocked(useFmeaKnowledgeRuleOptions).mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+  } as unknown as ReturnType<typeof useFmeaKnowledgeRuleOptions>);
   vi.mocked(useUpdateFmeaEntry).mockReturnValue({
     mutateAsync: vi.fn(),
     isPending: false,

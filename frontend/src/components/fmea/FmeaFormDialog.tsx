@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ClipboardPenLine, Loader2 } from 'lucide-react';
 import { Badge } from '../ui/badge';
@@ -13,9 +13,17 @@ import {
 } from '../ui/dialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select';
 import { Textarea } from '../ui/textarea';
 import {
   useCreateFmeaEntry,
+  useFmeaKnowledgeRuleOptions,
   useUpdateFmeaEntry,
   type CreateFmeaEntryRequest,
   type FmeaEntry,
@@ -59,8 +67,8 @@ const fmeaFieldMaxLengths = {
   recommendedAction: 1000,
 } as const;
 
-/** 与 .NET Guid 标准文本格式一致，避免把明显无效的关联 ID 送到服务端。 */
-const knowledgeRuleIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+/** 选择器中的特殊值，用于把可选关联清空为 null。 */
+const noKnowledgeRuleValue = '__none__';
 
 const emptyFormValues: FmeaFormValues = {
   deviceType: '',
@@ -109,6 +117,18 @@ function FieldError({ id, message }: FieldErrorProps) {
   );
 }
 
+/** 延迟规则选项查询，避免用户输入设备类型时每个字符都触发网络请求。 */
+function useDebouncedValue(value: string, delayMs: number): string {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timer);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
+
 /**
  * FMEA 表单弹窗外壳。
  *
@@ -128,6 +148,14 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
   const [values, setValues] = useState<FmeaFormValues>(() => toFormValues(entry));
   const [errors, setErrors] = useState<FmeaFormErrors>({});
   const [submitError, setSubmitError] = useState<string>();
+  const lookupDeviceType = useDebouncedValue(values.deviceType.trim(), 250);
+  const knowledgeRuleQuery = useFmeaKnowledgeRuleOptions(
+    {
+      deviceType: lookupDeviceType || undefined,
+      selectedRuleId: entry?.knowledgeRuleId ?? undefined,
+    },
+    { enabled: open },
+  );
 
   const isPending = createMutation.isPending || updateMutation.isPending;
   const ratingsAreValid = [values.severity, values.occurrence, values.detectability]
@@ -192,11 +220,6 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
         nextErrors[field] = values[field].trim() ? t('fmea.ratingInvalid') : t(requiredMessageKey);
       }
     });
-
-    const knowledgeRuleId = values.knowledgeRuleId.trim();
-    if (knowledgeRuleId && !knowledgeRuleIdPattern.test(knowledgeRuleId)) {
-      nextErrors.knowledgeRuleId = t('fmea.knowledgeRuleIdInvalid');
-    }
 
     return nextErrors;
   };
@@ -431,17 +454,46 @@ function FmeaFormDialogContent({ open, entry, onOpenChange }: FmeaFormDialogProp
 
           <div className="space-y-2">
             <Label htmlFor="fmea-knowledge-rule-id">{t('fmea.knowledgeRuleId')}</Label>
-            <Input
-              id="fmea-knowledge-rule-id"
-              value={values.knowledgeRuleId}
-              onChange={(event) => updateField('knowledgeRuleId', event.target.value)}
-              placeholder={t('fmea.knowledgeRuleIdPlaceholder')}
-              maxLength={36}
-              aria-invalid={errors.knowledgeRuleId ? 'true' : undefined}
-              aria-describedby={errors.knowledgeRuleId ? 'fmea-knowledge-rule-id-error' : undefined}
-              autoComplete="off"
-            />
-            <FieldError id="fmea-knowledge-rule-id-error" message={errors.knowledgeRuleId} />
+            <Select
+              value={values.knowledgeRuleId || noKnowledgeRuleValue}
+              onValueChange={(value) => {
+                if (value == null) return;
+                updateField(
+                  'knowledgeRuleId',
+                  String(value) === noKnowledgeRuleValue ? '' : String(value),
+                );
+              }}
+            >
+              <SelectTrigger id="fmea-knowledge-rule-id" className="w-full">
+                <SelectValue placeholder={t('fmea.knowledgeRulePlaceholder')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={noKnowledgeRuleValue}>
+                  {t('fmea.noKnowledgeRule')}
+                </SelectItem>
+                {knowledgeRuleQuery.data?.map((rule) => (
+                  <SelectItem key={rule.id} value={rule.id}>
+                    {rule.name} · {rule.deviceType}
+                    {rule.isSystemPreset ? ` · ${t('fmea.systemPreset')}` : ''}
+                    {!rule.enabled ? ` · ${t('fmea.disabledRule')}` : ''}
+                  </SelectItem>
+                ))}
+                {values.knowledgeRuleId
+                  && !knowledgeRuleQuery.data?.some((rule) => rule.id === values.knowledgeRuleId)
+                  && (
+                    <SelectItem value={values.knowledgeRuleId}>
+                      {t('fmea.unavailableSelectedRule')}
+                    </SelectItem>
+                  )}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground" aria-live="polite">
+              {knowledgeRuleQuery.isLoading
+                ? t('fmea.knowledgeRuleLoading')
+                : knowledgeRuleQuery.isError
+                  ? t('fmea.knowledgeRuleLoadFailed')
+                  : t('fmea.knowledgeRuleHint')}
+            </p>
           </div>
 
           <DialogFooter>

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using EquipAI.Application.DTOs.Auth;
 using EquipAI.Application.Fmea.DTOs;
+using EquipAI.Core.Constants;
 using EquipAI.Core.Entities;
 using EquipAI.Infrastructure.Data;
 using EquipAI.Tests.Integration.Infrastructure;
@@ -44,6 +45,70 @@ public class FmeaControllerTests
         var client = await _factory.CreateClientWithSeedAsync();
         var response = await client.GetAsync("/api/v1/fmea");
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetFmeaKnowledgeRuleOptions_WithoutAuth_Returns401()
+    {
+        var client = await _factory.CreateClientWithSeedAsync();
+        var response = await client.GetAsync("/api/v1/fmea/knowledge-rules");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetFmeaKnowledgeRuleOptions_WithAuth_ReturnsSafeTenantAndSystemSummaries()
+    {
+        var client = await GetAuthenticatedClientAsync();
+        var tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var otherTenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var deviceType = $"规则选择器测试设备-{Guid.NewGuid():N}";
+        var tenantRuleId = Guid.NewGuid();
+        var systemRuleId = Guid.NewGuid();
+        var disabledRuleId = Guid.NewGuid();
+        var otherTenantRuleId = Guid.NewGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.KnowledgeRules.AddRange(
+                CreateKnowledgeRule(tenantRuleId, tenantId, deviceType, "当前租户规则"),
+                CreateKnowledgeRule(systemRuleId, SystemConstants.SystemTenantId, "*", "系统预置规则"),
+                CreateKnowledgeRule(disabledRuleId, tenantId, deviceType, "已停用规则", enabled: false),
+                CreateKnowledgeRule(otherTenantRuleId, otherTenantId, deviceType, "其他租户规则"));
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            var response = await client.GetAsync(
+                $"/api/v1/fmea/knowledge-rules?deviceType={Uri.EscapeDataString(deviceType)}");
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            var body = await response.Content.ReadAsStringAsync();
+            var options = await response.Content.ReadFromJsonAsync<List<FmeaKnowledgeRuleOptionResponse>>();
+            options.Should().NotBeNull();
+            options!.Should().Contain(option => option.Id == tenantRuleId && !option.IsSystemPreset);
+            options.Should().Contain(option => option.Id == systemRuleId && option.IsSystemPreset);
+            options.Should().NotContain(option => option.Id == disabledRuleId);
+            options.Should().NotContain(option => option.Id == otherTenantRuleId);
+            body.Should().NotContain("conditions");
+            body.Should().NotContain("conclusion");
+        }
+        finally
+        {
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rules = await db.KnowledgeRules
+                .IgnoreQueryFilters()
+                .Where(rule => rule.Id == tenantRuleId
+                    || rule.Id == systemRuleId
+                    || rule.Id == disabledRuleId
+                    || rule.Id == otherTenantRuleId)
+                .ToListAsync();
+            db.KnowledgeRules.RemoveRange(rules);
+            await db.SaveChangesAsync();
+        }
     }
 
     [Fact]
@@ -213,6 +278,28 @@ public class FmeaControllerTests
             Rpn = rpn,
             CreatedBy = Guid.Empty,
             IsEnabled = true,
+        };
+    }
+
+    /// <summary>
+    /// 构造规则选项查询使用的知识规则，便于测试租户和启用状态边界。
+    /// </summary>
+    private static KnowledgeRule CreateKnowledgeRule(
+        Guid id,
+        Guid tenantId,
+        string deviceType,
+        string name,
+        bool enabled = true)
+    {
+        return new KnowledgeRule
+        {
+            Id = id,
+            TenantId = tenantId,
+            DeviceType = deviceType,
+            Name = name,
+            Conditions = "[]",
+            Conclusion = "测试结论",
+            Enabled = enabled,
         };
     }
 

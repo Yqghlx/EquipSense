@@ -67,6 +67,157 @@ public class RuleEngineAnalysisServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task MatchRuleAsync_命中规则时_应返回租户可见的启用Fmea并按租户优先排序()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var deviceId = Guid.NewGuid();
+        var ruleId = Guid.NewGuid();
+        var otherTenantId = Guid.NewGuid();
+
+        db.Devices.Add(new Device
+        {
+            Id = deviceId,
+            TenantId = _tenantId,
+            DeviceCode = "DEV-FMEA-001",
+            Name = "测试电机",
+            Type = "电机",
+        });
+        db.KnowledgeRules.Add(new KnowledgeRule
+        {
+            Id = ruleId,
+            TenantId = _tenantId,
+            DeviceType = "电机",
+            Name = "电机温度规则",
+            Conditions = """[{"metric":"temperature","operator":">","threshold":80}]""",
+            Conclusion = "电机温度过高",
+            Enabled = true,
+        });
+        db.FmeaLibrary.AddRange(
+            new FmeaEntry
+            {
+                TenantId = _tenantId,
+                KnowledgeRuleId = ruleId,
+                DeviceType = "电机",
+                FailureMode = "本租户轴承过热",
+                Cause = "润滑不足",
+                Effect = "轴承寿命下降",
+                Detection = "温度持续升高",
+                RecommendedAction = "检查润滑并测量轴承温度",
+                Severity = 7,
+                Occurrence = 4,
+                Detectability = 3,
+                Rpn = 84,
+                IsEnabled = true,
+            },
+            new FmeaEntry
+            {
+                TenantId = Guid.Empty,
+                KnowledgeRuleId = ruleId,
+                DeviceType = "电机",
+                FailureMode = "系统通用过热",
+                Cause = "散热不良",
+                Effect = "绝缘老化",
+                Detection = "温度超限",
+                RecommendedAction = "检查散热系统",
+                Severity = 9,
+                Occurrence = 9,
+                Detectability = 9,
+                Rpn = 729,
+                IsEnabled = true,
+            },
+            new FmeaEntry
+            {
+                TenantId = _tenantId,
+                KnowledgeRuleId = ruleId,
+                DeviceType = "电机",
+                FailureMode = "已禁用模式",
+                Cause = "不适用",
+                Effect = "不适用",
+                Detection = "不适用",
+                RecommendedAction = "不应返回",
+                Severity = 1,
+                Occurrence = 1,
+                Detectability = 1,
+                Rpn = 1,
+                IsEnabled = false,
+            },
+            new FmeaEntry
+            {
+                TenantId = otherTenantId,
+                KnowledgeRuleId = ruleId,
+                DeviceType = "电机",
+                FailureMode = "其他租户模式",
+                Cause = "不应泄漏",
+                Effect = "不应泄漏",
+                Detection = "不应泄漏",
+                RecommendedAction = "不应返回",
+                Severity = 10,
+                Occurrence = 10,
+                Detectability = 10,
+                Rpn = 1000,
+                IsEnabled = true,
+            });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IRuleEngineAnalysisService>();
+        var result = await service.MatchRuleAsync(_tenantId, deviceId, "temperature", 95.0);
+
+        result.Should().NotBeNull();
+        result!.FmeaMatches.Should().HaveCount(2);
+        result.FmeaMatches![0].FailureMode.Should().Be("本租户轴承过热");
+        result.FmeaMatches[1].FailureMode.Should().Be("系统通用过热");
+        result.FmeaMatches.Should().NotContain(item => item.FailureMode == "已禁用模式");
+        result.FmeaMatches.Should().NotContain(item => item.FailureMode == "其他租户模式");
+    }
+
+    [Fact]
+    public async Task MatchRuleAsync_同时命中多条规则时_应优先选择租户自定义规则()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var deviceId = Guid.NewGuid();
+
+        db.Devices.Add(new Device
+        {
+            Id = deviceId,
+            TenantId = _tenantId,
+            DeviceCode = "DEV-RULE-PRIORITY",
+            Name = "测试电机",
+            Type = "电机",
+        });
+        db.KnowledgeRules.AddRange(
+            new KnowledgeRule
+            {
+                TenantId = Guid.Empty,
+                DeviceType = "电机",
+                Name = "系统精确规则",
+                Conditions = """[{"metric":"temperature","operator":">","threshold":80}]""",
+                Conclusion = "系统规则结论",
+                ConfidenceWeight = 0.99m,
+                Enabled = true,
+            },
+            new KnowledgeRule
+            {
+                TenantId = _tenantId,
+                DeviceType = "*",
+                Name = "租户自定义规则",
+                Conditions = """[{"metric":"temperature","operator":">","threshold":80}]""",
+                Conclusion = "租户规则结论",
+                ConfidenceWeight = 0.5m,
+                Enabled = true,
+            });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IRuleEngineAnalysisService>();
+        var result = await service.MatchRuleAsync(_tenantId, deviceId, "temperature", 95.0);
+
+        result.Should().NotBeNull();
+        result!.RuleName.Should().Be("租户自定义规则");
+        result.Conclusion.Should().Be("租户规则结论");
+    }
+
+    [Fact]
     public async Task MatchRuleAsync_条件不满足应返回null()
     {
         using var scope = _sp.CreateScope();

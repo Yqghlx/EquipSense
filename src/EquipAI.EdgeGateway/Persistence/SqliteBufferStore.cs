@@ -18,6 +18,18 @@ public record PendingRecord(long Id, string Topic, byte[] Payload, DateTime Crea
 public class SqliteBufferStore : IAsyncDisposable
 {
     private readonly SqliteConnection _connection;
+    /// <summary>
+    /// 串行化共享 SQLite 连接上的所有命令、结果物化和释放操作。
+    /// </summary>
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
+    /// <summary>
+    /// 标识数据库表结构是否已经完成初始化。
+    /// </summary>
+    private bool _initialized;
+    /// <summary>
+    /// 标识存储是否已经开始释放，阻止排队操作再次使用连接。
+    /// </summary>
+    private int _disposed;
 
     /// <summary>
     /// 数据保留天数，超过此天数的已发送记录将被清理
@@ -44,20 +56,32 @@ public class SqliteBufferStore : IAsyncDisposable
     /// </summary>
     public async Task InitializeAsync()
     {
-        await _connection.OpenAsync();
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS buffer_messages (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                topic       TEXT NOT NULL,
-                payload     BLOB NOT NULL,
-                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-                is_sent     INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE INDEX IF NOT EXISTS idx_buffer_pending
-                ON buffer_messages(is_sent, created_at);
-            """;
-        await cmd.ExecuteNonQueryAsync();
+        await EnterOperationAsync();
+        try
+        {
+            if (_initialized)
+                return;
+
+            await _connection.OpenAsync();
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE IF NOT EXISTS buffer_messages (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    topic       TEXT NOT NULL,
+                    payload     BLOB NOT NULL,
+                    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                    is_sent     INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_buffer_pending
+                    ON buffer_messages(is_sent, created_at);
+                """;
+            await cmd.ExecuteNonQueryAsync();
+            _initialized = true;
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     /// <summary>
@@ -68,11 +92,19 @@ public class SqliteBufferStore : IAsyncDisposable
     /// <remarks>标记为 virtual 以便单元测试模拟 SQLite 故障（如磁盘满场景）</remarks>
     public virtual async Task StoreAsync(string topic, byte[] payload)
     {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = "INSERT INTO buffer_messages (topic, payload) VALUES (@topic, @payload)";
-        cmd.Parameters.AddWithValue("@topic", topic);
-        cmd.Parameters.AddWithValue("@payload", payload);
-        await cmd.ExecuteNonQueryAsync();
+        await EnterOperationAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "INSERT INTO buffer_messages (topic, payload) VALUES (@topic, @payload)";
+            cmd.Parameters.AddWithValue("@topic", topic);
+            cmd.Parameters.AddWithValue("@payload", payload);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     /// <summary>
@@ -82,26 +114,35 @@ public class SqliteBufferStore : IAsyncDisposable
     /// <returns>待发送记录列表</returns>
     public async Task<List<PendingRecord>> GetPendingAsync(int limit)
     {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = """
-            SELECT id, topic, payload, created_at
-            FROM buffer_messages
-            WHERE is_sent = 0
-            ORDER BY created_at ASC
-            LIMIT @limit
-            """;
-        cmd.Parameters.AddWithValue("@limit", limit);
-        var results = new List<PendingRecord>();
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        await EnterOperationAsync();
+        try
         {
-            results.Add(new PendingRecord(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                (byte[])reader.GetValue(2),
-                reader.GetDateTime(3)));
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = """
+                SELECT id, topic, payload, created_at
+                FROM buffer_messages
+                WHERE is_sent = 0
+                ORDER BY created_at ASC
+                LIMIT @limit
+                """;
+            cmd.Parameters.AddWithValue("@limit", limit);
+            var results = new List<PendingRecord>();
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                results.Add(new PendingRecord(
+                    reader.GetInt64(0),
+                    reader.GetString(1),
+                    (byte[])reader.GetValue(2),
+                    reader.GetDateTime(3)));
+            }
+
+            return results;
         }
-        return results;
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     /// <summary>
@@ -110,10 +151,18 @@ public class SqliteBufferStore : IAsyncDisposable
     /// <param name="id">记录 ID</param>
     public async Task MarkAsSentAsync(long id)
     {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = "UPDATE buffer_messages SET is_sent = 1 WHERE id = @id";
-        cmd.Parameters.AddWithValue("@id", id);
-        await cmd.ExecuteNonQueryAsync();
+        await EnterOperationAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "UPDATE buffer_messages SET is_sent = 1 WHERE id = @id";
+            cmd.Parameters.AddWithValue("@id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     /// <summary>
@@ -121,10 +170,18 @@ public class SqliteBufferStore : IAsyncDisposable
     /// </summary>
     public async Task CleanupOldAsync()
     {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = "DELETE FROM buffer_messages WHERE created_at < datetime('now', @days)";
-        cmd.Parameters.AddWithValue("@days", $"-{RetentionDays} days");
-        await cmd.ExecuteNonQueryAsync();
+        await EnterOperationAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "DELETE FROM buffer_messages WHERE created_at < datetime('now', @days)";
+            cmd.Parameters.AddWithValue("@days", $"-{RetentionDays} days");
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 
     /// <summary>
@@ -134,11 +191,43 @@ public class SqliteBufferStore : IAsyncDisposable
     /// <param name="daysAgo">天数偏移（正数表示过去）</param>
     public async Task TestHelper_SetCreatedDaysAgo(long id, int daysAgo)
     {
-        var cmd = _connection.CreateCommand();
-        cmd.CommandText = "UPDATE buffer_messages SET created_at = datetime('now', @days) WHERE id = @id";
-        cmd.Parameters.AddWithValue("@days", $"-{daysAgo} days");
-        cmd.Parameters.AddWithValue("@id", id);
-        await cmd.ExecuteNonQueryAsync();
+        await EnterOperationAsync();
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "UPDATE buffer_messages SET created_at = datetime('now', @days) WHERE id = @id";
+            cmd.Parameters.AddWithValue("@days", $"-{daysAgo} days");
+            cmd.Parameters.AddWithValue("@id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// 进入 SQLite 操作闸门，并在等待期间再次检查释放状态。
+    /// 二次检查用于阻止已经排队的后台操作在连接关闭后继续执行。
+    /// </summary>
+    private async Task EnterOperationAsync()
+    {
+        ThrowIfDisposed();
+        await _operationGate.WaitAsync();
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            _operationGate.Release();
+            ThrowIfDisposed();
+        }
+    }
+
+    /// <summary>
+    /// 检查存储是否已经释放。
+    /// </summary>
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+            throw new ObjectDisposedException(nameof(SqliteBufferStore));
     }
 
     /// <summary>
@@ -146,7 +235,18 @@ public class SqliteBufferStore : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        await _connection.CloseAsync();
-        await _connection.DisposeAsync();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        await _operationGate.WaitAsync();
+        try
+        {
+            await _connection.CloseAsync();
+            await _connection.DisposeAsync();
+        }
+        finally
+        {
+            _operationGate.Release();
+        }
     }
 }

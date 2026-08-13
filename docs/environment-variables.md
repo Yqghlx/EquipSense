@@ -4,6 +4,26 @@ EquipSense 后端通过环境变量或 `appsettings.json` 配置运行参数。D
 
 本地开发配置中的数据库、JWT 和网关密钥仅保留占位符。请使用 `dotnet user-secrets` 或环境变量注入真实值，避免把凭据写入仓库；生产 Docker 部署必须使用 `docker/.env` 中的强随机值。
 
+## 生产凭据初始化边界
+
+生产首次配置或升级历史 `.env` 推荐先按组织密钥管理策略备份配置，再从仓库根目录执行：
+
+```bash
+bash docker/setup.sh --sync-template-defaults
+```
+
+该选项会在同一个原子写入流程中追加白名单非秘密默认值并生成本机可安全生成的随机值；已有键（包括空值和非法值）不覆盖，模板中的密码、密钥、许可证、租户 UUID、域名、证书路径和外部凭据不会复制。`.env` 使用并发锁、符号链接保护和 `600` 权限；默认 `bash docker/setup.sh` 不会自动改写已有 `.env`。值完全相同的重复键只有在明确追加 `--repair-identical-duplicates` 时才会归一化，冲突值始终要求人工清理。模板基线错误、bootstrap 或校验失败不会启动容器、生成证书或创建 MQTT 密码文件。
+
+白名单同步项包括固定 RabbitMQ 镜像 digest、Production/事件总线默认、Outbox/邮件队列参数、WAF/OTLP/Jaeger 路径和非秘密端口/功能开关；具体名单由 `docker/bootstrap-production-secrets.sh` 维护并由生产脚本契约测试保护。`AUTOMAPPER_LICENSE_KEY`、`GATEWAY_TENANT_ID`、`DOMAIN`、`FRONTEND_URL`、`VAPID__SUBJECT`、`SSL_CERT_PATH`、`SSL_KEY_PATH`、SMTP/LLM 凭据和 TLS/MQTT 文件必须由部署方提供。
+
+| 配置类别 | 处理方式 | 典型变量/文件 |
+|----------|----------|---------------|
+| 本机可生成的随机凭据 | 可由 bootstrap 生成；生成后必须写入密钥管理系统并纳入备份恢复策略 | `PG_PASSWORD`、`REDIS_PASSWORD`、`RABBITMQ_PASSWORD`、`MQTT_PASSWORD`、`JWT_SECRET`、`TOTP_ENCRYPTION_KEY`、`PII_ENCRYPTION_KEY`、种子账户密码、`GATEWAY_AUTH_KEY`、`SEQ_ADMIN_PASSWORD`、`GRAFANA_PASSWORD` |
+| 外部生产配置 | 必须由部署方、供应商或密钥管理系统提供，脚本不会猜测或伪造 | `AUTOMAPPER_LICENSE_KEY`、`GATEWAY_TENANT_ID`、`DOMAIN`/`FRONTEND_URL`、SMTP/LLM/OTLP 凭据 |
+| 正式运行时文件 | 必须预置并通过格式、有效期、主机名、权限、私钥匹配和 CA 链检查 | `docker/ssl/`、`docker/mqtt-certs/`、Mosquitto 密码文件 |
+
+所有初始化错误输出都只能包含变量名、文件名、服务名和整改类别，不应记录密码、密钥、许可证、完整 `.env` 或恢复码；“本地随机凭据已生成”不等于生产环境已经具备上线资格。
+
 ## 数据库
 
 | 变量名 | 说明 | 默认值 | 必填 |

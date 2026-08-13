@@ -13,6 +13,16 @@ public class LocalBufferTests : IAsyncDisposable
         _buffer = new LocalBuffer(capacity: 3);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void 构造时容量必须为正数(int capacity)
+    {
+        var act = () => new LocalBuffer(capacity);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
     [Fact]
     public async Task EnqueueAsync_未满时应保持在内存()
     {
@@ -200,6 +210,47 @@ public class LocalBufferTests : IAsyncDisposable
         await buffer.DisposeAsync();
     }
 
+    [Fact]
+    public async Task 并发入队时队列深度不得超过容量()
+    {
+        const int capacity = 1;
+        var store = new BlockingSqliteStore();
+        var buffer = new LocalBuffer(capacity, store);
+
+        await buffer.EnqueueAsync("seed", [0]);
+
+        var tasks = Enumerable.Range(1, 3)
+            .Select(index => Task.Run(() => buffer.EnqueueAsync($"topic/{index}", [(byte)index])))
+            .ToArray();
+
+        await store.TwoWritesEntered.WaitAsync(TimeSpan.FromSeconds(5));
+        store.ReleaseWrites();
+        await Task.WhenAll(tasks);
+
+        buffer.Count.Should().Be(capacity);
+
+        await buffer.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DequeueBatch_应同步更新队列深度指标()
+    {
+        var metrics = new GatewayMetrics();
+        var buffer = new LocalBuffer(capacity: 2, metrics: metrics);
+
+        await buffer.EnqueueAsync("topic/1", [1]);
+        await buffer.EnqueueAsync("topic/2", [2]);
+        metrics.GetGauge(GatewayMetrics.Names.BufferQueueDepth).Should().Be(2);
+
+        buffer.DequeueBatch(1).Should().HaveCount(1);
+        metrics.GetGauge(GatewayMetrics.Names.BufferQueueDepth).Should().Be(1);
+
+        buffer.DequeueBatch(10).Should().HaveCount(1);
+        metrics.GetGauge(GatewayMetrics.Names.BufferQueueDepth).Should().Be(0);
+
+        await buffer.DisposeAsync();
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _buffer.DisposeAsync();
@@ -214,5 +265,33 @@ public class LocalBufferTests : IAsyncDisposable
 
         public override Task StoreAsync(string topic, byte[] payload)
             => throw new InvalidOperationException("模拟 SQLite 故障");
+    }
+
+    /// <summary>
+    /// 模拟多个采集线程同时等待离线写入，稳定暴露队列容量检查与入队之间的竞态。
+    /// </summary>
+    private sealed class BlockingSqliteStore : SqliteBufferStore
+    {
+        private readonly TaskCompletionSource<object?> _twoWritesEntered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<object?> _releaseWrites =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _writeCount;
+
+        public BlockingSqliteStore() : base(":memory:")
+        {
+        }
+
+        public Task TwoWritesEntered => _twoWritesEntered.Task;
+
+        public override async Task StoreAsync(string topic, byte[] payload)
+        {
+            if (Interlocked.Increment(ref _writeCount) >= 2)
+                _twoWritesEntered.TrySetResult(null);
+
+            await _releaseWrites.Task;
+        }
+
+        public void ReleaseWrites() => _releaseWrites.TrySetResult(null);
     }
 }

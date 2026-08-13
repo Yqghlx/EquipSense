@@ -83,6 +83,39 @@ public class RootCauseAnalysisEngineTests
     }
 
     [Fact]
+    public async Task AnalyzeAsync_规则关联Fmea时_应把故障模式和建议带入诊断结果()
+    {
+        _mockDataQuality.Setup(d => d.CalculateScoreAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0.8);
+        _mockMlService.Setup(m => m.DetectAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MlAnomalyResult(false, 0.1, 50.0, "ML 检测正常"));
+        _mockRuleEngine.Setup(r => r.MatchRuleAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RuleMatchResult(
+                Guid.NewGuid(),
+                "温度规则",
+                "设备温度异常",
+                "检查散热",
+                null,
+                0.8,
+                [new FmeaMatchResult(
+                    Guid.NewGuid(),
+                    "轴承过热",
+                    "润滑不足",
+                    "轴承寿命下降",
+                    "温度持续升高",
+                    "检查润滑并测量轴承温度",
+                    84)]));
+
+        var result = await _engine.AnalyzeAsync(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "temperature", 95.0, CreateBaseline());
+
+        result.Level.Should().Be(AnalysisLevel.L2);
+        result.RootCause.Should().Contain("轴承过热");
+        result.RootCause.Should().Contain("润滑不足");
+        result.Suggestion.Should().Contain("检查润滑并测量轴承温度");
+    }
+
+    [Fact]
     public async Task AnalyzeAsync_WithBaselineAndHighQuality_UsesL3()
     {
         // L4 返回 null，L2 返回 null → 降级到 L3 统计分析

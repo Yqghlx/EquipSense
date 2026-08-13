@@ -1777,6 +1777,331 @@ test_bootstrap_production_secrets_refuses_symlink_without_mutation() {
   cmp -s "$case_dir/real.env.before" "$case_dir/real.env" || fail "符号链接失败时目标 .env 不应被修改"
 }
 
+test_setup_rejects_repair_without_bootstrap() {
+  local case_dir="$TEST_ROOT/setup-repair-without-bootstrap"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+
+  # 参数错误必须在 Docker 探测和 .env 创建前被拒绝，避免错误调用留下半初始化环境。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh --repair-identical-duplicates 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "未启用 bootstrap 时不应接受重复键修复参数"
+  assert_contains "$output" "--repair-identical-duplicates 只能与 --bootstrap-local-secrets 一起使用"
+  [[ ! -e "$case_dir/.env" ]] || fail "参数错误时不应创建 .env"
+}
+
+test_setup_bootstraps_local_secrets_when_explicit() {
+  local case_dir="$TEST_ROOT/setup-explicit-bootstrap"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\\n" "$*" > "bootstrap.args"' \
+    'exit 23' > "$case_dir/bootstrap-production-secrets.sh"
+  chmod +x "$case_dir/bootstrap-production-secrets.sh"
+
+  # setup.sh 只需要 Docker 的版本探测；测试不启动或修改任何容器。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh \
+    --bootstrap-local-secrets --repair-identical-duplicates 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "bootstrap 返回失败时 setup.sh 不应成功"
+  assert_contains "$output" "本地凭据初始化失败"
+  [[ -s "$case_dir/bootstrap.args" ]] || fail "显式 bootstrap 参数未调用初始化脚本"
+  assert_contains "$(cat "$case_dir/bootstrap.args")" "--env-file"
+  assert_contains "$(cat "$case_dir/bootstrap.args")" "--repair-identical-duplicates"
+  [[ ! -d "$case_dir/ssl" ]] || fail "bootstrap 失败时不应进入 TLS 文件处理"
+  [[ ! -d "$case_dir/mqtt-certs" ]] || fail "bootstrap 失败时不应进入 MQTT 证书处理"
+}
+
+test_bootstrap_reports_redacted_remediation_categories() {
+  local case_dir="$TEST_ROOT/bootstrap-remediation-categories"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh --env-file .env 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "缺少生产专属配置时 bootstrap 不应误报成功"
+  assert_contains "$output" "本机随机凭据"
+  assert_contains "$output" "外部生产配置"
+  assert_contains "$output" "TLS/MQTT"
+
+  local generated_pg_password
+  generated_pg_password="$(awk -F= '$1 == "PG_PASSWORD" { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+  [[ -n "$generated_pg_password" ]] || fail "测试环境未生成 PG_PASSWORD"
+  [[ "$output" != *"$generated_pg_password"* ]] || fail "整改提示不应包含生成的凭据值"
+
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/duplicate.env"
+  printf '%s\n' 'PG_PASSWORD=conflicting-value-that-must-not-be-printed' >> "$case_dir/duplicate.env"
+  chmod 600 "$case_dir/duplicate.env"
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh --env-file duplicate.env 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "重复键时 bootstrap 不应继续写入"
+  assert_contains "$output" "重复键"
+  [[ "$output" != *"conflicting-value-that-must-not-be-printed"* ]] \
+    || fail "重复键整改提示不应包含配置值"
+}
+
+test_bootstrap_syncs_only_whitelisted_template_defaults() {
+  local case_dir="$TEST_ROOT/bootstrap-sync-template-defaults"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+  sed -E '/^(RABBITMQ_IMAGE|ASPNETCORE_ENVIRONMENT|OTEL_EXPORTER_OTLP_ENDPOINT)=/d' \
+    "$PROJECT_ROOT/docker/.env.example" > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  cp "$case_dir/.env" "$case_dir/.env.before"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh \
+    --env-file .env --sync-template-defaults 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "外部生产配置未完成时同步不应误报成功"
+  for key in RABBITMQ_IMAGE ASPNETCORE_ENVIRONMENT OTEL_EXPORTER_OTLP_ENDPOINT; do
+    grep -q "^${key}=" "$case_dir/.env" || fail "同步模式未追加白名单默认项：$key"
+    [[ "$(grep -c "^${key}=" "$case_dir/.env")" -eq 1 ]] \
+      || fail "同步模式为 $key 追加了重复定义"
+  done
+
+  local before_value after_value
+  for key in AUTOMAPPER_LICENSE_KEY GATEWAY_TENANT_ID FRONTEND_URL VAPID__SUBJECT; do
+    before_value="$(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env.before")"
+    after_value="$(awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+    [[ "$after_value" = "$before_value" ]] || fail "同步模式不应改写 $key"
+  done
+
+  local generated_value
+  generated_value="$(awk -F= '$1 == "PG_PASSWORD" { print substr($0, index($0, "=") + 1); exit }' "$case_dir/.env")"
+  [[ -n "$generated_value" ]] || fail "同步模式未继续生成本地随机凭据"
+  [[ "$output" != *"$generated_value"* ]] || fail "同步输出不应包含生成的随机凭据"
+  assert_contains "$output" "追加"
+  assert_contains "$output" "本机随机凭据"
+}
+
+test_bootstrap_sync_does_not_overwrite_existing_default_or_empty_value() {
+  local case_dir="$TEST_ROOT/bootstrap-sync-preserves-existing"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+  sed \
+    -e 's#^RABBITMQ_IMAGE=.*#RABBITMQ_IMAGE=custom-approved-image-reference#' \
+    -e 's#^OTEL_EXPORTER_OTLP_ENDPOINT=.*#OTEL_EXPORTER_OTLP_ENDPOINT=#' \
+    "$PROJECT_ROOT/docker/.env.example" > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  local result_code
+  set +e
+  (cd "$case_dir" && bash ./bootstrap-production-secrets.sh \
+    --env-file .env --sync-template-defaults >/dev/null 2>&1)
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "外部生产配置未完成时同步不应误报成功"
+  grep -qx 'RABBITMQ_IMAGE=custom-approved-image-reference' "$case_dir/.env" \
+    || fail "同步模式覆盖了已有 RabbitMQ 镜像配置"
+  grep -qx 'OTEL_EXPORTER_OTLP_ENDPOINT=' "$case_dir/.env" \
+    || fail "同步模式覆盖了已有空 OTLP 配置"
+  [[ "$(grep -c '^RABBITMQ_IMAGE=' "$case_dir/.env")" -eq 1 ]] \
+    || fail "已有 RabbitMQ 镜像出现重复定义"
+  [[ "$(grep -c '^OTEL_EXPORTER_OTLP_ENDPOINT=' "$case_dir/.env")" -eq 1 ]] \
+    || fail "已有 OTLP 配置出现重复定义"
+}
+
+test_bootstrap_sync_rejects_invalid_template_before_mutation() {
+  local invalid_case
+  local case_dir
+  local output
+  local result_code
+  for invalid_case in missing duplicate placeholder; do
+    case_dir="$TEST_ROOT/bootstrap-sync-invalid-${invalid_case}"
+    mkdir -p "$case_dir"
+    cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+    cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+    cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+    case "$invalid_case" in
+      missing)
+        sed -i.bak '/^RABBITMQ_IMAGE=/d' "$case_dir/.env.example"
+        ;;
+      duplicate)
+        printf '%s\n' 'RABBITMQ_IMAGE=duplicate-template-image-reference' >> "$case_dir/.env.example"
+        ;;
+      placeholder)
+        sed -i.bak 's#^RABBITMQ_IMAGE=.*#RABBITMQ_IMAGE=PLEASE_CHANGE_TEMPLATE_IMAGE#' "$case_dir/.env.example"
+        ;;
+    esac
+    rm -f "$case_dir/.env.example.bak"
+    cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env"
+    chmod 600 "$case_dir/.env" "$case_dir/.env.example"
+    cp "$case_dir/.env" "$case_dir/.env.before"
+
+    set +e
+    output="$(cd "$case_dir" && bash ./bootstrap-production-secrets.sh \
+      --env-file .env --sync-template-defaults 2>&1)"
+    result_code=$?
+    set -e
+
+    [[ "$result_code" -ne 0 ]] || fail "模板 ${invalid_case} 时同步不应成功"
+    assert_contains "$output" "模板"
+    cmp -s "$case_dir/.env.before" "$case_dir/.env" \
+      || fail "模板 ${invalid_case} 时不应修改 .env"
+    [[ ! -e "$case_dir/.env.lock" ]] || fail "模板 ${invalid_case} 后遗留锁目录"
+  done
+}
+
+test_bootstrap_sync_allowlist_excludes_sensitive_keys() {
+  local script_content
+  local sync_keys
+  script_content="$PROJECT_ROOT/docker/bootstrap-production-secrets.sh"
+  sync_keys="$(awk '
+    /^SYNCABLE_TEMPLATE_KEYS=\(/ { in_array = 1; next }
+    in_array && /^\)/ { exit }
+    in_array {
+      gsub(/[[:space:]]/, "")
+      if (length($0) > 0) print $0
+    }
+  ' "$script_content")"
+  [[ -n "$sync_keys" ]] || fail "未找到模板同步白名单"
+
+  local key
+  while IFS= read -r key; do
+    case "$key" in
+      *PASSWORD*|*SECRET*|*API_KEY*|*PRIVATEKEY*|*LICENSE*|*TENANT*|*DOMAIN*|FRONTEND_URL|VAPID__SUBJECT|SSL_CERT_PATH|SSL_KEY_PATH)
+        fail "模板同步白名单包含敏感或部署绑定键：$key"
+        ;;
+    esac
+  done <<< "$sync_keys"
+
+  local case_dir="$TEST_ROOT/bootstrap-sync-sensitive-omission"
+  mkdir -p "$case_dir"
+  cp "$PROJECT_ROOT/docker/bootstrap-production-secrets.sh" "$case_dir/bootstrap-production-secrets.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+  sed -E '/^(AUTOMAPPER_LICENSE_KEY|GATEWAY_TENANT_ID|FRONTEND_URL|VAPID__SUBJECT|SSL_CERT_PATH|SSL_KEY_PATH)=/d' \
+    "$PROJECT_ROOT/docker/.env.example" > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+
+  (cd "$case_dir" && bash ./bootstrap-production-secrets.sh \
+    --env-file .env --sync-template-defaults >/dev/null 2>&1) || true
+  ! grep -q '^AUTOMAPPER_LICENSE_KEY=' "$case_dir/.env" \
+    || fail "同步模式不应新增 AutoMapper 许可证"
+  ! grep -q '^GATEWAY_TENANT_ID=' "$case_dir/.env" \
+    || fail "同步模式不应新增真实租户 UUID"
+  ! grep -q '^FRONTEND_URL=' "$case_dir/.env" \
+    || fail "同步模式不应新增前端域名"
+  ! grep -q '^VAPID__SUBJECT=' "$case_dir/.env" \
+    || fail "同步模式不应新增 Web Push 发件身份"
+  ! grep -q '^SSL_CERT_PATH=' "$case_dir/.env" \
+    || fail "同步模式不应新增 TLS 证书路径"
+  ! grep -q '^SSL_KEY_PATH=' "$case_dir/.env" \
+    || fail "同步模式不应新增 TLS 私钥路径"
+}
+
+test_setup_syncs_template_defaults_when_explicit() {
+  local case_dir="$TEST_ROOT/setup-explicit-template-sync"
+  mkdir -p "$case_dir/bin"
+  cp "$PROJECT_ROOT/docker/setup.sh" "$case_dir/setup.sh"
+  cp "$PROJECT_ROOT/docker/validate-env.sh" "$case_dir/validate-env.sh"
+  cp "$PROJECT_ROOT/docker/.env.example" "$case_dir/.env.example"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\\n" "$*" > "bootstrap.args"' \
+    'exit 23' > "$case_dir/bootstrap-production-secrets.sh"
+  chmod +x "$case_dir/bootstrap-production-secrets.sh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ "${1:-}" = "--version" ]]; then exit 0; fi' \
+    'if [[ "${1:-}" = "compose" && "${2:-}" = "version" ]]; then exit 0; fi' \
+    'exit 0' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup.sh \
+    --sync-template-defaults 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "模板同步 bootstrap 失败时 setup.sh 不应成功"
+  assert_contains "$output" "本地凭据/模板默认值初始化失败"
+  [[ -s "$case_dir/bootstrap.args" ]] || fail "显式模板同步未调用 bootstrap"
+  assert_contains "$(cat "$case_dir/bootstrap.args")" "--sync-template-defaults"
+  [[ ! -d "$case_dir/ssl" ]] || fail "模板同步失败时不应进入 TLS 文件处理"
+  [[ ! -d "$case_dir/mqtt-certs" ]] || fail "模板同步失败时不应进入 MQTT 证书处理"
+}
+
+test_production_env_template_matches_validator_required_keys() {
+  local validator_file="$PROJECT_ROOT/docker/validate-env.sh"
+  local template_file="$PROJECT_ROOT/docker/.env.example"
+  local required_key
+  local required_keys
+  required_keys="$(awk '
+    /REQUIRED_ENV_VARS=\(/ { in_array = 1; next }
+    in_array && /^  \)/ { exit }
+    in_array {
+      gsub(/"/, "")
+      gsub(/[[:space:]]/, "")
+      if (length($0) > 0) print $0
+    }
+  ' "$validator_file")"
+
+  while IFS= read -r required_key; do
+    [ -n "$required_key" ] || continue
+    grep -q "^${required_key}=" "$template_file" \
+      || fail ".env.example 缺少校验器要求的必填键：$required_key"
+  done <<< "$required_keys"
+
+  local duplicate_template_keys
+  duplicate_template_keys="$(awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { count[$1]++ } END { for (key in count) if (count[key] > 1) print key }' "$template_file")"
+  [[ -z "$duplicate_template_keys" ]] || fail ".env.example 不应包含重复键：$duplicate_template_keys"
+}
+
 test_setup_rejects_non_production_environment_explicitly() {
   local case_dir="$TEST_ROOT/setup-non-production"
   mkdir -p "$case_dir/bin"
@@ -4521,6 +4846,15 @@ case "${1:-all}" in
     test_bootstrap_production_secrets_repairs_only_identical_duplicates
     test_bootstrap_production_secrets_rejects_conflicting_duplicates_when_repair_requested
     test_bootstrap_production_secrets_refuses_symlink_without_mutation
+    test_setup_rejects_repair_without_bootstrap
+    test_setup_bootstraps_local_secrets_when_explicit
+    test_bootstrap_reports_redacted_remediation_categories
+    test_bootstrap_syncs_only_whitelisted_template_defaults
+    test_bootstrap_sync_does_not_overwrite_existing_default_or_empty_value
+    test_bootstrap_sync_rejects_invalid_template_before_mutation
+    test_bootstrap_sync_allowlist_excludes_sensitive_keys
+    test_setup_syncs_template_defaults_when_explicit
+    test_production_env_template_matches_validator_required_keys
     test_setup_rejects_new_placeholder_env
     test_setup_rejects_symlink_environment_file
     test_setup_rejects_non_production_environment_explicitly
@@ -4684,6 +5018,15 @@ case "${1:-all}" in
     test_bootstrap_production_secrets_repairs_only_identical_duplicates
     test_bootstrap_production_secrets_rejects_conflicting_duplicates_when_repair_requested
     test_bootstrap_production_secrets_refuses_symlink_without_mutation
+    test_setup_rejects_repair_without_bootstrap
+    test_setup_bootstraps_local_secrets_when_explicit
+    test_bootstrap_reports_redacted_remediation_categories
+    test_bootstrap_syncs_only_whitelisted_template_defaults
+    test_bootstrap_sync_does_not_overwrite_existing_default_or_empty_value
+    test_bootstrap_sync_rejects_invalid_template_before_mutation
+    test_bootstrap_sync_allowlist_excludes_sensitive_keys
+    test_setup_syncs_template_defaults_when_explicit
+    test_production_env_template_matches_validator_required_keys
     test_setup_rejects_new_placeholder_env
     test_setup_rejects_symlink_environment_file
     test_setup_rejects_non_production_environment_explicitly

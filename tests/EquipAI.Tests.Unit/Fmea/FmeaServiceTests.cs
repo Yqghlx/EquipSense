@@ -137,6 +137,41 @@ public class FmeaServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetKnowledgeRuleOptionsAsync_Should_ReturnOnlyAccessibleEnabledRulesInDeterministicOrder()
+    {
+        var tenantRuleId = Guid.NewGuid();
+        var systemRuleId = Guid.NewGuid();
+        var disabledRuleId = Guid.NewGuid();
+        var otherTenantRuleId = Guid.NewGuid();
+
+        _dbContext.KnowledgeRules.AddRange(
+            CreateKnowledgeRule(tenantRuleId, _testTenantId, "电机", "本租户电机规则"),
+            CreateKnowledgeRule(systemRuleId, SystemConstants.SystemTenantId, "*", "系统通用规则"),
+            CreateKnowledgeRule(disabledRuleId, _testTenantId, "电机", "已停用规则", enabled: false),
+            CreateKnowledgeRule(otherTenantRuleId, Guid.NewGuid(), "电机", "其他租户规则"));
+        await _dbContext.SaveChangesAsync();
+
+        var options = await _fmeaService.GetKnowledgeRuleOptionsAsync("电机");
+
+        options.Select(option => option.Id).Should().Equal(tenantRuleId, systemRuleId);
+        options.Should().OnlyContain(option => option.Enabled);
+        options.Single(option => option.Id == systemRuleId).IsSystemPreset.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetKnowledgeRuleOptionsAsync_Should_KeepSelectedDisabledRuleForEdit()
+    {
+        var disabledRuleId = Guid.NewGuid();
+        _dbContext.KnowledgeRules.Add(
+            CreateKnowledgeRule(disabledRuleId, _testTenantId, "泵", "已停用泵规则", enabled: false));
+        await _dbContext.SaveChangesAsync();
+
+        var options = await _fmeaService.GetKnowledgeRuleOptionsAsync("泵", disabledRuleId);
+
+        options.Should().ContainSingle(option => option.Id == disabledRuleId && !option.Enabled);
+    }
+
+    [Fact]
     public async Task GetEntriesAsync_Should_Return_Paged_Results()
     {
         for (int i = 0; i < 5; i++)
@@ -373,16 +408,22 @@ public class FmeaServiceTests : IDisposable
         _dbContext.Dispose();
     }
 
-    private static KnowledgeRule CreateKnowledgeRule(Guid id, Guid tenantId)
+    private static KnowledgeRule CreateKnowledgeRule(
+        Guid id,
+        Guid tenantId,
+        string deviceType = "Air Compressor",
+        string name = "Motor overload rule",
+        bool enabled = true)
     {
         return new KnowledgeRule
         {
             Id = id,
             TenantId = tenantId,
-            DeviceType = "Air Compressor",
-            Name = "Motor overload rule",
+            DeviceType = deviceType,
+            Name = name,
             Conditions = "[]",
             Conclusion = "Motor overload",
+            Enabled = enabled,
         };
     }
 }

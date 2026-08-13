@@ -47,6 +47,20 @@ public class FmeaController : ControllerBase
     }
 
     /// <summary>
+    /// 获取 FMEA 表单可关联的知识规则摘要。
+    /// </summary>
+    [HttpGet("knowledge-rules")]
+    [RequirePermission("knowledge:read")]
+    [ProducesResponseType(typeof(List<FmeaKnowledgeRuleOptionResponse>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<FmeaKnowledgeRuleOptionResponse>>> GetKnowledgeRuleOptions(
+        [FromQuery] string? deviceType = null,
+        [FromQuery] Guid? selectedRuleId = null,
+        CancellationToken ct = default)
+    {
+        return Ok(await _fmeaService.GetKnowledgeRuleOptionsAsync(deviceType, selectedRuleId, ct));
+    }
+
+    /// <summary>
     /// 创建 FMEA 条目
     /// </summary>
     [HttpPost]

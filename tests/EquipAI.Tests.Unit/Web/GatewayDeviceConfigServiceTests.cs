@@ -121,6 +121,46 @@ public sealed class GatewayDeviceConfigServiceTests
         values.Should().ContainSingle().Which.Should().Be(authKey);
     }
 
+    [Fact]
+    public async Task 代理连接测试收到取消时应传播取消而不是回退校验()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Gateway:AllowedHosts:0"] = "10.20.0.15",
+                ["Gateway:AuthKey"] = "gateway-secret",
+            })
+            .Build();
+        var policy = new GatewayEndpointPolicy(configuration);
+        using var httpClient = new HttpClient(new CancellationHandler());
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(item => item.CreateClient("GatewayProxy")).Returns(httpClient);
+
+        var service = new GatewayDeviceConfigService(
+            dbContext: null!,
+            tenantContext: Mock.Of<ITenantContext>(),
+            endpointPolicy: policy,
+            httpClientFactory: factory.Object,
+            logger: NullLogger<GatewayDeviceConfigService>.Instance);
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var act = () => service.ProxyTestConnectionAsync(
+            "modbus-tcp",
+            "{\"host\":\"10.20.0.20\",\"port\":502}",
+            new Gateway
+            {
+                GatewayId = "gateway-001",
+                Host = "10.20.0.15",
+                HealthPort = 8081,
+                Enabled = true,
+            },
+            cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private static AppDbContext CreateDb(out Guid tenantId)
     {
         tenantId = Guid.NewGuid();
@@ -177,5 +217,13 @@ public sealed class GatewayDeviceConfigServiceTests
                 Content = JsonContent.Create(new { success = true, message = "连接测试成功" }),
             });
         }
+    }
+
+    private sealed class CancellationHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(new OperationCanceledException(cancellationToken));
     }
 }

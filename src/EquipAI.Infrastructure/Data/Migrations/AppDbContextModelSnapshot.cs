@@ -888,6 +888,8 @@ namespace EquipAI.Infrastructure.Data.Migrations
 
                     b.HasIndex("IsEnabled");
 
+                    b.HasIndex("TenantId", "KnowledgeRuleId", "IsEnabled");
+
                     b.HasIndex("Rpn");
 
                     b.HasIndex("TenantId");

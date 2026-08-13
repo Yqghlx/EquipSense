@@ -99,6 +99,21 @@ public class SqliteBufferStoreTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task StoreAsync_并发写入应完整保存所有记录()
+    {
+        var tasks = Enumerable.Range(0, 200)
+            .Select(index => Task.Run(() => _store.StoreAsync(
+                $"topic/{index}",
+                [(byte)(index % 255)])))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        var pending = await _store.GetPendingAsync(250);
+        pending.Should().HaveCount(200);
+    }
+
+    [Fact]
     public async Task MarkAsSentAsync_仅标记指定记录()
     {
         // Arrange
