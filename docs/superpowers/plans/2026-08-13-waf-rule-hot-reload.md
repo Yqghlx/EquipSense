@@ -239,32 +239,32 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 **Interfaces:**
 - 证据必须区分代码已验证与真实生产制品审批/演练未完成，不得把 WAF 代码测试写成生产环境已验收。
 
-- [ ] Step 1: 运行后端聚焦测试和 Release 构建
+- [x] Step 1: 运行后端聚焦测试和 Release 构建
 
-    dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~WafRuleLoaderTests|FullyQualifiedName~WafRuleProviderTests|FullyQualifiedName~WafMiddlewareTests|FullyQualifiedName~ProductionConfigurationTests"
-    dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false
+    dotnet test tests/EquipAI.Tests.Unit -c Release --no-build --filter "FullyQualifiedName~WafRuleLoaderTests|FullyQualifiedName~WafRuleProviderTests|FullyQualifiedName~WafMiddlewareTests|FullyQualifiedName~WafRuleConfigurationTests" --logger "console;verbosity=minimal"
+    dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false -v:q
 
-预期：聚焦测试全部通过，Release 构建 0 warning/0 error。
+结果：WAF 聚焦测试 68/68 通过，Release 构建 0 warning/0 error。
 
-- [ ] Step 2: 运行生产脚本、差异和敏感信息检查
+- [x] Step 2: 运行生产脚本、差异和敏感信息检查
 
     bash tests/scripts/production-scripts-test.sh all
     bash -n docker/backup.sh docker/restore.sh tests/scripts/production-runtime-smoke.sh tests/scripts/production-scripts-test.sh
     git -c core.fsmonitor=false diff --check
 
-预期：脚本、语法和差异检查通过；规则文件不得含真实凭据。
+结果：脚本测试输出“生产脚本测试通过”，Shell 语法、差异和敏感模式扫描均通过；规则文件不含真实凭据。
 
-- [ ] Step 3: 运行当前提交 Production runtime smoke
+- [x] Step 3: 运行当前提交 Production runtime smoke
 
-使用当前提交三镜像并设置 SMOKE_RUN_E2E=true（依赖和浏览器可用时）运行现有 smoke；Docker 不可用时记录精确阻断，不把历史结果冒充当前提交证据。
+结果：使用当前工作区构建的 `equipsense/backend:ci-smoke`、`equipsense/frontend:ci-smoke` 和 `equipsense/edgegateway:ci-smoke`，设置 `SMOKE_RUN_E2E=true` 运行通过；433 个 E2E 为 432 通过、1 个架构性条件跳过、0 失败，Production runtime smoke 健康探针、迁移、演示数据、HTTPS/API 反向代理和边缘网关缓存均通过。
 
-- [ ] Step 4: 更新风险和上线报告
+- [x] Step 4: 更新风险和上线报告
 
-在上线报告记录 loader/provider/请求链路/Compose 契约和当前 smoke 的确切结果；在 R20 之外增加 WAF 规则更新的代码侧缓解，保留制品来源、审批、最小权限、有效更新和回滚演练为部署侧条件；将本计划完成步骤打勾。
+结果：已更新 `docs/LANDING_READINESS_REPORT.md` 与 `docs/evaluation/S09-风险登记册.md`，新增 R21；报告保留正式规则制品来源、审批、最小权限和有效更新/回滚演练为部署侧条件。
 
-- [ ] Step 5: 最终工作区审计并提交证据
+- [x] Step 5: 最终工作区审计并提交证据
 
-确认 git status 只有预期变更，检查没有真实 .env、证书、备份或临时 Docker 文件进入 git；运行 git diff --check 和最近提交摘要后提交：
+结果：已完成最终工作区审计、差异检查和最近提交复核；权限修正已提交为 `9c47cfe`，上线证据将在本次文档提交中记录：
 
     git add docs/LANDING_READINESS_REPORT.md docs/evaluation/S09-风险登记册.md docs/superpowers/plans/2026-08-13-waf-rule-hot-reload.md
     git commit -m "docs(readiness): record waf rule reload verification"
