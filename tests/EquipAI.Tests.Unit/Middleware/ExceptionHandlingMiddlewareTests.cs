@@ -184,6 +184,26 @@ public class ExceptionHandlingMiddlewareTests
 
     #endregion
 
+    #region ForbiddenAccessException → 403
+
+    [Fact]
+    public async Task ForbiddenAccessException_应返回403并保留权限提示()
+    {
+        var response = await ExecuteMiddlewareAsync(mockNext =>
+        {
+            mockNext
+                .Setup(next => next(It.IsAny<HttpContext>()))
+                .ThrowsAsync(new ForbiddenAccessException("当前用户没有执行该审批步骤的权限"));
+        });
+
+        _context.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        response.GetProperty("code").GetInt32().Should().Be(StatusCodes.Status403Forbidden);
+        response.GetProperty("message").GetString()
+            .Should().Be("当前用户没有执行该审批步骤的权限");
+    }
+
+    #endregion
+
     #region ArgumentException → 400
 
     [Fact]

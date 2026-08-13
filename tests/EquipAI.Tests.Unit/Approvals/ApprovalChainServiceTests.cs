@@ -2,6 +2,7 @@ using EquipAI.Application.Approvals;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
+using EquipAI.Core.Exceptions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
@@ -66,8 +67,14 @@ public class ApprovalChainServiceTests : IAsyncDisposable
             new ApprovalStep { StepOrder = 1, Role = "operator" });
 
         // 精确匹配链（纠正性 + 紧急）
+        var specificApproverId = Guid.NewGuid();
         var exactMatch = CreateTemplate(tenantId, "纠正性紧急", WorkOrderType.Corrective, WorkOrderPriority.Critical, isDefault: false,
-            new ApprovalStep { StepOrder = 1, Role = "maintenance_lead" });
+            new ApprovalStep
+            {
+                StepOrder = 1,
+                Role = "maintenance_lead",
+                SpecificApproverId = specificApproverId
+            });
 
         db.ApprovalChainTemplates.AddRange(globalTemplate, typeDefault, exactMatch);
 
@@ -94,6 +101,7 @@ public class ApprovalChainServiceTests : IAsyncDisposable
 
         approvals.Should().HaveCount(1);
         approvals[0].ExpectedRole.Should().Be("maintenance_lead");
+        approvals[0].SpecificApproverId.Should().Be(specificApproverId);
     }
 
     [Fact]
@@ -255,7 +263,7 @@ public class ApprovalChainServiceTests : IAsyncDisposable
         var approverId = Guid.NewGuid();
 
         // 通过第一步
-        await service.ApproveAsync(tenantId, workOrderId, approverId, "同意");
+        await service.ApproveAsync(tenantId, workOrderId, approverId, "MaintenanceLead", "同意");
 
         // 验证：工单状态仍为 SubmittedForApproval（还有未完成步骤）
         // 注意：由于 Service 内部使用新的 scope/dbcontext，需要用 AsNoTracking 读取最新数据
@@ -264,7 +272,7 @@ public class ApprovalChainServiceTests : IAsyncDisposable
 
         // 通过第二步
         var approverId2 = Guid.NewGuid();
-        await service.ApproveAsync(tenantId, workOrderId, approverId2, "同意");
+        await service.ApproveAsync(tenantId, workOrderId, approverId2, "SystemAdmin", "同意");
 
         // 验证：所有步骤通过，工单状态变为 Accepted
         var woAfterAll = await db.WorkOrders.AsNoTracking().FirstAsync(wo => wo.Id == workOrderId);
@@ -278,6 +286,147 @@ public class ApprovalChainServiceTests : IAsyncDisposable
 
         approvals.Should().HaveCount(2);
         approvals.All(a => a.Action == ApprovalAction.Approved).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ApproveAsync_显式租户与当前上下文不一致时_不得修改审批记录()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var actualTenantId = Guid.NewGuid();
+        var suppliedTenantId = Guid.NewGuid();
+        _tenantContext.SetTenantId(actualTenantId);
+
+        var workOrderId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = actualTenantId,
+            Title = "租户边界审批测试",
+            Status = WorkOrderStatus.SubmittedForApproval,
+            Type = WorkOrderType.Corrective,
+            Priority = WorkOrderPriority.High,
+            DeviceId = Guid.NewGuid()
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = actualTenantId,
+            WorkOrderId = workOrderId,
+            StepOrder = 1,
+            ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+
+        var act = () => service.ApproveAsync(
+            suppliedTenantId, workOrderId, Guid.NewGuid(), "MaintenanceLead", "越租户审批");
+
+        await act.Should().ThrowAsync<KeyNotFoundException>(
+            "显式租户参数不匹配时，应按资源不可见返回 404，且不得使用当前上下文中的审批记录");
+
+        var approval = await db.WorkOrderApprovals
+            .AsNoTracking()
+            .SingleAsync(a => a.WorkOrderId == workOrderId);
+        approval.Action.Should().Be(ApprovalAction.Pending);
+
+        var workOrder = await db.WorkOrders
+            .AsNoTracking()
+            .SingleAsync(w => w.Id == workOrderId);
+        workOrder.Status.Should().Be(WorkOrderStatus.SubmittedForApproval);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_当前用户角色不匹配时_不得修改审批记录()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+        _tenantContext.SetTenantId(tenantId);
+
+        var workOrderId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = tenantId,
+            Title = "审批角色边界测试",
+            Status = WorkOrderStatus.SubmittedForApproval,
+            Type = WorkOrderType.Corrective,
+            Priority = WorkOrderPriority.High,
+            DeviceId = Guid.NewGuid()
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = tenantId,
+            WorkOrderId = workOrderId,
+            StepOrder = 1,
+            ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+        var act = () => service.ApproveAsync(
+            tenantId, workOrderId, Guid.NewGuid(), "SystemAdmin", "越权审批");
+
+        await act.Should().ThrowAsync<ForbiddenAccessException>();
+
+        var approval = await db.WorkOrderApprovals
+            .AsNoTracking()
+            .SingleAsync(a => a.WorkOrderId == workOrderId);
+        approval.Action.Should().Be(ApprovalAction.Pending);
+        approval.ApproverId.Should().BeNull();
+        approval.Comment.Should().BeNull();
+
+        var workOrder = await db.WorkOrders
+            .AsNoTracking()
+            .SingleAsync(w => w.Id == workOrderId);
+        workOrder.Status.Should().Be(WorkOrderStatus.SubmittedForApproval);
+    }
+
+    [Fact]
+    public async Task ApproveAsync_指定审批人不匹配时_不得修改审批记录()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+        _tenantContext.SetTenantId(tenantId);
+
+        var workOrderId = Guid.NewGuid();
+        var expectedApproverId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = tenantId,
+            Title = "指定审批人边界测试",
+            Status = WorkOrderStatus.SubmittedForApproval,
+            Type = WorkOrderType.Corrective,
+            Priority = WorkOrderPriority.High,
+            DeviceId = Guid.NewGuid()
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = tenantId,
+            WorkOrderId = workOrderId,
+            StepOrder = 1,
+            ExpectedRole = "maintenance_lead",
+            SpecificApproverId = expectedApproverId,
+            Action = ApprovalAction.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+        var act = () => service.ApproveAsync(
+            tenantId, workOrderId, Guid.NewGuid(), "MaintenanceLead", "非指定审批人");
+
+        await act.Should().ThrowAsync<ForbiddenAccessException>();
+
+        var approval = await db.WorkOrderApprovals
+            .AsNoTracking()
+            .SingleAsync(a => a.WorkOrderId == workOrderId);
+        approval.Action.Should().Be(ApprovalAction.Pending);
+        approval.ApproverId.Should().BeNull();
     }
 
     // ===================================================================
@@ -322,7 +471,7 @@ public class ApprovalChainServiceTests : IAsyncDisposable
         var approverId = Guid.NewGuid();
 
         // 驳回第一步
-        await service.RejectAsync(tenantId, workOrderId, approverId, "不符合要求");
+        await service.RejectAsync(tenantId, workOrderId, approverId, "MaintenanceLead", "不符合要求");
 
         // 验证：工单状态回到 InProgress（使用 AsNoTracking 读取最新数据）
         var wo = await db.WorkOrders.AsNoTracking().FirstAsync(w => w.Id == workOrderId);
@@ -340,6 +489,103 @@ public class ApprovalChainServiceTests : IAsyncDisposable
         // 后续步骤也应被标记为 Rejected（自动跳过）
         approvals[1].Action.Should().Be(ApprovalAction.Rejected);
         approvals[1].Comment.Should().Be("前置步骤被驳回，自动跳过");
+    }
+
+    [Fact]
+    public async Task RejectAsync_当前用户角色不匹配时_不得修改审批记录()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+        _tenantContext.SetTenantId(tenantId);
+
+        var workOrderId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = tenantId,
+            Title = "驳回角色边界测试",
+            Status = WorkOrderStatus.SubmittedForApproval,
+            Type = WorkOrderType.Corrective,
+            Priority = WorkOrderPriority.High,
+            DeviceId = Guid.NewGuid()
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = tenantId,
+            WorkOrderId = workOrderId,
+            StepOrder = 1,
+            ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+        var act = () => service.RejectAsync(
+            tenantId, workOrderId, Guid.NewGuid(), "SystemAdmin", "越权驳回");
+
+        await act.Should().ThrowAsync<ForbiddenAccessException>();
+
+        var approval = await db.WorkOrderApprovals
+            .AsNoTracking()
+            .SingleAsync(a => a.WorkOrderId == workOrderId);
+        approval.Action.Should().Be(ApprovalAction.Pending);
+        approval.ApproverId.Should().BeNull();
+        approval.Comment.Should().BeNull();
+
+        var workOrder = await db.WorkOrders
+            .AsNoTracking()
+            .SingleAsync(w => w.Id == workOrderId);
+        workOrder.Status.Should().Be(WorkOrderStatus.SubmittedForApproval);
+    }
+
+    [Fact]
+    public async Task RejectAsync_指定审批人不匹配时_不得修改审批记录()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantId = Guid.NewGuid();
+        _tenantContext.SetTenantId(tenantId);
+
+        var workOrderId = Guid.NewGuid();
+        var expectedApproverId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = workOrderId,
+            TenantId = tenantId,
+            Title = "指定驳回人边界测试",
+            Status = WorkOrderStatus.SubmittedForApproval,
+            Type = WorkOrderType.Corrective,
+            Priority = WorkOrderPriority.High,
+            DeviceId = Guid.NewGuid()
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = tenantId,
+            WorkOrderId = workOrderId,
+            StepOrder = 1,
+            ExpectedRole = "maintenance_lead",
+            SpecificApproverId = expectedApproverId,
+            Action = ApprovalAction.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+        var act = () => service.RejectAsync(
+            tenantId, workOrderId, Guid.NewGuid(), "MaintenanceLead", "非指定驳回人");
+
+        await act.Should().ThrowAsync<ForbiddenAccessException>();
+
+        var approval = await db.WorkOrderApprovals
+            .AsNoTracking()
+            .SingleAsync(a => a.WorkOrderId == workOrderId);
+        approval.Action.Should().Be(ApprovalAction.Pending);
+        approval.ApproverId.Should().BeNull();
+
+        var workOrder = await db.WorkOrders
+            .AsNoTracking()
+            .SingleAsync(w => w.Id == workOrderId);
+        workOrder.Status.Should().Be(WorkOrderStatus.SubmittedForApproval);
     }
 
     // ===================================================================
@@ -383,8 +629,8 @@ public class ApprovalChainServiceTests : IAsyncDisposable
             .Should().Be(2);
 
         // 第 1 步通过，第 2 步驳回 → 工单回 InProgress（返工）
-        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "同意");
-        await service.RejectAsync(tenantId, workOrderId, Guid.NewGuid(), "需返工");
+        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "MaintenanceLead", "同意");
+        await service.RejectAsync(tenantId, workOrderId, Guid.NewGuid(), "SystemAdmin", "需返工");
         (await db.WorkOrders.AsNoTracking().FirstAsync(w => w.Id == workOrderId)).Status
             .Should().Be(WorkOrderStatus.InProgress);
 
@@ -398,8 +644,8 @@ public class ApprovalChainServiceTests : IAsyncDisposable
             "重新提交应作废上一轮审批记录，不应让旧记录（含 Rejected）与新记录共存");
 
         // 走完新一轮 2 步审批
-        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "同意");
-        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "同意");
+        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "MaintenanceLead", "同意");
+        await service.ApproveAsync(tenantId, workOrderId, Guid.NewGuid(), "SystemAdmin", "同意");
 
         // 关键断言 2：新一轮全部通过后，工单应进入 Accepted（派工执行），不被上一轮 Rejected 永久阻塞
         var woFinal = await db.WorkOrders.AsNoTracking().FirstAsync(w => w.Id == workOrderId);
@@ -531,12 +777,59 @@ public class ApprovalChainServiceTests : IAsyncDisposable
         {
             TenantId = _tenantContext.TenantId, WorkOrderId = Guid.NewGuid(),
             StepOrder = 1, ExpectedRole = "maintenance_lead",
-            Action = ApprovalAction.Pending, ApproverId = approverId
+            Action = ApprovalAction.Pending,
+            SpecificApproverId = approverId
+        });
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = _tenantContext.TenantId, WorkOrderId = Guid.NewGuid(),
+            StepOrder = 1, ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending,
+            SpecificApproverId = Guid.NewGuid()
         });
         await db.SaveChangesAsync();
 
-        var pending = await service.GetPendingApprovalsAsync(approverId, null);
-        pending.Should().HaveCount(1);
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = _tenantContext.TenantId, WorkOrderId = Guid.NewGuid(),
+            StepOrder = 2, ExpectedRole = "system_admin",
+            Action = ApprovalAction.Pending
+        });
+        await db.SaveChangesAsync();
+
+        var pending = await service.GetPendingApprovalsAsync(
+            _tenantContext.TenantId, approverId, "MaintenanceLead");
+        pending.Should().ContainSingle(a => a.ExpectedRole == "maintenance_lead");
+
+        var withoutRole = await service.GetPendingApprovalsAsync(
+            _tenantContext.TenantId, approverId, null);
+        withoutRole.Should().BeEmpty("缺少当前用户角色时不能放宽待审批范围");
+    }
+
+    [Fact]
+    public async Task GetPendingApprovalsAsync_显式租户与当前上下文不一致时_不得返回审批记录()
+    {
+        _tenantContext.SetTenantId(Guid.NewGuid());
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IApprovalChainService>();
+        var approverId = Guid.NewGuid();
+
+        db.WorkOrderApprovals.Add(new WorkOrderApproval
+        {
+            TenantId = _tenantContext.TenantId,
+            WorkOrderId = Guid.NewGuid(),
+            StepOrder = 1,
+            ExpectedRole = "maintenance_lead",
+            Action = ApprovalAction.Pending,
+            SpecificApproverId = approverId
+        });
+        await db.SaveChangesAsync();
+
+        var pending = await service.GetPendingApprovalsAsync(
+            Guid.NewGuid(), approverId, "MaintenanceLead");
+
+        pending.Should().BeEmpty("审批列表必须同时满足调用方租户和当前上下文租户");
     }
 
     private class MutableTenantContext : ITenantContext

@@ -153,13 +153,19 @@ try
     //   - .NET Runtime（GC / ThreadPool / 内存 / CPU）— 补充 prometheus-net 未覆盖的运行时维度
     //
     // Exporter 策略：
-    //   - 开发环境（OTEL_EXPORTER 未配置）：Console exporter，trace/metric 直接打到日志
-    //   - 生产环境（OTEL_EXPORTER=otlp）：OTLP exporter 推送到 Jaeger/Tempo/Prometheus
+    //   - 开发/测试环境（OTEL_EXPORTER 未配置）：Console exporter，便于本地调试
+    //   - 生产环境：必须配置 OTLP exporter；缺失时在注册服务前 fail-closed，避免日志放大
     //
     // 与 prometheus-net 的关系：
     //   - prometheus-net 暴露 /metrics（HTTP pull），覆盖业务指标（设备/告警/工单计数）+ HTTP 请求时长
     //   - OTel Metrics 通过 OTLP push，补充 .NET Runtime 指标（GC / ThreadPool），与 trace 关联可在 Jaeger 中查看
-    var otllEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+    var otelEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+    OpenTelemetryConfigurationValidator.ValidateForEnvironment(
+        otelEndpoint,
+        builder.Environment.EnvironmentName);
+    var otelEndpointUri = string.IsNullOrEmpty(otelEndpoint)
+        ? null
+        : new Uri(otelEndpoint);
     builder.Services.AddOpenTelemetry()
         .WithTracing(tracing =>
         {
@@ -181,15 +187,18 @@ try
                     opts.SetDbStatementForStoredProcedure = true;
                 });
 
-            if (!string.IsNullOrEmpty(otllEndpoint))
+            if (!string.IsNullOrEmpty(otelEndpoint))
             {
                 // 生产：OTLP gRPC 推送到 Jaeger / Tempo / OTel Collector
                 tracing.AddOtlpExporter(opts =>
                 {
-                    opts.Endpoint = new Uri(otllEndpoint);
+                    opts.Endpoint = otelEndpointUri!;
                     // 默认协议 gRPC（兼容 Jaeger 4317）
                 });
-                Log.Information("[OTel] Trace OTLP exporter 已启用 → {Endpoint}", otllEndpoint);
+                // 只记录 authority，避免把未来误填入 URL 的路径、查询参数或凭据写入日志。
+                Log.Information(
+                    "[OTel] Trace OTLP exporter 已启用 → {Endpoint}",
+                    otelEndpointUri!.GetLeftPart(UriPartial.Authority));
             }
             else
             {
@@ -213,13 +222,15 @@ try
             // 当前业务指标通过 prometheus-net 暴露，未走 OTel Meter；后续可逐步迁移
             // metrics.AddMeter("EquipAI.Business");
 
-            if (!string.IsNullOrEmpty(otllEndpoint))
+            if (!string.IsNullOrEmpty(otelEndpoint))
             {
                 metrics.AddOtlpExporter(opts =>
                 {
-                    opts.Endpoint = new Uri(otllEndpoint);
+                    opts.Endpoint = otelEndpointUri!;
                 });
-                Log.Information("[OTel] Metrics OTLP exporter 已启用 → {Endpoint}", otllEndpoint);
+                Log.Information(
+                    "[OTel] Metrics OTLP exporter 已启用 → {Endpoint}",
+                    otelEndpointUri!.GetLeftPart(UriPartial.Authority));
             }
             else
             {

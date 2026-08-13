@@ -244,10 +244,13 @@ public class WorkOrdersController : ControllerBase
     [Audit("Approve", "WorkOrder")]
     [RequirePermission("workorder:accept")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> ApproveWorkOrder(Guid id, [FromBody] ApprovalActionRequest? request = null)
     {
         await _approvalChainService.ApproveAsync(
-            _tenantContext.TenantId, id, _tenantContext.UserId, request?.Comment);
+            _tenantContext.TenantId, id, _tenantContext.UserId,
+            User.FindFirst("role")?.Value, request?.Comment);
         return Ok(new { message = "审批通过" });
     }
 
@@ -258,10 +261,13 @@ public class WorkOrdersController : ControllerBase
     [Audit("RejectApproval", "WorkOrder")]
     [RequirePermission("workorder:accept")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> RejectApproval(Guid id, [FromBody] ApprovalActionRequest? request = null)
     {
         await _approvalChainService.RejectAsync(
-            _tenantContext.TenantId, id, _tenantContext.UserId, request?.Comment);
+            _tenantContext.TenantId, id, _tenantContext.UserId,
+            User.FindFirst("role")?.Value, request?.Comment);
         return Ok(new { message = "审批已驳回" });
     }
 

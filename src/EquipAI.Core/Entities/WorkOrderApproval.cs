@@ -19,6 +19,11 @@ public class WorkOrderApproval : BaseEntity
     /// <summary>期望审批角色</summary>
     public string ExpectedRole { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 指定审批人 ID；为空时表示该角色下的任意具备权限用户均可审批。
+    /// </summary>
+    public Guid? SpecificApproverId { get; set; }
+
     /// <summary>实际审批人 ID</summary>
     public Guid? ApproverId { get; set; }
 

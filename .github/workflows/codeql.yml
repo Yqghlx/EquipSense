@@ -33,6 +33,10 @@ env:
   DOTNET_VERSION: '8.0.x'
   NODE_VERSION: '20'
 
+# CodeQL 仅需要读取仓库；分析 job 另外声明上传 SARIF 所需的安全事件权限。
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: CodeQL 分析 (${{ matrix.language }})
@@ -52,10 +56,10 @@ jobs:
         language: ['csharp', 'javascript-typescript']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 初始化 CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
         with:
           languages: ${{ matrix.language }}
           # suite：安全-扩展查询集，比默认更全面（含路径遍历、SSRF、日志注入等）
@@ -64,7 +68,7 @@ jobs:
       # C# 构建需要 .NET SDK；明确使用 .sln，避免 .NET 8 无法识别 slnx。
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
         if: matrix.language == 'csharp'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -75,6 +79,6 @@ jobs:
           dotnet build EquipAI.sln --configuration Release --no-restore -m:1 --disable-build-servers
 
       - name: 执行 CodeQL 分析
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@c4dd10e44af883a891fe31ced449bcb4a6728b9b # v3
         with:
           category: '/language:${{ matrix.language }}'

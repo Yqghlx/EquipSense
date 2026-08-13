@@ -86,7 +86,7 @@ cd ..
 
 开发/测试只启动基础设施时使用 `docker-compose.dev.yml`；如需测试完整 Compose 的 TLS 挂载链路，可按“TLS 证书配置”中的自签名方案单独运行 `generate-cert.sh` 和 `generate-mqtt-cert.sh`，但不得将其用于生产环境。
 
-`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝符号链接形式的 `.env`、TLS 私钥和 Mosquitto 密码文件，避免仅打印 warning 后误报配置成功或把认证文件写入非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+`setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝所有直接挂载/执行运行时文件的符号链接，`compose-production.sh` 也拒绝符号链接形式的 `.env`、Compose 文件和校验器入口，避免仅打印 warning 后误报配置成功或把认证/配置文件解析到非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
 
 WAF 规则文件位于 `docker/waf-rules/rules.json`，生产 Compose 以只读方式挂载到 `/etc/equipai/waf`，并通过 `WAF_RULES_PATH` 与 `WAF_REQUIRE_EXTERNAL_RULES=true` 强制应用加载。规则制品更新必须先在同目录临时文件中完成结构/安全校验和 `sha256sum` 记录，再备份旧文件并使用同目录 `mv` 原子替换；发布后核对后端日志中的 revision、规则数量和 SHA-256。失败或误报时使用已审查备份按同一流程回滚。应用不接受 HTTP 或数据库规则编辑，外部规则不能关闭内置 WAF 基线；正式环境仍需由部署方完成制品审批、最小权限及一次有效更新/回滚演练。
 
@@ -211,7 +211,7 @@ curl http://localhost:8080/api/v1/system/info
 | `ALERT_WEBHOOK_URL` | Alertmanager 外部告警 Webhook；未配置时降级为仅在监控面板保留 | - | 否 |
 | `JAEGER_SPAN_STORAGE_TYPE` | Jaeger trace 存储类型；单机生产默认 `badger` | `badger` | 否 |
 | `JAEGER_BADGER_EPHEMERAL` | Badger 是否临时存储；生产必须关闭 | `false` | 否 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | 后端 OTLP gRPC 端点；当前留空会退回 Console exporter | 空 | 待生产策略确认 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 后端 OTLP gRPC 端点；必须使用 `http://` 或 `https://` 且包含主机，不得内嵌凭据；Production 缺失时应用启动 fail-closed | `http://jaeger:4317`（标准 Compose） | Production 必填；Development/Testing 可为空 |
 | `MQTT_PORT` | MQTT 对外端口 | `8883` | 否 |
 | `MQTT_USERNAME` | MQTT 用户名 | - | 生产环境必填 |
 | `MQTT_PASSWORD` | MQTT 密码 | - | 生产环境必填 |
@@ -360,7 +360,7 @@ SMTP_ENABLE_SSL=true
 
 SMTP 是至少一次投递：如果邮件服务器已经接受消息，而进程在把任务标记为 Sent 前退出，重试可能产生重复邮件。需要严格去重时，应使用支持提供方幂等键/投递回执的邮件 API；当前原生 SMTP 实现不宣称 exactly-once。上线前必须用真实账号验证 TLS、发件域名、退信/死信告警和抽样到达率。
 
-> 可观测性策略待决：当前 Production 未设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 时会启用 Console exporter。正式上线前需明确采用“生产空端点时禁用 exporter 并记录简洁日志”或“Production 缺少 OTLP 端点即拒绝启动”；在决策落地前，部署侧应显式配置 `http://jaeger:4317`，避免高频 trace/metric 写入容器日志。
+可观测性策略已收口：标准生产 Compose 在未显式覆盖时将 `OTEL_EXPORTER_OTLP_ENDPOINT` 注入为 `http://jaeger:4317`，后端 Production 启动门禁拒绝缺失、非法协议、空主机或含空白字符的端点，避免退回 Console exporter 并放大容器日志。Development/Testing 仍可留空以使用 Console exporter；外部 Production 部署必须显式提供可达的 Jaeger、Tempo 或 OTel Collector 端点。
 
 ### 钉钉/飞书告警机器人推送
 

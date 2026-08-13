@@ -587,6 +587,47 @@ EOF
     || fail "生产门禁失败时不得调用 Docker Compose"
 }
 
+test_production_compose_wrapper_rejects_symlink_compose_file() {
+  local case_dir="$TEST_ROOT/compose-production-wrapper-compose-symlink"
+  local trace_file="$case_dir/trace.log"
+  mkdir -p "$case_dir/bin"
+
+  cp "$PROJECT_ROOT/docker/compose-production.sh" "$case_dir/compose-production.sh"
+  printf '%s\n' 'PLACEHOLDER=not-a-secret' > "$case_dir/.env"
+  : > "$case_dir/real-compose.yml"
+  ln -s real-compose.yml "$case_dir/docker-compose.yml"
+
+  cat > "$case_dir/validate-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'validate %s\n' "$*" >> "$TRACE_FILE"
+EOF
+  chmod 700 "$case_dir/validate-env.sh"
+
+  cat > "$case_dir/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'docker %s\n' "$*" >> "$TRACE_FILE"
+EOF
+  chmod 700 "$case_dir/bin/docker"
+
+  local output
+  local result_code
+  set +e
+  output="$(
+    TRACE_FILE="$trace_file" \
+    PATH="$case_dir/bin:$PATH" \
+    PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+    bash "$case_dir/compose-production.sh" up -d 2>&1
+  )"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "生产 Compose 包装器不应接受符号链接 Compose 文件"
+  assert_contains "$output" "Compose 文件不得为符号链接"
+  [[ ! -s "$trace_file" ]] || fail "符号链接 Compose 文件失败时不应执行校验器或 Docker"
+}
+
 test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection() {
   local case_dir="$TEST_ROOT/compose-production-wrapper-recovery"
   local trace_file="$case_dir/trace.log"
@@ -779,7 +820,22 @@ test_jaeger_storage_is_persistent_by_default() {
   assert_contains "$compose_content" 'jaeger-init:'
   assert_contains "$env_content" 'JAEGER_SPAN_STORAGE_TYPE=badger'
   assert_contains "$env_content" 'JAEGER_BADGER_EPHEMERAL=false'
+  assert_contains "$env_content" 'OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317'
+  assert_contains "$compose_content" 'OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}"'
   [[ "$compose_content" != *'SPAN_STORAGE_TYPE: memory'* ]] || fail "生产 Jaeger 不应默认使用内存存储"
+}
+
+test_backend_otlp_production_gate_is_wired() {
+  local program_content
+  local validator_line
+  local telemetry_registration_line
+  program_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs")"
+  assert_contains "$program_content" 'OpenTelemetryConfigurationValidator.ValidateForEnvironment('
+  assert_contains "$program_content" 'builder.Environment.EnvironmentName'
+  validator_line="$(grep -n 'OpenTelemetryConfigurationValidator.ValidateForEnvironment' "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs" | head -n1 | cut -d: -f1)"
+  telemetry_registration_line="$(grep -n 'builder.Services.AddOpenTelemetry()' "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs" | head -n1 | cut -d: -f1)"
+  [[ -n "$validator_line" && -n "$telemetry_registration_line" && "$validator_line" -lt "$telemetry_registration_line" ]] \
+    || fail "OTLP 配置门禁必须在 OpenTelemetry 服务注册前执行"
 }
 
 test_validate_env_rejects_ephemeral_jaeger_storage_in_production() {
@@ -826,6 +882,45 @@ test_validate_env_rejects_invalid_alert_webhook_url() {
 
   [[ "$result_code" -ne 0 ]] || fail "非法 Alertmanager webhook 地址不应通过生产环境校验"
   assert_contains "$output" "ALERT_WEBHOOK_URL 必须使用 http:// 或 https://"
+}
+
+test_validate_env_rejects_invalid_otlp_endpoint() {
+  local env_file="$TEST_ROOT/invalid-otlp-endpoint.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' 'OTEL_EXPORTER_OTLP_ENDPOINT=ftp://telemetry.example.com:4317' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非法 OTLP 端点不应通过生产环境校验"
+  assert_contains "$output" "OTEL_EXPORTER_OTLP_ENDPOINT 必须使用 http:// 或 https://"
+
+  local credentials_env_file="$TEST_ROOT/otlp-credentials.env"
+  cp "$TEST_ROOT/valid.env" "$credentials_env_file"
+  chmod 600 "$credentials_env_file"
+  printf '%s\n' 'OTEL_EXPORTER_OTLP_ENDPOINT=https://user:password@telemetry.example.com:4317' >> "$credentials_env_file"
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$credentials_env_file" 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "带内嵌凭据的 OTLP 端点不应通过生产环境校验"
+  assert_contains "$output" "OTEL_EXPORTER_OTLP_ENDPOINT 不得包含内嵌凭据"
+
+  local missing_host_env_file="$TEST_ROOT/otlp-missing-host.env"
+  cp "$TEST_ROOT/valid.env" "$missing_host_env_file"
+  chmod 600 "$missing_host_env_file"
+  printf '%s\n' 'OTEL_EXPORTER_OTLP_ENDPOINT=http://:4317' >> "$missing_host_env_file"
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$missing_host_env_file" 2>&1)"
+  result_code=$?
+  set -e
+  [[ "$result_code" -ne 0 ]] || fail "缺少主机的 OTLP 端点不应通过生产环境校验"
+  assert_contains "$output" "OTEL_EXPORTER_OTLP_ENDPOINT 必须包含有效主机"
 }
 
 test_validate_runtime_files_rejects_invalid_certificates() {
@@ -1123,6 +1218,22 @@ test_validate_runtime_files_gate() {
   printf '%s\n' 'loadtest:dummy-hash' > "$case_dir/mosquitto_passwd/passwd"
   chmod 600 "$case_dir/mosquitto_passwd/passwd"
   bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files >/dev/null
+
+  # 生产 Compose 会直接挂载这些文件；即使符号链接最终可读，也不能让门禁
+  # 把配置解析到运行目录之外的非预期目标。
+  mv "$case_dir/prometheus.yml" "$case_dir/prometheus.yml.real"
+  ln -s prometheus.yml.real "$case_dir/prometheus.yml"
+  local symlink_runtime_file_output
+  local symlink_runtime_file_result_code
+  set +e
+  symlink_runtime_file_output="$(bash "$case_dir/validate-env.sh" "$env_file" --check-runtime-files 2>&1)"
+  symlink_runtime_file_result_code=$?
+  set -e
+  [[ "$symlink_runtime_file_result_code" -ne 0 ]] \
+    || fail "符号链接生产运行时配置文件不应通过运行时门禁"
+  assert_contains "$symlink_runtime_file_output" "运行时文件不得为符号链接：prometheus.yml"
+  rm "$case_dir/prometheus.yml"
+  mv "$case_dir/prometheus.yml.real" "$case_dir/prometheus.yml"
 
   chmod 644 "$case_dir/ssl/key.pem" "$case_dir/mqtt-certs/server.key"
   local weak_private_key_output
@@ -3408,7 +3519,7 @@ test_release_waits_for_quality_gates() {
   assert_contains "$docker_block" "needs: [backend, frontend, production-smoke, backup-restore-rehearsal, load-test, e2e]"
 
   local release_block
-  release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  release_block="$(sed -n '/^  release:/,/^  create-release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$release_block" "needs: [backend, frontend, production-smoke, backup-restore-rehearsal, load-test]"
 
   local load_block
@@ -3417,7 +3528,7 @@ test_release_waits_for_quality_gates() {
 
   local deploy_block
   deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  assert_contains "$deploy_block" "needs: [release]"
+  assert_contains "$deploy_block" "needs: [release, create-release]"
 }
 
 test_ci_scans_all_images_before_registry_publish() {
@@ -3428,12 +3539,12 @@ test_ci_scans_all_images_before_registry_publish() {
     if [[ "$job_name" == "docker" ]]; then
       job_block="$(sed -n '/^  docker:/,/^  production-smoke:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
     else
-      job_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+      job_block="$(sed -n '/^  release:/,/^  create-release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
     fi
 
     first_scan_line="$(printf '%s\n' "$job_block" | grep -n 'Trivy 扫描后端镜像' | head -n 1 | cut -d: -f1)"
     last_scan_line="$(printf '%s\n' "$job_block" | grep -n 'severity: HIGH,CRITICAL' | tail -n 1 | cut -d: -f1)"
-    first_push_line="$(printf '%s\n' "$job_block" | grep -n '^[[:space:]]*push: true$' | head -n 1 | cut -d: -f1)"
+    first_push_line="$(printf '%s\n' "$job_block" | grep -n 'docker image push "\$image_tag"' | head -n 1 | cut -d: -f1)"
 
     [[ -n "$first_scan_line" && -n "$last_scan_line" && -n "$first_push_line" ]] \
       || fail "$job_name 镜像 job 必须包含本地构建、三镜像扫描和最终推送阶段"
@@ -3447,13 +3558,13 @@ test_ci_scans_all_images_before_registry_publish() {
     push_before_all_scans="$(
       printf '%s\n' "$job_block" \
         | sed -n "1,${last_scan_line}p" \
-        | grep -c '^[[:space:]]*push: true$' \
+        | grep -c 'docker image push "\$image_tag"' \
         || true
     )"
     push_after_all_scans="$(
       printf '%s\n' "$job_block" \
         | sed -n "$((last_scan_line + 1)),\$p" \
-        | grep -c '^[[:space:]]*push: true$' \
+        | grep -c 'docker image push "\$image_tag"' \
         || true
     )"
 
@@ -3462,7 +3573,7 @@ test_ci_scans_all_images_before_registry_publish() {
     [[ "$push_before_all_scans" -eq 0 ]] \
       || fail "$job_name 镜像 job 在三张镜像全部通过 Trivy 前不得写入镜像仓库"
     [[ "$push_after_all_scans" -eq 3 ]] \
-      || fail "$job_name 镜像 job 只能在三张镜像全部通过 Trivy 后执行三次发布"
+      || fail "$job_name 镜像 job 只能在三张镜像全部通过 Trivy 后逐个发布已扫描标签"
   done
 }
 
@@ -3480,6 +3591,95 @@ test_ci_trivy_action_is_pinned_to_verified_commit() {
     || fail "六个 Trivy 扫描步骤都必须锁定到经核实的 v0.36.0 完整 commit SHA"
   [[ "$ci_content" != *'aquasecurity/trivy-action@master'* ]] \
     || fail "具有 GHCR 写权限的 job 不得执行可变 master 分支上的 Trivy action"
+}
+
+test_ci_pushes_scanned_local_images_without_rebuild() {
+  local job_name job_block last_scan_line post_scan_builds push_command_count
+
+  for job_name in docker release; do
+    if [[ "$job_name" == "docker" ]]; then
+      job_block="$(sed -n '/^  docker:/,/^  production-smoke:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+    else
+      job_block="$(sed -n '/^  release:/,/^  create-release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+    fi
+
+    last_scan_line="$(printf '%s\n' "$job_block" | grep -n 'severity: HIGH,CRITICAL' | tail -n 1 | cut -d: -f1)"
+    [[ -n "$last_scan_line" ]] || fail "$job_name 镜像 job 必须包含完整 Trivy 扫描"
+
+    post_scan_builds="$(
+      printf '%s\n' "$job_block" \
+        | sed -n "$((last_scan_line + 1)),\$p" \
+        | grep -c 'uses: docker/build-push-action@' \
+        || true
+    )"
+    [[ "$post_scan_builds" -eq 0 ]] \
+      || fail "$job_name 镜像 job 扫描后不得再次使用 Buildx 重建发布"
+
+    push_command_count="$(printf '%s\n' "$job_block" | grep -c 'docker image push "\$image_tag"' || true)"
+    [[ "$push_command_count" -eq 3 ]] \
+      || fail "$job_name 镜像 job 必须逐个推送已扫描的三个本地镜像标签"
+
+    assert_contains "$job_block" 'IMAGE_TAGS: ${{ steps.meta-backend.outputs.tags }}'
+    assert_contains "$job_block" 'IMAGE_TAGS: ${{ steps.meta-frontend.outputs.tags }}'
+    assert_contains "$job_block" 'IMAGE_TAGS: ${{ steps.meta-edgegateway.outputs.tags }}'
+  done
+}
+
+test_ci_release_uses_isolated_minimum_permission_job() {
+  local release_block create_release_block deploy_block
+  release_block="$(sed -n '/^  release:/,/^  create-release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  create_release_block="$(sed -n '/^  create-release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+
+  assert_contains "$release_block" 'contents: read'
+  assert_contains "$release_block" 'packages: write'
+  [[ "$release_block" != *'contents: write'* ]] \
+    || fail "镜像发布 job 不得持有 contents: write"
+
+  assert_contains "$create_release_block" 'needs: [release]'
+  assert_contains "$create_release_block" 'contents: write'
+  [[ "$create_release_block" != *'packages: write'* ]] \
+    || fail "GitHub Release job 不需要 packages: write"
+  assert_contains "$deploy_block" 'needs: [release, create-release]'
+}
+
+test_ci_actions_are_pinned_to_full_commit_sha() {
+  local workflow_file action_line action_ref
+
+  for workflow_file in "$PROJECT_ROOT/.github/workflows/ci.yml" "$PROJECT_ROOT/.github/workflows/codeql.yml"; do
+    while IFS= read -r action_line; do
+      [[ "$action_line" =~ uses:[[:space:]][^@[:space:]]+@([^[:space:]#]+) ]] \
+        || fail "无法解析 Action 引用：$action_line"
+      action_ref="${BASH_REMATCH[1]}"
+      [[ "$action_ref" =~ ^[0-9a-f]{40}$ ]] \
+        || fail "Action 必须固定为完整 40 位 commit SHA：$action_line"
+    done < <(grep -E '^[[:space:]]*uses:' "$workflow_file")
+  done
+}
+
+test_ci_serializes_same_ref_runs_without_canceling_tags() {
+  local workflow_head expected_cancel
+  workflow_head="$(sed -n '1,36p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  expected_cancel="cancel-in-progress: \${{ !startsWith(github.ref, 'refs/tags/v') }}"
+
+  assert_contains "$workflow_head" 'concurrency:'
+  assert_contains "$workflow_head" 'group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}'
+  assert_contains "$workflow_head" "$expected_cancel"
+}
+
+test_dotnet_solution_entrypoint_is_single_and_supported() {
+  [[ -f "$PROJECT_ROOT/EquipAI.sln" ]] \
+    || fail "仓库必须保留 .NET 8 可读取的 EquipAI.sln 入口"
+  [[ ! -e "$PROJECT_ROOT/EquipAI.slnx" ]] \
+    || fail "当前锁定 .NET 8 SDK 不支持的 EquipAI.slnx 不应继续作为入口存在"
+
+  local agents_content ci_content
+  agents_content="$(cat "$PROJECT_ROOT/AGENTS.md")"
+  ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  [[ "$agents_content" != *'EquipAI.slnx'* ]] \
+    || fail "AGENTS.md 不得继续把失效的 EquipAI.slnx 描述为有效入口"
+  [[ "$ci_content" != *'EquipAI.slnx'* ]] \
+    || fail "CI 不得引用失效的 EquipAI.slnx 入口"
 }
 
 test_wait_for_http_retries_until_endpoint_is_ready() {
@@ -3790,7 +3990,7 @@ test_edgegateway_release_and_deploy_contract() {
   local ci_content docker_block release_block
   ci_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
   docker_block="$(sed -n '/^  docker:/,/^  production-smoke:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
-  release_block="$(sed -n '/^  release:/,/^  deploy:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  release_block="$(sed -n '/^  release:/,/^  create-release:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$docker_block" 'id: meta-edgegateway'
   assert_contains "$docker_block" 'file: docker/Dockerfile.edgegateway'
   assert_contains "$docker_block" 'edgegateway:sha-${{ steps.sha.outputs.short }}'
@@ -3816,7 +4016,7 @@ test_production_runtime_smoke_gate_is_wired() {
   local smoke_compose
   smoke_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.smoke.yml")"
   assert_contains "$smoke_compose" "build: !reset null"
-  for service in postgres redis mosquitto rabbitmq backend edgegateway frontend; do
+  for service in postgres redis mosquitto rabbitmq backend edgegateway frontend jaeger-init jaeger; do
     assert_contains "$smoke_compose" "${service}:"
     assert_contains "$smoke_compose" "container_name: !reset null"
   done
@@ -3841,6 +4041,11 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "/api/v1/gateways"
   assert_contains "$smoke_script" "jq -r"
   assert_contains "$smoke_script" "SMOKE_RUN_E2E"
+  assert_contains "$smoke_script" "OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317"
+  assert_contains "$smoke_script" "up -d jaeger-init jaeger postgres redis mosquitto rabbitmq backend edgegateway frontend"
+  assert_contains "$smoke_script" "JAEGER_UI_PORT"
+  assert_contains "$smoke_script" "/api/services"
+  assert_contains "$smoke_script" "/api/traces"
   assert_contains "$smoke_script" "--allow-isolated-e2e"
   assert_contains "$smoke_script" "SMOKE_E2E_WORKERS"
   assert_contains "$smoke_script" "SMOKE_E2E_GREP"
@@ -4294,6 +4499,7 @@ case "${1:-all}" in
     test_production_env_template_uses_https_default
     test_production_compose_wrapper_runs_preflight_before_start
     test_production_compose_wrapper_blocks_start_when_preflight_fails
+    test_production_compose_wrapper_rejects_symlink_compose_file
     test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection
     test_setup_validates_production_compose_wrapper
     test_production_readiness_entrypoint_is_wired_and_read_only
@@ -4302,8 +4508,10 @@ case "${1:-all}" in
     test_production_e2e_preserves_mfa_policy
     test_alertmanager_webhook_is_fail_safe_and_configurable
     test_jaeger_storage_is_persistent_by_default
+    test_backend_otlp_production_gate_is_wired
     test_validate_env_rejects_ephemeral_jaeger_storage_in_production
     test_validate_env_rejects_invalid_alert_webhook_url
+    test_validate_env_rejects_invalid_otlp_endpoint
     test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
@@ -4388,6 +4596,11 @@ case "${1:-all}" in
     test_release_waits_for_quality_gates
     test_ci_scans_all_images_before_registry_publish
     test_ci_trivy_action_is_pinned_to_verified_commit
+    test_ci_pushes_scanned_local_images_without_rebuild
+    test_ci_release_uses_isolated_minimum_permission_job
+    test_ci_actions_are_pinned_to_full_commit_sha
+    test_ci_serializes_same_ref_runs_without_canceling_tags
+    test_dotnet_solution_entrypoint_is_single_and_supported
     test_wait_for_http_retries_until_endpoint_is_ready
     test_wait_for_http_fails_closed_after_timeout
     test_ci_service_startup_uses_fail_closed_http_waiter
@@ -4451,6 +4664,7 @@ case "${1:-all}" in
     test_production_env_template_uses_https_default
     test_production_compose_wrapper_runs_preflight_before_start
     test_production_compose_wrapper_blocks_start_when_preflight_fails
+    test_production_compose_wrapper_rejects_symlink_compose_file
     test_production_compose_wrapper_uses_non_secret_recovery_env_for_inspection
     test_setup_validates_production_compose_wrapper
     test_production_compose_supports_isolated_tenant2_e2e_credentials
@@ -4458,8 +4672,10 @@ case "${1:-all}" in
     test_production_e2e_preserves_mfa_policy
     test_alertmanager_webhook_is_fail_safe_and_configurable
     test_jaeger_storage_is_persistent_by_default
+    test_backend_otlp_production_gate_is_wired
     test_validate_env_rejects_ephemeral_jaeger_storage_in_production
     test_validate_env_rejects_invalid_alert_webhook_url
+    test_validate_env_rejects_invalid_otlp_endpoint
     test_validate_runtime_files_rejects_invalid_certificates
     test_validate_runtime_files_rejects_production_self_signed_certificates
     test_validate_runtime_files_gate
@@ -4520,6 +4736,11 @@ case "${1:-all}" in
     test_release_waits_for_quality_gates
     test_ci_scans_all_images_before_registry_publish
     test_ci_trivy_action_is_pinned_to_verified_commit
+    test_ci_pushes_scanned_local_images_without_rebuild
+    test_ci_release_uses_isolated_minimum_permission_job
+    test_ci_actions_are_pinned_to_full_commit_sha
+    test_ci_serializes_same_ref_runs_without_canceling_tags
+    test_dotnet_solution_entrypoint_is_single_and_supported
     test_wait_for_http_retries_until_endpoint_is_ready
     test_wait_for_http_fails_closed_after_timeout
     test_ci_service_startup_uses_fail_closed_http_waiter

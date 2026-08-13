@@ -2,6 +2,7 @@ using EquipAI.Application.Approvals.DTOs;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Events;
+using EquipAI.Core.Exceptions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -185,6 +186,7 @@ public class ApprovalChainService : IApprovalChainService
                 WorkOrderId = workOrderId,
                 StepOrder = step.StepOrder,
                 ExpectedRole = step.Role,
+                SpecificApproverId = step.SpecificApproverId,
                 Action = ApprovalAction.Pending
             })
             .ToList();
@@ -196,7 +198,7 @@ public class ApprovalChainService : IApprovalChainService
         // 安全性：WorkOrderApproval 无外键被其他表引用，审批人/意见的审计由 WorkOrderLog
         // 状态变更日志保留，删除上一轮作废记录不丢审计。
         var previousApprovals = await dbContext.WorkOrderApprovals
-            .Where(a => a.WorkOrderId == workOrderId)
+            .Where(a => a.TenantId == tenantId && a.WorkOrderId == workOrderId)
             .ToListAsync(ct);
         if (previousApprovals.Count > 0)
         {
@@ -219,15 +221,22 @@ public class ApprovalChainService : IApprovalChainService
 
     /// <inheritdoc />
     public async Task ApproveAsync(
-        Guid tenantId, Guid workOrderId, Guid approverId, string? comment, CancellationToken ct = default)
+        Guid tenantId, Guid workOrderId, Guid approverId, string? approverRole,
+        string? comment, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
+        // 先确认工单属于显式租户。跨租户或不存在的工单必须返回 404，
+        // 避免把“资源不可见”误报为“审批状态冲突”，也不向调用方泄露资源存在性。
+        await EnsureWorkOrderExistsAsync(dbContext, tenantId, workOrderId, ct);
+
         // 获取当前待审批的步骤（按步骤顺序取第一个 Pending 的记录）
         var currentApproval = await dbContext.WorkOrderApprovals
-            .Where(a => a.WorkOrderId == workOrderId && a.Action == ApprovalAction.Pending)
+            .Where(a => a.TenantId == tenantId
+                && a.WorkOrderId == workOrderId
+                && a.Action == ApprovalAction.Pending)
             .OrderBy(a => a.StepOrder)
             .FirstOrDefaultAsync(ct);
 
@@ -235,6 +244,8 @@ public class ApprovalChainService : IApprovalChainService
         {
             throw new InvalidOperationException($"工单 {workOrderId} 没有待审批的步骤");
         }
+
+        EnsureApprovalActor(currentApproval, approverId, approverRole);
 
         // 更新当前步骤的审批信息
         currentApproval.ApproverId = approverId;
@@ -244,7 +255,7 @@ public class ApprovalChainService : IApprovalChainService
 
         // 检查是否所有步骤都已通过
         var allApprovals = await dbContext.WorkOrderApprovals
-            .Where(a => a.WorkOrderId == workOrderId)
+            .Where(a => a.TenantId == tenantId && a.WorkOrderId == workOrderId)
             .OrderBy(a => a.StepOrder)
             .ToListAsync(ct);
 
@@ -253,7 +264,8 @@ public class ApprovalChainService : IApprovalChainService
         if (allApproved)
         {
             // 所有步骤通过，将工单状态变为 Accepted
-            var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == workOrderId, ct);
+            var workOrder = await dbContext.WorkOrders
+                .FirstOrDefaultAsync(wo => wo.TenantId == tenantId && wo.Id == workOrderId, ct);
             if (workOrder != null)
             {
                 var oldStatus = workOrder.Status;
@@ -283,15 +295,21 @@ public class ApprovalChainService : IApprovalChainService
 
     /// <inheritdoc />
     public async Task RejectAsync(
-        Guid tenantId, Guid workOrderId, Guid approverId, string? comment, CancellationToken ct = default)
+        Guid tenantId, Guid workOrderId, Guid approverId, string? approverRole,
+        string? comment, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
 
+        // 与通过路径保持相同的资源可见性语义：跨租户或不存在的工单统一返回 404。
+        await EnsureWorkOrderExistsAsync(dbContext, tenantId, workOrderId, ct);
+
         // 获取当前待审批的步骤
         var currentApproval = await dbContext.WorkOrderApprovals
-            .Where(a => a.WorkOrderId == workOrderId && a.Action == ApprovalAction.Pending)
+            .Where(a => a.TenantId == tenantId
+                && a.WorkOrderId == workOrderId
+                && a.Action == ApprovalAction.Pending)
             .OrderBy(a => a.StepOrder)
             .FirstOrDefaultAsync(ct);
 
@@ -299,6 +317,8 @@ public class ApprovalChainService : IApprovalChainService
         {
             throw new InvalidOperationException($"工单 {workOrderId} 没有待审批的步骤");
         }
+
+        EnsureApprovalActor(currentApproval, approverId, approverRole);
 
         // 更新当前步骤为驳回
         currentApproval.ApproverId = approverId;
@@ -308,7 +328,10 @@ public class ApprovalChainService : IApprovalChainService
 
         // 将后续未处理的步骤也标记为 Rejected（因为链式审批中，某一步驳回后后续步骤不再执行）
         var laterApprovals = await dbContext.WorkOrderApprovals
-            .Where(a => a.WorkOrderId == workOrderId && a.StepOrder > currentApproval.StepOrder && a.Action == ApprovalAction.Pending)
+            .Where(a => a.TenantId == tenantId
+                && a.WorkOrderId == workOrderId
+                && a.StepOrder > currentApproval.StepOrder
+                && a.Action == ApprovalAction.Pending)
             .ToListAsync(ct);
 
         foreach (var later in laterApprovals)
@@ -318,7 +341,8 @@ public class ApprovalChainService : IApprovalChainService
         }
 
         // 工单状态回到 InProgress
-        var workOrder = await dbContext.WorkOrders.FirstOrDefaultAsync(wo => wo.Id == workOrderId, ct);
+        var workOrder = await dbContext.WorkOrders
+            .FirstOrDefaultAsync(wo => wo.TenantId == tenantId && wo.Id == workOrderId, ct);
         if (workOrder != null)
         {
             var oldStatus = workOrder.Status;
@@ -346,7 +370,7 @@ public class ApprovalChainService : IApprovalChainService
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var approvals = await dbContext.WorkOrderApprovals
-            .Where(a => a.WorkOrderId == workOrderId)
+            .Where(a => a.TenantId == tenantId && a.WorkOrderId == workOrderId)
             .OrderBy(a => a.StepOrder)
             .ToListAsync(ct);
 
@@ -355,34 +379,104 @@ public class ApprovalChainService : IApprovalChainService
 
     /// <inheritdoc />
     public async Task<List<WorkOrderApprovalDto>> GetPendingApprovalsAsync(
-        Guid approverId, string? role, CancellationToken ct = default)
+        Guid tenantId, Guid approverId, string? role, CancellationToken ct = default)
     {
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 查询待审批记录：按审批人或角色匹配
-        var query = dbContext.WorkOrderApprovals
-            .Where(a => a.Action == ApprovalAction.Pending);
-
-        if (!string.IsNullOrWhiteSpace(role))
+        // 缺少角色时必须 fail-closed，不能因为调用方没有传角色而返回当前租户全部审批任务。
+        if (string.IsNullOrWhiteSpace(role))
         {
-            // 按角色匹配：查找期望角色匹配的待审批记录
-            query = query.Where(a => a.ExpectedRole == role);
+            return [];
         }
 
-        // 如果指定了审批人 ID，也可以匹配 SpecificApproverId（通过审批链模板中的步骤配置）
-        // 这里暂时只按角色匹配
+        // 查询待审批记录：先显式限定租户，再在内存中按统一规则比较角色。
+        // 审批模板历史数据同时存在 PascalCase 和 snake_case，直接使用数据库等值比较会导致
+        // 合法用户看不到自己的任务；在租户范围内做规范化比较可兼容旧数据且不会扩大跨租户范围。
+        var query = dbContext.WorkOrderApprovals
+            .Where(a => a.TenantId == tenantId
+                && a.Action == ApprovalAction.Pending
+                && (a.SpecificApproverId == null || a.SpecificApproverId == approverId));
 
         var approvals = await query
             .OrderBy(a => a.StepOrder)
             .ToListAsync(ct);
 
-        return approvals.Select(MapApprovalToDto).ToList();
+        var normalizedRole = NormalizeRole(role);
+        return approvals
+            .Where(a => NormalizeRole(a.ExpectedRole) == normalizedRole)
+            .Select(MapApprovalToDto)
+            .ToList();
     }
 
     // ===================================================================
     // 辅助方法
     // ===================================================================
+
+    /// <summary>
+    /// 验证工单属于调用方显式指定的租户。
+    /// 使用显式租户条件而不是依赖当前请求的全局过滤器，确保后台新 scope 和跨租户调用都保持一致。
+    /// </summary>
+    /// <param name="dbContext">数据库上下文。</param>
+    /// <param name="tenantId">调用方租户 ID。</param>
+    /// <param name="workOrderId">工单 ID。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="KeyNotFoundException">工单不存在或不属于指定租户时抛出。</exception>
+    private static async Task EnsureWorkOrderExistsAsync(
+        AppDbContext dbContext,
+        Guid tenantId,
+        Guid workOrderId,
+        CancellationToken ct)
+    {
+        var exists = await dbContext.WorkOrders
+            .IgnoreQueryFilters()
+            .AnyAsync(workOrder => workOrder.TenantId == tenantId && workOrder.Id == workOrderId, ct);
+
+        if (!exists)
+        {
+            throw new KeyNotFoundException($"工单 {workOrderId} 不存在");
+        }
+    }
+
+    /// <summary>
+    /// 校验当前用户是否具备当前审批步骤要求的角色，并且在步骤指定审批人时校验用户 ID。
+    /// </summary>
+    /// <param name="approval">当前待审批记录。</param>
+    /// <param name="approverId">当前审批人的用户 ID。</param>
+    /// <param name="approverRole">当前用户 JWT 中的角色。</param>
+    /// <exception cref="ForbiddenAccessException">角色缺失或不匹配时抛出。</exception>
+    private static void EnsureApprovalActor(
+        WorkOrderApproval approval, Guid approverId, string? approverRole)
+    {
+        var isSpecificApproverMismatch = approval.SpecificApproverId.HasValue
+            && approval.SpecificApproverId.Value != approverId;
+        if (isSpecificApproverMismatch || !RolesMatch(approval.ExpectedRole, approverRole))
+        {
+            throw new ForbiddenAccessException("当前用户没有执行该审批步骤的权限");
+        }
+    }
+
+    /// <summary>
+    /// 比较审批角色。角色配置历史上允许 PascalCase、snake_case 和大小写差异，
+    /// 因此统一移除分隔符并转小写；空角色永远不匹配，确保权限校验默认拒绝。
+    /// </summary>
+    private static bool RolesMatch(string? expectedRole, string? actualRole)
+    {
+        var normalizedExpectedRole = NormalizeRole(expectedRole);
+        var normalizedActualRole = NormalizeRole(actualRole);
+        return normalizedExpectedRole.Length > 0
+            && normalizedExpectedRole == normalizedActualRole;
+    }
+
+    /// <summary>
+    /// 规范化角色名称，兼容 PascalCase、snake_case、短横线和大小写差异。
+    /// </summary>
+    private static string NormalizeRole(string? role)
+        => string.IsNullOrWhiteSpace(role)
+            ? string.Empty
+            : new string(role.Where(char.IsLetterOrDigit)
+                .Select(char.ToLowerInvariant)
+                .ToArray());
 
     /// <summary>
     /// 三级回退匹配审批链模板
@@ -463,6 +557,7 @@ public class ApprovalChainService : IApprovalChainService
             approval.WorkOrderId,
             approval.StepOrder,
             approval.ExpectedRole,
+            approval.SpecificApproverId,
             approval.ApproverId,
             approval.Action.ToString(),
             approval.Comment,

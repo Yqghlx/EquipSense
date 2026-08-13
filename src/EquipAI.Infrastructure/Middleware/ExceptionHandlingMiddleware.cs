@@ -52,6 +52,8 @@ public class ExceptionHandlingMiddleware
     {
         var (statusCode, message) = exception switch
         {
+            // 403：用户已认证，但不具备执行当前业务操作的权限
+            ForbiddenAccessException forbidden => (HttpStatusCode.Forbidden, forbidden.Message),
             // 401：未授权访问（如未登录或令牌无效）
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "未授权的访问"),
             // 404：资源不存在

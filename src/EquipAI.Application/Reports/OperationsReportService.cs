@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using EquipAI.Application.Analysis;
 using EquipAI.Core.Enums;
@@ -55,7 +56,15 @@ public class OperationsReportService
         var offlineCount = devices.Count(d => d.Status == DeviceStatus.Offline);
         var maintenanceCount = devices.Count(d => d.Status == DeviceStatus.Maintenance);
         sb.AppendLine($"设备总数,在线,离线,维护中,平均健康度");
-        sb.AppendLine($"{devices.Count},{onlineCount},{offlineCount},{maintenanceCount},{(devices.Any() ? devices.Average(d => d.HealthScore).ToString("F1") : "N/A")}");
+        AppendCsvRow(
+            sb,
+            devices.Count,
+            onlineCount,
+            offlineCount,
+            maintenanceCount,
+            devices.Any()
+                ? devices.Average(d => d.HealthScore).ToString("F1", CultureInfo.InvariantCulture)
+                : "N/A");
         sb.AppendLine();
 
         // === 2. 告警统计 ===
@@ -76,7 +85,8 @@ public class OperationsReportService
         // 且"已解决 + 活跃" ≠ 告警总数（Acknowledged 状态告警凭空消失）。#243 已统一 Dashboard/OEE 定义，此处为对称遗漏。
         var active = alerts.Count(a => a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged);
         var ackRate = alerts.Count > 0 ? (double)alerts.Count(a => a.AcknowledgedAt != null) / alerts.Count * 100 : 0;
-        sb.AppendLine($"{alerts.Count},{critical},{high},{normal},{low},{resolved},{active},{ackRate:F1}%");
+        AppendCsvRow(sb, alerts.Count, critical, high, normal, low, resolved, active,
+            $"{ackRate.ToString("F1", CultureInfo.InvariantCulture)}%");
         sb.AppendLine();
 
         // === 3. 工单统计 ===
@@ -99,7 +109,8 @@ public class OperationsReportService
         var completionRate = workOrders.Count > 0 ? (double)woCompleted / workOrders.Count * 100 : 0;
 
         sb.AppendLine($"工单总数,已完成,执行中,待派工,完成率");
-        sb.AppendLine($"{workOrders.Count},{woCompleted},{woInProgress},{woPending},{completionRate:F1}%");
+        AppendCsvRow(sb, workOrders.Count, woCompleted, woInProgress, woPending,
+            $"{completionRate.ToString("F1", CultureInfo.InvariantCulture)}%");
         sb.AppendLine();
 
         // === 4. OEE 指标 ===
@@ -108,7 +119,8 @@ public class OperationsReportService
         {
             var oee = await _oeeService.CalculateAsync(tenantId, ct);
             sb.AppendLine($"综合OEE(%),可用率(%),性能(%),质量(%),在线设备,总设备");
-            sb.AppendLine($"{oee.Oee},{oee.Availability},{oee.Performance},{oee.Quality},{oee.OnlineDevices},{oee.TotalDevices}");
+            AppendCsvRow(sb, oee.Oee, oee.Availability, oee.Performance, oee.Quality,
+                oee.OnlineDevices, oee.TotalDevices);
         }
         catch (Exception ex)
         {
@@ -126,7 +138,8 @@ public class OperationsReportService
             .ToList();
         foreach (var d in bottomDevices)
         {
-            sb.AppendLine($"{d.DeviceCode},{d.Name ?? d.DeviceCode},{d.Status},{d.HealthScore:F1}");
+            AppendCsvRow(sb, d.DeviceCode, d.Name ?? d.DeviceCode, d.Status.ToString(),
+                d.HealthScore.ToString("F1", CultureInfo.InvariantCulture));
         }
         sb.AppendLine();
 
@@ -140,10 +153,62 @@ public class OperationsReportService
         sb.AppendLine($"指标,告警数");
         foreach (var m in byMetric)
         {
-            sb.AppendLine($"{m.Metric},{m.Count}");
+            AppendCsvRow(sb, m.Metric, m.Count);
         }
 
         return ToUtf8Bytes(sb.ToString());
+    }
+
+    /// <summary>
+    /// 追加一行 RFC 4180 兼容的 CSV。
+    ///
+    /// 文本字段来自设备、指标或租户配置，必须同时处理分隔符、引号和换行；
+    /// 仅对文本字段执行公式前缀保护，避免把内部生成的负数误转成文本。
+    /// </summary>
+    private static void AppendCsvRow(StringBuilder builder, params object?[] fields)
+    {
+        for (var index = 0; index < fields.Length; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            var field = fields[index];
+            var text = field switch
+            {
+                null => string.Empty,
+                IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+                _ => field.ToString() ?? string.Empty,
+            };
+
+            builder.Append(EscapeCsvField(text, field is string));
+        }
+
+        builder.AppendLine();
+    }
+
+    /// <summary>
+    /// 转义单个 CSV 字段，并阻止 Excel 将外部文本解释为公式。
+    /// </summary>
+    private static string EscapeCsvField(string value, bool protectFormula)
+    {
+        if (protectFormula)
+        {
+            var firstNonWhitespace = value.TrimStart();
+            if (firstNonWhitespace.Length > 0
+                && firstNonWhitespace[0] is '=' or '+' or '-' or '@')
+            {
+                value = "'" + value;
+            }
+        }
+
+        if (value.IndexOfAny([',', '"', '\r', '\n']) >= 0)
+        {
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        }
+
+        return value;
     }
 
     private static byte[] ToUtf8Bytes(string content) => Encoding.UTF8.GetBytes(content);

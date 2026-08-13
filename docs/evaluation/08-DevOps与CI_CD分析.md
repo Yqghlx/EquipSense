@@ -45,8 +45,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 1658 xUnit 测试 |
-| Integration test | ~120s | 184 个测试（178 通过、6 个条件跳过，含真实 RabbitMQ 场景） |
+| Unit test | ~30s | 1675 xUnit 测试 |
+| Integration test | ~120s | 191 个测试（185 通过、6 个条件跳过，含真实 RabbitMQ 场景） |
 | NuGet vuln | ~20s | 已纳入阻断门禁 |
 | **合计** | **~5min** | |
 
@@ -86,9 +86,21 @@ ignore-unfixed: true
 severity: HIGH,CRITICAL
 ```
 
-`aquasecurity/trivy-action` 的 6 个调用均固定到经核实的 v0.36.0 完整提交 SHA。main 与版本发布先把 backend/frontend/edgegateway 三张镜像加载到 runner 本地，三张镜像全部通过 Trivy 后才允许写入 GHCR；任一扫描失败都不会提前发布 sha、semver、major/minor 或 `latest` 标签。
+`aquasecurity/trivy-action` 的 6 个调用均固定到经核实的 v0.36.0 完整提交 SHA。main 与版本发布先把 backend/frontend/edgegateway 三张镜像加载到 runner 本地，三张镜像全部通过 Trivy 后，再逐标签推送刚才扫描的本地镜像；扫描失败不会提前发布 sha、semver、major/minor 或 `latest` 标签，也不会触发第二次 Buildx 构建。
 
-main 的 `latest` 发布显式依赖后端、前端、Production runtime smoke、备份恢复、K6 和 E2E；版本标签发布依赖后端、前端、Production runtime smoke、备份恢复和 K6。服务启动统一使用失败关闭的 HTTP 就绪等待器，后端或前端在限定次数内未就绪时返回非零，不再让后续负载或 E2E 测试继续运行。
+2026-08-13 修复了独立复审发现的制品同一性问题：`docker` 与 `release` job 都通过 `docker image push` 推送 `metadata-action` 生成的本地标签，扫描对象与推送对象来自同一批本地镜像。CI 契约测试验证三张镜像均先加载、完整扫描，再逐标签推送。
+
+修复后 `ci.yml` 与 `codeql.yml` 共 38 次 Action 调用，全部固定为经官方仓库核实的完整 commit SHA，并保留版本注释供 Dependabot 更新。顶层令牌默认只读；`packages: write` 仅授予镜像 job，`contents: write` 仅授予独立 `create-release` job；读取生产 SSH 私钥的部署 Action 和写入 CodeQL/GHCR 的步骤也使用固定 SHA。
+
+### GitHub Release 权限缺陷
+
+版本镜像 `release` job 保持 `contents: read` + `packages: write`；`create-release` 独立依赖 `release`，仅声明 `contents: write` 并运行固定 SHA 的 `softprops/action-gh-release`。`deploy` 同时依赖 `release` 与 `create-release`，因此 Release 创建失败不会进入生产部署。首次真实 tag run 仍需验证 GitHub 仓库设置、Release API 和 GHCR 写入行为。
+
+### 解决方案工具链一致性
+
+仓库 `global.json` 当前锁定 .NET 8 特性带并实际解析为 SDK 8.0.419。实测 `dotnet sln EquipAI.sln list` 可列出全部 8 个项目，CI 和当前构建门禁也都使用该入口；原先提交的 `.slnx` 在当前 SDK 下会报 `Expected file header not found`，已移除该失效遗留文件，并将开发文档、审计和 CI 统一到 `.sln`，避免新开发者误用第二套入口。
+
+main 的 `latest` 发布显式依赖后端、前端、Production runtime smoke、备份恢复、K6 和 E2E；版本标签发布依赖后端、前端、Production runtime smoke、备份恢复和 K6。服务启动统一使用失败关闭的 HTTP 就绪等待器，后端或前端在限定次数内未就绪时返回非零，不再让后续负载或 E2E 测试继续运行。Production runtime smoke 还会显式启动 Jaeger 初始化/查询服务，并通过 `/api/services` 与 `/api/traces` 验证后端 trace 已被接收，避免只验证 OTLP 端口或配置存在。
 
 ### Dockerfile 优化
 
@@ -158,9 +170,9 @@ timeout: 60s
 | 测试门禁 | ⭐⭐⭐⭐⭐ | 7 道门禁 (TS/ESLint/i18n/Vitest/Vite/xUnit/Integration) |
 | E2E 覆盖 | ⭐⭐⭐⭐⭐ | 435 用例/8 场景/含安全测试；最新隔离 Production 镜像为 434 通过、1 个架构性条件跳过、0 失败；main/tag 已接入全量门禁 |
 | Docker 构建 | ⭐⭐⭐⭐⭐ | 多阶段 + 层缓存 + GHCR + 三镜像版本标签 |
-| 安全扫描 | ⭐⭐⭐⭐⭐ | Gitleaks + NuGet/npm + 三镜像 Trivy；Action 固定 SHA，HIGH/CRITICAL 阻断且全部扫描通过后才发布 |
+| 安全扫描 | ⭐⭐⭐⭐☆ | Gitleaks + NuGet/npm + 三镜像 Trivy 已阻断；38 次 Action 调用全部固定完整 SHA，生产 SSH 私钥、GHCR 和 CodeQL 写权限均按 job 隔离 |
 | 压测集成 | ⭐⭐⭐⭐☆ | K6 读路径与 20 VU × 30s 遥测写路径已进入 main/PR/tag 门禁，高吞吐容量压测保留手动 |
-| CD 部署 | ⭐⭐⭐⭐☆ | tag 发布后可 SSH 自动部署，三重健康门禁与旧镜像回滚 |
+| CD 部署 | ⭐⭐⭐⭐☆ | 部署脚本具备三重健康门禁与旧镜像回滚；生产运行时清单和直接 Compose 入口拒绝符号链接配置/入口文件；Release 权限已隔离，部署等待其成功，同 ref 并发已由 workflow 级策略收口；首次真实 tag/main run 仍待验收 |
 | 版本管理 | ⭐⭐⭐⭐⭐ | semver + sha 追溯，支持精确回滚 |
 
 ---
@@ -174,7 +186,11 @@ timeout: 60s
 | 3 | 跨主机附件存储 | 当前命名卷 + 备份补偿已覆盖单机；跨主机仍需 S3/MinIO 和恢复演练 |
 | 4 | 供应商运行时凭据 | 当前工作区 `.env` 仍有 27 项生产门禁问题，必须由密钥管理系统注入真实凭据和证书后再发布 |
 | 5 | 蓝绿生产演练 | 脚本和回滚行为测试已完成，仍需在真实生产资源上做首次容量与切换演练 |
-| 6 | 同引用流水线并发竞态 | 当前不同 CI run 仍可能并发写 `latest`；待确认采用“分支/PR 新运行取消旧运行、版本标签不取消、手动触发隔离”的并发组策略 |
+| 6 | 同引用流水线并发竞态 | `.github/workflows/ci.yml` 已按 workflow + event + ref 建立 workflow 级并发组；手动运行与 push/PR 隔离，分支/PR/手动运行取消旧活动运行，版本 tag 不取消正在运行的验收并按 ref 串行；仍需在真实 main/tag run 观察取消事件和最终 `latest` 行为 |
+| 7 | 首次真实发布验收 | 代码已改为逐标签推送同一批已扫描本地镜像，Release 已拆最小权限；需在真实 GitHub tag run 验证 GHCR、Release API 和部署依赖链 |
+| 8 | Action 更新治理 | 38 次引用已固定完整 SHA；需由 Dependabot 按版本注释持续更新并在每次更新后运行 CI 供应链契约 |
+| 9 | 解决方案入口不一致 | 已移除当前 SDK 8.0.419 无法读取的 `.slnx` 遗留文件；`EquipAI.sln` 是唯一受支持入口，并由契约测试防止失效入口回归 |
+| 10 | 运行时挂载文件边界 | `validate-env.sh --check-runtime-files` 和 `compose-production.sh` 已拒绝符号链接运行时/Compose/校验器文件，并有负向契约测试；仍需在真实部署主机验证文件权限与发布流程 |
 
 ---
 
@@ -189,4 +205,4 @@ timeout: 60s
 | 技术债务 | [13-技术债务与改进路线图](./13-技术债务与改进路线图.md) |
 
 ---
-*本文档属于 EquipSense 项目评估体系 · 复核日期：2026-08-13 · 版本：v3.91*
+*本文档属于 EquipSense 项目评估体系 · 复核日期：2026-08-13 · 版本：v4.06*

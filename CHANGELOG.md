@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file. The format 
 - 将本地数据库、JWT 和网关认证配置改为占位符，并为生产环境增加网关密钥安全校验；真实凭据通过环境变量或 .NET User Secrets 注入。
 - 移除生产 Compose 中 RabbitMQ、Seq 和 Grafana 的公开弱密码默认值，缺少强密码时拒绝解析配置。
 - 生产环境检测未解析的连接串占位符并在启动阶段失败，避免服务以字面量凭据反复重试基础设施连接。
+- 运营 CSV 报表对设备编码、设备名称和指标名执行 RFC 4180 转义，并对 Excel 公式前缀做文本保护，避免用户数据破坏报表结构或被 Excel 当作公式执行。
 
 ### Fixed
 

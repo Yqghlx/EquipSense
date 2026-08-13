@@ -18,6 +18,7 @@ public class WorkOrderApprovalConfiguration : IEntityTypeConfiguration<WorkOrder
         builder.Property(e => e.WorkOrderId).HasColumnName("work_order_id");
         builder.Property(e => e.StepOrder).HasColumnName("step_order");
         builder.Property(e => e.ExpectedRole).HasColumnName("expected_role").HasMaxLength(100);
+        builder.Property(e => e.SpecificApproverId).HasColumnName("specific_approver_id");
         builder.Property(e => e.ApproverId).HasColumnName("approver_id");
         builder.Property(e => e.Action).HasColumnName("action");
         builder.Property(e => e.Comment).HasColumnName("comment");
@@ -29,5 +30,8 @@ public class WorkOrderApprovalConfiguration : IEntityTypeConfiguration<WorkOrder
 
         // 按工单和步骤顺序建立索引，用于按序查询审批步骤
         builder.HasIndex(e => new { e.WorkOrderId, e.StepOrder });
+
+        // 指定审批人待办查询需要单独索引，避免租户规模扩大后退化为全表扫描。
+        builder.HasIndex(e => new { e.TenantId, e.SpecificApproverId, e.Action });
     }
 }

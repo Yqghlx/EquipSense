@@ -8,6 +8,7 @@ public record WorkOrderApprovalDto(
     Guid WorkOrderId,
     int StepOrder,
     string ExpectedRole,
+    Guid? SpecificApproverId,
     Guid? ApproverId,
     string Action,
     string? Comment,

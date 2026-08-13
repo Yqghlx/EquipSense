@@ -89,7 +89,7 @@ npx playwright show-report
 
 ### 模拟器（发送测试遥测数据）
 
-模拟器有两个副本，**仅 `src/EquipAI.Simulator` 收录在 `EquipAI.sln` / `EquipAI.slnx` 中**（被解决方案构建编译）；`tools/EquipAI.Simulator` 是测试项目当前仍引用的旧副本，运行模拟器命令请用前者。
+模拟器有两个副本，**仅 `src/EquipAI.Simulator` 收录在 `EquipAI.sln` 中**（被解决方案构建编译）；`tools/EquipAI.Simulator` 是测试项目当前仍引用的旧副本，运行模拟器命令请用前者。
 
 ```bash
 # 向指定租户的 3 个设备每 5 秒发送遥测数据（5% 概率触发异常）
@@ -336,7 +336,7 @@ dotnet run --project src/EquipAI.Simulator -- \
 
 ## 已知坑点
 
-- **模拟器有两份**：只有 `src/EquipAI.Simulator` 作为正式运行入口收录在 `EquipAI.sln` / `EquipAI.slnx` 中；`tools/EquipAI.Simulator` 是测试项目使用的旧副本，命令一律用前者。
+- **模拟器有两份**：只有 `src/EquipAI.Simulator` 作为正式运行入口收录在 `EquipAI.sln` 中；`tools/EquipAI.Simulator` 是测试项目使用的旧副本，命令一律用前者。
 - **E2E 测试位置**：Playwright 配置在 `frontend/`，测试用例按功能分目录放 `frontend/e2e-comprehensive/` 下（不是 `tests/e2e/`）。运行前需 `cd frontend && npx playwright install`。
 - **前端 lint 阈值严格**：CI 用 `npx eslint src/ --max-warnings 1`，新增 warning 也可能挂 CI。
 - **i18n 双语必须齐全**：改文案需同步中英文，`npm run check:i18n` 在 CI 强制运行。

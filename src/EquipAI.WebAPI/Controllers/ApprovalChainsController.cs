@@ -77,7 +77,7 @@ public class ApprovalChainsController : ControllerBase
 
     /// <summary>
     /// 获取待我审批的工单列表
-    /// 根据当前用户的角色匹配待审批记录
+    /// 根据当前用户的租户、角色和指定审批人匹配待审批记录
     /// </summary>
     [HttpGet("pending")]
     [RequirePermission("workorder:accept")]
@@ -85,7 +85,8 @@ public class ApprovalChainsController : ControllerBase
     public async Task<ActionResult<List<WorkOrderApprovalDto>>> PendingApprovals()
     {
         // 从用户上下文获取角色信息
-        var role = _tenantContext.IsSystemAdmin ? "system_admin" : "";
-        return Ok(await _approvalChainService.GetPendingApprovalsAsync(_tenantContext.UserId, role));
+        var role = User.FindFirst("role")?.Value;
+        return Ok(await _approvalChainService.GetPendingApprovalsAsync(
+            _tenantContext.TenantId, _tenantContext.UserId, role));
     }
 }

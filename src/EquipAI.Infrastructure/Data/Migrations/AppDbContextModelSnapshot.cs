@@ -1926,6 +1926,10 @@ namespace EquipAI.Infrastructure.Data.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("expected_role");
 
+                    b.Property<Guid?>("SpecificApproverId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("specific_approver_id");
+
                     b.Property<int>("StepOrder")
                         .HasColumnType("integer")
                         .HasColumnName("step_order");
@@ -1943,6 +1947,8 @@ namespace EquipAI.Infrastructure.Data.Migrations
                     b.HasIndex("TenantId", "WorkOrderId");
 
                     b.HasIndex("WorkOrderId", "StepOrder");
+
+                    b.HasIndex("TenantId", "SpecificApproverId", "Action");
 
                     b.ToTable("work_order_approvals", (string)null);
                 });

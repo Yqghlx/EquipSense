@@ -829,6 +829,8 @@ export interface WorkOrderApprovalDto {
   stepOrder: number;
   /** 期望审批角色 */
   expectedRole: string;
+  /** 指定审批人 ID；为空表示该角色下的任意审批人 */
+  specificApproverId?: string;
   /** 实际审批人 ID */
   approverId?: string;
   /** 审批动作（Pending / Approved / Rejected） */

@@ -62,8 +62,12 @@ resolve_path() {
 ENV_FILE="$(resolve_path "$ENV_FILE")"
 COMPOSE_FILE="$(resolve_path "$COMPOSE_FILE")"
 
+[[ ! -L "$ENV_FILE" ]] || fatal "环境变量文件不得为符号链接：$ENV_FILE"
 [[ -f "$ENV_FILE" ]] || fatal "环境变量文件不存在：$ENV_FILE"
+[[ ! -L "$COMPOSE_FILE" ]] || fatal "Compose 文件不得为符号链接：$COMPOSE_FILE"
 [[ -f "$COMPOSE_FILE" ]] || fatal "Compose 文件不存在：$COMPOSE_FILE"
+[[ ! -L "${SCRIPT_DIR}/validate-env.sh" ]] \
+  || fatal "生产环境校验器不得为符号链接：${SCRIPT_DIR}/validate-env.sh"
 [[ -f "${SCRIPT_DIR}/validate-env.sh" ]] \
   || fatal "缺少生产环境校验器：${SCRIPT_DIR}/validate-env.sh"
 command -v "$DOCKER_BIN" >/dev/null 2>&1 \

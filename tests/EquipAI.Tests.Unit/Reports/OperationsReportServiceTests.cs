@@ -381,6 +381,50 @@ public class OperationsReportServiceTests : IAsyncDisposable
         content.Should().Contain("\n1,1,0,0,100.0%", "其他租户的 10 个工单不应计入");
     }
 
+    /// <summary>
+    /// 报表中的设备文本和指标文本必须安全编码为 CSV 字段，并阻断 Excel 公式注入。
+    ///
+    /// 原因：设备名称、编码和指标名来自用户或现场设备。未转义的逗号/引号/换行会破坏
+    /// CSV 行结构；以 =、+、-、@ 开头的值直接交给 Excel 还可能被当成公式执行。
+    /// </summary>
+    [Fact]
+    public async Task GenerateReportAsync_动态文本字段_正确转义并阻断公式注入()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var now = new DateTime(2026, 1, 15, 10, 0, 0, DateTimeKind.Utc);
+
+        db.Devices.Add(new Device
+        {
+            Name = "泵,主线\"A\"\n二号",
+            Type = "pump",
+            DeviceCode = "D-CSV",
+            TenantId = _tenantId,
+            Status = DeviceStatus.Online,
+            HealthScore = 90m,
+        });
+        db.Alerts.Add(CreateAlert(
+            _tenantId,
+            AlertSeverity.High,
+            AlertStatus.Active,
+            now,
+            metric: "=SUM(A1:A2)"));
+        await db.SaveChangesAsync();
+
+        var result = await service.GenerateReportAsync(
+            _tenantId,
+            new DateTime(2026, 1, 1),
+            new DateTime(2026, 1, 31));
+        var content = Encoding.UTF8.GetString(result);
+
+        content.Should().Contain(
+            "D-CSV,\"泵,主线\"\"A\"\"" + "\n二号\",Online,90.0",
+            "逗号、引号和换行必须保留在同一个 CSV 字段中");
+        content.Should().Contain(
+            "'=SUM(A1:A2),1",
+            "以公式字符开头的指标必须按文本导出，避免 Excel 执行公式");
+    }
+
     // =========================================================================
     // OEE 降级 — OEE 计算失败不应破坏整个报表
     // =========================================================================

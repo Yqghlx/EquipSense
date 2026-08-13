@@ -87,7 +87,10 @@ else
   for _ in $(seq 1 20); do
     smoke_port_candidate=$((40000 + RANDOM % 20000))
     if smoke_port_range_is_free \
-      "$smoke_port_candidate" "$((smoke_port_candidate + 1))" "$((smoke_port_candidate + 2))"; then
+      "$smoke_port_candidate" "$((smoke_port_candidate + 1))" "$((smoke_port_candidate + 2))" \
+      "$((smoke_port_candidate + 3))" "$((smoke_port_candidate + 4))" "$((smoke_port_candidate + 5))" \
+      "$((smoke_port_candidate + 10))" "$((smoke_port_candidate + 11))" "$((smoke_port_candidate + 12))" \
+      "$((smoke_port_candidate + 13))" "$((smoke_port_candidate + 14))"; then
       SMOKE_PORT_BASE="$smoke_port_candidate"
       break
     fi
@@ -107,15 +110,19 @@ REDIS_PORT="${SMOKE_REDIS_PORT:-$((SMOKE_PORT_BASE + 11))}"
 MQTT_PORT="${SMOKE_MQTT_PORT:-$((SMOKE_PORT_BASE + 12))}"
 RABBITMQ_PORT="${SMOKE_RABBITMQ_PORT:-$((SMOKE_PORT_BASE + 13))}"
 RABBITMQ_MGMT_PORT="${SMOKE_RABBITMQ_MGMT_PORT:-$((SMOKE_PORT_BASE + 14))}"
+JAEGER_UI_PORT="${SMOKE_JAEGER_UI_PORT:-$((SMOKE_PORT_BASE + 3))}"
+JAEGER_OTLP_PORT="${SMOKE_JAEGER_OTLP_PORT:-$((SMOKE_PORT_BASE + 4))}"
+JAEGER_OTLP_HTTP_PORT="${SMOKE_JAEGER_OTLP_HTTP_PORT:-$((SMOKE_PORT_BASE + 5))}"
 
 for smoke_port in \
   "$BACKEND_PORT" "$FRONTEND_PORT" "$EDGE_PORT" "$PG_PORT" "$REDIS_PORT" \
-  "$MQTT_PORT" "$RABBITMQ_PORT" "$RABBITMQ_MGMT_PORT"; do
+  "$MQTT_PORT" "$RABBITMQ_PORT" "$RABBITMQ_MGMT_PORT" "$JAEGER_UI_PORT" \
+  "$JAEGER_OTLP_PORT" "$JAEGER_OTLP_HTTP_PORT"; do
   [[ "$smoke_port" =~ ^[0-9]+$ && "$smoke_port" -ge 1024 && "$smoke_port" -le 65535 ]] \
     || fatal "smoke 端口必须位于 1024-65535"
 done
 
-for smoke_port in "$BACKEND_PORT" "$FRONTEND_PORT" "$EDGE_PORT"; do
+for smoke_port in "$BACKEND_PORT" "$FRONTEND_PORT" "$EDGE_PORT" "$JAEGER_UI_PORT" "$JAEGER_OTLP_PORT" "$JAEGER_OTLP_HTTP_PORT"; do
   if smoke_port_is_listening "$smoke_port"; then
     fatal "smoke 应用端口已被占用：$smoke_port"
   fi
@@ -254,6 +261,9 @@ runtime_env=(
   "MQTT_PORT=$MQTT_PORT"
   "RABBITMQ_PORT=$RABBITMQ_PORT"
   "RABBITMQ_MGMT_PORT=$RABBITMQ_MGMT_PORT"
+  "JAEGER_UI_PORT=$JAEGER_UI_PORT"
+  "JAEGER_OTLP_PORT=$JAEGER_OTLP_PORT"
+  "JAEGER_OTLP_HTTP_PORT=$JAEGER_OTLP_HTTP_PORT"
   "BACKEND_PORT=$BACKEND_PORT"
   "FRONTEND_PORT=$FRONTEND_PORT"
   "SMOKE_BACKEND_IMAGE=$BACKEND_IMAGE"
@@ -265,7 +275,8 @@ runtime_env=(
   "EDGE_PORT=$EDGE_PORT"
   "GATEWAY_ALLOWED_HOSTS=edgegateway"
   "LLM_API_KEY="
-  "OTEL_EXPORTER_OTLP_ENDPOINT="
+  # Smoke 必须走与生产 Compose 相同的 Jaeger OTLP 链路，避免只验证 Console exporter。
+  "OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317"
   "WAF_RULES_PATH=/etc/equipai/waf/rules.json"
   "WAF_REQUIRE_EXTERNAL_RULES=true"
 )
@@ -356,7 +367,7 @@ COMPOSE=(
 )
 "${COMPOSE[@]}" config --quiet
 COMPOSE_READY=true
-if ! "${COMPOSE[@]}" up -d postgres redis mosquitto rabbitmq backend edgegateway frontend >/dev/null; then
+if ! "${COMPOSE[@]}" up -d jaeger-init jaeger postgres redis mosquitto rabbitmq backend edgegateway frontend >/dev/null; then
   # Compose 在依赖健康检查失败时通常只返回一句摘要；在清理临时资源前保留后端启动日志，
   # 否则迁移、配置或依赖连接类故障无法从 CI 输出定位。
   "${COMPOSE[@]}" logs --no-color --tail=200 backend >&2 || true
@@ -403,9 +414,37 @@ wait_for_http() {
   fatal "HTTP 探针失败：$url"
 }
 
+wait_for_jaeger_trace() {
+  local services_response
+  local jaeger_service
+  local traces_response
+
+  for _ in $(seq 1 45); do
+    # ActivitySource 的批量导出是异步的；先从 Query API 获取服务，再查询最近一条 trace，
+    # 这样烟测验证的是后端确实完成 OTLP 推送和 Jaeger 接收，而不是只验证端口已监听。
+    services_response="$(curl --fail --silent --show-error --max-time 10 \
+      "http://127.0.0.1:$JAEGER_UI_PORT/api/services" 2>/dev/null || true)"
+    if jq -e '(.data | type == "array") and (.data | length > 0)' <<<"$services_response" >/dev/null 2>&1; then
+      jaeger_service="$(jq -r '.data[0]' <<<"$services_response")"
+      traces_response="$(curl --fail --silent --show-error --max-time 10 --get \
+        --data-urlencode "service=$jaeger_service" \
+        --data-urlencode 'lookback=1h' \
+        --data-urlencode 'limit=1' \
+        "http://127.0.0.1:$JAEGER_UI_PORT/api/traces" 2>/dev/null || true)"
+      if jq -e '(.data | type == "array") and (.data | length > 0)' <<<"$traces_response" >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 2
+  done
+
+  fatal "Jaeger 未收到后端 OTLP trace，Production 可观测性链路未闭环"
+}
+
 wait_for_health backend
 wait_for_health edgegateway
 wait_for_health frontend
+wait_for_http "http://127.0.0.1:$JAEGER_UI_PORT/api/services" ""
 
 environment_name="$("${COMPOSE[@]}" exec -T backend printenv ASPNETCORE_ENVIRONMENT)"
 [[ "$environment_name" = Production ]] || fatal "backend 未运行在 Production 环境"
@@ -497,6 +536,8 @@ curl --fail --silent --show-error --max-time 10 \
   -H "Authorization: Bearer $viewer_access_token" \
   "http://127.0.0.1:$BACKEND_PORT/api/v1/auth/me" >/dev/null \
   || fatal "Production 访问令牌无法访问受保护的 /auth/me"
+
+wait_for_jaeger_trace
 
 # 完整演示模式除了要能启动，还必须通过真实 API 暴露完整且可读的业务闭环。
 # 这里校验固定编码集合而不是只校验数量，避免基础种子或历史残留恰好凑出相同数量。
@@ -611,4 +652,4 @@ if [[ "$SMOKE_RUN_E2E" = true ]]; then
   printf 'Production 镜像完整业务 E2E 通过。\n'
 fi
 
-printf 'Production runtime smoke 通过：镜像、迁移、完整演示数据、边缘网关缓存、健康探针、HTTPS 和 API 反向代理均正常。\n'
+printf 'Production runtime smoke 通过：镜像、迁移、完整演示数据、边缘网关缓存、健康探针、HTTPS、API 反向代理和 Jaeger OTLP trace 接收均正常。\n'

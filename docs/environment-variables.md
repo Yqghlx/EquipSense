@@ -267,6 +267,7 @@ Production 默认 RabbitMQ；Development 和 Testing 默认 InMemory。生产使
 | `ALERT_WEBHOOK_URL` | Alertmanager 外部告警接收地址；为空时告警仅保留在 Alertmanager/Grafana | — | 否 |
 | `JAEGER_SPAN_STORAGE_TYPE` | Jaeger trace 存储类型；单机生产默认 `badger`，多副本可切换外部存储 | `badger` | 否 |
 | `JAEGER_BADGER_EPHEMERAL` | 是否使用临时 Badger 存储；生产必须为 `false` | `false` | 否 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 后端 OTLP gRPC 端点；必须使用 `http://` 或 `https://` 且包含主机，不得内嵌凭据；Production 缺失时应用启动 fail-closed | `http://jaeger:4317`（标准 Compose） | Production 必填；Development/Testing 可为空 |
 
 ## 限流与调试
 

@@ -328,6 +328,35 @@ else
     fi
   fi
 
+  # 标准 Compose 会为 Production 注入 Jaeger 默认端点；一旦显式配置，必须在门禁阶段
+  # 拒绝错误协议、空主机、内嵌凭据和空白字符。直接启动应用时由同一策略的 C# 门禁拒绝空值。
+  otel_exporter_otlp_endpoint="$(read_env_value OTEL_EXPORTER_OTLP_ENDPOINT)"
+  if [ -n "$otel_exporter_otlp_endpoint" ]; then
+    case "$otel_exporter_otlp_endpoint" in
+      http://*|https://*)
+        otel_endpoint_authority="${otel_exporter_otlp_endpoint#*://}"
+        otel_endpoint_host="${otel_endpoint_authority%%/*}"
+        otel_endpoint_host="${otel_endpoint_host%%\?*}"
+        otel_endpoint_host="${otel_endpoint_host%%\#*}"
+        if [ -z "$otel_endpoint_host" ] || [[ "$otel_endpoint_host" == :* ]]; then
+          error "OTEL_EXPORTER_OTLP_ENDPOINT 必须包含有效主机"
+        elif [[ "$otel_endpoint_authority" == *@* ]]; then
+          # OTLP 认证应通过受控的 exporter/header 配置注入，不能把用户名或密码
+          # 写进 URL，避免被 Compose、异常信息或日志意外传播。
+          error "OTEL_EXPORTER_OTLP_ENDPOINT 不得包含内嵌凭据"
+        fi
+        ;;
+      *)
+        error "OTEL_EXPORTER_OTLP_ENDPOINT 必须使用 http:// 或 https://"
+        ;;
+    esac
+    if [[ "$otel_exporter_otlp_endpoint" == *$'\n'* ]] \
+      || [[ "$otel_exporter_otlp_endpoint" == *$'\r'* ]] \
+      || [[ "$otel_exporter_otlp_endpoint" == *[[:space:]]* ]]; then
+      error "OTEL_EXPORTER_OTLP_ENDPOINT 含有不安全空白字符"
+    fi
+  fi
+
   jaeger_span_storage_type="$(read_env_value JAEGER_SPAN_STORAGE_TYPE)"
   if [ -n "$jaeger_span_storage_type" ] && ! [[ "$jaeger_span_storage_type" =~ ^(badger|memory|opensearch|elasticsearch|cassandra|grpc|blackhole)$ ]]; then
     error "JAEGER_SPAN_STORAGE_TYPE 不是支持的 Jaeger 存储类型"
@@ -471,10 +500,21 @@ else
       "grafana/provisioning/datasources/prometheus.yml"
       "grafana/provisioning/dashboards/dashboard.yml"
     )
-    for relative_path in "${RUNTIME_FILES[@]}"; do
-      if [ ! -f "$SCRIPT_DIR/$relative_path" ]; then
+
+    check_runtime_file() {
+      local relative_path="$1"
+      local path="$SCRIPT_DIR/$relative_path"
+      # 这些文件会被 Compose 直接挂载，入口脚本还可能在容器内执行；拒绝符号链接
+      # 可以避免部署门禁把配置解析到运行目录之外的非预期目标。
+      if [ -L "$path" ]; then
+        error "运行时文件不得为符号链接：$relative_path"
+      elif [ ! -f "$path" ]; then
         error "运行时文件缺失：$relative_path"
       fi
+    }
+
+    for relative_path in "${RUNTIME_FILES[@]}"; do
+      check_runtime_file "$relative_path"
     done
 
     if ! command -v openssl >/dev/null 2>&1; then

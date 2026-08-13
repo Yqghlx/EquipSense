@@ -217,9 +217,9 @@ services:
       FileStorage__S3__SecretKey: "${FILE_STORAGE_S3_SECRET_KEY:-}"
       FileStorage__S3__UsePathStyle: "${FILE_STORAGE_S3_USE_PATH_STYLE:-false}"
       FileStorage__S3__KeyPrefix: "${FILE_STORAGE_S3_KEY_PREFIX:-attachments}"
-      # v1.4 OpenTelemetry：OTLP 推送到 Jaeger（未配置则降级 Console 输出）
-      # 开发环境留空 → Console exporter；生产配置 http://jaeger:4317 → OTLP exporter
-      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-}"
+      # OpenTelemetry：标准 Compose 默认推送到持久化 Jaeger；开发/测试可显式覆盖为空。
+      # Production 应始终保留有效 OTLP 端点，应用启动门禁会拒绝空值或非法地址。
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4317}"
       Vapid__Subject: "${VAPID__SUBJECT:-mailto:admin@example.com}"
       Vapid__PublicKey: "${VAPID__PUBLICKEY:-}"
       Vapid__PrivateKey: "${VAPID__PRIVATEKEY:-}"

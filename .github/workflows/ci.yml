@@ -22,6 +22,16 @@ on:
       - 'coverage-results/**'
   workflow_dispatch:  # 保留手动触发能力（紧急验证 / 选择性重跑）
 
+# 同一 workflow/event/ref 只允许一个活动流水线，避免旧的 main 运行在较新的提交之后覆盖 latest。
+# 手动验证与 push/PR 隔离；分支、PR 和手动验证保留最新运行，版本 tag 不取消正在运行的验证并按同一 tag 串行。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+# 默认令牌只读；需要写入 GHCR 或创建 Release 的 job 单独声明最小权限。
+permissions:
+  contents: read
+
 env:
   DOTNET_VERSION: '8.0.x'
   NODE_VERSION: '20'
@@ -38,13 +48,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Gitleaks 需要完整 git 历史才能扫描所有提交
           fetch-depth: 0
 
       - name: Gitleaks 扫描
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           # 使用免费开源探测规则，无需配置 GitHub Secret
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,7 +86,7 @@ jobs:
           --health-retries 12
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 运行生产脚本回归测试
         run: bash tests/scripts/production-scripts-test.sh
@@ -91,7 +101,7 @@ jobs:
             test rules /tmp/certificate-rules.test.yml
 
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -158,7 +168,7 @@ jobs:
 
       - name: 上传覆盖率报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: backend-coverage-report
           path: |
@@ -180,7 +190,7 @@ jobs:
     needs: secret-scan
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 执行隔离备份恢复实演
         run: bash tests/backup-restore-rehearsal.sh
@@ -197,10 +207,10 @@ jobs:
         working-directory: frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 设置 Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -225,7 +235,7 @@ jobs:
 
       - name: 上传前端覆盖率报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: frontend-coverage-report
           path: frontend/coverage/
@@ -259,10 +269,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 登录 GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -277,7 +287,7 @@ jobs:
       # main 分支 → 标签 sha-<short>, latest
       - name: 提取镜像标签（后端）
         id: meta-backend
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend
           tags: |
@@ -286,7 +296,7 @@ jobs:
 
       - name: 提取镜像标签（前端）
         id: meta-frontend
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend
           tags: |
@@ -295,7 +305,7 @@ jobs:
 
       - name: 提取镜像标签（边缘网关）
         id: meta-edgegateway
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway
           tags: |
@@ -303,11 +313,11 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # 先加载到 runner 本地供 Trivy 扫描；任何镜像未通过前都不能写入 GHCR。
       - name: 构建并加载待扫描后端镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/Dockerfile.backend
@@ -315,7 +325,7 @@ jobs:
           tags: ${{ steps.meta-backend.outputs.tags }}
 
       - name: 构建并加载待扫描前端镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/Dockerfile.frontend
@@ -323,7 +333,7 @@ jobs:
           tags: ${{ steps.meta-frontend.outputs.tags }}
 
       - name: 构建并加载待扫描边缘网关镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/Dockerfile.edgegateway
@@ -360,30 +370,33 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
-      # 三张本地镜像全部通过后才发布；Buildx 复用上述构建缓存，不重复执行镜像层。
-      - name: 发布后端镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.backend
-          push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
+      # 三张本地镜像全部通过后，逐标签推送刚才扫描的本地镜像，避免第二次 Buildx 引入未扫描制品。
+      - name: 发布已扫描的后端镜像
+        env:
+          IMAGE_TAGS: ${{ steps.meta-backend.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [[ -n "$image_tag" ]] || continue
+            docker image push "$image_tag"
+          done <<< "$IMAGE_TAGS"
 
-      - name: 发布前端镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
+      - name: 发布已扫描的前端镜像
+        env:
+          IMAGE_TAGS: ${{ steps.meta-frontend.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [[ -n "$image_tag" ]] || continue
+            docker image push "$image_tag"
+          done <<< "$IMAGE_TAGS"
 
-      - name: 发布边缘网关镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.edgegateway
-          push: true
-          tags: ${{ steps.meta-edgegateway.outputs.tags }}
+      - name: 发布已扫描的边缘网关镜像
+        env:
+          IMAGE_TAGS: ${{ steps.meta-edgegateway.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [[ -n "$image_tag" ]] || continue
+            docker image push "$image_tag"
+          done <<< "$IMAGE_TAGS"
 
   # ============================================================================
   # Production 容器运行时 smoke（PR、main 和版本 tag 均执行）
@@ -398,7 +411,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 构建 smoke 后端镜像
         run: docker build --file docker/Dockerfile.backend --tag equipsense/backend:ci-${GITHUB_SHA} .
@@ -431,7 +444,7 @@ jobs:
 
       - name: 上传 Production 镜像 E2E 报告
         if: always() && github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-playwright-report
           path: frontend/e2e-comprehensive/test-results/
@@ -453,10 +466,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 登录 GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -465,7 +478,7 @@ jobs:
       # 从 git tag 推导语义化标签：v1.2.3 → 1.2.3, 1.2, 1, latest
       - name: 提取镜像标签（后端）
         id: meta-backend
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/backend
           tags: |
@@ -476,7 +489,7 @@ jobs:
 
       - name: 提取镜像标签（前端）
         id: meta-frontend
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/frontend
           tags: |
@@ -487,7 +500,7 @@ jobs:
 
       - name: 提取镜像标签（边缘网关）
         id: meta-edgegateway
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/edgegateway
           tags: |
@@ -497,11 +510,11 @@ jobs:
             type=raw,value=latest
 
       - name: 设置 Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # 版本标签同样先在本地扫描，避免失败版本或 latest 提前进入 GHCR。
       - name: 构建并加载待扫描后端镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/Dockerfile.backend
@@ -509,7 +522,7 @@ jobs:
           tags: ${{ steps.meta-backend.outputs.tags }}
 
       - name: 构建并加载待扫描前端镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/Dockerfile.frontend
@@ -517,7 +530,7 @@ jobs:
           tags: ${{ steps.meta-frontend.outputs.tags }}
 
       - name: 构建并加载待扫描边缘网关镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
           file: docker/Dockerfile.edgegateway
@@ -552,34 +565,45 @@ jobs:
           ignore-unfixed: true
           severity: HIGH,CRITICAL
 
-      # 所有版本镜像通过扫描后才写入 semver、major/minor 和 latest 标签。
-      - name: 发布后端版本镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.backend
-          push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
+      # 所有版本镜像通过扫描后，逐标签推送刚才构建并扫描的本地镜像。
+      - name: 发布已扫描的后端版本镜像
+        env:
+          IMAGE_TAGS: ${{ steps.meta-backend.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [[ -n "$image_tag" ]] || continue
+            docker image push "$image_tag"
+          done <<< "$IMAGE_TAGS"
 
-      - name: 发布前端版本镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
+      - name: 发布已扫描的前端版本镜像
+        env:
+          IMAGE_TAGS: ${{ steps.meta-frontend.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [[ -n "$image_tag" ]] || continue
+            docker image push "$image_tag"
+          done <<< "$IMAGE_TAGS"
 
-      - name: 发布边缘网关版本镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: docker/Dockerfile.edgegateway
-          push: true
-          tags: ${{ steps.meta-edgegateway.outputs.tags }}
+      - name: 发布已扫描的边缘网关版本镜像
+        env:
+          IMAGE_TAGS: ${{ steps.meta-edgegateway.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [[ -n "$image_tag" ]] || continue
+            docker image push "$image_tag"
+          done <<< "$IMAGE_TAGS"
 
-      # 生成 GitHub Release（自动从 tag 名提取版本号，CHANGELOG.md 作为正文）
+  # GitHub Release 使用独立的最小仓库内容写权限，避免把仓库写权限授予镜像发布步骤。
+  create-release:
+    name: 创建 GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    permissions:
+      contents: write
+    steps:
       - name: 创建 GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           draft: false
@@ -610,7 +634,7 @@ jobs:
     name: CD 自动部署
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') && secrets.DEPLOY_SSH_KEY != ''
-    needs: [release]
+    needs: [release, create-release]
     environment: production  # 可配合 Environment Protection Rules（人工审批 / 分支限制）
     steps:
       - name: 提取版本号
@@ -620,7 +644,7 @@ jobs:
       # SSH 到生产服务器后调用仓库内经过行为测试的部署脚本。
       # 脚本负责预检、镜像拉取、滚动重启、三重健康门禁及失败回滚验证。
       - name: SSH 部署（拉取镜像 + 重启 + 健康检查 + 失败回滚）
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -678,10 +702,10 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -750,7 +774,7 @@ jobs:
 
       - name: 上传 K6 性能报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: k6-performance-report
           path: |
@@ -793,15 +817,15 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 设置 .NET ${{ env.DOTNET_VERSION }}
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: 设置 Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -855,7 +879,7 @@ jobs:
 
       - name: 上传测试报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report
           path: frontend/e2e-comprehensive/test-results/

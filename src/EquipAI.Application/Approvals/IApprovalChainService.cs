@@ -37,12 +37,26 @@ public interface IApprovalChainService
     /// <summary>
     /// 审批通过 — 当前步骤标记 Approved，所有步骤通过后工单状态变为 Accepted
     /// </summary>
-    Task ApproveAsync(Guid tenantId, Guid workOrderId, Guid approverId, string? comment, CancellationToken ct = default);
+    /// <param name="tenantId">调用方租户 ID。</param>
+    /// <param name="workOrderId">工单 ID。</param>
+    /// <param name="approverId">当前审批人的用户 ID。</param>
+    /// <param name="approverRole">当前用户 JWT 中的角色。</param>
+    /// <param name="comment">审批意见。</param>
+    Task ApproveAsync(
+        Guid tenantId, Guid workOrderId, Guid approverId, string? approverRole,
+        string? comment, CancellationToken ct = default);
 
     /// <summary>
     /// 审批驳回 — 当前步骤标记 Rejected，工单状态回到 InProgress
     /// </summary>
-    Task RejectAsync(Guid tenantId, Guid workOrderId, Guid approverId, string? comment, CancellationToken ct = default);
+    /// <param name="tenantId">调用方租户 ID。</param>
+    /// <param name="workOrderId">工单 ID。</param>
+    /// <param name="approverId">当前审批人的用户 ID。</param>
+    /// <param name="approverRole">当前用户 JWT 中的角色。</param>
+    /// <param name="comment">驳回意见。</param>
+    Task RejectAsync(
+        Guid tenantId, Guid workOrderId, Guid approverId, string? approverRole,
+        string? comment, CancellationToken ct = default);
 
     /// <summary>
     /// 获取指定工单的所有审批记录
@@ -50,7 +64,11 @@ public interface IApprovalChainService
     Task<List<WorkOrderApprovalDto>> GetApprovalsAsync(Guid tenantId, Guid workOrderId, CancellationToken ct = default);
 
     /// <summary>
-    /// 获取指定审批人待审批的工单列表
+    /// 获取指定租户内指定审批人待审批的工单列表
     /// </summary>
-    Task<List<WorkOrderApprovalDto>> GetPendingApprovalsAsync(Guid approverId, string? role, CancellationToken ct = default);
+    /// <param name="tenantId">调用方租户 ID。</param>
+    /// <param name="approverId">当前用户 ID，用于匹配指定审批人步骤。</param>
+    /// <param name="role">当前用户角色。</param>
+    Task<List<WorkOrderApprovalDto>> GetPendingApprovalsAsync(
+        Guid tenantId, Guid approverId, string? role, CancellationToken ct = default);
 }
