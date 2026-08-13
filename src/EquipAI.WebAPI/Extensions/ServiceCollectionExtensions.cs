@@ -206,6 +206,16 @@ public static class ServiceCollectionExtensions
         services.AddTransient<OutboundEndpointValidationHandler>();
         services.AddSingleton<Security.AuthResponsePolicy>();
 
+        // WAF 规则 provider 以同一单例同时作为请求依赖和 HostedService，
+        // 确保生产规则在宿主接收请求前完成首次加载，并由宿主统一停止监听。
+        var wafRuleOptions = configuration
+            .GetSection(WafRuleOptions.SectionName)
+            .Get<WafRuleOptions>() ?? new WafRuleOptions();
+        services.AddSingleton(wafRuleOptions);
+        services.AddSingleton<WafRuleProvider>();
+        services.AddSingleton<IWafRuleProvider>(sp => sp.GetRequiredService<WafRuleProvider>());
+        services.AddHostedService(sp => sp.GetRequiredService<WafRuleProvider>());
+
         // MQTT 配置选项
         services.Configure<MqttOptions>(configuration.GetSection("Mqtt"));
 

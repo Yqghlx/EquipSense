@@ -99,23 +99,23 @@ regex 使用以下边界编译：
 - WafRuleProvider 实现 IWafRuleProvider、IHostedService、IDisposable；StartAsync 首次加载并创建 FileSystemWatcher，StopAsync 停止监听并释放 debounce 资源。
 - internal Task<bool> ReloadNowAsync(CancellationToken cancellationToken) 仅供单元测试验证非法更新保留旧快照，不暴露 HTTP API。
 
-- [ ] Step 1: 写 provider 失败测试
+- [x] Step 1: 写 provider 失败测试
 
 覆盖生产首次缺失文件时 StartAsync 抛异常；开发缺失文件时 Current 只含内置规则；有效 JSON 的 revision 和摘要原子切换；非法 JSON reload 返回 false 且旧 revision/规则仍能命中；Changed/Created/Renamed 连续事件在 250ms 防抖后只加载一次；并发读取 Current.Rules 不抛异常。通过可注入的 watcher factory 或 ReloadNowAsync 测试，不依赖固定端口。
 
-- [ ] Step 2: 运行 provider 测试确认失败
+- [x] Step 2: 运行 provider 测试确认失败
 
     dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~WafRuleProviderTests" --no-restore
 
 预期：provider 类型未实现而失败。
 
-- [ ] Step 3: 实现 provider 启动加载和原子快照
+- [x] Step 3: 实现 provider 启动加载和原子快照
 
 provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAsync 调用 loader，生产规则错误向 Generic Host 传播，开发缺失使用只含内置规则的快照。监听规则目录而非单文件，过滤 RulesPath 文件名，处理 Changed、Created、Renamed 和 Error；用 CancellationTokenSource 加 Task.Delay 实现 250ms 防抖，用 SemaphoreSlim 串行 reload。
 
 成功 reload 记录 revision、规则数量、SHA-256 和耗时；失败只记录路径与错误类别并保留旧快照。StopAsync 取消 debounce、等待当前 reload、释放 watcher/semaphore，正常停机不记录严重错误。
 
-- [ ] Step 4: 注册为同一单例托管服务
+- [x] Step 4: 注册为同一单例托管服务
 
 在 AddInfrastructure 中注册同一实例：
 
@@ -125,13 +125,13 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 
 这样 provider 在 WAF 第一个请求前完成首次加载，并由 Generic Host 管理停止顺序。
 
-- [ ] Step 5: 运行 provider 和 middleware 测试
+- [x] Step 5: 运行 provider 和 middleware 测试
 
     dotnet test tests/EquipAI.Tests.Unit --filter "FullyQualifiedName~WafRuleProviderTests|FullyQualifiedName~WafMiddlewareTests" --no-restore
 
 预期：全部通过，日志断言不出现规则正文或请求体。
 
-- [ ] Step 6: 提交 provider 子任务
+- [x] Step 6: 提交 provider 子任务
 
     git add src/EquipAI.Infrastructure/Middleware/IWafRuleProvider.cs src/EquipAI.Infrastructure/Middleware/WafRuleProvider.cs src/EquipAI.WebAPI/Extensions/ServiceCollectionExtensions.cs tests/EquipAI.Tests.Unit/Middleware/WafRuleProviderTests.cs
     git commit -m "feat(security): hot reload waf rule snapshots"

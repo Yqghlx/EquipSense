@@ -90,7 +90,7 @@ public static class WafRuleLoader
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new InvalidOperationException("WAF 规则文件读取失败", exception);
+            throw new InvalidOperationException("WAF 规则文件读取失败");
         }
 
         if (content.Length > MaxFileBytes)
@@ -112,9 +112,9 @@ public static class WafRuleLoader
 
             document = JsonSerializer.Deserialize<WafRuleFileDocument>(jsonContent, JsonOptions);
         }
-        catch (JsonException exception)
+        catch (JsonException)
         {
-            throw new InvalidOperationException("WAF 规则 JSON 格式或未知字段不合法", exception);
+            throw new InvalidOperationException("WAF 规则 JSON 格式或未知字段不合法");
         }
 
         if (document is null)
@@ -276,9 +276,9 @@ public static class WafRuleLoader
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
                     TimeSpan.FromMilliseconds(50));
             }
-            catch (ArgumentException exception)
+            catch (ArgumentException)
             {
-                throw new InvalidOperationException("WAF 规则正则编译失败", exception);
+                throw new InvalidOperationException("WAF 规则正则编译失败");
             }
         }
     }
