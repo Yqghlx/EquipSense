@@ -150,7 +150,7 @@ if ! docker image inspect "$BACKEND_IMAGE" "$FRONTEND_IMAGE" "$EDGEGATEWAY_IMAGE
   fatal "找不到本地 smoke 镜像，请先构建 $BACKEND_IMAGE、$FRONTEND_IMAGE 和 $EDGEGATEWAY_IMAGE"
 fi
 
-mkdir -p "$RUNTIME_DOCKER/ssl" "$RUNTIME_DOCKER/mqtt-certs" "$RUNTIME_DOCKER/mqtt-ca" "$RUNTIME_DOCKER/mosquitto_passwd" "$RUNTIME_DOCKER/rabbitmq" "$RUNTIME_DOCKER/prometheus" "$RUNTIME_DOCKER/grafana/provisioning/datasources" "$RUNTIME_DOCKER/grafana/provisioning/dashboards"
+mkdir -p "$RUNTIME_DOCKER/ssl" "$RUNTIME_DOCKER/mqtt-certs" "$RUNTIME_DOCKER/mqtt-ca" "$RUNTIME_DOCKER/mosquitto_passwd" "$RUNTIME_DOCKER/rabbitmq" "$RUNTIME_DOCKER/prometheus" "$RUNTIME_DOCKER/grafana/provisioning/datasources" "$RUNTIME_DOCKER/grafana/provisioning/dashboards" "$RUNTIME_DOCKER/waf-rules"
 
 # 只复制不含运行时凭据的配置；绝不复制仓库中的 .env、证书、私钥、密码文件和备份。
 runtime_files=(
@@ -178,6 +178,8 @@ cp "$PROJECT_ROOT/docker/rabbitmq/definitions.json" "$RUNTIME_DOCKER/rabbitmq/de
 cp "$PROJECT_ROOT/docker/rabbitmq/start.sh" "$RUNTIME_DOCKER/rabbitmq/start.sh"
 cp "$PROJECT_ROOT/docker/grafana/provisioning/datasources/prometheus.yml" "$RUNTIME_DOCKER/grafana/provisioning/datasources/prometheus.yml"
 cp "$PROJECT_ROOT/docker/grafana/provisioning/dashboards/dashboard.yml" "$RUNTIME_DOCKER/grafana/provisioning/dashboards/dashboard.yml"
+cp "$PROJECT_ROOT/docker/waf-rules/rules.json" "$RUNTIME_DOCKER/waf-rules/rules.json"
+chmod 600 "$RUNTIME_DOCKER/waf-rules/rules.json"
 
 random_secret() {
   openssl rand -hex 32
@@ -261,6 +263,8 @@ runtime_env=(
   "GATEWAY_ALLOWED_HOSTS=edgegateway"
   "LLM_API_KEY="
   "OTEL_EXPORTER_OTLP_ENDPOINT="
+  "WAF_RULES_PATH=/etc/equipai/waf/rules.json"
+  "WAF_REQUIRE_EXTERNAL_RULES=true"
 )
 
 if [[ "$SMOKE_RUN_E2E" = true ]]; then

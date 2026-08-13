@@ -67,6 +67,8 @@ GRAFANA_PASSWORD=<Grafana管理员密码>
 # ALERT_WEBHOOK_URL=https://alert-receiver.example.com/api/alertmanager
 JAEGER_SPAN_STORAGE_TYPE=badger
 JAEGER_BADGER_EPHEMERAL=false
+WAF_RULES_PATH=/etc/equipai/waf/rules.json
+WAF_REQUIRE_EXTERNAL_RULES=true
 
 # 可选修改
 DOMAIN=your-domain.com
@@ -85,6 +87,8 @@ cd ..
 开发/测试只启动基础设施时使用 `docker-compose.dev.yml`；如需测试完整 Compose 的 TLS 挂载链路，可按“TLS 证书配置”中的自签名方案单独运行 `generate-cert.sh` 和 `generate-mqtt-cert.sh`，但不得将其用于生产环境。
 
 `setup.sh` 仅支持 `Production`，会在创建认证文件前一次性校验生产 Compose 所需的凭证、JWT 长度、文件权限和固定镜像 digest，并确认 Mosquitto 密码文件包含当前 `MQTT_USERNAME`；它要求生产 TLS/MQTT 文件已预置，绝不会自动生成开发自签名证书。确认运行时文件后还会再次执行 `--check-runtime-files`，拒绝过期、主机名不匹配、私钥权限不安全、证书与私钥不匹配、生产叶子证书自签名或 CA 链无效的 TLS/MQTT 文件，同时拒绝符号链接形式的 `.env`、TLS 私钥和 Mosquitto 密码文件，避免仅打印 warning 后误报配置成功或把认证文件写入非预期目标。开发/测试请使用 `docker-compose.dev.yml`，需要完整 TLS 挂载测试时再单独生成临时证书。部署脚本会重复执行同一运行时门禁；校验器还会拒绝数据库、缓存、消息队列、监控服务、种子账户及安全密钥之间复用同一凭据、重复环境变量和非 `Production` 运行环境，只输出变量名，不输出凭据值。
+
+WAF 规则文件位于 `docker/waf-rules/rules.json`，生产 Compose 以只读方式挂载到 `/etc/equipai/waf`，并通过 `WAF_RULES_PATH` 与 `WAF_REQUIRE_EXTERNAL_RULES=true` 强制应用加载。规则制品更新必须先在同目录临时文件中完成结构/安全校验和 `sha256sum` 记录，再备份旧文件并使用同目录 `mv` 原子替换；发布后核对后端日志中的 revision、规则数量和 SHA-256。失败或误报时使用已审查备份按同一流程回滚。应用不接受 HTTP 或数据库规则编辑，外部规则不能关闭内置 WAF 基线；正式环境仍需由部署方完成制品审批、最小权限及一次有效更新/回滚演练。
 
 直接启动生产 Compose 时统一使用 `docker/compose-production.sh`：它会在 `up`、`start`、`restart`、`build`、`pull`、`create`、`run` 和 `scale` 前执行同一套生产门禁，校验失败时不会调用 Docker，避免只启动部分服务。`ps`、`logs`、`exec`、`stop` 和 `down` 等观察或故障处置命令仍可在门禁失败时使用；这些命令使用仅包含显式安全变量白名单的临时恢复环境，未知变量默认丢弃，避免把新增的 API Key、密码或带认证信息的 URL 复制到临时文件。CI/CD 的正式镜像发布继续使用 `deploy-production.sh`，不要用本地构建入口替代滚动发布脚本。
 
@@ -236,6 +240,8 @@ curl http://localhost:8080/api/v1/system/info
 | `TRUSTED_PROXY_NETWORKS` | 可信反向代理 CIDR 网段，多个网段用逗号分隔 | `172.16.0.0/12` | 使用反向代理时需按实际网络确认 |
 | `SSL_CERT_PATH` | TLS 证书路径（容器内） | `/etc/nginx/ssl/cert.pem` | 否 |
 | `SSL_KEY_PATH` | TLS 私钥路径（容器内） | `/etc/nginx/ssl/key.pem` | 否 |
+| `WAF_RULES_PATH` | WAF 版本化 JSON 规则文件路径（容器内，生产必须为绝对路径） | `/etc/equipai/waf/rules.json` | 否 |
+| `WAF_REQUIRE_EXTERNAL_RULES` | 生产是否强制加载外部 WAF 规则文件 | `true` | 生产必须为 `true` |
 
 ## 首次启动
 

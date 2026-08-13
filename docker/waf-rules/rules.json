@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "revision": "2026-08-13.1",
+  "rules": [
+    {
+      "id": "custom-sqli-load-function",
+      "category": "sql-injection",
+      "matchType": "contains",
+      "pattern": "load_file",
+      "description": "拦截数据库文件读取函数特征"
+    },
+    {
+      "id": "custom-command-powershell-encoded",
+      "category": "command-injection",
+      "matchType": "contains",
+      "pattern": "powershell -enc",
+      "description": "拦截常见 PowerShell 编码执行特征"
+    }
+  ]
+}

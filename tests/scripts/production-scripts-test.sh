@@ -3919,6 +3919,39 @@ test_frontend_service_worker_handles_owner_scoped_background_sync() {
   assert_contains "$service_worker" "new NetworkOnly"
 }
 
+test_waf_rule_reload_contract() {
+  local compose_content smoke_compose smoke_script env_example rules_content runbook_content deploy_content compliance_content
+  compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
+  smoke_compose="$(cat "$PROJECT_ROOT/docker/docker-compose.smoke.yml")"
+  smoke_script="$(cat "$PROJECT_ROOT/tests/scripts/production-runtime-smoke.sh")"
+  env_example="$(cat "$PROJECT_ROOT/docker/.env.example")"
+  rules_content="$(cat "$PROJECT_ROOT/docker/waf-rules/rules.json" 2>/dev/null || true)"
+  runbook_content="$(cat "$PROJECT_ROOT/docs/OPS_RUNBOOK.md")"
+  deploy_content="$(cat "$PROJECT_ROOT/docs/DEPLOY.md")"
+  compliance_content="$(cat "$PROJECT_ROOT/docs/COMPLIANCE_REPORT.md")"
+
+  assert_contains "$compose_content" 'Security__Waf__RulesPath'
+  assert_contains "$compose_content" 'Security__Waf__RequireExternalRules'
+  assert_contains "$compose_content" './waf-rules:/etc/equipai/waf:ro'
+  assert_contains "$smoke_compose" 'backend:'
+  assert_contains "$smoke_script" 'waf-rules/rules.json'
+  assert_contains "$smoke_script" 'RUNTIME_DOCKER/waf-rules'
+  assert_contains "$env_example" 'WAF_RULES_PATH=/etc/equipai/waf/rules.json'
+  assert_contains "$env_example" 'WAF_REQUIRE_EXTERNAL_RULES=true'
+  assert_contains "$rules_content" '"schemaVersion": 1'
+  assert_contains "$rules_content" '"revision"'
+  assert_contains "$rules_content" '"rules"'
+  [[ "$rules_content" != *"password"* && "$rules_content" != *"secret"* ]] \
+    || fail "WAF 规则制品不得包含凭据字段"
+  assert_contains "$runbook_content" "WAF 规则"
+  assert_contains "$runbook_content" "原子"
+  assert_contains "$runbook_content" "SHA-256"
+  assert_contains "$runbook_content" "回滚"
+  assert_contains "$deploy_content" "WAF_RULES_PATH"
+  assert_contains "$deploy_content" "WAF_REQUIRE_EXTERNAL_RULES=true"
+  assert_contains "$compliance_content" "WAF 规则更新机制"
+}
+
 test_frontend_auth_session_clears_sensitive_state() {
   local auth_store
   auth_store="$(cat "$PROJECT_ROOT/frontend/src/stores/authStore.ts")"
@@ -4101,6 +4134,7 @@ case "${1:-all}" in
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
+    test_waf_rule_reload_contract
     test_rabbitmq_healthcheck_uses_service_account
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
@@ -4222,6 +4256,7 @@ case "${1:-all}" in
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
+    test_waf_rule_reload_contract
     test_rabbitmq_healthcheck_uses_service_account
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight

@@ -40,7 +40,7 @@ EquipSense 是面向工业企业的设备监控与预测维护 SaaS 平台，核
 |--------|------|------|
 | 输入校验 | ASP.NET Data Annotations + Zod（前端） | ✅ 已实现 |
 | XSS 防护 | InputSanitizationMiddleware（script 标签/事件处理器/js 协议） | ✅ 已实现 |
-| WAF | WafMiddleware（SQL 注入/路径遍历/命令注入/XSS） | ✅ Phase 4 新增 |
+| WAF | WafMiddleware（内置 SQL 注入/路径遍历/命令注入/XSS 基线）+ 受限版本化规则文件热加载 | ✅ 已实现（生产制品审批和更新/回滚演练仍需完成） |
 | 速率限制 | 全局 60/min，认证端点 10/min | ✅ 已实现 |
 | 安全响应头 | SecurityHeadersMiddleware（X-Content-Type-Options/X-Frame-Options/Referrer-Policy） | ✅ 已实现 |
 
@@ -85,7 +85,7 @@ EquipSense 是面向工业企业的设备监控与预测维护 SaaS 平台，核
 - [x] **MFA 强制与恢复** — 生产配置强制 SystemAdmin/MaintenanceLead 完成 TOTP enrollment；未完成前不颁发 JWT，刷新令牌和禁用操作也会被拦截；恢复码单次消费并留痕
 - [x] **敏感字段加密** — 用户手机号/邮箱使用应用层 AES-256-GCM 加密，数据库只保存密文和盲索引；生产环境仍需完成密钥注入、历史迁移验收和密钥恢复演练
 - [ ] **备份运营闭环** — 备份与受控恢复脚本及 CI 回归已实现，仍需生产配置定时任务、异地目标和定期隔离恢复演练
-- [ ] **WAF 规则更新机制** — 当前规则静态编译，未实现动态规则更新
+- [x] **WAF 规则更新机制** — 版本化 JSON 规则文件只读挂载；loader 校验大小、字段、权限、摘要和 NonBacktracking 正则，provider 启动失败关闭并在运行中原子切换快照，非法更新保留旧版本；规则更新不提供 HTTP/数据库编辑入口
 
 ## 四、部署安全清单
 
@@ -101,6 +101,7 @@ EquipSense 是面向工业企业的设备监控与预测维护 SaaS 平台，核
 - [x] 生产环境关闭 Swagger
 - [x] 日志不记录敏感信息（密码/token/许可证密钥）
 - [ ] `bash docker/validate-env.sh docker/.env --check-runtime-files` 以 0 退出
+- [ ] WAF 规则制品已完成来源审查、最小权限配置，并使用临时文件 + 原子替换完成一次有效更新和回滚演练（记录 revision、SHA-256 和结果）
 
 ## 五、结论
 
@@ -109,4 +110,4 @@ EquipSense 已在代码层实现等保 2.0 三级要求的核心安全控制（�
 **建议**：
 1. 生产部署前验证高权限账号完成 MFA enrollment，安全保存恢复码并完成恢复演练
 2. 配置 `docker/backup.sh` 定时备份、异地同步，并使用 `docker/restore.sh` 完成隔离恢复演练
-3. 定期更新 WAF 规则库
+3. 定期审查和更新 WAF 规则制品，保留 revision、SHA-256、审批和回滚证据

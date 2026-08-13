@@ -198,32 +198,32 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 - Compose 后端只读挂载 ./waf-rules:/etc/equipai/waf:ro；smoke 复制并挂载相同目录。
 - 规则文件使用 schemaVersion 1、固定 revision 和无敏感值的低误报扩展规则，权限为 600。
 
-- [ ] Step 1: 写生产脚本契约失败测试
+- [x] Step 1: 写生产脚本契约失败测试
 
 在 production-scripts-test.sh 断言生产 compose 注入规则路径和强制开关、规则目录只读挂载、smoke runtime_files 包含 waf-rules/rules.json、规则文件包含 schemaVersion/revision/rules 且不含凭据、运维文档包含原子替换/回滚/摘要记录、合规报告将 WAF 规则更新列为代码已实现但保留部署侧演练要求。
 
-- [ ] Step 2: 运行契约测试确认失败
+- [x] Step 2: 运行契约测试确认失败
 
     bash tests/scripts/production-scripts-test.sh all
 
 预期：新增规则挂载和文档断言失败。
 
-- [ ] Step 3: 添加规则制品并接入 Compose/smoke
+- [x] Step 3: 添加规则制品并接入 Compose/smoke
 
 添加非敏感、低误报的扩展规则作为仓库基线；所有生产 Compose 变更保持只读挂载。更新 smoke runtime_files 和临时 Docker 目录复制逻辑，使隔离 Production smoke 加载当前规则文件；规则文件不可通过环境变量替换为远程 URL。
 
-- [ ] Step 4: 增加运维更新与回滚文档
+- [x] Step 4: 增加运维更新与回滚文档
 
 在 OPS_RUNBOOK.md 和 DEPLOY.md 写出：同目录临时文件、应用 loader/结构校验、sha256sum 摘要、备份当前文件、原子 mv、检查 revision/数量/摘要/错误计数、失败原子恢复。说明更新不经过 HTTP API，不记录规则正文。COMPLIANCE_REPORT.md 将 WAF 规则更新机制从待完善改为代码已实现，并明确正式制品审批、最小权限和一次生产等价更新/回滚演练仍需部署方完成。
 
-- [ ] Step 5: 运行生产脚本契约和 Shell 语法检查
+- [x] Step 5: 运行生产脚本契约和 Shell 语法检查
 
     bash -n tests/scripts/production-scripts-test.sh tests/scripts/production-runtime-smoke.sh
     bash tests/scripts/production-scripts-test.sh all
 
 预期：全部通过，规则文件、Compose 挂载、smoke 复制和文档契约一致。
 
-- [ ] Step 6: 提交运维集成子任务
+- [x] Step 6: 提交运维集成子任务
 
     git add docker/waf-rules/rules.json docker/docker-compose.yml docker/docker-compose.smoke.yml docker/.env.example tests/scripts/production-scripts-test.sh tests/scripts/production-runtime-smoke.sh docs/OPS_RUNBOOK.md docs/DEPLOY.md docs/COMPLIANCE_REPORT.md
     git commit -m "ops(security): ship auditable waf rule artifact"

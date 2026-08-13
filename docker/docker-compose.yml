@@ -239,6 +239,9 @@ services:
       # 证书生命周期监控默认开启；只读公钥证书，不挂载 Nginx 私钥。
       Security__CertificateMonitoring__Enabled: "${CERTIFICATE_MONITORING_ENABLED:-true}"
       Security__CertificateMonitoring__IntervalSeconds: "${CERTIFICATE_MONITORING_INTERVAL_SECONDS:-300}"
+      # WAF 外部规则只读挂载；生产默认强制加载，规则内容由版本化制品管理。
+      Security__Waf__RulesPath: "${WAF_RULES_PATH:-/etc/equipai/waf/rules.json}"
+      Security__Waf__RequireExternalRules: "${WAF_REQUIRE_EXTERNAL_RULES:-true}"
       # CORS 白名单：生产环境必须显式指定前端域名（ASP.NET Core 数组环境变量格式）
       Cors__Origins__0: "${FRONTEND_URL:?请在 .env 中设置 FRONTEND_URL}"
       # 限流参数：生产使用安全默认值；隔离 E2E 可提高窗口额度，但不能关闭限流中间件。
@@ -270,6 +273,8 @@ services:
       - ./mqtt-certs/ca.crt:/etc/equipai/mqtt-certs/ca.crt:ro
       - ./mqtt-certs/server.crt:/etc/equipai/mqtt-certs/server.crt:ro
       - ./ssl/cert.pem:/etc/equipai/tls/cert.pem:ro
+      # WAF 规则由部署制品原子替换，应用只读加载并热更新。
+      - ./waf-rules:/etc/equipai/waf:ro
       # 工单附件默认写入 /app/uploads；使用命名卷避免容器重建丢失文件。
       - attachments_data:/app/uploads
     depends_on:
