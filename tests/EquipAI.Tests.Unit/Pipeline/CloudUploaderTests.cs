@@ -109,6 +109,24 @@ public class CloudUploaderTests
     }
 
     [Fact]
+    public async Task UploadWithFallbackAsync_收到取消时应传播取消且不得写入离线缓冲()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var buffer = new LocalBuffer(capacity: 100);
+        var uploader = CreateUploader(localBuffer: buffer);
+
+        var act = () => uploader.UploadWithFallbackAsync(
+            "test/topic",
+            """{"data":1}"""u8.ToArray(),
+            cancellation.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        buffer.Count.Should().Be(0);
+        await buffer.DisposeAsync();
+    }
+
+    [Fact]
     public async Task ReplayOfflineDataAsync_未连接时应安全返回不回放()
     {
         var store = new SqliteBufferStore(":memory:");

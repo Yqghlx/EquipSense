@@ -73,7 +73,7 @@ public class ConfigRefreshService : BackgroundService
                 ValidateRuntimeConfiguration(_environmentName, _options, devices);
                 // 空列表是后端明确表示“当前没有设备”，必须应用它以停止已删除的采集器；
                 // 与上面的不可达状态分开，避免旧设备永久残留或临时故障导致误停采。
-                await _deviceManager.ApplyConfigAsync(devices);
+                await _deviceManager.ApplyConfigAsync(devices, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

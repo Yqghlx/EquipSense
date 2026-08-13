@@ -9,7 +9,7 @@ namespace EquipAI.EdgeGateway.Pipeline;
 /// 按设备配置的 PollIntervalMs 间隔定时采集，标准化后上传。
 /// 支持自动重连：连接或采集异常时指数退避重试，不会永久退出。
 /// </summary>
-public class DataCollector : BackgroundService
+public class DataCollector : BackgroundService, IAsyncDisposable
 {
     private readonly ILogger<DataCollector> _logger;
     private readonly Func<IProtocolAdapter> _adapterFactory;
@@ -22,6 +22,11 @@ public class DataCollector : BackgroundService
     /// 当前活跃的协议适配器实例
     /// </summary>
     private IProtocolAdapter _adapter;
+
+    /// <summary>
+    /// 防止宿主停机与设备配置刷新同时释放同一个采集器。
+    /// </summary>
+    private int _disposed;
 
     /// <summary>
     /// 初始化数据采集调度器
@@ -138,5 +143,31 @@ public class DataCollector : BackgroundService
             CloudUploader.BuildPayload(message, _deviceType));
         await _uploader.UploadWithFallbackAsync(topic, payload, ct);
         _metrics?.Increment(GatewayMetrics.Names.CollectionsTotal);
+    }
+
+    /// <summary>
+    /// 释放当前协议适配器。
+    /// </summary>
+    /// <remarks>
+    /// DeviceManager 直接调用 StartCollectingAsync，而不是通过 BackgroundService 的
+    /// StartAsync/StopAsync 生命周期，因此不能依赖基类自动释放适配器；否则动态删设备或
+    /// 网关停机时，OPC UA 会话、Modbus 串口和 TCP 连接会一直占用现场资源。
+    /// </remarks>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        try
+        {
+            await _adapter.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            // 释放阶段不能阻止其他设备继续停机；适配器自身已尽力清理，异常保留在日志中。
+            _logger.LogWarning(ex, "释放设备 {DeviceId} 的协议适配器失败", _config.DeviceId);
+        }
+
+        GC.SuppressFinalize(this);
     }
 }

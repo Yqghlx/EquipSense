@@ -3563,12 +3563,14 @@ test_docker_edgegateway_build_is_reproducible() {
 }
 
 test_edgegateway_production_runtime_contract() {
-  local compose_content options_content program_content project_content refresh_content
+  local compose_content options_content program_content project_content refresh_content collector_content manager_content
   compose_content="$(cat "$PROJECT_ROOT/docker/docker-compose.yml")"
   options_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/GatewayOptions.cs")"
   program_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Program.cs")"
   project_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj")"
   refresh_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Pipeline/ConfigRefreshService.cs")"
+  collector_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Pipeline/DataCollector.cs")"
+  manager_content="$(cat "$PROJECT_ROOT/src/EquipAI.EdgeGateway/Pipeline/DeviceManager.cs")"
 
   assert_contains "$compose_content" 'DOTNET_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"'
   assert_contains "$compose_content" 'Gateway__BufferPath: "${GATEWAY_BUFFER_PATH:-/data/buffer.db}"'
@@ -3584,12 +3586,20 @@ test_edgegateway_production_runtime_contract() {
   assert_contains "$program_content" 'gatewayOpts.UseLocalDeviceConfigFallback'
   assert_contains "$program_content" 'sp.GetRequiredService<GatewayOptions>().HealthPort'
   assert_contains "$program_content" 'Environment.ExitCode = 1'
+  assert_contains "$program_content" 'return new InitialConfigApplier(deviceManager, initialDevices)'
+  [[ "$program_content" != *'_ = deviceManager.ApplyConfigAsync(initialDevices)'* ]] \
+    || fail "边缘网关初始设备配置不得在 HostedService 注册阶段重复启动"
+  assert_contains "$program_content" 'await deviceManager.ApplyConfigAsync(devices, stoppingToken)'
   assert_contains "$refresh_content" 'ValidateRuntimeConfiguration'
   assert_contains "$refresh_content" 'GatewayConfigurationValidator.ValidateOpcUaSecurity'
   assert_contains "$refresh_content" '动态设备配置未通过安全门禁，本轮未应用'
   assert_contains "$refresh_content" 'if (!fetchResult.IsAvailable)'
   assert_contains "$refresh_content" 'DeviceConfigurationFetchResult.FromBackend'
-  assert_contains "$refresh_content" 'await _deviceManager.ApplyConfigAsync(devices)'
+  assert_contains "$refresh_content" 'await _deviceManager.ApplyConfigAsync(devices, stoppingToken)'
+  assert_contains "$collector_content" 'public class DataCollector : BackgroundService, IAsyncDisposable'
+  assert_contains "$collector_content" 'await _adapter.DisposeAsync()'
+  assert_contains "$manager_content" 'SemaphoreSlim _configurationGate'
+  assert_contains "$manager_content" 'await Collector.DisposeAsync()'
   assert_contains "$project_content" '<None Update="appsettings*.json">'
   assert_contains "$project_content" '<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>'
   assert_contains "$project_content" '<CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>'

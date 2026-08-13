@@ -128,4 +128,18 @@ public class DataCollectorTests
         var act = () => collector.CollectOnceAsync(CancellationToken.None);
         await act.Should().ThrowAsync<Exception>().WithMessage("*适配器读取失败*");
     }
+
+    [Fact]
+    public async Task DisposeAsync_应释放当前协议适配器且可重复调用()
+    {
+        var (collector, adapterMock) = CreateSut();
+        adapterMock
+            .Setup(a => a.DisposeAsync())
+            .Returns(ValueTask.CompletedTask);
+
+        await collector.DisposeAsync();
+        await collector.DisposeAsync();
+
+        adapterMock.Verify(a => a.DisposeAsync(), Times.Once);
+    }
 }

@@ -124,6 +124,8 @@ public class CloudUploader : IAsyncDisposable
     /// </summary>
     public async Task UploadAsync(NormalizedMessage message, string deviceType, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (_mqttClient is null || !_mqttClient.IsConnected)
         {
             _logger.LogWarning("MQTT 未连接，跳过上传");
@@ -154,6 +156,8 @@ public class CloudUploader : IAsyncDisposable
     /// <param name="ct">取消令牌</param>
     public async Task UploadWithFallbackAsync(string topic, byte[] payload, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (IsOnline)
         {
             try
@@ -166,6 +170,11 @@ public class CloudUploader : IAsyncDisposable
                 await _mqttClient!.PublishAsync(mqttMessage, ct);
                 _logger.LogDebug("已上传: {Topic}", topic);
                 await ReplayOfflineDataAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // 宿主停机或请求取消不是网络故障，不能把当前消息写入离线队列后继续产生副作用。
+                throw;
             }
             catch (Exception ex)
             {
@@ -200,6 +209,8 @@ public class CloudUploader : IAsyncDisposable
     /// <param name="ct">取消令牌</param>
     public async Task ReplayOfflineDataAsync(CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (_offlineStore is null || !IsOnline) return;
 
         var pending = await _offlineStore.GetPendingAsync(100);
@@ -216,6 +227,10 @@ public class CloudUploader : IAsyncDisposable
                 await _mqttClient!.PublishAsync(mqttMessage, ct);
                 await _offlineStore.MarkAsSentAsync(record.Id);
                 _metrics?.Increment(GatewayMetrics.Names.ReplayMessagesTotal);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {

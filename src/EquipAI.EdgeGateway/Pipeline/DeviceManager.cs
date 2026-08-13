@@ -15,6 +15,8 @@ public class DeviceManager : IAsyncDisposable
     private readonly IServiceProvider _serviceProvider;
     private readonly Func<IServiceProvider, string, IProtocolAdapter> _adapterFactory;
     private readonly ILogger<DeviceManager> _logger;
+    private readonly SemaphoreSlim _configurationGate = new(1, 1);
+    private int _disposed;
 
     /// <summary>
     /// 当前管理的设备数量
@@ -41,44 +43,60 @@ public class DeviceManager : IAsyncDisposable
     /// 应用新的设备配置集合：停用已移除的、启动新增的、重启变更的
     /// </summary>
     /// <param name="desired">期望的设备配置列表</param>
-    public async Task ApplyConfigAsync(DeviceConfig[] desired)
+    /// <param name="ct">等待配置锁时使用的取消令牌</param>
+    public async Task ApplyConfigAsync(DeviceConfig[] desired, CancellationToken ct = default)
     {
-        var desiredMap = desired.ToDictionary(d => d.DeviceId);
-        var currentIds = _devices.Keys.ToHashSet();
+        ArgumentNullException.ThrowIfNull(desired);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
-        // 停用已移除的设备
-        foreach (var id in currentIds.Except(desiredMap.Keys))
+        // 配置刷新可能与初始配置应用、下一轮定时刷新重叠；串行化整批变更，
+        // 确保同一个采集器不会被两个调用方同时停止、替换或从字典移除。
+        await _configurationGate.WaitAsync(ct);
+        try
         {
-            if (_devices.TryRemove(id, out var running))
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
+            var desiredMap = desired.ToDictionary(d => d.DeviceId);
+            var currentIds = _devices.Keys.ToHashSet();
+
+            // 停用已移除的设备
+            foreach (var id in currentIds.Except(desiredMap.Keys))
             {
-                await running.StopAsync();
-                _logger.LogInformation("已停止设备采集器: {DeviceId}", id);
+                if (_devices.TryRemove(id, out var running))
+                {
+                    await running.StopAsync();
+                    _logger.LogInformation("已停止设备采集器: {DeviceId}", id);
+                }
+            }
+
+            // 启动新增或重启变更的设备
+            foreach (var (deviceId, config) in desiredMap)
+            {
+                if (_devices.TryGetValue(deviceId, out var existing))
+                {
+                    // 配置未变更则跳过
+                    if (ConfigEquals(existing.Config, config))
+                        continue;
+
+                    // 配置变更：停旧启新
+                    await existing.StopAsync();
+                    _devices.TryRemove(deviceId, out _);
+                    _logger.LogInformation("设备 {DeviceId} 配置变更，重启采集器", deviceId);
+                }
+
+                // 启动新采集器
+                var collector = CreateCollector(config);
+                var cts = new CancellationTokenSource();
+                var task = collector.StartCollectingAsync(cts.Token);
+                var runningDevice = new RunningDevice(config, collector, cts, task);
+
+                _devices[deviceId] = runningDevice;
+                _logger.LogInformation("已启动设备采集器: {DeviceId}, 协议={Protocol}", deviceId, config.Protocol);
             }
         }
-
-        // 启动新增或重启变更的设备
-        foreach (var (deviceId, config) in desiredMap)
+        finally
         {
-            if (_devices.TryGetValue(deviceId, out var existing))
-            {
-                // 配置未变更则跳过
-                if (ConfigEquals(existing.Config, config))
-                    continue;
-
-                // 配置变更：停旧启新
-                await existing.StopAsync();
-                _devices.TryRemove(deviceId, out _);
-                _logger.LogInformation("设备 {DeviceId} 配置变更，重启采集器", deviceId);
-            }
-
-            // 启动新采集器
-            var collector = CreateCollector(config);
-            var cts = new CancellationTokenSource();
-            var task = collector.StartCollectingAsync(cts.Token);
-            var runningDevice = new RunningDevice(config, collector, cts, task);
-
-            _devices[deviceId] = runningDevice;
-            _logger.LogInformation("已启动设备采集器: {DeviceId}, 协议={Protocol}", deviceId, config.Protocol);
+            _configurationGate.Release();
         }
     }
 
@@ -87,12 +105,23 @@ public class DeviceManager : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        foreach (var id in _devices.Keys)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        await _configurationGate.WaitAsync();
+        try
         {
-            if (_devices.TryRemove(id, out var running))
+            foreach (var id in _devices.Keys)
             {
-                await running.StopAsync();
+                if (_devices.TryRemove(id, out var running))
+                {
+                    await running.StopAsync();
+                }
             }
+        }
+        finally
+        {
+            _configurationGate.Release();
         }
 
         GC.SuppressFinalize(this);
@@ -149,14 +178,30 @@ public class DeviceManager : IAsyncDisposable
         public CancellationTokenSource Cts { get; } = cts;
         public Task RunningTask { get; } = task;
 
+        private int _stopped;
+
         /// <summary>
         /// 停止采集器并释放资源
         /// </summary>
         public async Task StopAsync()
         {
+            if (Interlocked.Exchange(ref _stopped, 1) != 0)
+                return;
+
             Cts.Cancel();
-            try { await RunningTask; } catch (OperationCanceledException) { }
-            Cts.Dispose();
+            try
+            {
+                await RunningTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // 取消是配置变更和正常停机的预期结束路径。
+            }
+            finally
+            {
+                await Collector.DisposeAsync();
+                Cts.Dispose();
+            }
         }
     }
 }

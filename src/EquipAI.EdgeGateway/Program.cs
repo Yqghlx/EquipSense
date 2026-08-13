@@ -189,8 +189,6 @@ try
     builder.Services.AddSingleton<IHostedService>(sp =>
     {
         var deviceManager = sp.GetRequiredService<DeviceManager>();
-        // 初始配置在服务启动后异步应用
-        _ = deviceManager.ApplyConfigAsync(initialDevices);
         return new InitialConfigApplier(deviceManager, initialDevices);
     });
 
@@ -271,6 +269,8 @@ file class InitialConfigApplier(DeviceManager deviceManager, DeviceConfig[] devi
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await deviceManager.ApplyConfigAsync(devices);
+        // 只在 HostedService 生命周期中应用一次；注册工厂不能提前启动异步任务，
+        // 否则会与 ExecuteAsync 并发创建重复采集器。
+        await deviceManager.ApplyConfigAsync(devices, stoppingToken);
     }
 }
