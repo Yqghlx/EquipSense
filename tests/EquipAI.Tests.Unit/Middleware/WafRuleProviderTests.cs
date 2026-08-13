@@ -101,6 +101,18 @@ public sealed class WafRuleProviderTests : IDisposable
             .IsMatch("second-pattern").Should().BeTrue();
     }
 
+    [Fact]
+    public void Dispose_重复调用_不应抛出异常()
+    {
+        using var provider = CreateProvider(CreateOptions("missing.json"), "Development");
+
+        provider.Dispose();
+
+        var act = () => provider.Dispose();
+
+        act.Should().NotThrow();
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

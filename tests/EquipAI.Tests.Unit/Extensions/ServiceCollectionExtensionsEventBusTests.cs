@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Moq;
 
 namespace EquipAI.Tests.Unit.Extensions;
 
@@ -21,16 +22,22 @@ public sealed class ServiceCollectionExtensionsEventBusTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddHttpContextAccessor();
+        var hostEnvironment = new Mock<IHostEnvironment>();
+        hostEnvironment.SetupGet(environment => environment.EnvironmentName).Returns("Testing");
+        services.AddSingleton<IHostEnvironment>(hostEnvironment.Object);
         services.AddInfrastructure(BuildConfiguration("RabbitMQ"));
         using var provider = services.BuildServiceProvider();
 
         var concrete = provider.GetRequiredService<RabbitMqEventBus>();
         var transport = provider.GetRequiredService<IEventBusTransport>();
         var state = provider.GetRequiredService<IRabbitMqConnectionState>();
-        var hostedDescriptor = services.Single(descriptor =>
-            descriptor.ServiceType == typeof(IHostedService)
-            && descriptor.ImplementationFactory is not null);
-        var hosted = hostedDescriptor.ImplementationFactory!(provider);
+        var hosted = services
+            .Where(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationFactory is not null)
+            .Select(descriptor => descriptor.ImplementationFactory!(provider))
+            .OfType<RabbitMqEventBus>()
+            .Single();
 
         using var scope = provider.CreateScope();
         var eventBus = scope.ServiceProvider.GetRequiredService<IEventBus>();

@@ -19,6 +19,10 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
     private CancellationTokenSource? _debounceCancellation;
     private Task? _pendingReload;
     private bool _started;
+    /// <summary>
+    /// 防止宿主和测试夹具重复释放 provider。
+    /// </summary>
+    private int _disposed;
 
     /// <summary>
     /// 初始化 WAF 规则 provider。
@@ -147,6 +151,11 @@ public sealed class WafRuleProvider : IWafRuleProvider, IHostedService, IDisposa
     /// </summary>
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _stopCancellation.Cancel();
         _watcher?.Dispose();
         _watcher = null;
