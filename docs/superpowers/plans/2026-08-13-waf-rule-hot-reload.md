@@ -244,7 +244,7 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
     dotnet test tests/EquipAI.Tests.Unit -c Release --no-build --filter "FullyQualifiedName~WafRuleLoaderTests|FullyQualifiedName~WafRuleProviderTests|FullyQualifiedName~WafMiddlewareTests|FullyQualifiedName~WafRuleConfigurationTests" --logger "console;verbosity=minimal"
     dotnet build EquipAI.sln -c Release --no-restore -m:1 -p:UseSharedCompilation=false -v:q
 
-结果：WAF 聚焦测试 68/68 通过，Release 构建 0 warning/0 error。
+结果：WAF 聚焦测试 68/68 通过；随后全量后端单元测试 1615/1615、默认集成测试 183 总数（177 通过、6 跳过、0 失败）；Release 构建 0 warning/0 error。
 
 - [x] Step 2: 运行生产脚本、差异和敏感信息检查
 
@@ -256,7 +256,7 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 
 - [x] Step 3: 运行当前提交 Production runtime smoke
 
-结果：使用当前工作区构建的 `equipsense/backend:ci-smoke`、`equipsense/frontend:ci-smoke` 和 `equipsense/edgegateway:ci-smoke`，设置 `SMOKE_RUN_E2E=true` 运行通过；433 个 E2E 为 432 通过、1 个架构性条件跳过、0 失败，Production runtime smoke 健康探针、迁移、演示数据、HTTPS/API 反向代理和边缘网关缓存均通过。
+结果：使用包含最终 provider 生命周期修复的当前 `equipsense/backend:ci-smoke`，以及当前工作区构建的 `equipsense/frontend:ci-smoke`、`equipsense/edgegateway:ci-smoke`，设置 `SMOKE_RUN_E2E=true` 运行通过；433 个 E2E 为 432 通过、1 个架构性条件跳过、0 失败，Production runtime smoke 健康探针、迁移、演示数据、HTTPS/API 反向代理和边缘网关缓存均通过。
 
 - [x] Step 4: 更新风险和上线报告
 
@@ -264,7 +264,7 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 
 - [x] Step 5: 最终工作区审计并提交证据
 
-结果：已完成最终工作区审计、差异检查和最近提交复核；权限修正已提交为 `9c47cfe`，上线证据将在本次文档提交中记录：
+结果：已完成最终工作区审计、差异检查和最近提交复核；权限修正提交为 `9c47cfe`，provider 生命周期修复提交为 `6e6ba82`，本次上线证据文档提交继续记录最终结果：
 
     git add docs/LANDING_READINESS_REPORT.md docs/evaluation/S09-风险登记册.md docs/superpowers/plans/2026-08-13-waf-rule-hot-reload.md
     git commit -m "docs(readiness): record waf rule reload verification"
