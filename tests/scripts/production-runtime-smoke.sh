@@ -179,7 +179,8 @@ cp "$PROJECT_ROOT/docker/rabbitmq/start.sh" "$RUNTIME_DOCKER/rabbitmq/start.sh"
 cp "$PROJECT_ROOT/docker/grafana/provisioning/datasources/prometheus.yml" "$RUNTIME_DOCKER/grafana/provisioning/datasources/prometheus.yml"
 cp "$PROJECT_ROOT/docker/grafana/provisioning/dashboards/dashboard.yml" "$RUNTIME_DOCKER/grafana/provisioning/dashboards/dashboard.yml"
 cp "$PROJECT_ROOT/docker/waf-rules/rules.json" "$RUNTIME_DOCKER/waf-rules/rules.json"
-chmod 600 "$RUNTIME_DOCKER/waf-rules/rules.json"
+# WAF 规则不包含凭据；保持组/其他用户不可写，同时允许镜像内的非 root 应用用户读取只读挂载。
+chmod 644 "$RUNTIME_DOCKER/waf-rules/rules.json"
 
 random_secret() {
   openssl rand -hex 32

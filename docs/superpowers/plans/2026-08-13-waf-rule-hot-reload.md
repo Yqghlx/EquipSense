@@ -196,7 +196,7 @@ provider 用 Volatile.Read 和 Interlocked.Exchange 管理私有快照；StartAs
 **Interfaces:**
 - 生产环境变量为 Security__Waf__RulesPath（WAF_RULES_PATH，默认 /etc/equipai/waf/rules.json）和 Security__Waf__RequireExternalRules（WAF_REQUIRE_EXTERNAL_RULES，默认 true）。
 - Compose 后端只读挂载 ./waf-rules:/etc/equipai/waf:ro；smoke 复制并挂载相同目录。
-- 规则文件使用 schemaVersion 1、固定 revision 和无敏感值的低误报扩展规则，权限为 600。
+- 规则文件使用 schemaVersion 1、固定 revision 和无敏感值的低误报扩展规则，权限为 644：组/其他用户不可写，且可供镜像内非 root 应用用户读取。
 
 - [x] Step 1: 写生产脚本契约失败测试
 
