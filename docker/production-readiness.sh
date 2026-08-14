@@ -23,6 +23,7 @@ ENV_FILE="${PRODUCTION_ENV_FILE:-${SCRIPT_DIR}/.env}"
 COMPOSE_FILES=()
 DOCKER_BIN="${PRODUCTION_DOCKER_BIN:-docker}"
 RUNTIME_CHECK=false
+ALLOW_ISOLATED_E2E=false
 ERRORS=0
 DOCKER_READY=false
 COMPOSE_READY=false
@@ -32,12 +33,13 @@ SENSITIVE_VALUES=()
 usage() {
   cat <<'EOF'
 用法：
-  production-readiness.sh [--env-file <路径>] [--compose-file <路径> ...] [--runtime]
+  production-readiness.sh [--env-file <路径>] [--compose-file <路径> ...] [--runtime] [--allow-isolated-e2e]
 
 选项：
   --env-file <路径>  指定生产环境变量文件，默认使用 docker/.env
   --compose-file <路径>  指定 Compose 文件，可重复传入；默认使用 docker/docker-compose.yml
   --runtime          额外检查 Compose 中的服务是否运行且健康
+  --allow-isolated-e2e  仅允许隔离 smoke 使用演示数据和第二租户测试账户
   --help             显示帮助
 
 说明：
@@ -148,6 +150,10 @@ while [ "$#" -gt 0 ]; do
       RUNTIME_CHECK=true
       shift
       ;;
+    --allow-isolated-e2e)
+      ALLOW_ISOLATED_E2E=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -208,7 +214,11 @@ fi
 validation_output=""
 validation_status=1
 if [ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ -f "${SCRIPT_DIR}/validate-env.sh" ]; then
-  if run_captured validation_output bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE" --check-runtime-files; then
+  validation_args=(bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  if [ "$ALLOW_ISOLATED_E2E" = true ]; then
+    validation_args+=(--allow-isolated-e2e)
+  fi
+  if run_captured validation_output "${validation_args[@]}"; then
     validation_status=0
     success "静态生产门禁通过"
   else

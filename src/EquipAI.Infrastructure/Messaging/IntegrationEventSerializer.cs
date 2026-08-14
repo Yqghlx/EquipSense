@@ -23,6 +23,7 @@ public static class IntegrationEventSerializer
             [nameof(AlertTriggeredEvent)] = typeof(AlertTriggeredEvent),
             [nameof(AnalysisCompletedEvent)] = typeof(AnalysisCompletedEvent),
             [nameof(TelemetryReceivedEvent)] = typeof(TelemetryReceivedEvent),
+            [nameof(WorkOrderAttachmentDeletedEvent)] = typeof(WorkOrderAttachmentDeletedEvent),
             [nameof(WorkOrderCreatedEvent)] = typeof(WorkOrderCreatedEvent),
             [nameof(WorkOrderStatusChangedEvent)] = typeof(WorkOrderStatusChangedEvent),
         };

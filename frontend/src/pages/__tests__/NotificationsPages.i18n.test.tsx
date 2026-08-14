@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
@@ -7,6 +8,9 @@ import NotificationsPage from '../../pages/NotificationsPage';
 import * as useNotifications from '../../hooks/useNotifications';
 
 const mockNavigate = vi.fn();
+const mockMarkRead = vi.fn();
+const mockMarkAllRead = vi.fn();
+const mockDeleteNotification = vi.fn();
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -67,16 +71,19 @@ function createWrapper() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockMarkRead.mockReset();
+  mockMarkAllRead.mockReset();
+  mockDeleteNotification.mockReset();
   vi.spyOn(useNotifications, 'useMarkRead').mockReturnValue({
-    mutate: vi.fn(),
+    mutate: mockMarkRead,
     isPending: false,
   } as unknown as ReturnType<typeof useNotifications.useMarkRead>);
   vi.spyOn(useNotifications, 'useMarkAllRead').mockReturnValue({
-    mutate: vi.fn(),
+    mutate: mockMarkAllRead,
     isPending: false,
   } as unknown as ReturnType<typeof useNotifications.useMarkAllRead>);
   vi.spyOn(useNotifications, 'useDeleteNotification').mockReturnValue({
-    mutate: vi.fn(),
+    mutate: mockDeleteNotification,
     isPending: false,
   } as unknown as ReturnType<typeof useNotifications.useDeleteNotification>);
 });
@@ -109,5 +116,67 @@ describe('NotificationsPage 英文界面', () => {
     render(<NotificationsPage />, { wrapper: createWrapper() });
     expect(screen.getByText('No notifications')).toBeInTheDocument();
     expect(screen.getByText('No notifications yet')).toBeInTheDocument();
+  });
+
+  it('通知行和操作按钮应分别处理已读、跳转与删除', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(useNotifications, 'useNotifications').mockReturnValue({
+      data: {
+        items: [
+          notification,
+          {
+            ...notification,
+            id: 'notification-002',
+            type: 'workorder',
+            title: 'Work order assigned',
+            isRead: true,
+            link: '',
+          },
+        ],
+        total: 2,
+        page: 1,
+        pageSize: 20,
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useNotifications.useNotifications>);
+
+    render(<NotificationsPage />, { wrapper: createWrapper() });
+
+    await user.click(screen.getByText('High temperature alert'));
+    expect(mockMarkRead).toHaveBeenCalledWith('notification-001');
+    expect(mockNavigate).toHaveBeenCalledWith('/alerts/alert-001');
+
+    await user.click(screen.getByTitle('Mark as read'));
+    expect(mockMarkRead).toHaveBeenCalledWith('notification-001');
+    await user.click(screen.getByTitle('View details'));
+    expect(mockNavigate).toHaveBeenCalledWith('/alerts/alert-001');
+    await user.click(screen.getAllByTitle('Delete')[0]);
+    expect(mockDeleteNotification).toHaveBeenCalledWith('notification-001');
+    await user.click(screen.getByRole('button', { name: 'Mark all as read' }));
+    expect(mockMarkAllRead).toHaveBeenCalledOnce();
+
+    await user.click(screen.getByRole('button', { name: 'Work orders' }));
+    expect(screen.getByText('Work order assigned')).toBeInTheDocument();
+    expect(screen.queryByText('High temperature alert')).not.toBeInTheDocument();
+  });
+
+  it('通知列表加载中和分页状态应正确显示并更新查询参数', async () => {
+    const user = userEvent.setup();
+    const query = vi.spyOn(useNotifications, 'useNotifications').mockReturnValue({
+      data: { items: [], total: 41, page: 1, pageSize: 20 },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useNotifications.useNotifications>);
+
+    const view = render(<NotificationsPage />, { wrapper: createWrapper() });
+    expect(screen.getByText('41 items')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(query.mock.lastCall?.[0]).toMatchObject({ page: 2, pageSize: 20 });
+
+    query.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    } as unknown as ReturnType<typeof useNotifications.useNotifications>);
+    view.rerender(<NotificationsPage />);
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
 });

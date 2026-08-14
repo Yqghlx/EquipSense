@@ -21,6 +21,8 @@ CURRENT_TAG=""
 MUTATION_STARTED=false
 VERSION_TEMP_FILE=""
 COMPOSE=()
+# 所有 Docker 操作（包括子门禁）必须复用同一入口，避免 PATH 中不同 CLI 导致预检与变更使用不同运行时。
+DOCKER_BIN="${DEPLOY_DOCKER_BIN:-docker}"
 DEPLOY_LOCK_DIR=""
 DEPLOY_LOCK_OWNED=false
 
@@ -80,7 +82,7 @@ wait_for_health() {
     frontend_container="$("${COMPOSE[@]}" ps -q frontend 2>/dev/null || true)"
     frontend_status=""
     if [[ -n "$frontend_container" ]]; then
-      frontend_status="$(docker inspect \
+      frontend_status="$("$DOCKER_BIN" inspect \
         --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' \
         "$frontend_container" 2>/dev/null || true)"
     fi
@@ -168,6 +170,7 @@ for required_file in \
   "$COMPOSE_DIR/.env" \
   "$COMPOSE_DIR/validate-env.sh" \
   "$COMPOSE_DIR/production-readiness.sh" \
+  "$COMPOSE_DIR/production-acceptance.sh" \
   "$COMPOSE_DIR/docker-compose.yml" \
   "$COMPOSE_DIR/docker-compose.prod.yml"; do
   [[ -f "$required_file" ]] || fatal "缺少必需文件 $required_file"
@@ -205,11 +208,15 @@ fi
 [[ "$DEPLOY_EDGE_HEALTH_URL" =~ ^https?://[^[:space:]]+$ ]] \
   || fatal "DEPLOY_EDGE_HEALTH_URL 必须是 http:// 或 https:// URL"
 
-command -v docker >/dev/null 2>&1 || fatal "未找到 docker 命令"
+if [[ "$DOCKER_BIN" = */* ]]; then
+  [[ -x "$DOCKER_BIN" ]] || fatal "Docker 命令不可执行：$DOCKER_BIN"
+else
+  command -v "$DOCKER_BIN" >/dev/null 2>&1 || fatal "未找到 Docker 命令：$DOCKER_BIN"
+fi
 command -v curl >/dev/null 2>&1 || fatal "未找到 curl 命令"
 
 COMPOSE=(
-  docker compose
+  "$DOCKER_BIN" compose
   --env-file "$COMPOSE_DIR/.env"
   -f "$COMPOSE_DIR/docker-compose.yml"
   -f "$COMPOSE_DIR/docker-compose.prod.yml"
@@ -225,12 +232,33 @@ run_readiness_gate() {
   if [ "$runtime_flag" = "--runtime" ]; then
     readiness_args+=(--runtime)
   fi
-  bash "$COMPOSE_DIR/production-readiness.sh" "${readiness_args[@]}"
+  PRODUCTION_DOCKER_BIN="$DOCKER_BIN" \
+    bash "$COMPOSE_DIR/production-readiness.sh" "${readiness_args[@]}"
+}
+
+run_production_acceptance_gate() {
+  local acceptance_args=(
+    --profile production
+    --env-file "$COMPOSE_DIR/.env"
+    --runtime-dir "$COMPOSE_DIR"
+    --compose-file "$COMPOSE_DIR/docker-compose.yml"
+    --compose-file "$COMPOSE_DIR/docker-compose.prod.yml"
+    --runtime
+  )
+  if [[ -n "${PRODUCTION_ACCEPTANCE_EVIDENCE_DIR:-}" ]]; then
+    acceptance_args+=(--evidence-dir "$PRODUCTION_ACCEPTANCE_EVIDENCE_DIR")
+  fi
+  # 该门禁必须在 GHCR 登录、镜像拉取和容器重建之前完成；BLOCKED/FAIL
+  # 都直接阻止发布，避免把“缺少现场证据”误当成可上线。
+  PRODUCTION_ACCEPTANCE_EXPECTED_TAG="$TARGET_TAG" \
+    PRODUCTION_DOCKER_BIN="$DOCKER_BIN" \
+    bash "$COMPOSE_DIR/production-acceptance.sh" "${acceptance_args[@]}"
 }
 
 export TAG="$TARGET_TAG"
 
-# 在登录仓库、拉取镜像或重建容器之前执行统一的生产配置与 Compose 门禁。
+# 在登录仓库、拉取镜像或重建容器之前执行统一的生产验收和 Compose 门禁。
+run_production_acceptance_gate
 run_readiness_gate
 
 VERSION_FILE="$COMPOSE_DIR/.last-deployed-tag"
@@ -258,7 +286,7 @@ fi
 [[ -n "${GHCR_PULL_TOKEN:-}" ]] || fatal "服务器未配置 GHCR_PULL_TOKEN"
 
 printf '%s' "$GHCR_PULL_TOKEN" \
-  | docker login ghcr.io -u "$GHCR_PULL_USER" --password-stdin
+  | "$DOCKER_BIN" login ghcr.io -u "$GHCR_PULL_USER" --password-stdin
 
 # 拉取失败不会改变运行态，因此尚不需要回滚。
 "${COMPOSE[@]}" pull backend frontend edgegateway

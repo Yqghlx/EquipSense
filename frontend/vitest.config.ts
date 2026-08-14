@@ -13,8 +13,8 @@ export default defineConfig({
     globals: true,
     exclude: ['**/e2e-comprehensive/**', '**/node_modules/**'],
     // 覆盖率采集：仅 [vitest run --coverage] 触发，不影响常规 [npm run test]。
-    // threshold 为下限门禁（ratchet 棘轮机制）— 基线 2026-08-08：lines 81.2%，
-    // functions 83.6%，留 1-2pp 波动余量；提升覆盖率后应相应上调。
+    // threshold 为下限门禁（ratchet 棘轮机制）— 2026-08-14 复核基线：行 84.41%、
+    // 函数 80.14%；新增业务页面后应及时补充测试，避免函数覆盖率跌破门禁。
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'json-summary'],

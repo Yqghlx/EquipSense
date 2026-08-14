@@ -1,3 +1,4 @@
+using System.Data.Common;
 using EquipAI.Application.Analysis;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -6,6 +7,7 @@ using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -31,6 +33,7 @@ public class DataQualityBackgroundScopeTests : IAsyncLifetime
 {
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
+    private readonly TelemetrySelectCommandCounter _selectCommandCounter = new();
 
     public async Task InitializeAsync()
     {
@@ -38,7 +41,9 @@ public class DataQualityBackgroundScopeTests : IAsyncLifetime
         await _connection.OpenAsync();
 
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_selectCommandCounter));
         // 复刻后台 scope：ITenantContext 回退为空租户
         services.AddScoped<ITenantContext>(_ => new BackgroundTenantContext());
         services.AddMemoryCache();
@@ -98,6 +103,83 @@ public class DataQualityBackgroundScopeTests : IAsyncLifetime
         // 修复后：能查到真实租户遥测（10 条），返回有效评分 > 0。修复前：默认过滤器查 0 条 → 返回 null。
         score.Should().NotBeNull("后台 scope 必须能按事件租户查到遥测并计算数据质量评分");
         score.Should().BeGreaterThan(0, "10 条正常遥测应产生正向数据质量评分");
+    }
+
+    /// <summary>
+    /// 高频设备的质量评估应限制应用层统计样本，但保留完整样本总数。
+    /// </summary>
+    [Fact]
+    public async Task 高频遥测质量评估_统计样本应限制在一万条且报告保留完整计数()
+    {
+        var tenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                WITH RECURSIVE numbers(n) AS (
+                    SELECT 1
+                    UNION ALL
+                    SELECT n + 1 FROM numbers WHERE n < 10005
+                )
+                INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source)
+                SELECT datetime('now', '-' || (n % 3600) || ' seconds'), {0}, {1}, {2}, 50.0, 'good', 'test'
+                FROM numbers
+                """,
+                tenantId,
+                deviceId,
+                "temperature");
+        }
+
+        _selectCommandCounter.Reset();
+        var service = _sp.GetRequiredService<DataQualityService>();
+        var report = await service.CalculateReportAsync(tenantId, deviceId, "temperature");
+
+        report.Should().NotBeNull();
+        report!.SampleCount.Should().Be(10005, "报告的完整性维度仍应基于时间窗口内的完整样本总数");
+        _selectCommandCounter.HasLimitedTelemetryQuery.Should().BeTrue(
+            "质量统计只能将最近一万条遥测加载到应用层，避免高频设备造成内存峰值");
+    }
+
+    /// <summary>记录质量评估查询，锁定高频遥测统计必须带数据库 LIMIT。</summary>
+    private sealed class TelemetrySelectCommandCounter : DbCommandInterceptor
+    {
+        private int _limitedTelemetryQueryCount;
+
+        public bool HasLimitedTelemetryQuery => Volatile.Read(ref _limitedTelemetryQueryCount) > 0;
+
+        public void Reset() => Interlocked.Exchange(ref _limitedTelemetryQueryCount, 0);
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CountLimitedTelemetryQuery(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CountLimitedTelemetryQuery(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void CountLimitedTelemetryQuery(DbCommand command)
+        {
+            var sql = command.CommandText;
+            if (sql.Contains("device_telemetry", StringComparison.OrdinalIgnoreCase)
+                && sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref _limitedTelemetryQueryCount);
+            }
+        }
     }
 
     /// <summary>复刻后台事件处理器中 ITenantContext 的 DI 回退：空租户上下文。</summary>

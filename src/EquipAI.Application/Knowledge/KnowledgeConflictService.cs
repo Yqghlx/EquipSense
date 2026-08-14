@@ -26,6 +26,11 @@ public class KnowledgeConflictResult
 /// </summary>
 public class KnowledgeConflictService
 {
+    /// <summary>
+    /// 单次冲突检测从数据库读取的最大规则数，避免规则规模增长时一次性占用过多内存。
+    /// </summary>
+    private const int ConflictRuleBatchSize = 500;
+
     private readonly AppDbContext _db;
     private readonly ILogger<KnowledgeConflictService> _logger;
 
@@ -58,28 +63,54 @@ public class KnowledgeConflictService
         if (newMetrics.Count == 0)
             return [];
 
-        // 查询同设备类型的所有已启用正式规则
-        var rules = await _db.KnowledgeRules
+        // 使用稳定主键游标分批读取，避免规则数量增长后形成无界查询结果集。
+        var matchedRules = _db.KnowledgeRules
+            .AsNoTracking()
             .Where(r => r.DeviceType == deviceType && r.Enabled)
-            .Where(r => excludeRuleId == null || r.Id != excludeRuleId.Value)
-            .Select(r => new { r.Id, r.Name, r.Conditions })
-            .ToListAsync(ct);
+            .Where(r => excludeRuleId == null || r.Id != excludeRuleId.Value);
 
         var conflicts = new List<KnowledgeConflictResult>();
+        Guid? lastRuleId = null;
 
-        foreach (var rule in rules)
+        while (true)
         {
-            var existingMetrics = ParseMetricNames(rule.Conditions);
-            var overlap = newMetrics.Intersect(existingMetrics, StringComparer.OrdinalIgnoreCase).ToList();
-
-            if (overlap.Count > 0)
+            var batchQuery = matchedRules;
+            if (lastRuleId.HasValue)
             {
-                conflicts.Add(new KnowledgeConflictResult
+                batchQuery = batchQuery.Where(r => r.Id > lastRuleId.Value);
+            }
+
+            var rules = await batchQuery
+                .OrderBy(r => r.Id)
+                .Take(ConflictRuleBatchSize)
+                .Select(r => new { r.Id, r.Name, r.Conditions })
+                .ToListAsync(ct);
+
+            if (rules.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var rule in rules)
+            {
+                var existingMetrics = ParseMetricNames(rule.Conditions);
+                var overlap = newMetrics.Intersect(existingMetrics, StringComparer.OrdinalIgnoreCase).ToList();
+
+                if (overlap.Count > 0)
                 {
-                    RuleId = rule.Id,
-                    RuleName = rule.Name,
-                    OverlappingMetrics = overlap
-                });
+                    conflicts.Add(new KnowledgeConflictResult
+                    {
+                        RuleId = rule.Id,
+                        RuleName = rule.Name,
+                        OverlappingMetrics = overlap
+                    });
+                }
+            }
+
+            lastRuleId = rules[^1].Id;
+            if (rules.Count < ConflictRuleBatchSize)
+            {
+                break;
             }
         }
 

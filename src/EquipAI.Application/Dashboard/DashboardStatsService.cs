@@ -75,11 +75,17 @@ public class DashboardStatsService
     /// </summary>
     private async Task<(int Total, int Online)> GetDeviceStatsAsync(Guid tenantId, CancellationToken ct)
     {
-        var devices = _db.UnfilteredSet<Core.Entities.Device>()
-            .Where(d => d.TenantId == tenantId);
-        var total = await devices.CountAsync(ct);
-        var online = await devices.CountAsync(d => d.Status == DeviceStatus.Online, ct);
-        return (total, online);
+        var summary = await _db.UnfilteredSet<Core.Entities.Device>()
+            .Where(d => d.TenantId == tenantId)
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Online = group.Count(d => d.Status == DeviceStatus.Online),
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return (summary?.Total ?? 0, summary?.Online ?? 0);
     }
 
     /// <summary>
@@ -92,16 +98,24 @@ public class DashboardStatsService
     /// </summary>
     private async Task<(int ActiveCount, Dictionary<string, int> BySeverity)> GetAlertStatsAsync(Guid tenantId, CancellationToken ct)
     {
-        // 先查询原始数据再在内存中分组，避免 EF Core 翻译枚举 ToString() 失败
-        var alerts = await _db.UnfilteredSet<Core.Entities.Alert>()
+        var summary = await _db.UnfilteredSet<Core.Entities.Alert>()
             .Where(a => a.TenantId == tenantId
                      && (a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged))
-            .Select(a => new { a.Severity })
-            .ToListAsync(ct);
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Critical = group.Count(a => a.Severity == AlertSeverity.Critical),
+                High = group.Count(a => a.Severity == AlertSeverity.High),
+                Normal = group.Count(a => a.Severity == AlertSeverity.Normal),
+                Low = group.Count(a => a.Severity == AlertSeverity.Low),
+            })
+            .FirstOrDefaultAsync(ct);
 
-        var bySeverity = alerts
-            .GroupBy(a => a.Severity.ToString())
-            .ToDictionary(g => g.Key, g => g.Count());
+        var bySeverity = new Dictionary<string, int>();
+        AddCountIfPositive(bySeverity, AlertSeverity.Critical, summary?.Critical ?? 0);
+        AddCountIfPositive(bySeverity, AlertSeverity.High, summary?.High ?? 0);
+        AddCountIfPositive(bySeverity, AlertSeverity.Normal, summary?.Normal ?? 0);
+        AddCountIfPositive(bySeverity, AlertSeverity.Low, summary?.Low ?? 0);
 
         var activeCount = bySeverity.Values.Sum();
         return (activeCount, bySeverity);
@@ -112,15 +126,13 @@ public class DashboardStatsService
     /// </summary>
     private async Task<(int PendingCount, Dictionary<string, int> ByStatus)> GetWorkOrderStatsAsync(Guid tenantId, CancellationToken ct)
     {
-        // 先查询原始数据再在内存中分组，兼容 InMemory 数据库和避免枚举翻译问题
-        var workOrders = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
+        var statusRows = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
             .Where(w => w.TenantId == tenantId)
-            .Select(w => new { w.Status })
+            .GroupBy(w => w.Status)
+            .Select(group => new { Status = group.Key, Count = group.Count() })
             .ToListAsync(ct);
 
-        var byStatus = workOrders
-            .GroupBy(w => w.Status.ToString())
-            .ToDictionary(g => g.Key, g => g.Count());
+        var byStatus = statusRows.ToDictionary(row => row.Status.ToString(), row => row.Count);
 
         byStatus.TryGetValue("PendingDispatch", out var pending);
         return (pending, byStatus);
@@ -128,7 +140,7 @@ public class DashboardStatsService
 
     /// <summary>
     /// 告警趋势：最近 7 天每天新增告警数
-    /// 先查询原始数据再在内存中分组，兼容 InMemory 数据库
+    /// 按租户本地日期边界在数据库侧计数，应用层只接收固定 7 个桶
     ///
     /// 时区处理（v1.4 修复）：
     ///   - 查询窗口用租户时区当天 0:00 起算的过去 7 天（转 UTC 后过滤 OccurredAt）
@@ -139,47 +151,56 @@ public class DashboardStatsService
         // 租户时区的"今天 0:00"（本地）→ 转 UTC 作为查询窗口起点
         var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone).Date;
         var startLocal = todayLocal.AddDays(-6);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
+        var boundariesUtc = BuildTrendBoundaries(startLocal, timeZone);
+        var summary = await _db.UnfilteredSet<Core.Entities.Alert>()
+            .Where(a => a.TenantId == tenantId)
+            .GroupBy(_ => 1)
+            .Select(group => new TrendCountSummary
+            {
+                Day0 = group.Count(a => a.OccurredAt >= boundariesUtc[0] && a.OccurredAt < boundariesUtc[1]),
+                Day1 = group.Count(a => a.OccurredAt >= boundariesUtc[1] && a.OccurredAt < boundariesUtc[2]),
+                Day2 = group.Count(a => a.OccurredAt >= boundariesUtc[2] && a.OccurredAt < boundariesUtc[3]),
+                Day3 = group.Count(a => a.OccurredAt >= boundariesUtc[3] && a.OccurredAt < boundariesUtc[4]),
+                Day4 = group.Count(a => a.OccurredAt >= boundariesUtc[4] && a.OccurredAt < boundariesUtc[5]),
+                Day5 = group.Count(a => a.OccurredAt >= boundariesUtc[5] && a.OccurredAt < boundariesUtc[6]),
+                Day6 = group.Count(a => a.OccurredAt >= boundariesUtc[6] && a.OccurredAt < boundariesUtc[7]),
+            })
+            .FirstOrDefaultAsync(ct);
 
-        var alerts = await _db.UnfilteredSet<Core.Entities.Alert>()
-            .Where(a => a.TenantId == tenantId && a.OccurredAt >= startUtc)
-            .Select(a => new { a.OccurredAt })
-            .ToListAsync(ct);
-
-        // 按租户时区的日期分组（之前按 UTC，跨时区用户看到的"今天"会错位）
-        var dailyCounts = alerts
-            .GroupBy(a => TimeZoneInfo.ConvertTimeFromUtc(a.OccurredAt, timeZone).Date)
-            .ToDictionary(g => g.Key, g => g.Count());
-
-        return BuildTrend(startLocal, dailyCounts);
+        return BuildTrend(startLocal, ToDailyCounts(summary));
     }
 
     /// <summary>
     /// 工单趋势：最近 7 天每天创建工单数
-    /// 时区处理同 GetAlertTrendAsync
+    /// 时区处理同 GetAlertTrendAsync，避免把窗口内原始工单加载到应用内存
     /// </summary>
     private async Task<List<TrendPoint>> GetWorkOrderTrendAsync(Guid tenantId, TimeZoneInfo timeZone, CancellationToken ct)
     {
         var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timeZone).Date;
         var startLocal = todayLocal.AddDays(-6);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
+        var boundariesUtc = BuildTrendBoundaries(startLocal, timeZone);
+        var summary = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
+            .Where(w => w.TenantId == tenantId)
+            .GroupBy(_ => 1)
+            .Select(group => new TrendCountSummary
+            {
+                Day0 = group.Count(w => w.CreatedAt >= boundariesUtc[0] && w.CreatedAt < boundariesUtc[1]),
+                Day1 = group.Count(w => w.CreatedAt >= boundariesUtc[1] && w.CreatedAt < boundariesUtc[2]),
+                Day2 = group.Count(w => w.CreatedAt >= boundariesUtc[2] && w.CreatedAt < boundariesUtc[3]),
+                Day3 = group.Count(w => w.CreatedAt >= boundariesUtc[3] && w.CreatedAt < boundariesUtc[4]),
+                Day4 = group.Count(w => w.CreatedAt >= boundariesUtc[4] && w.CreatedAt < boundariesUtc[5]),
+                Day5 = group.Count(w => w.CreatedAt >= boundariesUtc[5] && w.CreatedAt < boundariesUtc[6]),
+                Day6 = group.Count(w => w.CreatedAt >= boundariesUtc[6] && w.CreatedAt < boundariesUtc[7]),
+            })
+            .FirstOrDefaultAsync(ct);
 
-        var workOrders = await _db.UnfilteredSet<Core.Entities.WorkOrder>()
-            .Where(w => w.TenantId == tenantId && w.CreatedAt >= startUtc)
-            .Select(w => new { w.CreatedAt })
-            .ToListAsync(ct);
-
-        var dailyCounts = workOrders
-            .GroupBy(w => TimeZoneInfo.ConvertTimeFromUtc(w.CreatedAt, timeZone).Date)
-            .ToDictionary(g => g.Key, g => g.Count());
-
-        return BuildTrend(startLocal, dailyCounts);
+        return BuildTrend(startLocal, ToDailyCounts(summary));
     }
 
     /// <summary>
     /// 构建连续 7 天的趋势数据，无数据的日期补零
     /// </summary>
-    private static List<TrendPoint> BuildTrend(DateTime startDate, Dictionary<DateTime, int> dailyCounts)
+    private static List<TrendPoint> BuildTrend(DateTime startDate, IReadOnlyList<int> dailyCounts)
     {
         var result = new List<TrendPoint>(7);
         for (var i = 0; i < 7; i++)
@@ -188,9 +209,59 @@ public class DashboardStatsService
             result.Add(new TrendPoint
             {
                 Date = date.ToString("yyyy-MM-dd"),
-                Count = dailyCounts.GetValueOrDefault(date, 0),
+                Count = dailyCounts[i],
             });
         }
         return result;
+    }
+
+    /// <summary>
+    /// 构造租户本地日期对应的 UTC 半开区间，按天统计时无需加载窗口内每一条原始记录。
+    /// 显式使用 Unspecified 避免服务器本地时区参与转换，并正确处理夏令时边界。
+    /// </summary>
+    private static DateTime[] BuildTrendBoundaries(DateTime startLocal, TimeZoneInfo timeZone)
+    {
+        return Enumerable.Range(0, 8)
+            .Select(offset => TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(startLocal.AddDays(offset), DateTimeKind.Unspecified),
+                timeZone))
+            .ToArray();
+    }
+
+    /// <summary>将数据库聚合结果转换为固定七天的计数序列。</summary>
+    private static int[] ToDailyCounts(TrendCountSummary? summary)
+    {
+        if (summary is null)
+            return new int[7];
+
+        return
+        [
+            summary.Day0,
+            summary.Day1,
+            summary.Day2,
+            summary.Day3,
+            summary.Day4,
+            summary.Day5,
+            summary.Day6,
+        ];
+    }
+
+    /// <summary>只把非零枚举统计写入响应，保持原有空级别不返回的契约。</summary>
+    private static void AddCountIfPositive(Dictionary<string, int> target, Enum key, int count)
+    {
+        if (count > 0)
+            target[key.ToString()] = count;
+    }
+
+    /// <summary>七天趋势的数据库聚合结果。</summary>
+    private sealed class TrendCountSummary
+    {
+        public int Day0 { get; init; }
+        public int Day1 { get; init; }
+        public int Day2 { get; init; }
+        public int Day3 { get; init; }
+        public int Day4 { get; init; }
+        public int Day5 { get; init; }
+        public int Day6 { get; init; }
     }
 }

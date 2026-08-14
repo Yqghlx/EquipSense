@@ -28,6 +28,7 @@ public class DeviceHealthService
 
     private static readonly TimeSpan EvaluationWindow = TimeSpan.FromDays(7);
     private const int RecentTelemetrySampleSize = 100;
+    private const int HealthRecalculationBatchSize = 500;
 
     public DeviceHealthService(
         AppDbContext db,
@@ -120,54 +121,82 @@ public class DeviceHealthService
         // IgnoreQueryFilters + 显式 tenantId：本方法由后台 DeviceHealthRecalculationHostedService 调用
         // （无 HttpContext，默认过滤器解析为 Guid.Empty，与本租户 tenantId 求交集恒为空 → 查不到任何设备，
         // 重算形同未执行）。显式 tenantId 保证仅重算目标租户设备。
-        var devices = await _db.Devices
-            .IgnoreQueryFilters()
-            .Where(d => d.TenantId == tenantId)
-            .ToListAsync(ct);
-
-        if (devices.Count == 0)
+        //
+        // 按稳定主键排序分页而不是一次性 ToList：健康度重算是后台慢任务，租户设备数可能持续增长；
+        // 每批独立查询、提交并清理跟踪器，避免设备实体和近期告警随租户规模线性堆积在应用内存中。
+        var totalUpdated = 0;
+        var page = 0;
+        while (true)
         {
+            ct.ThrowIfCancellationRequested();
+
+            var devices = await _db.Devices
+                .IgnoreQueryFilters()
+                .Where(d => d.TenantId == tenantId)
+                .OrderBy(d => d.Id)
+                .Skip(checked(page * HealthRecalculationBatchSize))
+                .Take(HealthRecalculationBatchSize)
+                .ToListAsync(ct);
+
+            if (devices.Count == 0)
+                break;
+
+            var deviceIds = devices.Select(d => d.Id).ToList();
+            var since = DateTime.UtcNow - EvaluationWindow;
+
+            // 按设备、严重级别和状态在数据库聚合告警，只把有限的分组行带回应用；否则一个大租户的
+            // 七天告警历史会随告警量增长而占用不受控的内存。聚合结果仍保留原有每条告警的扣分语义。
+            var recentAlertGroups = await _db.Alerts
+                .IgnoreQueryFilters()
+                .Where(a => a.TenantId == tenantId
+                         && deviceIds.Contains(a.DeviceId)
+                         && a.OccurredAt >= since)
+                .GroupBy(a => new { a.DeviceId, a.Severity, a.Status })
+                .Select(g => new HealthAlertAggregate(
+                    g.Key.DeviceId,
+                    g.Key.Severity,
+                    g.Key.Status,
+                    g.Count()))
+                .ToListAsync(ct);
+
+            var alertScores = recentAlertGroups
+                .GroupBy(a => a.DeviceId)
+                .ToDictionary(group => group.Key, group => CalculateAlertScore(group));
+
+            // 每个设备只取最近 100 条遥测，再在内存中计算 good 比例；相关子查询由关系型数据库执行，
+            // 保持单次查询且不会把租户数天的全部时序数据加载到应用内存。使用相关子查询而不是
+            // GroupBy().SelectMany()，是因为 SQLite 与部分旧版 PostgreSQL 提供程序对后者的窗口函数翻译不一致。
+            var qualityScores = await CalculateTelemetryQualityScoresAsync(tenantId, deviceIds, ct);
+
+            foreach (var device in devices)
+            {
+                var alertScore = alertScores.GetValueOrDefault(device.Id, 100.0);
+                var qualityScore = qualityScores.GetValueOrDefault(device.Id, 70.0);
+                var score = CalculateTotalScore(
+                    CalculateStatusScore(device.Status),
+                    alertScore,
+                    qualityScore);
+                device.HealthScore = (decimal)score;
+            }
+
+            // 每批使用一个 SaveChanges 事务，避免每台设备一次事务；提交后清理跟踪器，保证下一批不继承
+            // 已完成设备的实体状态。任务中途取消时允许已完成批次保留，下次重算会幂等地覆盖结果。
+            await _db.SaveChangesAsync(ct);
+            totalUpdated += devices.Count;
+            _db.ChangeTracker.Clear();
+
+            if (devices.Count < HealthRecalculationBatchSize)
+                break;
+
+            page++;
+        }
+
+        if (totalUpdated == 0)
             _logger.LogInformation("租户 {TenantId} 没有设备需要更新健康度", tenantId);
-            return 0;
-        }
+        else
+            _logger.LogInformation("已批量更新 {Count} 台设备健康度（租户 {TenantId}）", totalUpdated, tenantId);
 
-        var deviceIds = devices.Select(d => d.Id).ToList();
-        var since = DateTime.UtcNow - EvaluationWindow;
-
-        // 批量查询所有设备的近期告警，避免 UpdateHealthScoreAsync 为每台设备重复往返数据库。
-        var recentAlerts = await _db.Alerts
-            .IgnoreQueryFilters()
-            .Where(a => a.TenantId == tenantId
-                     && deviceIds.Contains(a.DeviceId)
-                     && a.OccurredAt >= since)
-            .Select(a => new HealthAlertSample(a.DeviceId, a.Severity, a.Status))
-            .ToListAsync(ct);
-
-        var alertScores = recentAlerts
-            .GroupBy(a => a.DeviceId)
-            .ToDictionary(group => group.Key, group => CalculateAlertScore(group));
-
-        // 每个设备只取最近 100 条遥测，再在内存中计算 good 比例；相关子查询由关系型数据库执行，
-        // 保持单次查询且不会把租户数天的全部时序数据加载到应用内存。使用相关子查询而不是
-        // GroupBy().SelectMany()，是因为 SQLite 与部分旧版 PostgreSQL 提供程序对后者的窗口函数翻译不一致。
-        var qualityScores = await CalculateTelemetryQualityScoresAsync(tenantId, deviceIds, ct);
-
-        foreach (var device in devices)
-        {
-            var alertScore = alertScores.GetValueOrDefault(device.Id, 100.0);
-            var qualityScore = qualityScores.GetValueOrDefault(device.Id, 70.0);
-            var score = CalculateTotalScore(
-                CalculateStatusScore(device.Status),
-                alertScore,
-                qualityScore);
-            device.HealthScore = (decimal)score;
-        }
-
-        // 单次提交整批结果，避免每台设备一次 SaveChanges 造成 N 次事务与日志刷盘。
-        await _db.SaveChangesAsync(ct);
-
-        _logger.LogInformation("已批量更新 {Count}/{Total} 台设备健康度（租户 {TenantId}）", devices.Count, devices.Count, tenantId);
-        return devices.Count;
+        return totalUpdated;
     }
 
     /// <summary>获取健康度评分对应的等级标签</summary>
@@ -248,6 +277,32 @@ public class DeviceHealthService
         return Math.Max(0, 100 - penalty);
     }
 
+    /// <summary>
+    /// 按数据库聚合后的告警分组计算告警维度分数。
+    /// 每组的扣分乘以组内数量，保持与逐条扫描完全相同的评分规则。
+    /// </summary>
+    private static double CalculateAlertScore(IEnumerable<HealthAlertAggregate> alertGroups)
+    {
+        var penalty = 0.0;
+        foreach (var alertGroup in alertGroups)
+        {
+            var perAlertPenalty = alertGroup.Severity switch
+            {
+                AlertSeverity.Critical => 25.0,
+                AlertSeverity.High => 10.0,
+                AlertSeverity.Normal => 4.0,
+                _ => 1.0,
+            };
+
+            if (alertGroup.Status == AlertStatus.Active)
+                perAlertPenalty += 5.0;
+
+            penalty += perAlertPenalty * alertGroup.Count;
+        }
+
+        return Math.Max(0, 100 - penalty);
+    }
+
     /// <summary>按三维权重计算并四舍五入最终健康度。</summary>
     private static double CalculateTotalScore(double statusScore, double alertScore, double qualityScore)
     {
@@ -302,4 +357,11 @@ public class DeviceHealthService
         Guid DeviceId,
         AlertSeverity Severity,
         AlertStatus Status);
+
+    /// <summary>数据库按设备、严重级别和状态聚合后的告警计数。</summary>
+    private readonly record struct HealthAlertAggregate(
+        Guid DeviceId,
+        AlertSeverity Severity,
+        AlertStatus Status,
+        int Count);
 }

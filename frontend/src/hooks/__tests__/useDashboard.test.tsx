@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import api from '../../lib/api';
-import { useDashboardStats } from '../useDashboard';
+import { useDashboardStats, useOee } from '../useDashboard';
 
 // Mock axios api 模块
 vi.mock('../../lib/api', () => ({
@@ -81,5 +81,35 @@ describe('useDashboardStats', () => {
     });
 
     expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe('useOee', () => {
+  it('应获取设备综合效率数据', async () => {
+    const oee = {
+      oee: 82.5,
+      availability: 90,
+      performance: 92,
+      quality: 99,
+      totalDevices: 10,
+      onlineDevices: 8,
+      evaluatedAt: '2026-08-12T00:00:00Z',
+      isApproximate: true,
+      hasInsufficientData: false,
+    };
+    mockedApi.get.mockResolvedValueOnce({ data: oee });
+    const { result } = renderHook(() => useOee(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(oee);
+    expect(mockedApi.get).toHaveBeenCalledWith('/dashboard/oee');
+  });
+
+  it('OEE 请求失败时应返回错误状态', async () => {
+    mockedApi.get.mockRejectedValueOnce(new Error('OEE 服务不可用'));
+    const { result } = renderHook(() => useOee(), { wrapper: createWrapper() });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toBeDefined();
   });
 });

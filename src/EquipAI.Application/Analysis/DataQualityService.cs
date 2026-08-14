@@ -31,6 +31,11 @@ public class DataQualityService : IDataQualityService
     private const int MinSampleCount = 5;
 
     /// <summary>
+    /// 单次质量统计最多加载的样本数；完整性仍使用时间窗口内的完整计数计算。
+    /// </summary>
+    private const int MaxEvaluationSamples = 10_000;
+
+    /// <summary>
     /// 默认上报间隔（秒）：设备未配置上报间隔时使用此默认值
     /// </summary>
     private const int DefaultReportingIntervalSeconds = 10;
@@ -149,23 +154,27 @@ public class DataQualityService : IDataQualityService
         await using var scope = _scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // 同上：后台 scope 下默认过滤器会吞掉真实租户遥测，IgnoreQueryFilters + 显式 tenantId
-        var telemetryData = await dbContext.DeviceTelemetry
+        // 同上：后台 scope 下默认过滤器会吞掉真实租户遥测，IgnoreQueryFilters + 显式 tenantId。
+        var telemetryQuery = dbContext.DeviceTelemetry
             .IgnoreQueryFilters()
-            .Where(t => t.TenantId == tenantId && t.DeviceId == deviceId && t.Metric == metric && t.Time >= startTime && t.Time <= endTime)
-            .OrderBy(t => t.Time)
-            .Select(t => new { t.Time, t.Value })
-            .ToListAsync(ct);
+            .Where(t => t.TenantId == tenantId && t.DeviceId == deviceId && t.Metric == metric && t.Time >= startTime && t.Time <= endTime);
 
-        var sampleCount = telemetryData.Count;
-
-        // 样本数不足，无法计算可靠的统计指标
+        // 先取完整计数，保证完整性评分和报告中的 SampleCount 不因限流而失真；
+        // 统计维度只需最近一万条样本，避免高频设备把整个小时窗口实体化到应用内存。
+        var sampleCount = await telemetryQuery.CountAsync(ct);
         if (sampleCount < MinSampleCount)
         {
             _logger.LogDebug("数据质量评估跳过：设备={DeviceId}, 指标={Metric}, 样本数={Count}（不足 {Min}）",
                 deviceId, metric, sampleCount, MinSampleCount);
             return null;
         }
+
+        var telemetryData = await telemetryQuery
+            .OrderByDescending(t => t.Time)
+            .Take(MaxEvaluationSamples)
+            .OrderBy(t => t.Time)
+            .Select(t => new { t.Time, t.Value })
+            .ToListAsync(ct);
 
         // 计算预期的数据点数（基于默认上报间隔）
         var expectedPoints = (int)(EvaluationWindow.TotalSeconds / DefaultReportingIntervalSeconds);

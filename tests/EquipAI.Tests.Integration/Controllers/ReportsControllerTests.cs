@@ -60,4 +60,26 @@ public class ReportsControllerTests
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
+
+    [Fact]
+    public async Task GetOperationsReport_WithInvalidDateRange_ReturnsBadRequest()
+    {
+        var client = await GetAuthenticatedClientAsync();
+
+        var response = await client.GetAsync(
+            "/api/v1/reports/operations?startDate=2026-02-01&endDate=2026-01-01");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task GetOperationsReport_WithExcessiveDateRange_ReturnsBadRequest()
+    {
+        var client = await GetAuthenticatedClientAsync();
+
+        var response = await client.GetAsync(
+            "/api/v1/reports/operations?startDate=2020-01-01&endDate=2026-01-01");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
 }

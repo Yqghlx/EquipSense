@@ -198,8 +198,8 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// 事件发布中途失败后，重试必须继续发布已成功落库的同一批事件。
-    /// 若重试重新执行数据库去重并把已存在行当作“无需处理”，会造成遥测已落库但告警评估永远缺失。
+    /// 事件发布中途失败后，事务重试必须继续发布同一批稳定事件。
+    /// 若重试重新执行数据库去重并把提交结果不明确的行当作“无需处理”，会造成告警评估缺失。
     /// </summary>
     [Fact]
     public async Task 事件发布中途失败后应重试同一批事件而不是被去重跳过()
@@ -229,13 +229,39 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
         await _service.FlushAsync();
 
         (await CountTelemetryRowsAsync()).Should().Be(2);
-        publishAttempts.Should().Be(4, "第二条事件失败后，整个已落库批次必须使用相同事件继续重试");
+        publishAttempts.Should().Be(4, "第二条事件失败后，整个事务批次必须使用相同事件继续重试");
         publishedEvents[0].EventId.Should().Be(publishedEvents[2].EventId);
         publishedEvents[1].EventId.Should().Be(publishedEvents[3].EventId);
     }
 
     /// <summary>
-    /// 数据库命令已执行但客户端在收到响应前断开时，不能把已落库批次误判为普通重复数据。
+    /// 遥测写入与事务 Outbox 写入必须处于同一个数据库事务。
+    /// 如果 Outbox 写入失败，不能留下没有告警评估事件的孤儿遥测行。
+    /// </summary>
+    [Fact]
+    public async Task 事件持久化失败时遥测写入应整体回滚()
+    {
+        _eventBusMock
+            .Setup(e => e.PublishAsync(
+                It.IsAny<TelemetryReceivedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("模拟 Outbox 写入失败"));
+
+        await _service.EnqueueAsync(
+            _tenantId,
+            _deviceId,
+            "temperature",
+            80.0,
+            DateTime.UtcNow);
+
+        await _service.FlushAsync();
+
+        (await CountTelemetryRowsAsync()).Should().Be(0,
+            "事件无法持久化时，遥测和事件必须作为一个事务整体回滚，避免产生告警链路孤儿数据");
+    }
+
+    /// <summary>
+    /// 数据库命令已执行但客户端在收到响应前断开时，事务重试不能把提交结果不明确的批次误判为普通重复数据。
     /// </summary>
     [Fact]
     public async Task 批量写入结果不明确时仍应为已落库数据发布事件()
@@ -254,7 +280,7 @@ public class TelemetryServiceDedupTests : IAsyncLifetime
         _eventBusMock.Verify(
             e => e.PublishAsync(It.IsAny<TelemetryReceivedEvent>(), It.IsAny<CancellationToken>()),
             Times.Once,
-            "INSERT 已完成但响应丢失时，遥测对应的告警事件仍必须进入事件总线");
+            "INSERT 结果不明确时，事务重试仍必须为遥测发布对应的告警事件");
     }
 
     /// <summary>

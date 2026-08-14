@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using EquipAI.Application.Analysis;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Extensions;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,13 @@ namespace EquipAI.Application.Reports;
 /// </summary>
 public class OperationsReportService
 {
+    /// <summary>
+    /// 单次报表允许查询的最大时间跨度。
+    /// 报表会聚合告警和工单数据；限制跨度可以避免恶意或误操作请求把多年数据一次性加载到内存。
+    /// 一年加一天用于兼容闰年和按自然年导出的场景。
+    /// </summary>
+    public const int MaxReportRangeDays = 366;
+
     private readonly AppDbContext _db;
     private readonly OeeService _oeeService;
     private readonly ILogger<OperationsReportService> _logger;
@@ -34,10 +42,25 @@ public class OperationsReportService
     public async Task<byte[]> GenerateReportAsync(
         Guid tenantId, DateTime startDate, DateTime endDate, CancellationToken ct = default)
     {
-        // PostgreSQL timestamptz 列要求 DateTime.Kind 为 Utc，否则抛 ArgumentException
-        // Controller 传入的 startDate/endDate 可能是 Kind=Unspecified（如 new DateTime(year,month,1)）
-        startDate = DateTime.SpecifyKind(startDate, DateTimeKind.Utc);
-        endDate = DateTime.SpecifyKind(endDate, DateTimeKind.Utc);
+        // PostgreSQL timestamptz 列要求 DateTime.Kind 为 Utc；API/定时任务的输入可能是 Unspecified。
+        startDate = startDate.ToSafeUtc();
+        endDate = endDate.ToSafeUtc();
+
+        var validationError = ValidateDateRange(startDate, endDate);
+        if (validationError is not null)
+        {
+            if (startDate >= endDate)
+            {
+                throw new ArgumentException(validationError, nameof(startDate));
+            }
+
+            throw new ArgumentOutOfRangeException(nameof(endDate), endDate, validationError);
+        }
+
+        // 日期型 API 参数通常是当天 00:00:00；将它转换为次日零点，才能包含用户选择的结束日全天。
+        // 带有明确时分秒的参数保持原有精确边界，统一使用半开区间 [start, endExclusive) 避免 tick 精度问题。
+        var endDateExclusive = GetEndDateExclusive(endDate);
+        var displayEndDate = endDateExclusive.AddTicks(-1);
 
         var sb = new StringBuilder();
         // BOM 头（Excel 中文兼容）
@@ -45,71 +68,108 @@ public class OperationsReportService
 
         // === 报告标题 ===
         sb.AppendLine($"EquipSense 运营报告");
-        sb.AppendLine($"日期范围: {startDate:yyyy-MM-dd} 至 {endDate:yyyy-MM-dd}");
+        sb.AppendLine($"日期范围: {startDate:yyyy-MM-dd} 至 {displayEndDate:yyyy-MM-dd}");
         sb.AppendLine($"生成时间: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine();
 
         // === 1. 设备概览 ===
         sb.AppendLine("=== 设备概览 ===");
-        var devices = await _db.Devices.Where(d => d.TenantId == tenantId).ToListAsync(ct);
-        var onlineCount = devices.Count(d => d.Status == DeviceStatus.Online);
-        var offlineCount = devices.Count(d => d.Status == DeviceStatus.Offline);
-        var maintenanceCount = devices.Count(d => d.Status == DeviceStatus.Maintenance);
+        var deviceQuery = _db.Devices.Where(d => d.TenantId == tenantId);
+        var deviceSummary = await deviceQuery
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Online = group.Count(d => d.Status == DeviceStatus.Online),
+                Offline = group.Count(d => d.Status == DeviceStatus.Offline),
+                Maintenance = group.Count(d => d.Status == DeviceStatus.Maintenance),
+                // 显式转 double：SQLite 不支持 decimal Average，PostgreSQL/TimescaleDB 则支持；
+                // 报表只展示一位小数，double 足以覆盖健康度 0-100 的展示精度。
+                AverageHealthScore = group.Average(d => (double)d.HealthScore),
+            })
+            .FirstOrDefaultAsync(ct);
         sb.AppendLine($"设备总数,在线,离线,维护中,平均健康度");
         AppendCsvRow(
             sb,
-            devices.Count,
-            onlineCount,
-            offlineCount,
-            maintenanceCount,
-            devices.Any()
-                ? devices.Average(d => d.HealthScore).ToString("F1", CultureInfo.InvariantCulture)
+            deviceSummary?.Total ?? 0,
+            deviceSummary?.Online ?? 0,
+            deviceSummary?.Offline ?? 0,
+            deviceSummary?.Maintenance ?? 0,
+            deviceSummary is not null
+                ? deviceSummary.AverageHealthScore.ToString("F1", CultureInfo.InvariantCulture)
                 : "N/A");
         sb.AppendLine();
 
         // === 2. 告警统计 ===
         sb.AppendLine("=== 告警统计 ===");
-        var alerts = await _db.Alerts
+        var alertQuery = _db.Alerts
             .IgnoreQueryFilters()
-            .Where(a => a.TenantId == tenantId && a.OccurredAt >= startDate && a.OccurredAt <= endDate)
-            .ToListAsync(ct);
+            .Where(a => a.TenantId == tenantId && a.OccurredAt >= startDate && a.OccurredAt < endDateExclusive);
+        var alertSummary = await alertQuery
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Critical = group.Count(a => a.Severity == AlertSeverity.Critical),
+                High = group.Count(a => a.Severity == AlertSeverity.High),
+                Normal = group.Count(a => a.Severity == AlertSeverity.Normal),
+                Low = group.Count(a => a.Severity == AlertSeverity.Low),
+                Resolved = group.Count(a => a.Status == AlertStatus.Resolved),
+                Active = group.Count(a => a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged),
+                Acknowledged = group.Count(a => a.AcknowledgedAt != null),
+            })
+            .FirstOrDefaultAsync(ct);
 
         sb.AppendLine($"告警总数,Critical,High,Normal,Low,已解决,活跃,确认率");
-        var critical = alerts.Count(a => a.Severity == AlertSeverity.Critical);
-        var high = alerts.Count(a => a.Severity == AlertSeverity.High);
-        var normal = alerts.Count(a => a.Severity == AlertSeverity.Normal);
-        var low = alerts.Count(a => a.Severity == AlertSeverity.Low);
-        var resolved = alerts.Count(a => a.Status == AlertStatus.Resolved);
-        // 活跃告警定义 = Active（已触发未确认）+ Acknowledged（已确认未解决），与 DashboardStatsService/OeeService 一致。
-        // 修复历史：原代码只算 Active 漏算 Acknowledged，致报表活跃数 < Dashboard 活跃数，
-        // 且"已解决 + 活跃" ≠ 告警总数（Acknowledged 状态告警凭空消失）。#243 已统一 Dashboard/OEE 定义，此处为对称遗漏。
-        var active = alerts.Count(a => a.Status == AlertStatus.Active || a.Status == AlertStatus.Acknowledged);
-        var ackRate = alerts.Count > 0 ? (double)alerts.Count(a => a.AcknowledgedAt != null) / alerts.Count * 100 : 0;
-        AppendCsvRow(sb, alerts.Count, critical, high, normal, low, resolved, active,
+        var alertTotal = alertSummary?.Total ?? 0;
+        var ackRate = alertTotal > 0 ? (double)(alertSummary?.Acknowledged ?? 0) / alertTotal * 100 : 0;
+        AppendCsvRow(
+            sb,
+            alertTotal,
+            alertSummary?.Critical ?? 0,
+            alertSummary?.High ?? 0,
+            alertSummary?.Normal ?? 0,
+            alertSummary?.Low ?? 0,
+            alertSummary?.Resolved ?? 0,
+            alertSummary?.Active ?? 0,
             $"{ackRate.ToString("F1", CultureInfo.InvariantCulture)}%");
         sb.AppendLine();
 
         // === 3. 工单统计 ===
         sb.AppendLine("=== 工单统计 ===");
-        var workOrders = await _db.WorkOrders
-            .Where(w => w.TenantId == tenantId && w.CreatedAt >= startDate && w.CreatedAt <= endDate)
-            .ToListAsync(ct);
+        var workOrderQuery = _db.WorkOrders
+            .Where(w => w.TenantId == tenantId && w.CreatedAt >= startDate && w.CreatedAt < endDateExclusive);
+        var workOrderSummary = await workOrderQuery
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Completed = group.Count(w =>
+                    w.Status == WorkOrderStatus.Completed
+                    || w.Status == WorkOrderStatus.Accepted
+                    || w.Status == WorkOrderStatus.Closed),
+                InProgress = group.Count(w => w.Status == WorkOrderStatus.InProgress),
+                PendingDispatch = group.Count(w => w.Status == WorkOrderStatus.PendingDispatch),
+            })
+            .FirstOrDefaultAsync(ct);
 
         // 已完成 = Completed（已完成）+ Accepted（已验收）+ Closed（已关闭），三者均代表维修工作已完成
         // （生命周期 Completed→Accepted→Closed，区别仅在审批/归档阶段）。
         // 修复历史：原代码只算 Closed（归档），致 Completed/Accepted 工单在报表凭空消失、completionRate
         // 严重偏低（客户看月报"已完成=1"误以为效率极低），与 WorkOrderStatisticsService（用 CompletedAt.HasValue
         // 涵盖 Completed 及之后）方向不一致。与 #262（活跃告警定义）同构的业务定义跨查询点不一致。
-        var woCompleted = workOrders.Count(w =>
-            w.Status == WorkOrderStatus.Completed
-            || w.Status == WorkOrderStatus.Accepted
-            || w.Status == WorkOrderStatus.Closed);
-        var woInProgress = workOrders.Count(w => w.Status == WorkOrderStatus.InProgress);
-        var woPending = workOrders.Count(w => w.Status == WorkOrderStatus.PendingDispatch);
-        var completionRate = workOrders.Count > 0 ? (double)woCompleted / workOrders.Count * 100 : 0;
+        var workOrderTotal = workOrderSummary?.Total ?? 0;
+        var completionRate = workOrderTotal > 0
+            ? (double)(workOrderSummary?.Completed ?? 0) / workOrderTotal * 100
+            : 0;
 
         sb.AppendLine($"工单总数,已完成,执行中,待派工,完成率");
-        AppendCsvRow(sb, workOrders.Count, woCompleted, woInProgress, woPending,
+        AppendCsvRow(
+            sb,
+            workOrderTotal,
+            workOrderSummary?.Completed ?? 0,
+            workOrderSummary?.InProgress ?? 0,
+            workOrderSummary?.PendingDispatch ?? 0,
             $"{completionRate.ToString("F1", CultureInfo.InvariantCulture)}%");
         sb.AppendLine();
 
@@ -132,10 +192,17 @@ public class OperationsReportService
         // === 5. 设备健康度排名 ===
         sb.AppendLine("=== 设备健康度排名（最低 10 台）===");
         sb.AppendLine($"设备编码,设备名称,状态,健康度");
-        var bottomDevices = devices
-            .OrderBy(d => d.HealthScore)
+        var bottomDevices = await deviceQuery
+            .OrderBy(d => (double)d.HealthScore)
             .Take(10)
-            .ToList();
+            .Select(d => new
+            {
+                d.DeviceCode,
+                d.Name,
+                d.Status,
+                d.HealthScore,
+            })
+            .ToListAsync(ct);
         foreach (var d in bottomDevices)
         {
             AppendCsvRow(sb, d.DeviceCode, d.Name ?? d.DeviceCode, d.Status.ToString(),
@@ -145,11 +212,12 @@ public class OperationsReportService
 
         // === 6. 按指标告警分布 ===
         sb.AppendLine("=== 告警按指标分布 ===");
-        var byMetric = alerts
+        var byMetric = await alertQuery
             .GroupBy(a => a.Metric)
             .Select(g => new { Metric = g.Key, Count = g.Count() })
             .OrderByDescending(g => g.Count)
-            .Take(10);
+            .Take(10)
+            .ToListAsync(ct);
         sb.AppendLine($"指标,告警数");
         foreach (var m in byMetric)
         {
@@ -157,6 +225,38 @@ public class OperationsReportService
         }
 
         return ToUtf8Bytes(sb.ToString());
+    }
+
+    /// <summary>
+    /// 校验报表查询窗口，供控制器在执行数据库查询前返回明确的 400。
+    /// </summary>
+    public static string? ValidateDateRange(DateTime startDate, DateTime endDate)
+    {
+        if (startDate >= endDate)
+        {
+            return "日期范围无效：开始时间必须早于结束时间";
+        }
+
+        if (GetEndDateExclusive(endDate) - startDate > TimeSpan.FromDays(MaxReportRangeDays))
+        {
+            return $"日期范围不能超过 {MaxReportRangeDays} 天";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 获取报表查询的排他结束边界。
+    /// 只有零点日期被视为“按天查询”的结束值；带时分秒的输入仍表示精确时间点。
+    /// </summary>
+    public static DateTime GetEndDateExclusive(DateTime endDate)
+    {
+        if (endDate.TimeOfDay != TimeSpan.Zero)
+        {
+            return endDate;
+        }
+
+        return endDate.AddDays(1);
     }
 
     /// <summary>

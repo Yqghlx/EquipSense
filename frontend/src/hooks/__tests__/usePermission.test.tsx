@@ -232,6 +232,25 @@ describe('usePermission', () => {
     });
   });
 
+  describe('运营报表权限', () => {
+    it('技术员不应看到或访问运营报表', () => {
+      setMockUser('Technician');
+      const { result } = renderHook(() => usePermission('report'));
+
+      expect(result.current.canRead).toBe(false);
+    });
+
+    it('有 report:read 的角色应获得只读报表权限', () => {
+      for (const role of ['SystemAdmin', 'MaintenanceLead', 'Operator', 'Viewer']) {
+        setMockUser(role);
+        const { result } = renderHook(() => usePermission('report'));
+
+        expect(result.current.canRead).toBe(true);
+        expect(result.current.canCreate).toBe(role === 'SystemAdmin');
+      }
+    });
+  });
+
   describe('未知角色（default 分支）', () => {
     it('应返回全 false 的默认权限', () => {
       setMockUser('SuperUser'); // 不在枚举内的角色

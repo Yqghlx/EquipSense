@@ -1,8 +1,8 @@
 namespace EquipAI.Core.Interfaces;
 
 /// <summary>
-/// 事件总线接口，实现模块间的发布/订阅解耦
-/// Phase 1 使用进程内实现，后续可替换为 RabbitMQ 等消息队列
+/// 事件总线接口，实现模块间的发布/订阅解耦。
+/// 开发/测试环境可使用进程内实现；生产环境默认由事务 Outbox 包装 RabbitMQ 传输。
 /// </summary>
 public interface IEventBus
 {

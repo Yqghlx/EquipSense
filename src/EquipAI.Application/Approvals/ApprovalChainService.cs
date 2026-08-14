@@ -23,6 +23,11 @@ namespace EquipAI.Application.Approvals;
 /// </summary>
 public class ApprovalChainService : IApprovalChainService
 {
+    /// <summary>
+    /// 单次待审批查询从数据库读取的最大记录数，避免大租户待办请求无界加载。
+    /// </summary>
+    private const int PendingApprovalBatchSize = 500;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEventBus _eventBus;
     private readonly ILogger<ApprovalChainService> _logger;
@@ -393,19 +398,70 @@ public class ApprovalChainService : IApprovalChainService
         // 查询待审批记录：先显式限定租户，再在内存中按统一规则比较角色。
         // 审批模板历史数据同时存在 PascalCase 和 snake_case，直接使用数据库等值比较会导致
         // 合法用户看不到自己的任务；在租户范围内做规范化比较可兼容旧数据且不会扩大跨租户范围。
-        var query = dbContext.WorkOrderApprovals
+        // 使用稳定主键游标分批读取，避免租户待办规模增长后形成无界查询结果集。
+        var pendingQuery = dbContext.WorkOrderApprovals
+            .AsNoTracking()
             .Where(a => a.TenantId == tenantId
                 && a.Action == ApprovalAction.Pending
                 && (a.SpecificApproverId == null || a.SpecificApproverId == approverId));
 
-        var approvals = await query
-            .OrderBy(a => a.StepOrder)
-            .ToListAsync(ct);
-
         var normalizedRole = NormalizeRole(role);
-        return approvals
-            .Where(a => NormalizeRole(a.ExpectedRole) == normalizedRole)
-            .Select(MapApprovalToDto)
+        var result = new List<WorkOrderApprovalDto>();
+        Guid? lastApprovalId = null;
+
+        while (true)
+        {
+            var batchQuery = pendingQuery;
+            if (lastApprovalId.HasValue)
+            {
+                batchQuery = batchQuery.Where(a => a.Id > lastApprovalId.Value);
+            }
+
+            var approvals = await batchQuery
+                .OrderBy(a => a.Id)
+                .Take(PendingApprovalBatchSize)
+                .Select(a => new
+                {
+                    a.Id,
+                    a.WorkOrderId,
+                    a.StepOrder,
+                    a.ExpectedRole,
+                    a.SpecificApproverId,
+                    a.ApproverId,
+                    a.Action,
+                    a.Comment,
+                    a.ActedAt,
+                })
+                .ToListAsync(ct);
+
+            if (approvals.Count == 0)
+            {
+                break;
+            }
+
+            result.AddRange(approvals
+                .Where(a => NormalizeRole(a.ExpectedRole) == normalizedRole)
+                .Select(a => new WorkOrderApprovalDto(
+                    a.Id,
+                    a.WorkOrderId,
+                    a.StepOrder,
+                    a.ExpectedRole,
+                    a.SpecificApproverId,
+                    a.ApproverId,
+                    a.Action.ToString(),
+                    a.Comment,
+                    a.ActedAt)));
+
+            lastApprovalId = approvals[^1].Id;
+            if (approvals.Count < PendingApprovalBatchSize)
+            {
+                break;
+            }
+        }
+
+        return result
+            .OrderBy(a => a.StepOrder)
+            .ThenBy(a => a.Id)
             .ToList();
     }
 

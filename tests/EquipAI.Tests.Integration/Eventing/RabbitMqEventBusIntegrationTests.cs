@@ -191,17 +191,8 @@ public sealed class RabbitMqEventBusIntegrationTests
             provider.GetRequiredService<ILogger<RabbitMqEventBus>>(),
             Options.Create(options));
 
-    private static RabbitMqOptions CreateOptions(int maxRetryCount = 5, int retryIntervalSeconds = 1) => new()
-    {
-        Host = Environment.GetEnvironmentVariable("RABBITMQ_TEST_HOST") ?? "127.0.0.1",
-        Port = int.TryParse(Environment.GetEnvironmentVariable("RABBITMQ_TEST_PORT"), out var port) ? port : 5672,
-        Username = Environment.GetEnvironmentVariable("RABBITMQ_TEST_USERNAME") ?? "equipai_test",
-        Password = Environment.GetEnvironmentVariable("RABBITMQ_TEST_PASSWORD") ?? "equipai_test_password",
-        MaxRetryCount = maxRetryCount,
-        RetryIntervalSeconds = retryIntervalSeconds,
-        HandlerTimeoutSeconds = 10,
-        PrefetchCount = 20,
-    };
+    private static RabbitMqOptions CreateOptions(int maxRetryCount = 5, int retryIntervalSeconds = 1) =>
+        RabbitMqIntegrationTestConfiguration.CreateOptions(maxRetryCount: maxRetryCount, retryIntervalSeconds: retryIntervalSeconds);
 
     private static ConnectionFactory CreateFactory(RabbitMqOptions options) => new()
     {
@@ -259,13 +250,10 @@ public sealed class RabbitMqEventBusIntegrationTests
             response.EnsureSuccessStatusCode();
             await using var body = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var document = await JsonDocument.ParseAsync(body, cancellationToken: timeout.Token);
-            connectionName = document.RootElement.EnumerateArray()
-                .Where(item => item.TryGetProperty("client_properties", out var properties)
-                    && properties.TryGetProperty("connection_name", out var name)
-                    && name.ValueKind == JsonValueKind.String
-                    && name.GetString() == "EquipSense.EventBus")
-                .Select(item => item.GetProperty("name").GetString())
-                .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
+            connectionName = RabbitMqManagementConnectionSelector.FindConnectionName(
+                document.RootElement,
+                "EquipSense.EventBus",
+                options.VirtualHost);
 
             if (connectionName is null)
             {

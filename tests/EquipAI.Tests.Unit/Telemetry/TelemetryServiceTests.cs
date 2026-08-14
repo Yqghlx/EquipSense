@@ -109,6 +109,26 @@ public class TelemetryServiceTests : IDisposable
             Times.Never);
     }
 
+    [Fact]
+    public async Task EnqueueAndWaitForPersistenceAsync_当写入持续失败时_应向调用方报告失败()
+    {
+        var scopeFactory = new Mock<IServiceScopeFactory>();
+        scopeFactory
+            .Setup(factory => factory.CreateScope())
+            .Throws<InvalidOperationException>();
+
+        using var service = new TelemetryService(
+            scopeFactory.Object,
+            _eventBusMock.Object,
+            _serviceProvider.GetRequiredService<ILogger<TelemetryService>>());
+
+        var act = () => service.EnqueueAndWaitForPersistenceAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "temperature", 95.0, DateTime.UtcNow, "good", "mqtt");
+
+        await act.Should().ThrowAsync<Exception>(
+            "MQTT 入口只有收到持久化失败信号，才能阻止 Broker 确认并触发重投");
+    }
+
     /// <summary>
     /// 验证设备↔租户绑定校验：拒绝未知设备与租户不匹配项（防 MQTT 跨租户注入）
     ///

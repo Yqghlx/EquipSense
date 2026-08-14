@@ -19,11 +19,13 @@ import {
   Target,
   Shield,
   UserCog,
+  FileText,
 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../stores/authStore';
 import { useUnreadCount } from '../../hooks/useNotifications';
+import { usePermission } from '../../hooks/usePermission';
 
 /** 侧边栏导航项配置 */
 const baseNavItems = [
@@ -35,6 +37,7 @@ const baseNavItems = [
   { path: '/alerts', icon: AlertTriangle, labelKey: 'nav.alerts' },
   { path: '/alert-rules', icon: Bell, labelKey: 'nav.alertRules' },
   { path: '/work-orders', icon: ClipboardList, labelKey: 'nav.workOrders' },
+  { path: '/reports', icon: FileText, labelKey: 'nav.reports' },
   { path: '/pending-approvals', icon: ClipboardCheck, labelKey: 'nav.pendingApprovals' },
   { path: '/dispatch', icon: Users, labelKey: 'nav.dispatch' },
   { path: '/analyses', icon: Brain, labelKey: 'nav.analyses' },
@@ -63,11 +66,13 @@ export function Sidebar({ mobileOpen = false, onClose }: { mobileOpen?: boolean;
   const [collapsed, setCollapsed] = useState(false);
   const user = useAuthStore((s) => s.user);
   const { data: unreadCount } = useUnreadCount();
+  const reportPermission = usePermission('report');
 
   /** 根据角色动态构建导航项列表 */
-  const navItems = user?.role === 'SystemAdmin'
+  const allNavItems = user?.role === 'SystemAdmin'
     ? [...baseNavItems, ...adminNavItems]
     : baseNavItems;
+  const navItems = allNavItems.filter((item) => item.path !== '/reports' || reportPermission.canRead);
 
   return (
     <>

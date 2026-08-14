@@ -2,6 +2,10 @@
 
 > 分析日期：2026-08-13（按当前工作区复核） · 范围：.github/workflows/ci.yml · Dockerfiles · Production smoke · e2e-comprehensive · Vitest · K6 · 部署脚本
 
+> **2026-08-14 门禁复核**：后端全量单元为 1771 总计（1767 通过、4 跳过、0 失败），默认集成为 199 总计（193 通过、6 跳过、0 失败）；前端 557 个 Vitest 测试全部通过，覆盖率运行退出码为 0（语句 82.16%、行 84.62%、函数 80.37%、分支 69.12%，行/函数阈值 80%/80%），TypeScript、严格 ESLint、i18n 和生产构建均通过。前端 CI 质量 job 的本地门禁已恢复，远端 workflow 仍需真实运行验收。
+
+> **后端资源边界增量**：告警规则评估、知识规则冲突检测和审批待办均使用稳定 UUID 游标、每批最多 500 条、`AsNoTracking` 与最小投影；新增 501 条规则/待办的 SQLite `LIMIT` 回归，完整结果语义保持不变。真实 PostgreSQL 大租户延迟、锁竞争、待办响应体和规则/审批变更并发仍需部署侧基线。
+
 ---
 
 ## 一、流水线总览（质量门禁 + 运行时验收 + 发布）
@@ -45,8 +49,8 @@ workflow_dispatch: true  # 手动触发
 |------|------|------|
 | dotnet restore | ~60s | 9 个项目恢复 |
 | dotnet build Release | ~90s | 编译 (TreatWarningsAsErrors) |
-| Unit test | ~30s | 1692 xUnit 测试 |
-| Integration test | ~120s | 193 个测试（187 通过、6 个条件跳过，含真实 RabbitMQ 场景） |
+| Unit test | ~30s | 1771 xUnit 测试（1767 通过、4 跳过） |
+| Integration test | ~120s | 199 个测试（193 通过、6 个条件跳过，含专用 `/equipai_test` vhost 的真实 RabbitMQ 场景） |
 | NuGet vuln | ~20s | 已纳入阻断门禁 |
 | **合计** | **~5min** | |
 
@@ -60,7 +64,7 @@ workflow_dispatch: true  # 手动触发
 | tsc --noEmit | ~30s | strict: true, 0 error |
 | check:i18n | ~5s | key 完整性 |
 | ESLint | ~30s | `--max-warnings 1` |
-| vitest | ~30s | 494 测试 |
+| vitest | ~30s | 557 测试，覆盖率门禁通过（行 84.62%、函数 80.37%） |
 | vite build | ~60s | 分包构建 |
 | **合计** | **~3.5min** | |
 
@@ -205,4 +209,4 @@ timeout: 60s
 | 技术债务 | [13-技术债务与改进路线图](./13-技术债务与改进路线图.md) |
 
 ---
-*本文档属于 EquipSense 项目评估体系 · 复核日期：2026-08-13 · 版本：v4.12*
+*本文档属于 EquipSense 项目评估体系 · 复核日期：2026-08-13 · 版本：v4.13*

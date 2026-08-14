@@ -1,6 +1,7 @@
 using EquipAI.Application.WorkOrders;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using EquipAI.WebAPI.Controllers;
@@ -9,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace EquipAI.Tests.Unit.Web;
 
@@ -42,6 +44,7 @@ public class WorkOrderAttachmentsControllerTests
         var service = new WorkOrderAttachmentService(
             db,
             tenantContext,
+            new Mock<IEventBus>().Object,
             NullLogger<WorkOrderAttachmentService>.Instance);
         var controller = new WorkOrderAttachmentsController(
             service,
@@ -66,7 +69,7 @@ public class WorkOrderAttachmentsControllerTests
     }
 
     [Fact]
-    public async Task DeleteAttachment_数据库删除成功但物理文件删除失败时_不应恢复附件元数据()
+    public async Task DeleteAttachment_控制器不再同步删除物理文件时_只提交元数据删除和事件()
     {
         var tenantId = Guid.NewGuid();
         var workOrderId = Guid.NewGuid();
@@ -85,11 +88,18 @@ public class WorkOrderAttachmentsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var storage = new FailingDeleteFileStorage();
+        var storage = new FailIfDeleteFileStorage();
         var tenantContext = new FixedTenantContext(tenantId);
+        var eventBus = new Mock<IEventBus>();
+        eventBus
+            .Setup(item => item.PublishAsync(
+                It.IsAny<WorkOrderAttachmentDeletedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
         var service = new WorkOrderAttachmentService(
             db,
             tenantContext,
+            eventBus.Object,
             NullLogger<WorkOrderAttachmentService>.Instance);
         var controller = new WorkOrderAttachmentsController(
             service,
@@ -100,7 +110,13 @@ public class WorkOrderAttachmentsControllerTests
         var result = await controller.DeleteAttachment(workOrderId, attachmentId);
 
         result.Should().BeOfType<NoContentResult>();
-        storage.DeletedPaths.Should().ContainSingle();
+        storage.DeletedPaths.Should().BeEmpty(
+            "物理删除由可靠事件处理器异步执行，控制器不应在元数据提交后再同步删除");
+        eventBus.Verify(
+            item => item.PublishAsync(
+                It.IsAny<WorkOrderAttachmentDeletedEvent>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
         (await db.WorkOrderAttachments.IgnoreQueryFilters().CountAsync())
             .Should().Be(0, "物理文件删除失败也不应恢复已经提交的数据库删除");
     }
@@ -129,6 +145,7 @@ public class WorkOrderAttachmentsControllerTests
         var service = new WorkOrderAttachmentService(
             db,
             tenantContext,
+            new Mock<IEventBus>().Object,
             NullLogger<WorkOrderAttachmentService>.Instance);
         var controller = new WorkOrderAttachmentsController(
             service,
@@ -174,6 +191,7 @@ public class WorkOrderAttachmentsControllerTests
         var service = new WorkOrderAttachmentService(
             db,
             tenantContext,
+            new Mock<IEventBus>().Object,
             NullLogger<WorkOrderAttachmentService>.Instance);
         var controller = new WorkOrderAttachmentsController(
             service,
@@ -214,6 +232,7 @@ public class WorkOrderAttachmentsControllerTests
         var service = new WorkOrderAttachmentService(
             db,
             tenantContext,
+            new Mock<IEventBus>().Object,
             NullLogger<WorkOrderAttachmentService>.Instance);
         var controller = new WorkOrderAttachmentsController(
             service,
@@ -274,9 +293,9 @@ public class WorkOrderAttachmentsControllerTests
     }
 
     /// <summary>
-    /// 模拟物理删除失败，验证数据库删除不会被回滚成坏引用。
+    /// 如果控制器错误地同步删除物理文件则立即失败，用于证明删除职责已移交事件处理器。
     /// </summary>
-    private sealed class FailingDeleteFileStorage : IFileStorageService
+    private sealed class FailIfDeleteFileStorage : IFileStorageService
     {
         public List<string> DeletedPaths { get; } = [];
 

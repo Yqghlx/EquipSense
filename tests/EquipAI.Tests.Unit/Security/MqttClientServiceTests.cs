@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using MQTTnet;
 using MQTTnet.Client;
+using MQTTnet.Protocol;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using System.Text;
 using System.Diagnostics;
@@ -76,6 +77,68 @@ public sealed class MqttClientServiceTests
                 It.IsAny<MqttClientSubscribeOptions>(),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task 订阅遥测主题必须请求至少一次服务质量()
+    {
+        // Arrange：发布端使用 QoS 1；订阅端也必须显式请求 QoS 1，避免 MQTTnet 默认值将链路降级为 QoS 0。
+        var mqttClient = new Mock<IMqttClient>();
+        MqttClientSubscribeOptions? capturedOptions = null;
+        mqttClient
+            .Setup(client => client.ConnectAsync(
+                It.IsAny<MqttClientOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MqttClientConnectResult)null!);
+        mqttClient
+            .Setup(client => client.SubscribeAsync(
+                It.IsAny<MqttClientSubscribeOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<MqttClientSubscribeOptions, CancellationToken>((options, _) => capturedOptions = options)
+            .ReturnsAsync((MqttClientSubscribeResult)null!);
+
+        var service = new MqttClientService(
+            Options.Create(new MqttOptions
+            {
+                Host = "mqtt.example.com",
+                Port = 8883,
+                TopicPattern = "factory/+/telemetry/+",
+                UseTls = true
+            }),
+            NullLogger<MqttClientService>.Instance,
+            () => mqttClient.Object);
+
+        // Act
+        await service.ConnectAsync();
+
+        // Assert：不显式设置时 MQTTnet 默认是 AtMostOnce，这会在订阅者短暂断线时静默丢失遥测。
+        capturedOptions.Should().NotBeNull();
+        capturedOptions!.TopicFilters.Should().ContainSingle();
+        capturedOptions.TopicFilters[0].QualityOfServiceLevel.Should().Be(MqttQualityOfServiceLevel.AtLeastOnce);
+    }
+
+    [Fact]
+    public void MQTT客户端必须使用稳定的持久会话以支持失败消息重投()
+    {
+        var service = new MqttClientService(
+            Options.Create(new MqttOptions
+            {
+                Host = "mqtt.example.com",
+                Port = 8883,
+                ClientIdPrefix = "equipai-backend-test",
+                UseTls = true
+            }),
+            NullLogger<MqttClientService>.Instance);
+
+        var firstOptions = service.BuildClientOptionsForTest();
+        var secondOptions = service.BuildClientOptionsForTest();
+
+        firstOptions.CleanSession.Should().BeFalse(
+            "Broker 必须保留未确认的 QoS 1 消息和订阅关系，才能跨进程重启恢复");
+        firstOptions.ClientId.Should().Be("equipai-backend-test",
+            "ClientId 必须完全来自稳定配置，容器或 Pod 重建时机器名可能变化");
+        secondOptions.ClientId.Should().Be(firstOptions.ClientId,
+            "同一后端实例重启后必须使用相同 ClientId 才能恢复持久会话");
     }
 
     [Fact]

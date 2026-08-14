@@ -14,6 +14,7 @@ public class GatewayHeartbeatMonitor : LockedTimerService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
+    private const int ScanBatchSize = 500;
 
     public GatewayHeartbeatMonitor(
         IServiceProvider serviceProvider,
@@ -47,47 +48,75 @@ public class GatewayHeartbeatMonitor : LockedTimerService
 
         var threshold = DateTime.UtcNow.AddSeconds(-timeoutSeconds);
 
-        // 查找所有超时的在线网关
-        var expiredGateways = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
-            .Where(g => g.Status == "online" && g.LastHeartbeatAt < threshold)
-            .ToListAsync(ct);
-
-        if (expiredGateways.Count == 0) return;
-
-        var expiredGatewayIds = expiredGateways.Select(g => g.Id).ToList();
-
-        // 更新条件必须重复 Status + LastHeartbeatAt：网关可能在上面的快照查询之后刚好收到心跳，
-        // 若只按 ID 更新，会把已经恢复通信的网关错误改成 offline，造成状态和通知双重误报。
-        var affected = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
-            .Where(g => expiredGatewayIds.Contains(g.Id)
-                     && g.Status == "online"
-                     && g.LastHeartbeatAt < threshold)
-            .ExecuteUpdateAsync(s => s.SetProperty(g => g.Status, "offline"), ct);
-
-        // 只为实际仍处于超时 offline 状态的网关发送通知；查询与更新之间恢复心跳的网关会被排除。
-        var affectedGateways = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
-            .Where(g => expiredGatewayIds.Contains(g.Id)
-                     && g.Status == "offline"
-                     && g.LastHeartbeatAt < threshold)
-            .ToListAsync(ct);
-
-        foreach (var gateway in affectedGateways)
+        // 按稳定主键分页扫描，避免 30 秒后台任务一次性加载大规模租户的全部超时网关。
+        var lastId = Guid.Empty;
+        var totalAffected = 0;
+        while (true)
         {
-            Logger.LogInformation("网关 {GatewayId}（{Name}）心跳超时，标记为 offline", gateway.GatewayId, gateway.Name);
+            ct.ThrowIfCancellationRequested();
 
-            // 推送网关离线通知（P0 工业：网关是数据采集入口，离线=该网关下设备数据断，运维需立即知晓）。
-            // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强）。
-            try
+            var expiredGateways = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
+                .AsNoTracking()
+                .Where(g => g.Id > lastId
+                         && g.Status == "online"
+                         && g.LastHeartbeatAt < threshold)
+                .OrderBy(g => g.Id)
+                .Take(ScanBatchSize)
+                .ToListAsync(ct);
+
+            if (expiredGateways.Count == 0)
+                break;
+
+            var expiredGatewayIds = expiredGateways.Select(g => g.Id).ToList();
+
+            // 更新条件必须重复 Status + LastHeartbeatAt：网关可能在上面的快照查询之后刚好收到心跳，
+            // 若只按 ID 更新，会把已经恢复通信的网关错误标记为 offline，造成状态和通知双重误报。
+            var affected = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
+                .Where(g => expiredGatewayIds.Contains(g.Id)
+                         && g.Status == "online"
+                         && g.LastHeartbeatAt < threshold)
+                .ExecuteUpdateAsync(s => s.SetProperty(g => g.Status, "offline"), ct);
+
+            // 只为实际仍处于超时 offline 状态的网关发送通知；查询与更新之间恢复心跳的网关会被排除。
+            var affectedGateways = await dbContext.UnfilteredSet<Core.Entities.Gateway>()
+                .AsNoTracking()
+                .Where(g => expiredGatewayIds.Contains(g.Id)
+                         && g.Status == "offline"
+                         && g.LastHeartbeatAt < threshold)
+                .OrderBy(g => g.Id)
+                .Take(ScanBatchSize)
+                .ToListAsync(ct);
+
+            foreach (var gateway in affectedGateways)
             {
-                await signalR.SendGatewayOfflineAsync(
-                    gateway.TenantId, gateway.Id, gateway.GatewayId, gateway.Name, ct);
+                Logger.LogInformation("网关 {GatewayId}（{Name}）心跳超时，标记为 offline", gateway.GatewayId, gateway.Name);
+
+                // 推送网关离线通知（P0 工业：网关是数据采集入口，离线=该网关下设备数据断，运维需立即知晓）。
+                // try/catch 隔离——通知失败不得影响离线标记（离线状态是数据正确性，通知是可用性增强）。
+                try
+                {
+                    await signalR.SendGatewayOfflineAsync(
+                        gateway.TenantId, gateway.Id, gateway.GatewayId, gateway.Name, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // 宿主停机时必须传播取消，不能把已取消的通知误判为普通推送失败并继续扫描。
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "网关离线通知推送失败，不影响离线标记: GatewayId={GatewayId}", gateway.GatewayId);
+                }
             }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "网关离线通知推送失败，不影响离线标记: GatewayId={GatewayId}", gateway.GatewayId);
-            }
+
+            totalAffected += affected;
+            lastId = expiredGateways[^1].Id;
+            dbContext.ChangeTracker.Clear();
+
+            if (expiredGateways.Count < ScanBatchSize)
+                break;
         }
 
-        Logger.LogInformation("本轮已将 {Count} 个超时网关标记为 offline", affected);
+        Logger.LogInformation("本轮已将 {Count} 个超时网关标记为 offline", totalAffected);
     }
 }

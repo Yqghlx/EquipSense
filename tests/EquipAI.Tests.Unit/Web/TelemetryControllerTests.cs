@@ -197,6 +197,34 @@ public class TelemetryControllerTests
         ((IRequestSizeLimitMetadata)attribute!).MaxRequestBodySize.Should().Be(256 * 1024);
     }
 
+    [Fact]
+    public async Task GetTelemetry_历史时间范围超过上限_返回400()
+    {
+        await using var sut = CreateSut();
+        var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = start.AddDays(TelemetryQueryService.MaxHistoryRangeDays + 1);
+
+        var result = await sut.Controller.GetTelemetry(
+            DeviceId, "temperature", start, end);
+
+        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.Value!.ToString().Should().Contain("历史查询时间范围");
+    }
+
+    [Fact]
+    public async Task GetTelemetry_结束时间早于起始时间_返回400()
+    {
+        await using var sut = CreateSut();
+        var start = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        var end = start.AddHours(-1);
+
+        var result = await sut.Controller.GetTelemetry(
+            DeviceId, "temperature", start, end);
+
+        var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
+        badRequest.Value!.ToString().Should().Contain("结束时间必须晚于起始时间");
+    }
+
     private static string GetBadRequestMessage(IActionResult result)
     {
         var badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;

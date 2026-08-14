@@ -511,6 +511,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<WorkOrderAnalysisHandler>();
         services.AddScoped<KnowledgeCaptureHandler>();
         services.AddScoped<WorkOrderNotificationHandler>();
+        services.AddScoped<WorkOrderAttachmentDeletionHandler>();
 
         // 基线计算后台服务
         services.AddHostedService<BaselineCalculationService>();

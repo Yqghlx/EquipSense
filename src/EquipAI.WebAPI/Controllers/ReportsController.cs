@@ -32,6 +32,7 @@ public class ReportsController : ControllerBase
     [RequirePermission("report:read")]
     [Audit("GenerateReport", "Report")]
     [ProducesResponseType(typeof(FileResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GenerateOperationsReport(
         [FromQuery] DateTime? startDate,
         [FromQuery] DateTime? endDate,
@@ -40,6 +41,12 @@ public class ReportsController : ControllerBase
         // 默认本月 — new DateTime(...) 构造的 Kind=Unspecified，查 timestamptz 列会崩，用 ToSafeUtc 规范化
         var end = (endDate ?? DateTime.UtcNow).ToSafeUtc();
         var start = (startDate ?? new DateTime(end.Year, end.Month, 1)).ToSafeUtc();
+
+        var validationError = OperationsReportService.ValidateDateRange(start, end);
+        if (validationError is not null)
+        {
+            return BadRequest(new { code = 400, message = validationError });
+        }
 
         var bytes = await _reportService.GenerateReportAsync(
             _tenantContext.TenantId, start, end, ct);

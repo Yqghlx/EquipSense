@@ -3,7 +3,19 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import api from '../../lib/api';
-import { useDevices, useDevice, useCreateDevice, useUpdateDevice, useDeleteDevice } from '../useDevices';
+import { downloadBlob } from '../../lib/utils';
+import {
+  useDevices,
+  useDevice,
+  useCreateDevice,
+  useUpdateDevice,
+  useDeleteDevice,
+  useDeviceImportPreview,
+  useImportDevices,
+  downloadImportTemplate,
+  exportDevicesCsv,
+  useRefreshHealthScore,
+} from '../useDevices';
 import type { Device, PagedResult } from '../../types';
 
 // Mock axios api 模块
@@ -16,7 +28,12 @@ vi.mock('../../lib/api', () => ({
   },
 }));
 
+vi.mock('../../lib/utils', () => ({
+  downloadBlob: vi.fn(),
+}));
+
 const mockedApi = vi.mocked(api);
+const mockedDownloadBlob = vi.mocked(downloadBlob);
 
 const useDevicesContract = useDevices as unknown as (
   query: Parameters<typeof useDevices>[0] & { keyword?: string },
@@ -249,5 +266,76 @@ describe('useDeleteDevice', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(mockedApi.delete).toHaveBeenCalledWith('/devices/device-001');
+  });
+});
+
+describe('设备导入导出与健康度 Hook', () => {
+  it('应上传文件进行导入预览并保留 multipart 请求头', async () => {
+    mockedApi.post.mockResolvedValueOnce({ data: { valid: true, rows: [] } });
+    const file = new File(['deviceCode,name'], 'devices.csv', { type: 'text/csv' });
+    const { result } = renderHook(() => useDeviceImportPreview(), { wrapper: createWrapper() });
+
+    result.current.mutate(file);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockedApi.post).toHaveBeenCalledWith(
+      '/devices/import?preview=true',
+      expect.any(FormData),
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+  });
+
+  it('执行设备导入成功后应刷新设备和仪表盘缓存', async () => {
+    mockedApi.post.mockResolvedValueOnce({ data: { success: true, imported: 1 } });
+    const file = new File(['deviceCode,name'], 'devices.csv', { type: 'text/csv' });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useImportDevices(), { wrapper });
+
+    result.current.mutate(file);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockedApi.post).toHaveBeenCalledWith('/devices/import', expect.any(FormData), {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['devices'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
+  });
+
+  it('应下载导入模板并按筛选条件导出设备 CSV', async () => {
+    mockedApi.get
+      .mockResolvedValueOnce({ data: new Blob(['template']) })
+      .mockResolvedValueOnce({ data: new Blob(['devices']) })
+      .mockResolvedValueOnce({ data: new Blob(['all']) });
+
+    await downloadImportTemplate();
+    expect(mockedApi.get).toHaveBeenNthCalledWith(1, '/devices/import/template', { responseType: 'blob' });
+    expect(mockedDownloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'device_import_template.csv');
+
+    vi.spyOn(Date, 'now').mockReturnValue(123456789);
+    await exportDevicesCsv({ status: 'Offline', type: 'pump' });
+    expect(mockedApi.get).toHaveBeenNthCalledWith(2, '/devices/export?status=Offline&type=pump', { responseType: 'blob' });
+    expect(mockedDownloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'devices_123456789.csv');
+
+    await exportDevicesCsv();
+    expect(mockedApi.get).toHaveBeenNthCalledWith(3, '/devices/export', { responseType: 'blob' });
+    vi.restoreAllMocks();
+  });
+
+  it('刷新健康度后应使设备列表和详情缓存失效', async () => {
+    mockedApi.post.mockResolvedValueOnce({ data: { deviceId: 'device-001', healthScore: 95, level: 'Good' } });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useRefreshHealthScore(), { wrapper });
+
+    result.current.mutate('device-001');
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockedApi.post).toHaveBeenCalledWith('/devices/device-001/health-score');
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['devices'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['device'] });
   });
 });

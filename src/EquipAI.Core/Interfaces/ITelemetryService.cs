@@ -21,6 +21,14 @@ public interface ITelemetryService
         DateTime timestamp, string quality = "good", string source = "mqtt");
 
     /// <summary>
+    /// 将遥测加入批量写入队列，并等待该条数据所属批次完成持久化。
+    /// MQTT 消费路径使用此方法，只有数据库事务成功后才允许消息处理器返回；
+    /// 持久化失败会向上游报告，避免 Broker 在数据尚未落库时收到成功确认。
+    /// </summary>
+    Task EnqueueAndWaitForPersistenceAsync(Guid tenantId, Guid deviceId, string metric, double value,
+        DateTime timestamp, string quality = "good", string source = "mqtt");
+
+    /// <summary>
     /// 手动 flush 批量写入队列中的所有数据到数据库
     /// </summary>
     Task FlushAsync();

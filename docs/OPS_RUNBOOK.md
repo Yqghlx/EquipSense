@@ -23,6 +23,34 @@ bash docker/production-readiness.sh \
 
 该入口失败时只会报告变量名、证书文件、服务名和错误类别，不会打印密钥；修复后必须重新执行，不能用 `--runtime` 失败时的旧状态替代检查。
 
+### 0.1 统一生产验收报告
+
+发布或故障恢复前，先运行统一只读验收入口；它只读取配置、Compose 展开结果和当前
+服务状态，不执行 `up/down/pull/build/exec`，也不触发备份恢复：
+
+```bash
+bash docker/production-acceptance.sh \
+  --profile production \
+  --env-file docker/.env \
+  --runtime-dir docker \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --evidence-dir /var/lib/equipsense/acceptance-evidence \
+  --runtime \
+  --output-dir /var/lib/equipsense/acceptance-report
+```
+
+`checks.tsv` 是机器读取的固定五列协议：
+`check_id/category/required/status/evidence`；`summary.md` 用于人工审阅。退出码为：
+`0` 允许进入下一阶段，`1` 表示明确失败，`2` 表示缺少生产条件或证据，`3` 表示
+参数/文件边界错误。出现 `BLOCKED` 或 `FAIL` 时不得登录 GHCR、拉取镜像或重建应用。
+
+SMTP、OTLP、MQTT 和启用的外部集成必须使用最近 24 小时的独立证据文件；证据文件只含
+`status=PASS`、UTC `observed_at` 等非敏感元数据，权限不得允许组或其他用户写入，也
+不得是符号链接。`data.backup-restore` 永远显示 `SKIPPED`，应单独执行
+`bash tests/backup-restore-rehearsal.sh` 或正式 RPO/RTO 演练，不能把统一验收的
+`SKIPPED` 当作备份通过。
+
 ### 0.1 生产初始化失败处置
 
 首次部署或凭据轮换时，推荐显式执行：
@@ -46,6 +74,8 @@ bash docker/setup.sh --bootstrap-local-secrets
 4. `外部生产配置`：补齐 AutoMapper 许可证、真实租户 UUID、域名、SMTP、LLM、OTLP 等部署专属项。
 5. `TLS/MQTT`：预置正式证书、私钥和 CA 链，检查有效期、主机名、权限和证书-私钥匹配。
 6. `Docker/Compose`：修复依赖、挂载文件或权限后，重新运行只读 readiness；不要在静态门禁失败时启动服务。
+
+MQTT 密码轮换由 `setup-mosquitto.sh` 原子生成：它先写同目录临时文件，成功后再替换正式密码文件；如果生成器失败，旧密码文件应保持不变。密码目录和正式文件不得使用符号链接，若发现此类边界问题应先恢复安全路径，再重新执行轮换。
 
 整改后的复验顺序为：
 
@@ -157,6 +187,29 @@ docker stats equipai-backend --no-stream
 # 3. 临时方案：调大告警规则的 CooldownSeconds
 # 4. 根因方案：修复或更换异常设备
 ```
+
+#### TelemetryPersistenceDropped（遥测落库失败并丢弃）— Critical
+
+该告警表示后端批量写入数据库已完成有限重试仍失败；数据没有落库，必须先确认数据库恢复，再观察边缘网关重传和告警闭环，不得只重启前端或清理 Prometheus 指标。
+
+```bash
+# 1. 确认告警增量与当前 MQTT/后端状态
+curl --fail --silent "http://127.0.0.1:${BACKEND_PORT:-8080}/metrics" \
+  | grep -E '^equipai_telemetry_(dropped|received|deduped)_total'
+docker/compose-production.sh ps postgres backend mosquitto edgegateway
+
+# 2. 检查 PostgreSQL、后端 Outbox 和事务错误；不要删除 outbox_messages 或遥测缓冲文件
+docker/compose-production.sh logs --tail=200 postgres backend \
+  | grep -E '遥测批量写入失败|遥测批次原子持久化|outbox|database|timeout|connection'
+
+# 3. 检查边缘网关本地缓冲，数据库恢复后应看到回放增长且丢弃计数不再增长
+docker/compose-production.sh logs --tail=100 edgegateway \
+  | grep -E 'replay|buffer|MQTT|上传'
+curl --fail --silent "http://127.0.0.1:${EDGEGATEWAY_PORT:-8090}/metrics" \
+  | grep -E '^edgegateway_(buffer_queue_depth|replay_messages_total|buffer_dropped_total)'
+```
+
+数据库和连接恢复后，先执行 `docker/production-acceptance.sh --profile production --runtime`，再按现场变更流程重启受影响服务。确认 `equipai_telemetry_dropped_total` 不再增长、网关积压持续下降，并抽查遥测与告警事件后，才可关闭 Critical 告警。后端有限重试耗尽的批次不会由后端自动恢复；MQTT 失败消息依赖 Broker 在有效会话中的 QoS 重投，边缘网关仍依赖本地缓冲，直接 HTTP 上报方必须按业务约定补发缺口。正式上线前必须通过 Broker 断线、数据库故障、失败重投和服务重启后的端到端演练确认这条边界。
 
 ### 1.3 Alertmanager 外部通知与就绪检查
 
@@ -367,6 +420,14 @@ ls -lht docker/backups
 密钥管理系统之外单独保护 `TOTP_ENCRYPTION_KEY`。
 `.dump` 使用容器内 `pg_restore --list` 校验；恢复脚本会先执行 TimescaleDB
 `pre_restore`，恢复后执行 `post_restore` 和 `ANALYZE`，恢复失败时也会尝试退出 restoring 模式。
+
+附件删除不再由 HTTP 请求在数据库提交后直接调用物理存储。`DELETE /attachments/{id}`
+会在删除元数据的同一事务中登记 `WorkOrderAttachmentDeletedEvent`；生产 RabbitMQ
+通过 Outbox 分发，处理器删除本地文件或 S3 对象。处理器失败必须保持异常，让对应的
+`.retry` 队列按策略重试，达到上限后进入对应的 `.dead` 队列。出现附件删除死信时，先核对
+事件中的 `TenantId`、`WorkOrderId`、`AttachmentId` 和 `StoragePath`，确认对象存储凭据、
+网络和权限恢复后再重放；不得为了消除死信直接恢复或手工删除业务元数据。对象已不存在时，
+幂等删除可视为成功。生产上线前还必须为附件删除死信积压设置监控和告警。
 
 ### 4.2 恢复流程
 

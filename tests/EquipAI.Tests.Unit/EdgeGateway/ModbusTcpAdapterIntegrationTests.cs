@@ -5,29 +5,35 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace EquipAI.Tests.Unit.EdgeGateway;
 
 /// <summary>
-/// Modbus TCP 协议适配器集成测试
-///
-/// 需要本地运行 Modbus 模拟服务器（python3 /tmp/modbus_sim2.py，端口 502）。
-/// 模拟器 Holding Registers: 100=650(温度) 101=70(压力) 102=120(电流) 103=2980(转速) 104=1
-///
-/// 测试验证 ModbusTcpAdapter 能：
-/// 1. 连接到 Modbus TCP 服务器
-/// 2. 读取保持寄存器值并正确转换为 DataPoint
-/// 3. 读取线圈状态
-///
-/// 如模拟器未运行，测试会被跳过。
+/// 使用仓库 Simulator 验证 Modbus TCP 适配器的保持寄存器和线圈读取。
 /// </summary>
 [Trait("Category", "RequiresSimulator")]
 public class ModbusTcpAdapterIntegrationTests
 {
-    private const string Endpoint = "127.0.0.1:502";
+    /// <summary>
+    /// 仓库 Simulator 的默认 Modbus TCP 端点。
+    /// </summary>
+    private const string DefaultEndpoint = "127.0.0.1:5020";
 
-    private static bool IsSimulatorRunning()
+    /// <summary>
+    /// 检查指定 host:port 端点的 TCP 端口是否可连接。
+    /// </summary>
+    private static bool IsSimulatorRunning(string endpoint)
     {
         try
         {
+            var separatorIndex = endpoint.LastIndexOf(':');
+            if (separatorIndex <= 0
+                || separatorIndex == endpoint.Length - 1
+                || !int.TryParse(endpoint[(separatorIndex + 1)..], out var port)
+                || port <= 0)
+            {
+                return false;
+            }
+
+            var host = endpoint[..separatorIndex].Trim('[', ']');
             using var client = new System.Net.Sockets.TcpClient();
-            return client.ConnectAsync("127.0.0.1", 502).Wait(3000);
+            return client.ConnectAsync(host, port).Wait(TimeSpan.FromSeconds(3));
         }
         catch
         {
@@ -35,52 +41,49 @@ public class ModbusTcpAdapterIntegrationTests
         }
     }
 
-    [Fact]
+    [ProtocolFact]
     public async Task ModbusTcpAdapter_Should_Connect_And_Read_Holding_Registers()
     {
-        if (!IsSimulatorRunning()) return;
+        var endpoint = ProtocolIntegrationTestEnvironment.ReadEndpoint(
+            "EQUIPAI_MODBUS_TEST_ENDPOINT",
+            DefaultEndpoint);
+        ProtocolIntegrationTestEnvironment.EnsureAvailable(
+            "Modbus TCP",
+            ProtocolIntegrationTestEnvironment.IsEnabled(),
+            IsSimulatorRunning(endpoint));
 
         var adapter = new ModbusTcpAdapter(NullLogger<ModbusTcpAdapter>.Instance);
         var config = new DeviceConfig(
             DeviceId: "AC-MODBUS-001",
             Protocol: "modbus-tcp",
-            ConnectionString: Endpoint,
+            ConnectionString: endpoint,
             DataPoints: new Dictionary<string, string>
             {
-                ["holding_register:0"] = "temperature",
-                ["holding_register:1"] = "pressure",
-                ["holding_register:2"] = "motor_current",
+                ["holding_register:100"] = "temperature",
+                ["holding_register:101"] = "pressure",
+                ["holding_register:102"] = "vibration",
             });
 
         try
         {
-            // Act: 连接
             await adapter.ConnectAsync(config, CancellationToken.None);
             adapter.IsConnected.Should().BeTrue("连接成功后 IsConnected 应为 true");
 
-            // Act: 读取保持寄存器
             var points = await adapter.ReadAsync(
-                new[] { "holding_register:0", "holding_register:1", "holding_register:2" },
+                new[] { "holding_register:100", "holding_register:101", "holding_register:102" },
                 CancellationToken.None);
 
-            // Assert
             points.Should().HaveCount(3);
-            points.Should().AllSatisfy(p =>
-            {
-                p.Quality.Should().Be("good");
-            });
+            points.Should().AllSatisfy(point => point.Quality.Should().Be("good"));
 
-            // 温度寄存器 100 = 650（65.0°C）
-            var temp = points.First(p => p.PointId == "holding_register:0");
-            temp.Value.Should().Be(650.0, "温度寄存器值应为 650");
+            var temperature = points.First(point => point.PointId == "holding_register:100");
+            temperature.Value.Should().BeInRange(20, 110, "温度寄存器值应在 Simulator 配置范围内");
 
-            // 压力寄存器 101 = 70
-            var pressure = points.First(p => p.PointId == "holding_register:1");
-            pressure.Value.Should().Be(70.0);
+            var pressure = points.First(point => point.PointId == "holding_register:101");
+            pressure.Value.Should().BeInRange(10, 90);
 
-            // 电流寄存器 102 = 120
-            var current = points.First(p => p.PointId == "holding_register:2");
-            current.Value.Should().Be(120.0);
+            var vibration = points.First(point => point.PointId == "holding_register:102");
+            vibration.Value.Should().BeInRange(0, 20);
         }
         finally
         {
@@ -88,36 +91,39 @@ public class ModbusTcpAdapterIntegrationTests
         }
     }
 
-    [Fact]
+    [ProtocolFact]
     public async Task ModbusTcpAdapter_Should_Read_Coils()
     {
-        if (!IsSimulatorRunning()) return;
+        var endpoint = ProtocolIntegrationTestEnvironment.ReadEndpoint(
+            "EQUIPAI_MODBUS_TEST_ENDPOINT",
+            DefaultEndpoint);
+        ProtocolIntegrationTestEnvironment.EnsureAvailable(
+            "Modbus TCP",
+            ProtocolIntegrationTestEnvironment.IsEnabled(),
+            IsSimulatorRunning(endpoint));
 
         var adapter = new ModbusTcpAdapter(NullLogger<ModbusTcpAdapter>.Instance);
         var config = new DeviceConfig(
             DeviceId: "AC-MODBUS-001",
             Protocol: "modbus-tcp",
-            ConnectionString: Endpoint,
+            ConnectionString: endpoint,
             DataPoints: new Dictionary<string, string>());
 
         try
         {
             await adapter.ConnectAsync(config, CancellationToken.None);
 
-            // 读取线圈 0（IsRunning = True）
             var points = await adapter.ReadAsync(
                 new[] { "coil:0", "coil:1" },
                 CancellationToken.None);
 
             points.Should().HaveCount(2);
 
-            // 线圈 0 = True (1.0)
-            var running = points.First(p => p.PointId == "coil:0");
-            running.Value.Should().Be(1.0, "IsRunning 线圈应为 True");
+            var running = points.First(point => point.PointId == "coil:0");
+            running.Value.Should().Be(1.0, "Simulator 线圈 0 表示设备运行");
 
-            // 线圈 1 = False (0.0)
-            var alarm = points.First(p => p.PointId == "coil:1");
-            alarm.Value.Should().Be(0.0, "Alarm 线圈应为 False");
+            var alarm = points.First(point => point.PointId == "coil:1");
+            alarm.Value.Should().Be(0.0, "Simulator 线圈 1 表示无报警");
         }
         finally
         {

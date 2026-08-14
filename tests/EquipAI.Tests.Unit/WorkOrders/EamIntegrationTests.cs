@@ -2,6 +2,8 @@ using EquipAI.Application.WorkOrders.Integration;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Moq.Protected;
+using System.Net;
 using System.Text.Json;
 
 namespace EquipAI.Tests.Unit.WorkOrders;
@@ -50,6 +52,113 @@ public class EamIntegrationTests
         });
         var result = await integration.PushCreatedAsync(
             Guid.NewGuid(), Guid.NewGuid(), "测试工单", "High", config);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_小驼峰配置应正确读取启用状态和Endpoint()
+    {
+        // Arrange — EAM 配置同样由管理端按小驼峰字段名保存
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"wonum\":\"EAM-LOWERCASE-001\"}")
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new EamIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<EamIntegration>>());
+        var config = """
+            {"enabled":true,"type":"maximo","endpoint":"https://maximo.example.com","apiKey":"test-api-key"}
+            """;
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "小驼峰配置测试", "High", config);
+
+        // Assert
+        result.Should().Be("EAM-LOWERCASE-001");
+        handler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_HTTP成功但响应体为空_应返回Null以触发重试()
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(string.Empty),
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new EamIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<EamIntegration>>());
+        var config = JsonSerializer.Serialize(new EamConfig
+        {
+            Enabled = true,
+            Type = "maximo",
+            Endpoint = "https://maximo.example.com",
+        });
+
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "EAM 空响应测试", "High", config);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_HTTP成功但JSON缺少外部工单号_应返回Null以触发重试()
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"status\":\"accepted\"}"),
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new EamIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<EamIntegration>>());
+        var config = JsonSerializer.Serialize(new EamConfig
+        {
+            Enabled = true,
+            Type = "maximo",
+            Endpoint = "https://maximo.example.com",
+        });
+
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "EAM 缺少外部工单号测试", "High", config);
 
         result.Should().BeNull();
     }

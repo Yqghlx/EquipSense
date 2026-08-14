@@ -36,24 +36,23 @@ public class BusinessMetricsCollector : LockedTimerService
     protected override TimeSpan DefaultInterval => TimeSpan.FromSeconds(30);
 
     /// <summary>基类回调：持锁后执行采集。</summary>
-    protected override Task ExecuteWorkAsync(CancellationToken ct) => CollectAsync();
+    protected override Task ExecuteWorkAsync(CancellationToken ct) => CollectAsync(ct);
 
-    private async Task CollectAsync()
+    private async Task CollectAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         // 活跃告警数（按严重级别分组）
-        // 注意：EF Core 无法翻译枚举 ToString()，先查到内存再分组
-        var activeAlertsRaw = await db.Alerts
+        // 先按枚举值在数据库侧分组，再在应用层转换标签文本；避免每 30 秒加载全部活跃告警。
+        var activeAlertRows = await db.Alerts
             .IgnoreQueryFilters()
             .Where(a => a.Status == AlertStatus.Active)
-            .Select(a => new { a.Severity })
-            .ToListAsync();
-
-        var activeAlerts = activeAlertsRaw
-            .GroupBy(a => a.Severity.ToString())
+            .GroupBy(a => a.Severity)
             .Select(g => new { Severity = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var activeAlerts = activeAlertRows
+            .Select(g => new { Severity = g.Severity.ToString(), g.Count })
             .ToList();
 
         // 将上一次存在但本次不存在的标签归零
@@ -70,15 +69,14 @@ public class BusinessMetricsCollector : LockedTimerService
         }
 
         // 工单数（按状态分组）
-        // 注意：同上，EF Core 无法翻译枚举 ToString()，先查内存再分组
-        var workOrdersRaw = await db.WorkOrders
+        // 先按枚举值在数据库侧计数，避免把租户规模增长转化为后台任务内存增长。
+        var workOrderRows = await db.WorkOrders
             .IgnoreQueryFilters()
-            .Select(w => new { w.Status })
-            .ToListAsync();
-
-        var workOrders = workOrdersRaw
-            .GroupBy(w => w.Status.ToString())
+            .GroupBy(w => w.Status)
             .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var workOrders = workOrderRows
+            .Select(g => new { Status = g.Status.ToString(), g.Count })
             .ToList();
 
         var currentWoLabels = workOrders.Select(g => g.Status).ToHashSet();
@@ -98,7 +96,7 @@ public class BusinessMetricsCollector : LockedTimerService
             .IgnoreQueryFilters()
             .GroupBy(r => r.Enabled ? "enabled" : "disabled")
             .Select(g => new { Status = g.Key, Count = g.Count() })
-            .ToListAsync();
+            .ToListAsync(ct);
 
         BusinessMetrics.KnowledgeRules.WithLabels("enabled").Set(0);
         BusinessMetrics.KnowledgeRules.WithLabels("disabled").Set(0);
@@ -109,7 +107,7 @@ public class BusinessMetricsCollector : LockedTimerService
             BusinessMetrics.KnowledgeRules.WithLabels(group.Status).Set(group.Count);
         }
 
-        var pendingRules = await db.PendingRules.IgnoreQueryFilters().CountAsync();
+        var pendingRules = await db.PendingRules.IgnoreQueryFilters().CountAsync(ct);
         BusinessMetrics.KnowledgeRules.WithLabels("pending").Set(pendingRules);
     }
 }

@@ -45,9 +45,13 @@ public class SmtpOptions
     public bool EnableSsl { get; set; } = true;
 
     /// <summary>
-    /// SMTP 配置是否完整
+    /// SMTP 配置是否完整。
+    /// 只有基础连接参数和发件人地址均有效时，邮件 worker 才会领取任务。
     /// </summary>
-    public bool IsConfigured => !string.IsNullOrEmpty(Host) && !string.IsNullOrEmpty(FromEmail);
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(Host)
+        && Port is > 0 and <= 65535
+        && MailAddress.TryCreate(FromEmail, out _);
 }
 
 /// <summary>

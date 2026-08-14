@@ -162,6 +162,65 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
             .HealthScore.Should().Be(91m, "无遥测时应使用中性质量分 70");
     }
 
+    [Fact]
+    public async Task UpdateAllHealthScoresAsync_告警查询应在数据库聚合而非加载每条告警()
+    {
+        var tenantId = Guid.NewGuid();
+        var deviceId = Guid.NewGuid();
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.Add(MakeTenant(tenantId, TenantStatus.Active));
+            db.Devices.Add(MakeDevice(deviceId, tenantId, DeviceStatus.Online));
+            db.Alerts.AddRange(
+                MakeAlert(tenantId, deviceId, AlertSeverity.Critical, AlertStatus.Active),
+                MakeAlert(tenantId, deviceId, AlertSeverity.High, AlertStatus.Resolved));
+            await db.SaveChangesAsync();
+        }
+
+        using var scope = _sp.CreateScope();
+        var healthService = scope.ServiceProvider.GetRequiredService<DeviceHealthService>();
+        _selectCommandCounter.Reset();
+
+        await healthService.UpdateAllHealthScoresAsync(tenantId, CancellationToken.None);
+
+        _selectCommandCounter.AlertSelectSql.Should().NotBeEmpty();
+        _selectCommandCounter.AlertSelectSql.Should().OnlyContain(sql =>
+            sql.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase),
+            "健康度重算不应把租户评估窗口内的每条告警加载到应用内存");
+    }
+
+    [Fact]
+    public async Task RunRecalculationAsync_租户数量超过批次时租户读取应分页()
+    {
+        var tenantIds = Enumerable.Range(0, 501).Select(_ => Guid.NewGuid()).ToArray();
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.AddRange(tenantIds.Select(id => new Tenant
+            {
+                Id = id,
+                Name = $"健康度边界-{id:N}",
+                Slug = $"health-{id:N}",
+                Plan = TenantPlan.Professional,
+                Status = TenantStatus.Active,
+            }));
+            await db.SaveChangesAsync();
+        }
+
+        _selectCommandCounter.Reset();
+        var hosted = _sp.GetRequiredService<DeviceHealthRecalculationHostedService>();
+
+        await hosted.RunRecalculationAsync(CancellationToken.None);
+
+        _selectCommandCounter.TenantSelectSql
+            .Should().NotBeEmpty()
+            .And.OnlyContain(sql => sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase),
+                "健康度后台任务不应一次性加载所有活跃租户 ID");
+    }
+
     /// <summary>构造租户（最小必填字段）</summary>
     private static Tenant MakeTenant(Guid id, TenantStatus status) => new()
     {
@@ -197,10 +256,39 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
     private sealed class SelectCommandCounter : DbCommandInterceptor
     {
         private int _count;
+        private readonly List<string> _alertSelectSql = [];
+        private readonly List<string> _tenantSelectSql = [];
+        private readonly object _sync = new();
 
         public int Count => Volatile.Read(ref _count);
 
-        public void Reset() => Interlocked.Exchange(ref _count, 0);
+        public IReadOnlyList<string> AlertSelectSql
+        {
+            get
+            {
+                lock (_sync)
+                    return _alertSelectSql.ToArray();
+            }
+        }
+
+        public IReadOnlyList<string> TenantSelectSql
+        {
+            get
+            {
+                lock (_sync)
+                    return _tenantSelectSql.ToArray();
+            }
+        }
+
+        public void Reset()
+        {
+            Interlocked.Exchange(ref _count, 0);
+            lock (_sync)
+            {
+                _alertSelectSql.Clear();
+                _tenantSelectSql.Clear();
+            }
+        }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
             DbCommand command,
@@ -226,6 +314,18 @@ public class DeviceHealthRecalculationHostedServiceTests : IAsyncLifetime
             if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
             {
                 Interlocked.Increment(ref _count);
+
+                if (command.CommandText.Contains("Alerts", StringComparison.OrdinalIgnoreCase))
+                {
+                    lock (_sync)
+                        _alertSelectSql.Add(command.CommandText);
+                }
+
+                if (command.CommandText.Contains("Tenants", StringComparison.OrdinalIgnoreCase))
+                {
+                    lock (_sync)
+                        _tenantSelectSql.Add(command.CommandText);
+                }
             }
         }
     }

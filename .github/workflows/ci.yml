@@ -121,14 +121,21 @@ jobs:
       - name: 运行单元测试（采集覆盖率）
         run: dotnet test tests/EquipAI.Tests.Unit/EquipAI.Tests.Unit.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage" -s tests/coverage.runsettings --results-directory ./coverage-results
 
+      - name: 运行 OPC UA/Modbus 协议验收
+        run: bash tests/e2e/run-protocol-integration.sh
+
       - name: 配置并验证 RabbitMQ v2 可靠死信策略
         run: |
           container_id=$(docker ps --filter ancestor=rabbitmq:4.3.4-management-alpine --format '{{.ID}}' | head -n 1)
           test -n "$container_id"
-          docker exec "$container_id" rabbitmqctl set_policy -p / --priority 20 --apply-to queues \
+          if ! docker exec "$container_id" rabbitmqctl list_vhosts --silent | grep -Fqx '/equipai_test'; then
+            docker exec "$container_id" rabbitmqctl add_vhost /equipai_test
+          fi
+          docker exec "$container_id" rabbitmqctl set_permissions -p /equipai_test equipai_test '.*' '.*' '.*'
+          docker exec "$container_id" rabbitmqctl set_policy -p /equipai_test --priority 20 --apply-to queues \
             equipai-v2-at-least-once-dlx '^equipai\.v2\.' \
             '{"dead-letter-strategy":"at-least-once","overflow":"reject-publish"}'
-          policies=$(docker exec "$container_id" rabbitmqctl list_policies -p / --formatter json)
+          policies=$(docker exec "$container_id" rabbitmqctl list_policies -p /equipai_test --formatter json)
           [[ "$policies" == *'equipai-v2-at-least-once-dlx'* ]]
           [[ "$policies" == *'at-least-once'* ]]
           [[ "$policies" == *'reject-publish'* ]]
@@ -144,6 +151,7 @@ jobs:
           RABBITMQ_TEST_PORT: '5672'
           RABBITMQ_TEST_USERNAME: equipai_test
           RABBITMQ_TEST_PASSWORD: equipai_test_password
+          RABBITMQ_TEST_VHOST: /equipai_test
           RABBITMQ_TEST_MANAGEMENT_PORT: '15672'
 
       # 合并单元 + 集成覆盖率为单份 Cobertura XML，供门禁脚本读取
@@ -438,9 +446,20 @@ jobs:
           SMOKE_FRONTEND_IMAGE: equipsense/frontend:ci-${{ github.sha }}
           SMOKE_EDGEGATEWAY_IMAGE: equipsense/edgegateway:ci-${{ github.sha }}
           SMOKE_RUN_E2E: ${{ github.event_name != 'pull_request' && 'true' || 'false' }}
+          SMOKE_ACCEPTANCE_OUTPUT_DIR: ${{ github.workspace }}/production-acceptance-report
+          SMOKE_ACCEPTANCE_EXPECTED_TAG: ci-${{ github.sha }}
           # 有正式测试许可证时注入；未注入时仅验证配置路径和容器启动契约，不代表许可证有效性。
           SMOKE_AUTOMAPPER_LICENSE_KEY: ${{ secrets.AUTOMAPPER_LICENSE_KEY }}
         run: bash tests/scripts/production-runtime-smoke.sh
+
+      - name: 上传统一生产验收报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: production-acceptance-report
+          path: production-acceptance-report/
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: 上传 Production 镜像 E2E 报告
         if: always() && github.event_name != 'pull_request'

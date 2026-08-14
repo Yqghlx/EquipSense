@@ -117,6 +117,7 @@ public class TelemetryController : ControllerBase
     [RequirePermission("device:read")]
     [ProducesResponseType(typeof(List<TelemetryDataPoint>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(Dictionary<string, double>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> GetTelemetry(
         Guid deviceId,
         [FromQuery] string? metric,
@@ -130,12 +131,19 @@ public class TelemetryController : ControllerBase
         // 未指定指标时，返回所有指标的最新值
         if (string.IsNullOrEmpty(metric))
         {
-            var latest = await _queryService.GetLatestAsync(deviceId);
+            var latest = await _queryService.GetLatestAsync(deviceId, HttpContext.RequestAborted);
             return Ok(latest);
         }
 
         // 指定了指标时，返回历史时序数据
-        var data = await _queryService.QueryAsync(deviceId, metric, start, end);
+        var rangeError = TelemetryQueryService.ValidateHistoryRange(start, end);
+        if (rangeError is not null)
+        {
+            return BadRequest(new { code = 400, message = rangeError });
+        }
+
+        var data = await _queryService.QueryAsync(
+            deviceId, metric, start, end, HttpContext.RequestAborted);
         return Ok(data);
     }
 }

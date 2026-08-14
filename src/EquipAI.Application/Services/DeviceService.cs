@@ -18,6 +18,9 @@ namespace EquipAI.Application.Services;
 /// </summary>
 public class DeviceService : IDeviceService
 {
+    private const int DeleteAssociationBatchSize = 500;
+    private const string DeviceDeletedResolution = "设备已删除，自动归档活跃告警";
+
     private readonly AppDbContext _dbContext;
     private readonly IMapper _mapper;
     private readonly ILogger<DeviceService> _logger;
@@ -262,53 +265,12 @@ public class DeviceService : IDeviceService
             .FirstOrDefaultAsync(d => d.Id == deviceId && d.TenantId == tenantId)
             ?? throw new KeyNotFoundException($"设备 {deviceId} 不存在");
 
-        // 1. 归档该设备的活跃告警（标记 Resolved，避免孤儿告警污染 Dashboard）
-        // 注意：用传统 foreach 而非 ExecuteUpdateAsync，兼容 InMemory 测试 provider
-        // （ExecuteUpdate/ExecuteDelete 仅关系型数据库支持）。删设备是低频操作，性能不关键。
-        var activeAlerts = await _dbContext.Alerts
-            .Where(a => a.TenantId == tenantId &&
-                        a.DeviceId == deviceId &&
-                        a.Status == Core.Enums.AlertStatus.Active)
-            .ToListAsync();
-
-        var now = DateTime.UtcNow;
-        foreach (var alert in activeAlerts)
-        {
-            alert.Status = Core.Enums.AlertStatus.Resolved;
-            alert.ResolvedAt = now;
-            alert.Resolution = "设备已删除，自动归档活跃告警";
-        }
-
-        // 2. 删除该设备的网关关联（停止向幽灵设备推送）
-        var gatewayLinks = await _dbContext.GatewayDevices
-            .Where(gd => gd.TenantId == tenantId && gd.DeviceId == deviceId)
-            .ToListAsync();
-        _dbContext.GatewayDevices.RemoveRange(gatewayLinks);
-
-        // 3. 删除该设备绑定的告警规则（避免孤儿规则残留）
-        // 规则分三种粒度：DeviceId 特定（绑定具体设备）/ DeviceType 特定（绑定类型）/ 租户级（全设备）。
-        // 仅清理 DeviceId 绑定本设备的规则；DeviceType/租户级规则不绑定具体设备，保留（仍适用于其他/同类型设备）。
-        // 不清理的后果：删设备后规则残留（DeviceId 指向已删设备）→ 规则管理页显示孤儿规则致困惑；更严重：
-        // 重建同 DeviceCode 设备（返修/更换后新 ID）时旧规则仍绑旧 ID，新设备无告警保护
-        // （温度/振动超限不告警）——告警评估按 r.DeviceId==当前遥测设备过滤，孤儿规则永不匹配（静默失效，不崩溃），
-        // 工业设备返修后失去告警是安全盲区。与归档告警/移除网关关联同为"删设备必须清理的 DeviceId 绑定关联"。
-        var deviceRules = await _dbContext.AlertRules
-            .Where(r => r.TenantId == tenantId && r.DeviceId == deviceId)
-            .ToListAsync();
-        _dbContext.AlertRules.RemoveRange(deviceRules);
-
-        // 4. 删除设备本身
-        _dbContext.Devices.Remove(device);
-
-        // 5. 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）
-        var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
-            .FirstOrDefaultAsync(t => t.Id == tenantId);
-        if (tenant != null && tenant.CurrentDeviceCount > 0)
-        {
-            tenant.CurrentDeviceCount--;
-        }
-
-        await _dbContext.SaveChangesAsync();
+        // 关联数据可能远大于单个设备的当前状态；关系型数据库走批量 DML，
+        // 避免把告警、网关关联和规则实体全部 materialize 到 API 进程。
+        // InMemory provider 没有 ExecuteUpdate/ExecuteDelete，则按固定批次降级，
+        // 只为测试和非关系型场景保留兼容路径。
+        (var archivedAlertCount, var gatewayLinkCount, var deviceRuleCount) =
+            await RemoveDeviceAndAssociationsAsync(device, tenantId, deviceId);
 
         // 设备删除是不可逆的资产处置（硬删除 + 级联清理告警/规则/网关关联），必须留痕审计：
         // 工业资产报废/拆除是重大事件，删除不可追溯则无法核查"谁在何时删除了哪台设备"
@@ -318,7 +280,161 @@ public class DeviceService : IDeviceService
 
         _logger.LogInformation(
             "设备 {DeviceId}（编码：{DeviceCode}）已删除，同时归档 {AlertCount} 条活跃告警，移除 {LinkCount} 个网关关联，清理 {RuleCount} 条绑定告警规则",
-            deviceId, device.DeviceCode, activeAlerts.Count, gatewayLinks.Count, deviceRules.Count);
+            deviceId, device.DeviceCode, archivedAlertCount, gatewayLinkCount, deviceRuleCount);
+    }
+
+    /// <summary>
+    /// 在事务中删除设备及其无外键关联数据，并返回审计日志需要的数量。
+    /// 关系型数据库使用批量 DML；非关系型测试提供程序按固定批次处理，避免无界查询。
+    /// </summary>
+    private async Task<(int ArchivedAlertCount, int GatewayLinkCount, int DeviceRuleCount)>
+        RemoveDeviceAndAssociationsAsync(
+            Core.Entities.Device device,
+            Guid tenantId,
+            Guid deviceId)
+    {
+        async Task<(int ArchivedAlertCount, int GatewayLinkCount, int DeviceRuleCount)> ExecuteAsync()
+        {
+            var archivedAlertCount = await ArchiveActiveAlertsAsync(tenantId, deviceId);
+            var gatewayLinkCount = await RemoveGatewayLinksAsync(tenantId, deviceId);
+            var deviceRuleCount = await RemoveDeviceRulesAsync(tenantId, deviceId);
+
+            _dbContext.Devices.Remove(device);
+
+            // 维护租户 CurrentDeviceCount（使用 UnfilteredSet 跨租户查询）。
+            var tenant = await _dbContext.UnfilteredSet<Core.Entities.Tenant>()
+                .FirstOrDefaultAsync(t => t.Id == tenantId);
+            if (tenant != null && tenant.CurrentDeviceCount > 0)
+            {
+                tenant.CurrentDeviceCount--;
+            }
+
+            await _dbContext.SaveChangesAsync();
+            return (archivedAlertCount, gatewayLinkCount, deviceRuleCount);
+        }
+
+        if (!_dbContext.Database.IsRelational())
+        {
+            return await ExecuteAsync();
+        }
+
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+        try
+        {
+            var result = await ExecuteAsync();
+            await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 将设备的活跃告警批量归档，返回实际影响行数。
+    /// </summary>
+    private async Task<int> ArchiveActiveAlertsAsync(Guid tenantId, Guid deviceId)
+    {
+        var query = _dbContext.Alerts
+            .Where(alert => alert.TenantId == tenantId
+                && alert.DeviceId == deviceId
+                && alert.Status == AlertStatus.Active);
+        var now = DateTime.UtcNow;
+
+        if (_dbContext.Database.IsRelational())
+        {
+            return await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(alert => alert.Status, AlertStatus.Resolved)
+                .SetProperty(alert => alert.ResolvedAt, now)
+                .SetProperty(alert => alert.Resolution, DeviceDeletedResolution));
+        }
+
+        var archivedCount = 0;
+        while (true)
+        {
+            var batch = await query
+                .OrderBy(alert => alert.Id)
+                .Take(DeleteAssociationBatchSize)
+                .ToListAsync();
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var alert in batch)
+            {
+                alert.Status = AlertStatus.Resolved;
+                alert.ResolvedAt = now;
+                alert.Resolution = DeviceDeletedResolution;
+            }
+
+            await _dbContext.SaveChangesAsync();
+            archivedCount += batch.Count;
+            foreach (var alert in batch)
+            {
+                _dbContext.Entry(alert).State = EntityState.Detached;
+            }
+        }
+
+        return archivedCount;
+    }
+
+    /// <summary>
+    /// 删除设备的网关关联，返回实际影响行数。
+    /// </summary>
+    private async Task<int> RemoveGatewayLinksAsync(Guid tenantId, Guid deviceId)
+    {
+        var query = _dbContext.GatewayDevices
+            .Where(link => link.TenantId == tenantId && link.DeviceId == deviceId);
+        if (_dbContext.Database.IsRelational())
+        {
+            return await query.ExecuteDeleteAsync();
+        }
+
+        return await RemoveInBatchesAsync(query);
+    }
+
+    /// <summary>
+    /// 删除设备绑定的告警规则，保留设备类型规则和租户级规则。
+    /// </summary>
+    private async Task<int> RemoveDeviceRulesAsync(Guid tenantId, Guid deviceId)
+    {
+        var query = _dbContext.AlertRules
+            .Where(rule => rule.TenantId == tenantId && rule.DeviceId == deviceId);
+        if (_dbContext.Database.IsRelational())
+        {
+            return await query.ExecuteDeleteAsync();
+        }
+
+        return await RemoveInBatchesAsync(query);
+    }
+
+    /// <summary>
+    /// 为不支持批量 DML 的提供程序提供固定批次删除兜底。
+    /// </summary>
+    private async Task<int> RemoveInBatchesAsync<TEntity>(IQueryable<TEntity> query)
+        where TEntity : Core.Entities.BaseEntity
+    {
+        var removedCount = 0;
+        while (true)
+        {
+            var batch = await query
+                .OrderBy(entity => entity.Id)
+                .Take(DeleteAssociationBatchSize)
+                .ToListAsync();
+            if (batch.Count == 0)
+            {
+                break;
+            }
+
+            _dbContext.RemoveRange(batch);
+            await _dbContext.SaveChangesAsync();
+            removedCount += batch.Count;
+        }
+
+        return removedCount;
     }
 
     /// <summary>

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import OpcUaConnectionForm from '../OpcUaConnectionForm';
 import ModbusTcpConnectionForm from '../ModbusTcpConnectionForm';
 import ModbusRtuConnectionForm from '../ModbusRtuConnectionForm';
@@ -76,5 +76,47 @@ describe('设备接入连接表单英文界面', () => {
     expect(screen.queryByText('无')).not.toBeInTheDocument();
     expect(screen.queryByText('偶')).not.toBeInTheDocument();
     expect(screen.queryByText('奇')).not.toBeInTheDocument();
+  });
+
+  it('OPC UA 表单应解析配置并序列化端点、凭据和安全模式变更', async () => {
+    render(
+      <OpcUaConnectionForm
+        value={'{"endpointUrl":"opc.tcp://plc:4840","securityMode":"Sign","username":"operator","password":"secret"}'}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.getByDisplayValue('opc.tcp://plc:4840')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Endpoint URL'), { target: { value: 'opc.tcp://plc:4841' } });
+    fireEvent.change(screen.getByLabelText('Username (optional)'), { target: { value: 'maintainer' } });
+    fireEvent.change(screen.getByLabelText('Password (optional)'), { target: { value: 'new-secret' } });
+
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('opc.tcp://plc:4841'));
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('new-secret'));
+  });
+
+  it('Modbus TCP 表单应处理非法 JSON 并更新主机、端口和单元 ID', async () => {
+    render(<ModbusTcpConnectionForm value="{invalid" onChange={onChange} />);
+
+    expect(screen.getByLabelText('Host')).toHaveValue('127.0.0.1');
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: '192.168.1.10' } });
+    fireEvent.change(screen.getByLabelText('Port'), { target: { value: '1502' } });
+    fireEvent.change(screen.getByLabelText('Unit ID'), { target: { value: '2' } });
+
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('192.168.1.10'));
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('1502'));
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('"unitId": 2'));
+  });
+
+  it('Modbus RTU 表单应解析串口配置并更新波特率、数据位、停止位和地址', async () => {
+    const view = render(<ModbusRtuConnectionForm value={'{"port":"/dev/ttyS1","baudRate":19200,"dataBits":7,"parity":"Even","stopBits":2,"unitId":5}'} onChange={onChange} />);
+
+    expect(screen.getByLabelText('Serial port')).toHaveValue('/dev/ttyS1');
+    view.rerender(<ModbusRtuConnectionForm value="{}" onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Serial port'), { target: { value: '/dev/ttyUSB2' } });
+    fireEvent.change(screen.getByLabelText('Unit ID'), { target: { value: '10' } });
+
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('/dev/ttyUSB2'));
+    expect(onChange).toHaveBeenCalledWith(expect.stringContaining('"unitId": 10'));
   });
 });

@@ -133,6 +133,7 @@ public class MqttMessageHandler
                 return;
             }
 
+            var persistenceTasks = new List<Task>(metricCount);
             var acceptedCount = 0;
             foreach (var metric in metricsEl.EnumerateObject())
             {
@@ -149,15 +150,21 @@ public class MqttMessageHandler
                     continue;
                 }
 
-                await _telemetryService.EnqueueAsync(
+                // MQTT 只有在所属批次完成数据库持久化后才返回；否则 MqttClientService 会标记
+                // ProcessingFailed，避免 Broker 收到成功确认后把未落库遥测永久丢失。
+                persistenceTasks.Add(_telemetryService.EnqueueAndWaitForPersistenceAsync(
                     tenantId, deviceId,
                     metric.Name, value,
-                    timestamp, quality, "mqtt");
+                    timestamp, quality, "mqtt"));
+                acceptedCount++;
+            }
 
+            await Task.WhenAll(persistenceTasks);
+            for (var index = 0; index < acceptedCount; index++)
+            {
                 BusinessMetrics.TelemetryReceived
                     .WithLabels(tenantId.ToString(), deviceId.ToString())
                     .Inc();
-                acceptedCount++;
             }
 
             if (acceptedCount == 0)
@@ -170,6 +177,9 @@ public class MqttMessageHandler
         catch (Exception ex)
         {
             _logger.LogError(ex, "处理 MQTT 消息失败: {Topic}", topic);
+            // 基础设施/持久化失败不能被吞成“成功处理”；由 MqttClientService 负责把
+            // 失败状态映射到 MQTT ACK，触发 Broker 按 QoS 语义重投。
+            throw;
         }
     }
 }

@@ -31,5 +31,6 @@ public interface IPushNotificationService
     /// <summary>
     /// 向指定租户的所有订阅发送推送通知（广播）
     /// </summary>
-    Task SendToTenantAsync(Guid tenantId, string title, string body, string? url = null);
+    Task SendToTenantAsync(Guid tenantId, string title, string body, string? url = null,
+        CancellationToken cancellationToken = default);
 }

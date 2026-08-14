@@ -52,6 +52,47 @@ public sealed class SmtpEmailNotificationServiceTests
     }
 
     [Fact]
+    public async Task SMTP端口非法时应视为未配置且不调用发送器()
+    {
+        var sender = new Mock<ISmtpMailSender>();
+        sender.Setup(item => item.SendAsync(It.IsAny<MailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = CreateService(new SmtpOptions
+        {
+            Host = "smtp.example.com",
+            Port = 70000,
+            FromEmail = "noreply@example.com",
+        }, sender);
+
+        var result = await service.SendAsync("user@example.com", "测试", "<p>正文</p>");
+
+        result.Should().BeFalse();
+        sender.Verify(
+            item => item.SendAsync(It.IsAny<MailMessage>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SMTP发件人地址非法时应视为未配置且不调用发送器()
+    {
+        var sender = new Mock<ISmtpMailSender>();
+        sender.Setup(item => item.SendAsync(It.IsAny<MailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = CreateService(new SmtpOptions
+        {
+            Host = "smtp.example.com",
+            FromEmail = "not-an-email",
+        }, sender);
+
+        var result = await service.SendAsync("user@example.com", "测试", "<p>正文</p>");
+
+        result.Should().BeFalse();
+        sender.Verify(
+            item => item.SendAsync(It.IsAny<MailMessage>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task 无效邮箱地址应返回失败且不调用发送器()
     {
         var sender = new Mock<ISmtpMailSender>();

@@ -7,6 +7,7 @@ using EquipAI.Infrastructure.Data;
 using EquipAI.Infrastructure.Data.Entities;
 using EquipAI.Infrastructure.Metrics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -60,9 +61,35 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
             TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
     }
 
-    public async Task EnqueueAsync(Guid tenantId, Guid deviceId, string metric, double value,
+    public Task EnqueueAsync(Guid tenantId, Guid deviceId, string metric, double value,
         DateTime timestamp, string quality = "good", string source = "mqtt")
+        => EnqueueInternalAsync(
+            tenantId, deviceId, metric, value, timestamp, quality, source,
+            waitForPersistence: false);
+
+    public Task EnqueueAndWaitForPersistenceAsync(Guid tenantId, Guid deviceId, string metric, double value,
+        DateTime timestamp, string quality = "good", string source = "mqtt")
+        => EnqueueInternalAsync(
+            tenantId, deviceId, metric, value, timestamp, quality, source,
+            waitForPersistence: true);
+
+    /// <summary>
+    /// 将一条遥测加入队列；需要可靠接收的调用方可等待该条数据所属批次完成。
+    /// 普通 HTTP 入队保持原有异步接收语义，MQTT 则通过等待任务把数据库失败传回消息处理器。
+    /// </summary>
+    private async Task EnqueueInternalAsync(
+        Guid tenantId,
+        Guid deviceId,
+        string metric,
+        double value,
+        DateTime timestamp,
+        string quality,
+        string source,
+        bool waitForPersistence)
     {
+        TaskCompletionSource<bool>? persistenceCompletion = waitForPersistence
+            ? new(TaskCreationOptions.RunContinuationsAsynchronously)
+            : null;
         bool shouldFlush;
         lock (_lifecycleLock)
         {
@@ -71,6 +98,7 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
             if (Volatile.Read(ref _disposeStarted) != 0)
             {
                 _logger.LogDebug("遥测服务已开始关闭，丢弃设备 {DeviceId} 的新遥测", deviceId);
+                persistenceCompletion?.TrySetException(new ObjectDisposedException(nameof(TelemetryService)));
                 return;
             }
 
@@ -82,7 +110,8 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
                 Value = value,
                 Timestamp = timestamp,
                 Quality = quality,
-                Source = source
+                Source = source,
+                PersistenceCompletion = persistenceCompletion
             });
             shouldFlush = _queue.Count >= BatchSize;
         }
@@ -90,6 +119,11 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
         if (shouldFlush)
         {
             await FlushAsync();
+        }
+
+        if (persistenceCompletion is not null)
+        {
+            await persistenceCompletion.Task.ConfigureAwait(false);
         }
     }
 
@@ -160,84 +194,27 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
         var backoffDelays = new[] { 200, 500, 1000 };
         var maxAttempts = backoffDelays.Length + 1;
 
-        // 事件发布失败时，遥测行已经落库，不能重新用数据库去重结果决定是否发布事件：
-        // 否则重试会把整批识别为“已有数据”并直接返回，形成“时序数据存在但告警未评估”的静默丢失。
-        // 保存稳定的事件 ID，既能让 RabbitMQ/Outbox 幂等，又能让整批在短暂故障后继续发布。
-        var pendingEvents = new List<TelemetryReceivedEvent>();
-        var hasPersistedBatch = false;
+        // 保存稳定的事件 ID，既能让 RabbitMQ/Outbox 幂等，又能让事务重试继续使用同一批事件。
+        // 事件列表只在第一次确定待写入行后生成；后续重试不能重新生成事件 ID，否则会削弱 Inbox 幂等。
+        var batchState = new TelemetryBatchState();
 
         for (var attempt = 0; ; attempt++)
         {
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                // TelemetryService 是 Singleton，不能把构造时解析的事件总线与当前写入 DbContext 混用。
-                // 生产模式解析当前作用域的 Outbox 总线，测试/兼容容器没有注册时回退到注入实例。
-                var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
-
-                if (!hasPersistedBatch)
+                var hasWork = await PersistBatchAndEventsAsync(items, batchState);
+                if (!hasWork)
                 {
-                    // 多租户纵深防御：校验每条遥测的设备存在且归属租户与上报租户一致。
-                    // 校验也必须处于重试范围内，数据库短暂不可用时不能让异常逃出 Timer 回调。
-                    List<TelemetryQueueItem> validItems;
-                    using (var validateScope = _scopeFactory.CreateScope())
-                    {
-                        var validateDb = validateScope.ServiceProvider.GetRequiredService<AppDbContext>();
-                        validItems = await ValidateItemsAsync(validateDb, items);
-                    }
-
-                    if (validItems.Count == 0)
-                        return; // 全部被拒（未知设备/租户不符），无数据可写
-
-                    // 去重（批内 + DB 已存在）：见 DedupBatchAsync。放在首次写入前，
-                    // 覆盖 MQTT 重传和边缘网关重放，避免重复写入污染基线/触发重复告警。
-                    var toInsert = await DedupBatchAsync(dbContext, validItems);
-                    if (toInsert.Count == 0)
-                    {
-                        _logger.LogDebug("批次 {Count} 条全部为重复数据（已去重），跳过写入与事件发布",
-                            validItems.Count);
-                        return;
-                    }
-
-                    // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返
-                    // 修复历史：原实现 foreach 100 次 ExecuteSqlRawAsync，导致 100 设备写入 P95=1.38s
-                    try
-                    {
-                        await InsertBatchAsync(dbContext, toInsert);
-                    }
-                    catch (Exception insertException)
-                    {
-                        // 数据库可能已经提交 INSERT，但客户端在收到响应前断开。
-                        // 多值 INSERT 在数据库侧是原子的；整批键均存在时应继续发布事件，
-                        // 否则下一次去重会把“已落库但未告警”的批次误判为普通重复数据。
-                        if (await IsBatchPersistedAsync(dbContext, toInsert))
-                        {
-                            pendingEvents = CreateTelemetryEvents(toInsert);
-                            hasPersistedBatch = true;
-                            _logger.LogWarning(
-                                insertException,
-                                "遥测批量 INSERT 响应丢失但数据已确认落库，继续发布 {Count} 个事件",
-                                pendingEvents.Count);
-                            continue;
-                        }
-
-                        throw;
-                    }
-
-                    pendingEvents = CreateTelemetryEvents(toInsert);
-                    hasPersistedBatch = true;
-
-                    _logger.LogDebug("已写入 {Count} 条遥测数据（尝试 {Attempt}/{Total}，去重前 {Before}）",
-                        pendingEvents.Count, attempt + 1, maxAttempts, validItems.Count);
+                    _logger.LogDebug("批次遥测全部被拒绝或已去重，跳过写入与事件发布");
+                }
+                else
+                {
+                    _logger.LogDebug("已原子持久化 {Count} 条遥测及其事件（尝试 {Attempt}/{Total}）",
+                        batchState.Events?.Count ?? 0, attempt + 1, maxAttempts);
                 }
 
-                // 仅为实际写入的新行发布事件；重试时复用同一批稳定 EventId，
-                // 不再重新查询去重结果，也不会因时序行已存在而跳过告警评估。
-                foreach (var @event in pendingEvents)
-                    await eventBus.PublishAsync(@event);
-
-                return; // 写入成功，退出重试循环
+                CompletePersistence(items);
+                return;
             }
             catch (Exception ex)
             {
@@ -250,30 +227,154 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
                     continue;
                 }
 
-                // 重试耗尽：记录丢弃指标供运维告警，放弃本批。
-                // 若写入已成功但事件始终失败，遥测数据本身仍在库中，必须使用独立指标；
-                // 否则运维会误以为数据库写入失败，错过告警评估链路的故障。
-                if (hasPersistedBatch)
-                {
-                    BusinessMetrics.TelemetryEventDropped.Inc(pendingEvents.Count);
-                    _logger.LogError(
-                        ex,
-                        "遥测已落库但事件发布重试 {Total} 次仍失败，丢弃 {Count} 个事件",
-                        maxAttempts,
-                        pendingEvents.Count);
-                }
-                else
-                {
-                    BusinessMetrics.TelemetryDropped.Inc(items.Count);
-                    _logger.LogError(
-                        ex,
-                        "遥测批量写入重试 {Total} 次仍失败，丢弃 {Count} 条数据",
-                        maxAttempts,
-                        items.Count);
-                }
+                // 事务重试耗尽：数据和事件均未得到确认，计入遥测丢弃指标。
+                // 这样不会把“事件失败但遥测仍在库中”误报为可接受状态；边缘网关的本地缓冲
+                // 会在后续重传，下一次成功时由事件总线重新建立完整闭环。
+                BusinessMetrics.TelemetryDropped.Inc(items.Count);
+                _logger.LogError(
+                    ex,
+                    "遥测批次原子持久化重试 {Total} 次仍失败，放弃 {Count} 条数据",
+                    maxAttempts,
+                    items.Count);
+                CompletePersistence(items, ex);
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// 完成等待持久化的调用方任务。
+    /// 失败批次仍按既有有界策略丢弃，避免数据库长时间不可用时内存无界增长；
+    /// 但 MQTT 调用方会收到异常并可让 Broker 保留/重投消息，而不是把失败静默当成成功。
+    /// </summary>
+    private static void CompletePersistence(
+        IReadOnlyList<TelemetryQueueItem> items,
+        Exception? exception = null)
+    {
+        foreach (var item in items)
+        {
+            if (item.PersistenceCompletion is null)
+                continue;
+
+            if (exception is null)
+                item.PersistenceCompletion.TrySetResult(true);
+            else
+                item.PersistenceCompletion.TrySetException(exception);
+        }
+    }
+
+    /// <summary>
+    /// 在同一个数据库事务中完成遥测批量写入和事件 Outbox 登记。
+    ///
+    /// 生产环境使用 Npgsql 可重试执行策略；必须让“开启事务、写入遥测、登记 Outbox、提交事务”
+    /// 整体处于执行策略委托中，否则客户端在提交响应丢失时可能重复插入或留下半个闭环。
+    /// 每次执行策略重试都创建新的作用域，避免失败事务污染旧 DbContext 的跟踪状态。
+    /// InMemory 事件总线/数据库仅用于开发和测试，不具备生产级持久化语义，因此不强行伪造事务。
+    /// </summary>
+    private async Task<bool> PersistBatchAndEventsAsync(
+        IReadOnlyList<TelemetryQueueItem> items,
+        TelemetryBatchState batchState,
+        CancellationToken cancellationToken = default)
+    {
+        using var strategyScope = _scopeFactory.CreateScope();
+        var strategyDbContext = strategyScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var executionStrategy = strategyDbContext.Database.CreateExecutionStrategy();
+        var hasWork = false;
+
+        hasWork = await executionStrategy.ExecuteAsync(
+            state: 0,
+            operation: async (_, _, operationCancellationToken) =>
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                // TelemetryService 是 Singleton，不能把构造时解析的事件总线与当前写入 DbContext 混用。
+                // 生产模式解析当前作用域的 Outbox 总线，测试/兼容容器没有注册时回退到注入实例。
+                var eventBus = scope.ServiceProvider.GetService<IEventBus>() ?? _eventBus;
+
+                IDbContextTransaction? transaction = null;
+                if (dbContext.Database.IsRelational())
+                {
+                    transaction = await dbContext.Database.BeginTransactionAsync(operationCancellationToken);
+                }
+
+                var operationHasWork = false;
+                try
+                {
+                    // 多租户纵深防御：校验每条遥测的设备存在且归属租户与上报租户一致。
+                    var validItems = await ValidateItemsAsync(dbContext, items, operationCancellationToken);
+                    if (validItems.Count == 0)
+                    {
+                        return false;
+                    }
+
+                    // 去重（批内 + DB 已存在）：覆盖 MQTT 重传和边缘网关重放，避免重复写入污染基线
+                    // 或触发重复告警。执行策略重试时重新计算，能够识别上一次提交响应丢失的结果。
+                    var toInsert = await DedupBatchAsync(dbContext, validItems, operationCancellationToken);
+                    if (toInsert.Count > 0)
+                    {
+                        batchState.Events ??= CreateTelemetryEvents(toInsert);
+
+                        // 多值 INSERT：一次 SQL 完成整批写入，避免逐行 INSERT 导致的 N 次网络往返。
+                        await InsertBatchAsync(dbContext, toInsert, operationCancellationToken);
+                        operationHasWork = true;
+                    }
+
+                    // 如果执行策略正在处理一次“提交成功但响应丢失”的重试，toInsert 可能为空；
+                    // 仍需用同一批稳定事件调用事务 Outbox。TransactionalEventBus 会按 EventId 幂等跳过已存在项。
+                    if (batchState.Events is not null)
+                    {
+                        foreach (var @event in batchState.Events)
+                        {
+                            await eventBus.PublishAsync(@event, operationCancellationToken);
+                        }
+
+                        operationHasWork = true;
+                    }
+
+                    if (transaction is not null)
+                    {
+                        await transaction.CommitAsync(operationCancellationToken);
+                    }
+                }
+                catch
+                {
+                    if (transaction is not null)
+                    {
+                        try
+                        {
+                            await transaction.RollbackAsync(CancellationToken.None);
+                        }
+                        catch (Exception rollbackException)
+                        {
+                            // 原始异常通常意味着连接已断开，回滚也可能因事务状态未知而失败；
+                            // 不能让清理异常覆盖原始异常，否则执行策略无法判断是否应重试。
+                            _logger.LogWarning(rollbackException, "遥测批次事务回滚失败，保留原始异常继续重试");
+                        }
+                    }
+
+                    throw;
+                }
+                finally
+                {
+                    if (transaction is not null)
+                    {
+                        try
+                        {
+                            await transaction.DisposeAsync();
+                        }
+                        catch (Exception disposeException)
+                        {
+                            _logger.LogWarning(disposeException, "遥测批次事务释放失败");
+                        }
+                    }
+                }
+
+                return operationHasWork;
+            },
+            verifySucceeded: null,
+            cancellationToken: cancellationToken);
+
+        return hasWork;
     }
 
     /// <summary>
@@ -300,7 +401,9 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
     /// <param name="items">已通过设备↔租户校验的有效遥测项</param>
     /// <returns>去重后实际待写入的遥测项；重复项已计入 TelemetryDeduped 指标与日志</returns>
     internal async Task<List<TelemetryQueueItem>> DedupBatchAsync(
-        AppDbContext dbContext, List<TelemetryQueueItem> items, CancellationToken ct = default)
+        AppDbContext dbContext,
+        IReadOnlyList<TelemetryQueueItem> items,
+        CancellationToken ct = default)
     {
         // 1. 批内去重（同键保留首条）
         var distinct = new List<TelemetryQueueItem>(items.Count);
@@ -355,35 +458,6 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// 检查一次批量 INSERT 抛错后，数据库是否已经包含该批次的全部键。
-    /// 只在 INSERT 异常路径调用，用于识别“提交成功但响应丢失”的模糊结果。
-    /// </summary>
-    private static async Task<bool> IsBatchPersistedAsync(
-        AppDbContext dbContext,
-        IReadOnlyCollection<TelemetryQueueItem> items)
-    {
-        foreach (var group in items.GroupBy(i => (i.TenantId, i.DeviceId, i.Metric)))
-        {
-            var expectedTimes = group
-                .Select(item => item.Timestamp.ToSafeUtc())
-                .ToHashSet();
-            var persistedTimes = await dbContext.DeviceTelemetry
-                .IgnoreQueryFilters()
-                .Where(t => t.TenantId == group.Key.TenantId
-                         && t.DeviceId == group.Key.DeviceId
-                         && t.Metric == group.Key.Metric
-                         && expectedTimes.Contains(t.Time))
-                .Select(t => t.Time)
-                .ToListAsync();
-
-            if (!expectedTimes.IsSubsetOf(persistedTimes))
-                return false;
-        }
-
-        return true;
-    }
-
-    /// <summary>
     /// 为实际写入的遥测生成稳定批次事件。
     /// </summary>
     private static List<TelemetryReceivedEvent> CreateTelemetryEvents(
@@ -407,7 +481,9 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
     /// </summary>
     /// <returns>通过校验的遥测项；未通过的已计入 TelemetryRejected 指标与日志</returns>
     internal async Task<List<TelemetryQueueItem>> ValidateItemsAsync(
-        AppDbContext dbContext, List<TelemetryQueueItem> items)
+        AppDbContext dbContext,
+        IReadOnlyList<TelemetryQueueItem> items,
+        CancellationToken cancellationToken = default)
     {
         var deviceIds = items.Select(i => i.DeviceId).Distinct().ToList();
         // IgnoreQueryFilters：flush 处理跨多租户的批次，后台无 HttpContext 租户上下文
@@ -415,7 +491,7 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
             .IgnoreQueryFilters()
             .Where(d => deviceIds.Contains(d.Id))
             .Select(d => new { d.Id, d.TenantId })
-            .ToDictionaryAsync(d => d.Id, d => d.TenantId);
+            .ToDictionaryAsync(d => d.Id, d => d.TenantId, cancellationToken);
 
         var valid = new List<TelemetryQueueItem>(items.Count);
         var unknown = 0;
@@ -537,7 +613,10 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
     ///
     /// 单批限制：≤ 100 行 × 7 列 = 700 参数，远低于 PostgreSQL 65535 单 SQL 参数上限。
     /// </summary>
-    private static async Task InsertBatchAsync(AppDbContext dbContext, List<TelemetryQueueItem> items)
+    private static async Task InsertBatchAsync(
+        AppDbContext dbContext,
+        List<TelemetryQueueItem> items,
+        CancellationToken cancellationToken = default)
     {
         const int columnCount = 7;
         var valueBuilders = new List<string>(items.Count);
@@ -567,7 +646,18 @@ public class TelemetryService : ITelemetryService, IDisposable, IAsyncDisposable
             "INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source) VALUES " +
             string.Join(",", valueBuilders);
 
-        await dbContext.Database.ExecuteSqlRawAsync(sql, parameters);
+        await dbContext.Database.ExecuteSqlRawAsync(sql, parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// 保存一次批量遥测所需的稳定事件身份。
+    /// </summary>
+    private sealed class TelemetryBatchState
+    {
+        /// <summary>
+        /// 已为本批次生成的事件；数据库事务重试时必须复用这些 ID。
+        /// </summary>
+        public List<TelemetryReceivedEvent>? Events { get; set; }
     }
 }
 
@@ -580,4 +670,9 @@ internal class TelemetryQueueItem
     public DateTime Timestamp { get; set; }
     public string Quality { get; set; } = "good";
     public string Source { get; set; } = "mqtt";
+
+    /// <summary>
+    /// MQTT 可靠接收路径等待的持久化结果；普通异步 HTTP 入队不创建此任务。
+    /// </summary>
+    public TaskCompletionSource<bool>? PersistenceCompletion { get; set; }
 }

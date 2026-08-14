@@ -24,7 +24,7 @@ public class MqttMessageHandlerTests
     {
         var telemetry = new Mock<ITelemetryService>();
         telemetry
-            .Setup(service => service.EnqueueAsync(
+            .Setup(service => service.EnqueueAndWaitForPersistenceAsync(
                 It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(),
                 It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>()))
             .Returns(Task.CompletedTask);
@@ -46,7 +46,7 @@ public class MqttMessageHandlerTests
         await handler.HandleAsync($"factory/{TenantId}/telemetry/{DeviceId}", payload);
 
         var invocations = telemetry.Invocations
-            .Where(call => call.Method.Name == nameof(ITelemetryService.EnqueueAsync))
+            .Where(call => call.Method.Name == nameof(ITelemetryService.EnqueueAndWaitForPersistenceAsync))
             .ToList();
         invocations.Should().HaveCount(2);
         invocations.Should().OnlyContain(call =>
@@ -56,6 +56,29 @@ public class MqttMessageHandlerTests
             && (string)call.Arguments[6] == "mqtt");
         invocations.Select(call => (string)call.Arguments[2])
             .Should().BeEquivalentTo("temperature", "pressure");
+    }
+
+    [Fact]
+    public async Task HandleAsync_遥测持久化失败_必须向上抛出以阻止MQTT确认()
+    {
+        var telemetry = new Mock<ITelemetryService>();
+        telemetry
+            .Setup(service => service.EnqueueAndWaitForPersistenceAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(),
+                It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ThrowsAsync(new InvalidOperationException("模拟数据库不可用"));
+        var handler = CreateHandler(telemetry);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            timestamp = DateTime.UtcNow,
+            metrics = new Dictionary<string, double> { ["temperature"] = 95 },
+            quality = "good",
+        });
+
+        var act = () => handler.HandleAsync(CreateTopic(), payload);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("模拟数据库不可用");
     }
 
     [Fact]

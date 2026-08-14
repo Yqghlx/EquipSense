@@ -4,12 +4,13 @@ using FluentModbus;
 namespace EquipAI.Simulator;
 
 /// <summary>
-/// Modbus TCP Mock Server — 将 SimulatedSensor 值映射到 Holding Registers
-/// 每个传感器占用 2 个连续寄存器（float 拆分为两个 ushort）
-/// 寄存器地址从 StartAddress 开始，按传感器列表顺序依次排列
+/// Modbus TCP Mock Server — 将 SimulatedSensor 值映射到 Holding Registers。
+/// 每个传感器占用一个连续寄存器，寄存器地址从 StartAddress 开始依次排列。
 /// </summary>
 public class ModbusTcpMockServer : IAsyncDisposable
 {
+    // FluentModbus 5.x 的单元模式使用 0 作为默认单元，需与 ModbusTcpAdapter 保持一致。
+    private const byte DefaultUnitIdentifier = 0;
     private readonly ModbusTcpServer _server;
     private readonly List<SimulatedSensor> _sensors;
     private readonly ushort _startAddress;
@@ -32,7 +33,9 @@ public class ModbusTcpMockServer : IAsyncDisposable
         Port = port;
         _startAddress = startAddress;
         _sensors = sensors.ToList();
-        _server = new ModbusTcpServer();
+        // 协议验收客户端会在连接后立即发起请求，启用异步处理确保每个请求
+        // 在 TCP 接收线程中及时响应；同步模式需要额外的 ProcessRequests 调度。
+        _server = new ModbusTcpServer(isAsynchronous: true);
     }
 
     /// <summary>
@@ -45,8 +48,7 @@ public class ModbusTcpMockServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// 每 500ms 更新所有传感器的寄存器值
-    /// 每个 float 值拆分为 2 个 ushort 寄存器（小端序），从 StartAddress 开始依次写入
+    /// 每 500ms 更新所有传感器的寄存器值，并刷新用于验收读写链路的线圈。
     /// </summary>
     private async Task UpdateLoopAsync()
     {
@@ -75,35 +77,34 @@ public class ModbusTcpMockServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// 将当前所有传感器的值写入 Holding Registers
-    /// 使用 GetHoldingRegisterBuffer&lt;ushort&gt; 获取底层寄存器 span 直接写入
+    /// 将当前所有传感器的值写入 Holding Registers，并设置确定性的线圈状态。
+    /// 使用底层缓冲区可以避免额外的协议客户端，保持模拟器更新操作简单且可重复。
     /// </summary>
     private void UpdateRegisters()
     {
-        // 获取底层 ushort 类型的寄存器缓冲区
-        var holdingRegisters = _server.GetHoldingRegisterBuffer<ushort>();
+        var holdingRegisters = _server.GetHoldingRegisterBuffer<ushort>(DefaultUnitIdentifier);
+        var coils = _server.GetCoilBuffer<byte>(DefaultUnitIdentifier);
 
         for (var i = 0; i < _sensors.Count; i++)
         {
-            var value = (float)_sensors[i].GetValue(DateTime.UtcNow);
-            var bytes = BitConverter.GetBytes(value);
-
-            // float 是 4 字节，拆分为 2 个 ushort（小端序）
-            if (!BitConverter.IsLittleEndian)
-                Array.Reverse(bytes);
-
-            var low = BitConverter.ToUInt16(bytes, 0);
-            var high = BitConverter.ToUInt16(bytes, 2);
-
-            // 每个传感器占 2 个寄存器，从 _startAddress 开始
-            var baseIndex = _startAddress + i * 2;
+            var value = _sensors[i].GetValue(DateTime.UtcNow);
+            var baseIndex = _startAddress + i;
 
             // 检查地址范围，防止越界
-            if (baseIndex + 1 < holdingRegisters.Length)
+            if (baseIndex < holdingRegisters.Length)
             {
-                holdingRegisters[baseIndex] = low;
-                holdingRegisters[baseIndex + 1] = high;
+                holdingRegisters[baseIndex] = ModbusRegisterEncoding.EncodeHoldingRegister(value);
             }
+        }
+
+        if (coils.Length > 0)
+        {
+            coils[0] = 1;
+        }
+
+        if (coils.Length > 1)
+        {
+            coils[1] = 0;
         }
     }
 

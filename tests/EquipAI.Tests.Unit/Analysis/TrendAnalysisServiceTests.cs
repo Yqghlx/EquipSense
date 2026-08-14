@@ -190,6 +190,26 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
         result.Should().BeNull("聚合后小时数不足 5 不应计算趋势");
     }
 
+    /// <summary>
+    /// 单指标趋势应在数据库侧按小时聚合，防止高频遥测把原始点全部加载到应用内存。
+    /// </summary>
+    [Fact]
+    public async Task AnalyzeTrendAsync_应在数据库侧按小时聚合()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+        var deviceId = Guid.NewGuid();
+
+        await SeedTelemetryAsync(db, deviceId, _tenantId, "temp", 12, 50.0, 0.1);
+
+        _selectCommandCounter.Reset();
+        var result = await service.AnalyzeTrendAsync(deviceId, "temp");
+
+        result.Should().NotBeNull();
+        _selectCommandCounter.HasGroupBy.Should().BeTrue(
+            "单指标趋势应在数据库侧完成小时聚合，不能读取 7 天内的全部原始点");
+    }
+
     // =========================================================================
     // 趋势方向判定 — 上升 / 平稳 / 下降
     // =========================================================================
@@ -392,18 +412,26 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
 
         results.Should().ContainSingle("只有 warnDevice 满足'7 天内将超阈值'");
         results[0].DeviceId.Should().Be(warnDevice);
-        _selectCommandCounter.Count.Should().Be(3,
-            "批量趋势分析应一次查询活动指标、一次查询遥测、一次查询阈值，不能按指标重复访问数据库");
+        _selectCommandCounter.HasGroupBy.Should().BeTrue(
+            "批量趋势分析应在数据库侧按设备、指标和小时聚合，不能把 7 天原始点全部加载到应用内存");
+        _selectCommandCounter.Count.Should().Be(2,
+            "批量趋势分析应一次查询小时聚合遥测、一次按设备指标聚合阈值，不能先加载活动指标或按指标重复访问数据库");
     }
 
     /// <summary>统计趋势批量分析执行的 SELECT 次数，防止 N+1 查询回归。</summary>
     private sealed class SelectCommandCounter : DbCommandInterceptor
     {
         private int _count;
+        private int _groupByCount;
 
         public int Count => Volatile.Read(ref _count);
+        public bool HasGroupBy => Volatile.Read(ref _groupByCount) > 0;
 
-        public void Reset() => Interlocked.Exchange(ref _count, 0);
+        public void Reset()
+        {
+            Interlocked.Exchange(ref _count, 0);
+            Interlocked.Exchange(ref _groupByCount, 0);
+        }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
             DbCommand command,
@@ -429,6 +457,8 @@ public class TrendAnalysisServiceTests : IAsyncLifetime
             if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
             {
                 Interlocked.Increment(ref _count);
+                if (command.CommandText.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase))
+                    Interlocked.Increment(ref _groupByCount);
             }
         }
     }

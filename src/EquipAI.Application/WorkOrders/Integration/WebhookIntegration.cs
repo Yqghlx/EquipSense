@@ -180,7 +180,7 @@ public class WebhookIntegration : IWorkOrderIntegration
     /// </summary>
     private static T? DeserializeConfig<T>(string config) where T : class
     {
-        try { return JsonSerializer.Deserialize<T>(config); }
+        try { return JsonSerializer.Deserialize<T>(config, IntegrationJsonOptions.Default); }
         catch { return null; }
     }
 

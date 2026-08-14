@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, RefreshCw, AlertTriangle } from 'lucide-react';
+import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Button } from '../components/ui/button';
@@ -10,6 +10,7 @@ import { SeverityBadge } from '../components/alert/SeverityBadge';
 import { useAlerts, useAcknowledgeAlert, useResolveAlert } from '../hooks/useAlerts';
 import api from '../lib/api';
 import type { Alert } from '../types';
+import ExportButton from '../components/ui/ExportButton';
 
 /** 导出当前筛选条件下的告警为 CSV（触发浏览器下载） */
 async function exportAlertsCsv(status: string, severity: string) {
@@ -58,14 +59,12 @@ export default function AlertCenterPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('alert.title')}</h1>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => exportAlertsCsv(status, severity)}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          {t('common.export', '导出 CSV')}
-        </Button>
+        <ExportButton
+          onExport={() => exportAlertsCsv(status, severity)}
+          label={t('common.export', '导出 CSV')}
+          exportingLabel={t('alert.exporting')}
+          errorMessage={t('alert.exportFailed')}
+        />
       </div>
 
       {/* 过滤条件：状态 + 严重级别 */}

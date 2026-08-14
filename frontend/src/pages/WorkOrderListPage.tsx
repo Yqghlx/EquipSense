@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, Search, Download, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Plus, Search, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -17,6 +17,7 @@ import { useDevices } from '../hooks/useDevices';
 import { usePermission } from '../hooks/usePermission';
 import { getWorkOrderStatusLabels } from '../utils/workorder';
 import type { CreateWorkOrderRequest } from '../types';
+import ExportButton from '../components/ui/ExportButton';
 
 
 /**
@@ -55,14 +56,13 @@ export default function WorkOrderListPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t('workorder.title')}</h1>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => exportWorkOrdersCsv({ status: status || undefined })}
+          <ExportButton
+            onExport={() => exportWorkOrdersCsv({ status: status || undefined })}
+            label={t('common.export', '导出')}
+            exportingLabel={t('workorder.exporting')}
+            errorMessage={t('workorder.exportFailed')}
             title={t('common.exportTip', '最多导出 10000 条')}
-          >
-            <Download className="mr-2 h-4 w-4" />{t('common.export', '导出')}
-          </Button>
+          />
           <Button onClick={() => setDialogOpen(true)} disabled={!perm.canCreate}>
             <Plus className="mr-2 h-4 w-4" />{t('common.create')}
           </Button>

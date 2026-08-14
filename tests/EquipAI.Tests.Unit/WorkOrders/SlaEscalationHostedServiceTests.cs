@@ -1,3 +1,4 @@
+using System.Data.Common;
 using EquipAI.Application.WorkOrders;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -7,6 +8,7 @@ using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -26,6 +28,7 @@ namespace EquipAI.Tests.Unit.WorkOrders;
 /// </summary>
 public class SlaEscalationHostedServiceTests : IAsyncLifetime
 {
+    private readonly TenantSelectCommandCounter _tenantSelectCommandCounter = new();
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
     private Mock<ISignalRNotificationService> _notifyMock = null!;
@@ -38,7 +41,9 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
         _notifyMock = new Mock<ISignalRNotificationService>();
 
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_tenantSelectCommandCounter));
         // 复刻后台 HostedService scope：ITenantContext 回退为空租户
         services.AddScoped<ITenantContext>(_ => new BackgroundTenantContext());
         services.AddLogging();
@@ -155,6 +160,36 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
             "租户级故障隔离不能把宿主停机信号转换成成功完成");
     }
 
+    [Fact]
+    public async Task RunEscalationAsync_租户数量超过批次时租户读取应分页()
+    {
+        var tenantIds = Enumerable.Range(0, 501).Select(_ => Guid.NewGuid()).ToArray();
+
+        using (var seedScope = _sp.CreateScope())
+        {
+            var db = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Tenants.AddRange(tenantIds.Select(id => new Tenant
+            {
+                Id = id,
+                Name = $"SLA边界-{id:N}",
+                Slug = $"sla-{id:N}",
+                Plan = TenantPlan.Professional,
+                Status = TenantStatus.Active,
+            }));
+            await db.SaveChangesAsync();
+        }
+
+        _tenantSelectCommandCounter.Reset();
+        var hosted = _sp.GetRequiredService<SlaEscalationHostedService>();
+
+        await hosted.RunEscalationAsync(CancellationToken.None);
+
+        _tenantSelectCommandCounter.SelectSql
+            .Should().NotBeEmpty()
+            .And.OnlyContain(sql => sql.Contains("LIMIT", StringComparison.OrdinalIgnoreCase),
+                "SLA 后台任务不应一次性加载所有活跃租户 ID");
+    }
+
     /// <summary>构造租户（最小必填字段）</summary>
     private static Tenant MakeTenant(Guid id, TenantStatus status) => new()
     {
@@ -181,5 +216,56 @@ public class SlaEscalationHostedServiceTests : IAsyncLifetime
         public string IsolationMode => "Shared";
         public bool IsSystemAdmin => false;
         public Guid UserId => Guid.Empty;
+    }
+
+    /// <summary>记录 SLA 后台任务读取租户的 SQL，防止无界 ToListAsync 回归。</summary>
+    private sealed class TenantSelectCommandCounter : DbCommandInterceptor
+    {
+        private readonly object _gate = new();
+        private List<string> _selectSql = [];
+
+        public IReadOnlyList<string> SelectSql
+        {
+            get
+            {
+                lock (_gate)
+                    return _selectSql.ToArray();
+            }
+        }
+
+        public void Reset()
+        {
+            lock (_gate)
+                _selectSql = [];
+        }
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            Record(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Record(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void Record(DbCommand command)
+        {
+            if (!command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                || !command.CommandText.Contains("Tenants", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            lock (_gate)
+                _selectSql.Add(command.CommandText);
+        }
     }
 }

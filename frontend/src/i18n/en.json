@@ -96,6 +96,7 @@
     "alerts": "Alerts",
     "alertRules": "Alert Rules",
     "workOrders": "Work Orders",
+    "reports": "Operations Reports",
     "pendingApprovals": "Pending Approvals",
     "notifications": "Notifications",
     "dispatch": "Dispatch Board",
@@ -111,6 +112,25 @@
   "sidebar": {
     "expand": "Expand Sidebar",
     "collapse": "Collapse Sidebar"
+  },
+  "reports": {
+    "title": "Operations Reports",
+    "description": "Aggregate device, alert, work-order, and OEE metrics by tenant and export them as CSV for operational review.",
+    "currentMonthTitle": "Current-month snapshot",
+    "currentMonthDescription": "Generate a report from the start of the current month through now.",
+    "currentMonth": "Export current-month report",
+    "customTitle": "Custom date range",
+    "customDescription": "Choose a reporting window of up to 366 days. The end date includes the full day.",
+    "startDate": "Start date",
+    "endDate": "End date",
+    "rangeHint": "Choose a start date and an end date.",
+    "rangeRequired": "Choose a complete date range.",
+    "rangeStartBeforeEnd": "The start date must be before the end date.",
+    "rangeTooLong": "The date range cannot exceed 366 days.",
+    "download": "Export custom report",
+    "exporting": "Generating report…",
+    "exportFailed": "Report export failed. Check your network or permissions and try again.",
+    "noReadPermission": "Your role does not have permission to access operations reports."
   },
   "deviceComparison": {
     "title": "Device Comparison",
@@ -352,6 +372,8 @@
   },
   "device": {
     "title": "Device Management",
+    "exporting": "Exporting...",
+    "exportFailed": "Failed to export devices. Check your network or permissions and try again.",
     "deviceCode": "Device Code",
     "name": "Device Name",
     "type": "Device Type",
@@ -484,6 +506,8 @@
   },
   "alert": {
     "title": "Alert Center",
+    "exporting": "Exporting...",
+    "exportFailed": "Failed to export alerts. Check your network or permissions and try again.",
     "alertCode": "Alert Code",
     "metric": "Metric",
     "value": "Current Value",
@@ -535,6 +559,8 @@
   },
   "workorder": {
     "title": "Work Orders",
+    "exporting": "Exporting...",
+    "exportFailed": "Failed to export work orders. Check your network or permissions and try again.",
     "code": "Work Order Code",
     "titleField": "Title",
     "titlePlaceholder": "Work Order Title",
@@ -1376,6 +1402,8 @@
     "ip": "IP Address",
     "method": "Method",
     "time": "Time",
+    "exporting": "Exporting...",
+    "exportFailed": "Failed to export audit logs. Check your network or permissions and try again.",
     "actionOptions": {
       "authLoginSuccess": "AuthLoginSuccess (Login succeeded)",
       "authLoginFailed": "AuthLoginFailed (Login failed)",

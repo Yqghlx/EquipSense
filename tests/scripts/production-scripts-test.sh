@@ -237,6 +237,29 @@ test_validate_env_rejects_invalid_email_delivery_config() {
   assert_contains "$output" "EMAIL_DELIVERY_MAX_BACKOFF_SECONDS 必须是大于等于 0 的整数"
 }
 
+test_validate_env_rejects_invalid_smtp_config() {
+  local env_file="$TEST_ROOT/invalid-smtp.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  chmod 600 "$env_file"
+  printf '%s\n' \
+    'SMTP_HOST=smtp.example.com' \
+    'SMTP_PORT=70000' \
+    'SMTP_FROM_EMAIL=not-an-email' \
+    'SMTP_ENABLE_SSL=maybe' >> "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "非法 SMTP 配置不应通过生产环境校验"
+  assert_contains "$output" "SMTP_PORT 必须是 1-65535 范围内的整数"
+  assert_contains "$output" "SMTP_FROM_EMAIL 格式无效"
+  assert_contains "$output" "SMTP_ENABLE_SSL 必须是 true 或 false"
+}
+
 test_validate_env_rejects_relative_local_attachment_path() {
   local env_file="$TEST_ROOT/relative-attachment-path.env"
   cp "$TEST_ROOT/valid.env" "$env_file"
@@ -2346,6 +2369,78 @@ test_setup_mosquitto_rejects_password_file_symlink() {
   [[ ! -e "$case_dir/args" ]] || fail "拒绝密码文件符号链接时不应调用密码生成器"
 }
 
+test_setup_mosquitto_preserves_existing_password_file_when_generator_fails() {
+  local case_dir="$TEST_ROOT/setup-mosquitto-atomic-failure"
+  mkdir -p "$case_dir/bin" "$case_dir/mosquitto_passwd"
+  cp "$PROJECT_ROOT/docker/setup-mosquitto.sh" "$case_dir/setup-mosquitto.sh"
+  printf '%s\n' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=new-password-that-must-not-become-partial' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  printf '%s\n' 'loadtest:{PLAIN}existing-hash' > "$case_dir/mosquitto_passwd/passwd"
+  chmod 600 "$case_dir/mosquitto_passwd/passwd"
+  cp "$case_dir/mosquitto_passwd/passwd" "$case_dir/passwd.before"
+
+  # 模拟生成器在失败前破坏目标文件；非原子实现会覆盖当前认证文件，
+  # 而正确实现应只写临时文件并保留旧文件可用。
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'password_file=""' \
+    'previous=""' \
+    'for argument in "$@"; do' \
+    '  if [[ "$previous" = "-c" ]]; then password_file="$argument"; fi' \
+    '  previous="$argument"' \
+    'done' \
+    'printf "%s\n" "loadtest:{PLAIN}partially-written" > "$password_file"' \
+    'exit 1' > "$case_dir/bin/mosquitto_passwd"
+  chmod 700 "$case_dir/bin/mosquitto_passwd"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && PATH="$case_dir/bin:$PATH" bash ./setup-mosquitto.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "密码生成器失败时 setup-mosquitto.sh 必须返回非零"
+  cmp -s "$case_dir/passwd.before" "$case_dir/mosquitto_passwd/passwd" \
+    || fail "密码生成失败时不应破坏当前仍可用的密码文件"
+  [[ -z "$(find "$case_dir/mosquitto_passwd" -maxdepth 1 -name '.passwd.tmp.*' -print -quit)" ]] \
+    || fail "密码生成失败后不应留下临时密码文件"
+  [[ "$output" != *"new-password-that-must-not-become-partial"* ]] \
+    || fail "密码生成失败时不应把密码写入日志"
+}
+
+test_setup_mosquitto_rejects_password_directory_symlink() {
+  local case_dir="$TEST_ROOT/setup-mosquitto-directory-symlink"
+  mkdir -p "$case_dir/bin" "$case_dir/real-password-dir"
+  cp "$PROJECT_ROOT/docker/setup-mosquitto.sh" "$case_dir/setup-mosquitto.sh"
+  printf '%s\n' \
+    'MQTT_USERNAME=loadtest' \
+    'MQTT_PASSWORD=password-that-must-not-be-written-outside' > "$case_dir/.env"
+  chmod 600 "$case_dir/.env"
+  ln -s "$case_dir/real-password-dir" "$case_dir/mosquitto_passwd"
+
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\n" "$*" > "$TEST_CASE_DIR/args"' \
+    'exit 0' > "$case_dir/bin/mosquitto_passwd"
+  chmod 700 "$case_dir/bin/mosquitto_passwd"
+
+  local output
+  local result_code
+  set +e
+  output="$(cd "$case_dir" && TEST_CASE_DIR="$case_dir" PATH="$case_dir/bin:$PATH" \
+    bash ./setup-mosquitto.sh 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "密码文件目录为符号链接时必须拒绝写入"
+  assert_contains "$output" "密码文件目录不得为符号链接"
+  [[ ! -e "$case_dir/args" ]] || fail "拒绝密码文件目录符号链接时不应调用密码生成器"
+  [[ ! -e "$case_dir/real-password-dir/passwd" ]] || fail "拒绝密码文件目录符号链接时不应写入目录外目标"
+}
+
 test_backup_includes_attachments() {
   local case_dir="$TEST_ROOT/backup"
   local fake_attachment_root="$case_dir/fake-attachments"
@@ -3414,7 +3509,9 @@ create_deploy_fixtures() {
   : > "$case_dir/.env"
   : > "$case_dir/docker-compose.yml"
   : > "$case_dir/docker-compose.prod.yml"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "$case_dir/production-acceptance.sh"
   chmod 600 "$case_dir/.env"
+  chmod +x "$case_dir/production-acceptance.sh"
 }
 
 create_deploy_runtime_doubles() {
@@ -3437,6 +3534,11 @@ create_deploy_runtime_doubles() {
     '  code="${DEPLOY_READINESS_STATIC_RESULT:-0}"' \
     'fi' \
     'exit "$code"' > "$case_dir/production-readiness.sh"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'printf "%s\\n" "$*" >> "$DEPLOY_ACCEPTANCE_LOG"' \
+    'exit "${DEPLOY_ACCEPTANCE_RESULT:-0}"' > "$case_dir/production-acceptance.sh"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
     'set -euo pipefail' \
@@ -3473,7 +3575,7 @@ create_deploy_runtime_doubles() {
     '[[ -n "$code" ]] || code="000"' \
     'printf "%s" "$code"' > "$case_dir/bin/curl"
   chmod +x "$case_dir/validate-env.sh" "$case_dir/bin/docker" "$case_dir/bin/curl"
-  chmod +x "$case_dir/production-readiness.sh"
+  chmod +x "$case_dir/production-readiness.sh" "$case_dir/production-acceptance.sh"
 }
 
 run_deploy_fixture() {
@@ -3488,9 +3590,11 @@ run_deploy_fixture() {
     DEPLOY_CURL_LOG="$case_dir/curl.log" \
     DEPLOY_READINESS_LOG="$case_dir/readiness.log" \
     DEPLOY_READINESS_COUNTER="$case_dir/readiness-counter" \
+    DEPLOY_ACCEPTANCE_LOG="$case_dir/acceptance.log" \
     DEPLOY_ORDER_LOG="$case_dir/order.log" \
     DEPLOY_READINESS_STATIC_RESULT="${DEPLOY_READINESS_STATIC_RESULT:-0}" \
     DEPLOY_READINESS_RUNTIME_CODES="${DEPLOY_READINESS_RUNTIME_CODES:-0}" \
+    DEPLOY_ACCEPTANCE_RESULT="${DEPLOY_ACCEPTANCE_RESULT:-0}" \
     DEPLOY_MAX_ATTEMPTS=1 \
     DEPLOY_INITIAL_DELAY_SECONDS=0 \
     DEPLOY_ROLLBACK_INITIAL_DELAY_SECONDS=0 \
@@ -3544,6 +3648,26 @@ test_deploy_preflight_failure_does_not_mutate_services() {
   [[ -f "$readiness_marker" ]] || fail "部署必须调用生产 readiness"
   [[ ! -s "$docker_log" ]] || fail "静态 readiness 失败时不应调用 Docker"
   [[ "$output" != *"部署成功"* ]] || fail "readiness 失败时不应报告部署成功"
+}
+
+test_deploy_acceptance_failure_does_not_mutate_services() {
+  local case_dir="$TEST_ROOT/deploy-acceptance-blocked"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+
+  local output
+  local result_code
+  set +e
+  output="$(DEPLOY_ACCEPTANCE_RESULT=2 run_deploy_fixture "$case_dir" 2.0.0 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "统一生产验收被阻断时部署不应成功"
+  assert_contains "$(cat "$case_dir/acceptance.log")" "--profile production"
+  assert_contains "$(cat "$case_dir/acceptance.log")" "--runtime"
+  [[ ! -s "$case_dir/readiness.log" ]] || fail "统一生产验收失败后不应继续调用 readiness"
+  [[ ! -s "$case_dir/docker.log" ]] || fail "统一生产验收失败后不应登录、拉取或变更服务"
+  [[ "$output" != *"部署成功"* ]] || fail "统一生产验收失败时不应报告部署成功"
 }
 
 test_deploy_rejects_overlapping_runs() {
@@ -3607,6 +3731,38 @@ test_deploy_uses_edge_port_from_env_for_health_check() {
 
   grep -q 'localhost:18081/health' "$case_dir/curl.log" \
     || fail "部署健康检查必须读取 .env 中的 EDGE_PORT"
+}
+
+test_deploy_uses_configured_docker_binary_for_all_operations() {
+  local case_dir="$TEST_ROOT/deploy-custom-docker"
+  create_deploy_fixtures "$case_dir"
+  create_deploy_runtime_doubles "$case_dir"
+  printf '%s\n' '1.0.0' > "$case_dir/.last-deployed-tag"
+
+  cp "$case_dir/bin/docker" "$case_dir/custom-docker"
+  chmod +x "$case_dir/custom-docker"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'printf "%s\n" "poison-docker-called" > "$DEPLOY_POISON_MARKER"' \
+    'exit 97' > "$case_dir/bin/docker"
+  chmod +x "$case_dir/bin/docker"
+
+  local output
+  if ! output="$(
+    DEPLOY_DOCKER_BIN="$case_dir/custom-docker" \
+    DEPLOY_POISON_MARKER="$case_dir/poison-marker" \
+    run_deploy_fixture "$case_dir" 2.0.0 2>&1
+  )"; then
+    printf '%s\n' "$output" >&2
+    fail "配置自定义 Docker CLI 时部署应成功"
+  fi
+
+  [[ ! -f "$case_dir/poison-marker" ]] \
+    || fail "配置自定义 Docker CLI 后不应调用 PATH 中的 docker"
+  grep -q '^2.0.0|login ghcr.io' "$case_dir/docker.log" \
+    || fail "登录仓库必须使用配置的 Docker CLI"
+  [[ "$(cat "$case_dir/.last-deployed-tag")" = "2.0.0" ]] \
+    || fail "自定义 Docker CLI 部署成功后应更新版本记录"
 }
 
 test_deploy_final_status_display_failure_does_not_reverse_success() {
@@ -3854,6 +4010,21 @@ test_release_waits_for_quality_gates() {
   local deploy_block
   deploy_block="$(sed -n '/^  deploy:/,/^  load-test:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
   assert_contains "$deploy_block" "needs: [release, create-release]"
+}
+
+test_ci_rabbitmq_integration_uses_isolated_vhost() {
+  local backend_block setup_line test_line
+  backend_block="$(sed -n '/^  backend:/,/^  backup-restore-rehearsal:/p' "$PROJECT_ROOT/.github/workflows/ci.yml")"
+
+  assert_contains "$backend_block" 'rabbitmqctl add_vhost /equipai_test'
+  assert_contains "$backend_block" 'rabbitmqctl set_permissions -p /equipai_test equipai_test'
+  assert_contains "$backend_block" 'rabbitmqctl set_policy -p /equipai_test'
+  assert_contains "$backend_block" 'RABBITMQ_TEST_VHOST: /equipai_test'
+
+  setup_line="$(printf '%s\n' "$backend_block" | grep -n 'rabbitmqctl add_vhost /equipai_test' | head -n 1 | cut -d: -f1)"
+  test_line="$(printf '%s\n' "$backend_block" | grep -n '运行集成测试（采集覆盖率）' | head -n 1 | cut -d: -f1)"
+  [[ -n "$setup_line" && -n "$test_line" && "$setup_line" -lt "$test_line" ]] \
+    || fail "RabbitMQ 专用 vhost 必须在集成测试前初始化"
 }
 
 test_ci_scans_all_images_before_registry_publish() {
@@ -4253,6 +4424,29 @@ test_backend_certificate_monitoring_contract() {
     || fail "Grafana 证书剩余天数阈值必须与 Prometheus 告警分级一致"
 }
 
+test_backend_telemetry_drop_alert_contract() {
+  local rules_content mqtt_handler mqtt_client telemetry_interface
+  rules_content="$(cat "$PROJECT_ROOT/docker/prometheus/rules.yml")"
+  mqtt_handler="$(cat "$PROJECT_ROOT/src/EquipAI.Infrastructure/Messaging/MqttMessageHandler.cs")"
+  mqtt_client="$(cat "$PROJECT_ROOT/src/EquipAI.Infrastructure/Messaging/MqttClientService.cs")"
+  telemetry_interface="$(cat "$PROJECT_ROOT/src/EquipAI.Core/Interfaces/ITelemetryService.cs")"
+
+  # TelemetryService 在数据库持续故障时会记录该计数器；没有 Critical 告警就会形成无人值守的数据盲区。
+  assert_contains "$rules_content" 'alert: TelemetryPersistenceDropped'
+  assert_contains "$rules_content" 'increase(equipai_telemetry_dropped_total[5m]) > 0'
+  assert_contains "$rules_content" 'summary: "遥测落库失败并丢弃"'
+  assert_contains "$rules_content" 'severity: critical'
+  assert_contains "$rules_content" 'category: business'
+
+  # MQTT 只有在持久化完成后才允许回调结束；失败必须映射到 ProcessingFailed，阻止 QoS ACK。
+  assert_contains "$telemetry_interface" 'EnqueueAndWaitForPersistenceAsync'
+  assert_contains "$mqtt_handler" 'EnqueueAndWaitForPersistenceAsync'
+  assert_contains "$mqtt_handler" 'throw;'
+  assert_contains "$mqtt_client" 'e.ProcessingFailed = true;'
+  assert_contains "$mqtt_client" '.WithCleanSession(false)'
+  assert_contains "$mqtt_client" '.WithClientId(_options.ClientIdPrefix)'
+}
+
 test_docker_edgegateway_build_is_reproducible() {
   local dockerfile_content
   dockerfile_content="$(cat "$PROJECT_ROOT/docker/Dockerfile.edgegateway")"
@@ -4374,6 +4568,10 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_script" "--allow-isolated-e2e"
   assert_contains "$smoke_script" "SMOKE_E2E_WORKERS"
   assert_contains "$smoke_script" "SMOKE_E2E_GREP"
+  assert_contains "$smoke_script" "production-readiness.sh"
+  assert_contains "$smoke_script" "production-acceptance.sh"
+  assert_contains "$smoke_script" "SMOKE_ACCEPTANCE_OUTPUT_DIR"
+  assert_contains "$smoke_script" 'COMPOSE_PROJECT_NAME="$PROJECT_NAME"'
   assert_contains "$smoke_script" "--workers"
   assert_contains "$smoke_script" "--grep"
   assert_contains "$smoke_script" 'if ((${#SMOKE_E2E_ARGS[@]} > 0)); then'
@@ -4407,6 +4605,8 @@ test_production_runtime_smoke_gate_is_wired() {
   assert_contains "$smoke_block" "docker build"
   assert_contains "$smoke_block" "npm ci"
   assert_contains "$smoke_block" "SMOKE_RUN_E2E"
+  assert_contains "$smoke_block" "SMOKE_ACCEPTANCE_OUTPUT_DIR"
+  assert_contains "$smoke_block" "production-acceptance-report"
 }
 
 test_production_runtime_smoke_failure_preserves_exit_status() {
@@ -4435,10 +4635,78 @@ test_production_runtime_smoke_failure_preserves_exit_status() {
   assert_contains "$smoke_output" "找不到本地 smoke 镜像"
 }
 
+test_production_acceptance_package_contract() {
+  local acceptance_script deploy_doc runbook_doc landing_doc risk_doc
+  [[ -x "$PROJECT_ROOT/docker/production-acceptance.sh" ]] \
+    || fail "统一生产验收入口必须存在且可执行"
+  acceptance_script="$(cat "$PROJECT_ROOT/docker/production-acceptance.sh")"
+  assert_contains "$acceptance_script" "--profile isolated-ci|production"
+  assert_contains "$acceptance_script" "--evidence-dir"
+  assert_contains "$acceptance_script" "checks.tsv"
+  assert_contains "$acceptance_script" "summary.md"
+  assert_contains "$acceptance_script" "data.backup-restore"
+  assert_contains "$acceptance_script" "external.smtp"
+  assert_contains "$acceptance_script" "external.otel"
+  assert_contains "$acceptance_script" "external.mqtt"
+  assert_contains "$acceptance_script" "external.integrations"
+  assert_contains "$(cat "$PROJECT_ROOT/docker/setup.sh")" "production-acceptance.sh|生产发布统一验收入口"
+  [[ "$acceptance_script" != *" compose up"* ]] \
+    || fail "统一生产验收入口不得启动 Compose 服务"
+  [[ "$acceptance_script" != *" compose down"* ]] \
+    || fail "统一生产验收入口不得停止 Compose 服务"
+  [[ "$acceptance_script" != *" compose pull"* ]] \
+    || fail "统一生产验收入口不得拉取 Compose 镜像"
+  [[ "$acceptance_script" != *" compose build"* ]] \
+    || fail "统一生产验收入口不得构建 Compose 镜像"
+  [[ "$acceptance_script" != *" compose exec"* ]] \
+    || fail "统一生产验收入口不得进入容器"
+
+  deploy_doc="$(cat "$PROJECT_ROOT/docs/DEPLOY.md")"
+  runbook_doc="$(cat "$PROJECT_ROOT/docs/OPS_RUNBOOK.md")"
+  landing_doc="$(cat "$PROJECT_ROOT/docs/LANDING_READINESS_REPORT.md")"
+  risk_doc="$(cat "$PROJECT_ROOT/docs/evaluation/S09-风险登记册.md")"
+  for document in "$deploy_doc" "$runbook_doc" "$landing_doc" "$risk_doc"; do
+    assert_contains "$document" "production-acceptance.sh"
+    assert_contains "$document" "BLOCKED"
+  done
+  assert_contains "$deploy_doc" "data.backup-restore"
+  assert_contains "$runbook_doc" "backup-restore-rehearsal.sh"
+  assert_contains "$landing_doc" "27 个门禁问题"
+  assert_contains "$risk_doc" "最近 24 小时外部证据"
+}
+
 test_rabbitmq_healthcheck_uses_service_account() {
   local rabbitmq_block
   rabbitmq_block="$(sed -n '/^  rabbitmq:/,/^  backend:/p' "$PROJECT_ROOT/docker/docker-compose.yml")"
   assert_contains "$rabbitmq_block" "    user: rabbitmq"
+}
+
+test_protocol_integration_gate_contract() {
+  local script_content workflow_content
+  local unit_line protocol_line protocol_block
+  script_content="$(cat "$PROJECT_ROOT/tests/e2e/run-protocol-integration.sh")"
+  workflow_content="$(cat "$PROJECT_ROOT/.github/workflows/ci.yml")"
+
+  bash -n "$PROJECT_ROOT/tests/e2e/run-protocol-integration.sh"
+  assert_contains "$script_content" 'src/EquipAI.Simulator/bin/Release/net8.0/EquipAI.Simulator.dll'
+  assert_contains "$script_content" 'dotnet "$SIMULATOR_DLL" --headless'
+  assert_contains "$script_content" 'wait_for_port 4840'
+  assert_contains "$script_content" 'wait_for_port 5020'
+  assert_contains "$script_content" 'RUN_PROTOCOL_INTEGRATION_TESTS=true'
+  assert_contains "$script_content" 'Category=RequiresSimulator'
+  assert_contains "$script_content" 'kill "$SIMULATOR_PID"'
+  assert_contains "$script_content" 'rm -rf "$LOG_DIR"'
+  [[ "$script_content" != *"pkill"* ]] || fail "协议验收脚本不得使用宽泛 pkill"
+  [[ "$script_content" != *"killall"* ]] || fail "协议验收脚本不得使用宽泛 killall"
+
+  assert_contains "$workflow_content" 'run: bash tests/e2e/run-protocol-integration.sh'
+  unit_line="$(grep -n '运行单元测试（采集覆盖率）' "$PROJECT_ROOT/.github/workflows/ci.yml" | head -n1 | cut -d: -f1)"
+  protocol_line="$(grep -n '运行 OPC UA/Modbus 协议验收' "$PROJECT_ROOT/.github/workflows/ci.yml" | head -n1 | cut -d: -f1)"
+  [[ -n "$unit_line" && -n "$protocol_line" && "$protocol_line" -gt "$unit_line" ]] \
+    || fail "协议验收必须位于后端单元测试之后"
+  protocol_block="$(sed -n "${protocol_line},$((protocol_line + 3))p" "$PROJECT_ROOT/.github/workflows/ci.yml")"
+  [[ "$protocol_block" != *"continue-on-error"* ]] \
+    || fail "协议验收失败必须阻断 CI，不得 continue-on-error"
 }
 
 test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip() {
@@ -4471,6 +4739,9 @@ test_deploy_has_fail_closed_preflight() {
   assert_contains "$deploy_block" 'bash ./deploy-production.sh "$TARGET_VERSION"'
   assert_contains "$deploy_script" 'run_readiness_gate'
   assert_contains "$deploy_script" 'run_readiness_gate --runtime'
+  assert_contains "$deploy_script" 'run_production_acceptance_gate'
+  assert_contains "$deploy_script" 'PRODUCTION_ACCEPTANCE_EVIDENCE_DIR'
+  assert_contains "$deploy_script" 'PRODUCTION_DOCKER_BIN="$DOCKER_BIN"'
   [[ "$deploy_block" != *'docker compose --env-file .env'* ]] \
     || fail "CI 不应再维护未经行为测试的内联部署副本"
 }
@@ -4700,6 +4971,27 @@ test_alert_email_delivery_contract_is_registered_and_persistent() {
   assert_contains "$worker_content" 'BusinessMetrics.EmailDeliveryDeadLetters.Inc();'
 }
 
+test_attachment_delete_reliability_contract_is_registered() {
+  local event_content service_content handler_content serializer_content program_content controller_content
+  event_content="$(cat "$PROJECT_ROOT/src/EquipAI.Core/Events/WorkOrderAttachmentDeletedEvent.cs")"
+  service_content="$(cat "$PROJECT_ROOT/src/EquipAI.Application/WorkOrders/WorkOrderAttachmentService.cs")"
+  handler_content="$(cat "$PROJECT_ROOT/src/EquipAI.Application/WorkOrders/Handlers/WorkOrderAttachmentDeletionHandler.cs")"
+  serializer_content="$(cat "$PROJECT_ROOT/src/EquipAI.Infrastructure/Messaging/IntegrationEventSerializer.cs")"
+  program_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/Program.cs")"
+  controller_content="$(cat "$PROJECT_ROOT/src/EquipAI.WebAPI/Controllers/WorkOrderAttachmentsController.cs")"
+
+  assert_contains "$event_content" 'public record WorkOrderAttachmentDeletedEvent('
+  assert_contains "$service_content" 'await _eventBus.PublishAsync(deletionEvent, ct);'
+  assert_contains "$service_content" 'await _dbContext.SaveChangesAsync(ct);'
+  assert_contains "$handler_content" 'class WorkOrderAttachmentDeletionHandler'
+  assert_contains "$handler_content" 'throw;'
+  assert_contains "$serializer_content" '[nameof(WorkOrderAttachmentDeletedEvent)]'
+  assert_contains "$program_content" 'eventBus.Subscribe<WorkOrderAttachmentDeletedEvent, WorkOrderAttachmentDeletionHandler>();'
+  assert_contains "$controller_content" '物理文件由事件处理器异步删除'
+  [[ "$controller_content" != *'_fileStorage.DeleteAsync(attachment.StoragePath)'* ]] \
+    || fail "附件删除控制器不得绕过事务事件再次同步删除物理文件"
+}
+
 test_frontend_service_worker_handles_owner_scoped_background_sync() {
   local vite_config
   vite_config="$(cat "$PROJECT_ROOT/frontend/vite.config.ts")"
@@ -4810,6 +5102,7 @@ case "${1:-all}" in
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
     test_validate_env_rejects_invalid_email_delivery_config
+    test_validate_env_rejects_invalid_smtp_config
     test_validate_env_rejects_relative_local_attachment_path
     test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
@@ -4862,6 +5155,8 @@ case "${1:-all}" in
     test_setup_rejects_generating_self_signed_certificates_in_production
     test_setup_mosquitto_does_not_expose_password_in_process_arguments
     test_setup_mosquitto_rejects_password_file_symlink
+    test_setup_mosquitto_preserves_existing_password_file_when_generator_fails
+    test_setup_mosquitto_rejects_password_directory_symlink
     test_user_guide_documents_template_onboarding
     test_ops_runbook_documents_mfa_recovery_rehearsal_safety
     test_ops_runbook_documents_backup_manifest_safety
@@ -4911,9 +5206,11 @@ case "${1:-all}" in
     ;;
   deploy)
     test_deploy_preflight_failure_does_not_mutate_services
+    test_deploy_acceptance_failure_does_not_mutate_services
     test_deploy_rejects_overlapping_runs
     test_deploy_success_updates_version_atomically
     test_deploy_uses_edge_port_from_env_for_health_check
+    test_deploy_uses_configured_docker_binary_for_all_operations
     test_deploy_final_status_display_failure_does_not_reverse_success
     test_deploy_health_failure_rolls_back_and_verifies_health
     test_deploy_runtime_readiness_failure_rolls_back_and_preserves_version
@@ -4928,6 +5225,7 @@ case "${1:-all}" in
     ;;
   ci)
     test_release_waits_for_quality_gates
+    test_ci_rabbitmq_integration_uses_isolated_vhost
     test_ci_scans_all_images_before_registry_publish
     test_ci_trivy_action_is_pinned_to_verified_commit
     test_ci_pushes_scanned_local_images_without_rebuild
@@ -4949,13 +5247,17 @@ case "${1:-all}" in
     test_frontend_runtime_installs_certificate_check_dependency
     test_frontend_runtime_rejects_self_signed_certificate_in_production
     test_backend_certificate_monitoring_contract
+    test_backend_telemetry_drop_alert_contract
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
     test_production_runtime_smoke_failure_preserves_exit_status
+    test_production_acceptance_package_contract
+    bash "$PROJECT_ROOT/tests/scripts/production-acceptance-test.sh"
     test_waf_rule_reload_contract
     test_rabbitmq_healthcheck_uses_service_account
+    test_protocol_integration_gate_contract
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
@@ -4967,6 +5269,7 @@ case "${1:-all}" in
     test_frontend_service_worker_does_not_cache_authenticated_api
     test_frontend_offline_queue_is_session_scoped
     test_alert_email_delivery_contract_is_registered_and_persistent
+    test_attachment_delete_reliability_contract_is_registered
     test_frontend_service_worker_handles_owner_scoped_background_sync
     test_frontend_auth_session_clears_sensitive_state
     ;;
@@ -4978,6 +5281,7 @@ case "${1:-all}" in
     test_validate_env_rejects_missing_pii_encryption_key
     test_validate_env_rejects_invalid_rate_limiting_config
     test_validate_env_rejects_invalid_email_delivery_config
+    test_validate_env_rejects_invalid_smtp_config
     test_validate_env_rejects_relative_local_attachment_path
     test_validate_env_rejects_root_local_attachment_path
     test_validate_env_rejects_short_machine_api_key
@@ -5062,9 +5366,11 @@ case "${1:-all}" in
     test_restore_rejects_corrupted_redis_backup
     test_restore_rejects_overlapping_confirm_runs
     test_deploy_preflight_failure_does_not_mutate_services
+    test_deploy_acceptance_failure_does_not_mutate_services
     test_deploy_rejects_overlapping_runs
     test_deploy_success_updates_version_atomically
     test_deploy_uses_edge_port_from_env_for_health_check
+    test_deploy_uses_configured_docker_binary_for_all_operations
     test_deploy_final_status_display_failure_does_not_reverse_success
     test_deploy_health_failure_rolls_back_and_verifies_health
     test_deploy_runtime_readiness_failure_rolls_back_and_preserves_version
@@ -5077,6 +5383,7 @@ case "${1:-all}" in
     test_deploy_without_history_never_rolls_back_to_unknown_tag
     test_deploy_rollback_health_failure_is_critical
     test_release_waits_for_quality_gates
+    test_ci_rabbitmq_integration_uses_isolated_vhost
     test_ci_scans_all_images_before_registry_publish
     test_ci_trivy_action_is_pinned_to_verified_commit
     test_ci_pushes_scanned_local_images_without_rebuild
@@ -5096,13 +5403,17 @@ case "${1:-all}" in
     test_nginx_does_not_log_signalr_query_tokens
     test_frontend_runtime_installs_certificate_check_dependency
     test_frontend_runtime_rejects_self_signed_certificate_in_production
+    test_backend_telemetry_drop_alert_contract
     test_docker_edgegateway_build_is_reproducible
     test_edgegateway_production_runtime_contract
     test_edgegateway_release_and_deploy_contract
     test_production_runtime_smoke_gate_is_wired
     test_production_runtime_smoke_failure_preserves_exit_status
+    test_production_acceptance_package_contract
+    bash "$PROJECT_ROOT/tests/scripts/production-acceptance-test.sh"
     test_waf_rule_reload_contract
     test_rabbitmq_healthcheck_uses_service_account
+    test_protocol_integration_gate_contract
     test_backend_rate_limit_uses_authenticated_tenant_and_trusted_proxy_ip
     test_deploy_has_fail_closed_preflight
     test_production_dependency_audit_fails_closed_on_registry_error
@@ -5120,6 +5431,7 @@ case "${1:-all}" in
     test_frontend_offline_queue_is_session_scoped
     test_notification_preference_card_email_contract_is_type_specific
     test_alert_email_delivery_contract_is_registered_and_persistent
+    test_attachment_delete_reliability_contract_is_registered
     test_frontend_service_worker_handles_owner_scoped_background_sync
     test_frontend_auth_session_clears_sensitive_state
     test_development_internal_ports_bind_loopback_by_default

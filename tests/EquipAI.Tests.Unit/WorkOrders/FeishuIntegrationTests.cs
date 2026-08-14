@@ -2,6 +2,8 @@ using EquipAI.Application.WorkOrders.Integration;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Moq.Protected;
+using System.Net;
 using System.Text.Json;
 
 namespace EquipAI.Tests.Unit.WorkOrders;
@@ -40,6 +42,126 @@ public class FeishuIntegrationTests
         var result = await integration.PushCreatedAsync(
             Guid.NewGuid(), Guid.NewGuid(), "测试工单", "High", config);
 
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_小驼峰配置应正确读取启用状态和WebhookUrl()
+    {
+        // Arrange — 管理端保存的配置字段名遵循 API 的小驼峰约定
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"code\":0,\"msg\":\"success\"}")
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new FeishuIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<FeishuIntegration>>());
+        var config = """
+            {"enabled":true,"webhookUrl":"https://open.feishu.cn/open-apis/bot/v2/hook/test-webhook"}
+            """;
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "小驼峰配置测试", "High", config);
+
+        // Assert
+        result.Should().Contain("success");
+        handler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_HTTP成功但业务错误码非零_应返回Null()
+    {
+        // Arrange — 飞书 Webhook 可能以 HTTP 200 返回 code=9499 的业务失败
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"code\":9499,\"msg\":\"Bad Request\",\"data\":{}}")
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new FeishuIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<FeishuIntegration>>());
+        var config = """
+            {"enabled":true,"webhookUrl":"https://open.feishu.cn/open-apis/bot/v2/hook/test-webhook"}
+            """;
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "飞书业务失败测试", "High", config);
+
+        // Assert — 非空结果会被 IntegrationRouter 误判为成功
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_HTTP成功但应用业务错误码非零_应返回Null()
+    {
+        // Arrange — 应用消息接口先拿 Token，再以 HTTP 200 返回业务错误
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(request =>
+                    request.RequestUri != null
+                    && request.RequestUri.AbsolutePath.Contains("tenant_access_token", StringComparison.Ordinal)),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"tenant_access_token\":\"test-token\"}")
+            });
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.Is<HttpRequestMessage>(request =>
+                    request.RequestUri != null
+                    && request.RequestUri.AbsolutePath.Contains("/im/v1/messages", StringComparison.Ordinal)),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"code\":230099,\"msg\":\"permission denied\",\"data\":{}}")
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new FeishuIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<FeishuIntegration>>());
+        var config = """
+            {"enabled":true,"appId":"app-id","appSecret":"app-secret","chatId":"oc-test"}
+            """;
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "飞书应用业务失败测试", "High", config);
+
+        // Assert
         result.Should().BeNull();
     }
 

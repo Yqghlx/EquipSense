@@ -670,18 +670,44 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
         {
             device.LatestValue.Should().BeApproximately(expectedLatest[device.DeviceCode], 0.01);
         });
-        _selectCommandCounter.Count.Should().Be(2,
-            "设备列表和窗口遥测应各执行一次查询，不能按设备逐个查询");
+        _selectCommandCounter.Count.Should().Be(3,
+            "设备列表、窗口聚合和最新值批量查询各执行一次，不能按设备逐个查询");
+    }
+
+    [Fact]
+    public async Task CompareAsync_应在数据库侧聚合窗口统计_不加载全部原始点()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        for (var index = 1; index <= 2; index++)
+        {
+            var deviceId = await SeedDeviceAsync(
+                db, _tenantId, $"AGG-{index:000}", "air_compressor", $"聚合设备{index}");
+            await SeedConstantTelemetryAsync(db, _tenantId, deviceId, "temperature", 3, 20 + index);
+        }
+
+        _selectCommandCounter.Reset();
+        await service.CompareAsync(_tenantId, "air_compressor", "temperature", hours: 24);
+
+        _selectCommandCounter.HasGroupBy.Should().BeTrue(
+            "设备对比的均值、最小值、最大值和数量应由数据库聚合，不能把窗口内全部原始点加载到应用内存");
     }
 
     /// <summary>统计测试上下文执行的 SELECT 命令次数，防止批量分析退化为 N+1 查询。</summary>
     private sealed class SelectCommandCounter : DbCommandInterceptor
     {
         private int _count;
+        private int _groupByCount;
 
         public int Count => Volatile.Read(ref _count);
+        public bool HasGroupBy => Volatile.Read(ref _groupByCount) > 0;
 
-        public void Reset() => Interlocked.Exchange(ref _count, 0);
+        public void Reset()
+        {
+            Interlocked.Exchange(ref _count, 0);
+            Interlocked.Exchange(ref _groupByCount, 0);
+        }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
             DbCommand command,
@@ -707,6 +733,8 @@ public class DeviceComparisonServiceTests : IAsyncLifetime
             if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
             {
                 Interlocked.Increment(ref _count);
+                if (command.CommandText.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase))
+                    Interlocked.Increment(ref _groupByCount);
             }
         }
     }

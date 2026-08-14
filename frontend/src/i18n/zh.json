@@ -96,6 +96,7 @@
     "alerts": "告警中心",
     "alertRules": "告警规则",
     "workOrders": "工单管理",
+    "reports": "运营报表",
     "pendingApprovals": "待审批",
     "notifications": "通知中心",
     "dispatch": "派工看板",
@@ -111,6 +112,25 @@
   "sidebar": {
     "expand": "展开侧边栏",
     "collapse": "收起侧边栏"
+  },
+  "reports": {
+    "title": "运营报表",
+    "description": "按租户汇总设备、告警、工单和 OEE 指标，导出 CSV 用于运营复盘。",
+    "currentMonthTitle": "本月运营快照",
+    "currentMonthDescription": "使用当前月份至此刻的数据生成报告。",
+    "currentMonth": "导出本月报告",
+    "customTitle": "自定义日期范围",
+    "customDescription": "选择查询窗口，最长支持 366 天。结束日期包含当天全天。",
+    "startDate": "开始日期",
+    "endDate": "结束日期",
+    "rangeHint": "请选择开始日期和结束日期。",
+    "rangeRequired": "请选择完整的日期范围。",
+    "rangeStartBeforeEnd": "开始日期必须早于结束日期。",
+    "rangeTooLong": "日期范围不能超过 366 天。",
+    "download": "导出自定义报告",
+    "exporting": "正在生成报告…",
+    "exportFailed": "报告导出失败，请检查网络或权限后重试。",
+    "noReadPermission": "当前角色没有访问运营报表的权限。"
   },
   "deviceComparison": {
     "title": "设备对比",
@@ -352,6 +372,8 @@
   },
   "device": {
     "title": "设备管理",
+    "exporting": "导出中...",
+    "exportFailed": "设备导出失败，请检查网络或权限后重试。",
     "deviceCode": "设备编码",
     "name": "设备名称",
     "type": "设备类型",
@@ -484,6 +506,8 @@
   },
   "alert": {
     "title": "告警中心",
+    "exporting": "导出中...",
+    "exportFailed": "告警导出失败，请检查网络或权限后重试。",
     "alertCode": "告警编码",
     "metric": "指标",
     "value": "当前值",
@@ -535,6 +559,8 @@
   },
   "workorder": {
     "title": "工单管理",
+    "exporting": "导出中...",
+    "exportFailed": "工单导出失败，请检查网络或权限后重试。",
     "code": "工单编码",
     "titleField": "标题",
     "titlePlaceholder": "工单标题",
@@ -1376,6 +1402,8 @@
     "ip": "IP 地址",
     "method": "方法",
     "time": "时间",
+    "exporting": "导出中...",
+    "exportFailed": "审计日志导出失败，请检查网络或权限后重试",
     "actionOptions": {
       "authLoginSuccess": "AuthLoginSuccess（登录成功）",
       "authLoginFailed": "AuthLoginFailed（登录失败）",

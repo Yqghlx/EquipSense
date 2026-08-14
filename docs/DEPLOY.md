@@ -80,7 +80,7 @@ WAF_REQUIRE_EXTERNAL_RULES=true
 DOMAIN=your-domain.com
 ```
 
-生产部署先将正式 Nginx/MQTT 证书放入 `docker/ssl/` 和 `docker/mqtt-certs/`，再确认 `docker/.env` 中的外部必填项已替换占位值并完成最终门禁：
+生产部署先将正式 Nginx/MQTT 证书放入 `docker/ssl/` 和 `docker/mqtt-certs/`，再确认 `docker/.env` 中的外部必填项已替换占位值并完成最终门禁。`setup-mosquitto.sh` 会在同目录临时文件中生成认证哈希，成功后才原子替换 `mosquitto_passwd/passwd`；生成失败不会破坏当前可用的密码文件，也拒绝符号链接目录或目标文件：
 
 ```bash
 cd docker
@@ -117,6 +117,52 @@ bash docker/production-readiness.sh \
 ```
 
 自检返回非零时不得继续发布；输出只包含变量名、文件名、服务名和错误类别，不包含 `.env` 的实际值。
+
+### 生产发布统一验收与外部证据
+
+部署前使用统一只读验收入口生成 `checks.tsv` 和 `summary.md`。它不会执行
+`docker compose up/down/pull/build/exec`，也不会调用备份恢复；备份恢复仍由独立
+CI job 或生产 RPO/RTO 演练完成。隔离环境可以验证仓库可控的静态、Compose、制品和
+运行态契约，但真实 SMTP、OTLP、MQTT 现场连通性及工单集成不会被伪装成通过：
+报告中的 `data.backup-restore` 固定为 `SKIPPED`，不代表备份已经通过。
+
+```bash
+# CI/临时隔离 smoke：允许外部真实依赖显示 SKIPPED
+bash docker/production-acceptance.sh \
+  --profile isolated-ci \
+  --env-file docker/.env \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --output-dir /tmp/equipsense-acceptance
+
+# 已启动的正式服务：生产外部条件没有证据时返回 2（BLOCKED）
+bash docker/production-acceptance.sh \
+  --profile production \
+  --env-file docker/.env \
+  --runtime-dir docker \
+  --compose-file docker/docker-compose.yml \
+  --compose-file docker/docker-compose.prod.yml \
+  --evidence-dir /var/lib/equipsense/acceptance-evidence \
+  --runtime \
+  --output-dir /var/lib/equipsense/acceptance-report
+```
+
+退出码 `0/1/2/3` 分别表示全部必需检查通过、存在明确失败、存在阻断条件、参数或
+文件边界错误。生产外部证据目录中的文件名固定为
+`external.smtp.pass`、`external.otel.pass`、`external.mqtt.pass` 和
+`external.integrations.pass`（仅启用对应集成时需要），每个文件必须是非符号链接、
+权限不得包含组/其他用户写入位，并包含最近 24 小时内的：
+
+```text
+status=PASS
+observed_at=2026-08-14T12:00:00Z
+```
+
+证据由独立探测、人工验收或受控流水线生成；统一入口只验证格式、文件权限和新鲜度，
+不把证据内容当作凭据。SMTP 仍需保留真实到达率、退信和死信告警记录，OTLP 仍需保留
+trace/metric 持久化与告警证据。只有确实启用外部工单集成时，才在验收环境变量中设置
+`PRODUCTION_ACCEPTANCE_INTEGRATIONS_ENABLED=true` 并提供
+`external.integrations.pass`。报告是脱敏的，但仍应放在权限为 `700` 的目录中。
 
 `bootstrap-production-secrets.sh` 默认永不覆盖已有有效凭据，并拒绝重复键、符号链接环境文件和并发写入；启用 `--sync-template-defaults` 时只从同目录 `.env.example` 追加非秘密白名单键，通过同目录临时文件原子替换配置，生成后仍调用 `validate-env.sh`，失败时只输出变量名和整改类别。其“外部生产配置”和 TLS/MQTT 提示是人工交付项，不会被脚本伪造。因此该工具是降低初始化错误的辅助工具，不是许可证、证书、租户和域名的替代品，也不会把“部分初始化”误报成可上线。
 
@@ -271,6 +317,21 @@ curl http://localhost:8080/api/v1/system/info
 
 Production 中实际启用 OPC UA 时必须使用 `SignAndEncrypt`；未配置安全模式或填写未知值会阻止网关启动。只有完成现场风险评估、网络隔离和防火墙限制后，才允许通过 `GATEWAY_ALLOW_INSECURE_OPCUA=true` 兼容无法升级的旧设备，并应将该 break-glass 配置纳入变更审批。
 
+#### 工业协议自动验收（非现场验收）
+
+发布前可用仓库内 Simulator 验证适配器的基础协议读取链路：
+
+```bash
+dotnet build EquipAI.sln --configuration Release --no-restore
+bash tests/e2e/run-protocol-integration.sh
+```
+
+脚本使用 OPC UA `127.0.0.1:4840`、Modbus TCP `127.0.0.1:5020`，真实启动
+`src/EquipAI.Simulator` 后执行 4 条协议测试；端口被占用、Simulator 提前退出或任一测试失败都会返回非零。
+默认单元测试中的协议用例明确跳过，显式启用但缺少 Simulator 会失败，不得把缺少依赖当成通过。
+该门禁当前已验证 OPC UA 2/2、Modbus TCP 2/2；它不等同于真实 PLC/Modbus 从站、现场网络隔离、正式 OPC UA
+证书与安全策略、生产容量和长时间断网恢复验收。
+
 管理员账户的初始密码由 `SEED_ADMIN_PASSWORD` 提供，不再使用仓库内置默认密码。五个种子账户密码在部署校验和应用启动时都会检查，至少 16 个字符、彼此独立且不得包含占位值；所有种子用户首次登录后必须修改密码。数据库、Redis、RabbitMQ、MQTT、Seq、Grafana 和五个种子账户也必须分别使用不同的随机凭据，不能为了方便复制同一个密码；TOTP、PII、JWT 和网关认证密钥也必须彼此独立，直接通过编排平台注入环境变量时，应用启动校验仍会拒绝种子账户密码复用。
 
 强制改密同时由后端执行，不依赖前端路由。JWT 会携带 `must_change_password` 声明，`PasswordChangeRequiredMiddleware` 会对业务 API 返回 `403` 和 `X-Password-Change-Required: true`，仅保留登录挑战、首次 MFA 注册、找回密码、`/auth/me`、刷新、登出和改密等认证闭环接口；MFA 设置、确认、禁用及恢复码重置等高风险管理接口必须先完成改密。改密成功后会吊销旧 refresh 会话并签发新的令牌对/HttpOnly Cookie。旧 access token 会在其短生命周期内自然过期，不能绕过该门禁继续调用业务接口。
@@ -283,7 +344,7 @@ Production 中实际启用 OPC UA 时必须使用 `SignAndEncrypt`；未配置�
 
 生产环境默认要求系统管理员和维保主管启用 TOTP MFA。首次登录或公开注册完成后，页面会进入 MFA 注册向导：使用 Authenticator 扫描二维码、输入 6 位验证码，验证成功后才会建立正式会话；注册令牌只在 Redis 中保留 10 分钟，成功后立即删除。注册成功会显示 8 个一次性恢复码，必须在离开页面前保存；登录时可使用恢复码代替 TOTP，每个恢复码成功使用后立即失效。已登录用户可在“安全与 MFA”中输入当前 TOTP 重新生成恢复码，旧码会全部失效。若覆盖 `Security__Mfa__RequiredRoles__*`，仍必须保留 `SystemAdmin` 和 `MaintenanceLead`，否则应用拒绝启动。
 
-> `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。
+> `docker/generate-mqtt-cert.sh` 生成的证书仅适用于开发/测试。生产环境应替换 `docker/mqtt-certs/` 中的 CA、服务端证书和私钥，并确保服务端证书的 SAN 包含 Broker 主机名。边缘网关发布遥测和后端订阅遥测均使用 MQTT QoS 1；后端使用完全来自 `Mqtt__ClientIdPrefix` 的稳定 ClientId + 持久会话，并在首次连接及断线重连时重新以 QoS 1 订阅；收到消息后等待数据库批次完成持久化，失败时设置 `ProcessingFailed` 阻止 QoS ACK。ClientId 不依赖容器机器名，容器或 Pod 重建后仍可恢复同一 Broker 会话；横向扩展后端实例时必须为每个实例配置不同的 `Mqtt__ClientIdPrefix`，避免互相踢出持久会话。部署验收仍需通过实际 Broker 重连、失败重投、会话恢复和积压恢复验证端到端丢失率。
 
 ### RabbitMQ 既有部署升级
 
@@ -302,15 +363,18 @@ GitHub Actions 的 `deploy` job 要求 `DEPLOY_PATH` 指向生产 Docker 文件�
 - `.env`（权限为 `600`，由密钥管理系统或人工安全注入）
 - `validate-env.sh`
 - `production-readiness.sh`
+- `production-acceptance.sh`
 - `docker-compose.yml` 与 `docker-compose.prod.yml`
 - `deploy-production.sh`（与仓库 `docker/deploy-production.sh` 保持一致并具备执行权限）
 
 GitHub Actions 远程执行 `bash ./deploy-production.sh "$TARGET_VERSION"`。脚本会先获取 Compose 目录下的单实例部署锁，再执行
-只读生产 readiness 静态门禁（包含基础 Compose 和生产 overlay）；只有生产凭据、镜像
-digest 和 Compose 变量全部通过后，才会登录 GHCR、拉取镜像和重建容器。目标版本还必须
+统一生产验收（包含基础 Compose、生产 overlay、制品标识和运行态）以及只读 production
+readiness 静态门禁；只有生产凭据、镜像 digest、外部验收证据和 Compose 变量全部通过后，
+才会登录 GHCR、拉取镜像和重建容器。目标版本还必须
 通过后端、边缘网关、前端三项应用探针和全量运行态 readiness，才会原子更新版本记录；
 任一目标检查失败都会使用本机旧镜像回滚，并在回滚后再次执行全量 readiness。校验或
-镜像拉取失败发生在运行态变更前，不触发回滚。
+镜像拉取失败发生在运行态变更前，不触发回滚。制品验收按镜像引用的完整 tag 精确匹配
+`TARGET_VERSION`，允许 `tag@digest`，不会把 `v1.2.3-old` 这类 tag 子串误认为目标版本。
 
 PR、main 推送和版本 tag 还会运行 `production-smoke` job：它用当前提交实际构建的
 backend/frontend/edgegateway 镜像和临时 Production 配置启动核心 Compose 服务，验证迁移、三层
@@ -327,8 +391,13 @@ Smoke Compose 仅在临时隔离数据库中显式设置 `SEED_DEMO_DATA=full`�
 后端 `/health/ready`、边缘网关 `/health`、前端容器 health 和回滚后的全量运行态 readiness。
 只有目标版本的三项应用探针与全量运行态 readiness 都通过后才以临时文件加原子 `mv`
 更新版本记录。同一 tag 重复触发时也必须通过全量 readiness，不重复重建。
-部署脚本会从 `.env` 读取 `EDGE_PORT` 生成网关健康探针；若生产入口经过额外代理，可显式设置
-`DEPLOY_EDGE_HEALTH_URL` 覆盖默认的 `http://localhost:<EDGE_PORT>/health`。
+部署脚本会从 `.env` 读取 `EDGE_PORT` 生成网关健康探针；生产外部证据目录通过
+`PRODUCTION_ACCEPTANCE_EVIDENCE_DIR` 指定，缺失或过期时部署会在运行态变更前返回
+`BLOCKED`；若生产入口经过额外代理，可显式设置
+`DEPLOY_EDGE_HEALTH_URL` 覆盖默认的 `http://localhost:<EDGE_PORT>/health`。若 Docker CLI
+不在 PATH 中或需要通过受控包装器调用，可设置 `DEPLOY_DOCKER_BIN` 为可执行文件路径；
+Compose、GHCR 登录、前端容器 inspect 以及 readiness/验收子门禁都会复用该值，默认值仍为
+`docker`。
 
 手动执行与 CI 使用同一入口：
 
@@ -360,6 +429,8 @@ SMTP_USERNAME=your_username
 SMTP_PASSWORD=your_password
 SMTP_ENABLE_SSL=true
 ```
+
+部署前的 `validate-env.sh --check-runtime-files` 会在 SMTP 参数显式填写时校验端口、发件人地址和 TLS 开关；格式错误会直接阻止启动。SMTP 未配置时邮件能力保持关闭/挂起，真实上线仍需用正式账号完成 TLS、发件域名和到达率验收。
 
 > 未配置 SMTP 时，密码重置请求仍会记录审计日志，但不会发送邮件；已开启告警邮件的任务会持久化为 Pending，SMTP 恢复后由 worker 自动继续投递，不会消耗重试次数。
 

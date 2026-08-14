@@ -154,24 +154,9 @@ public class WorkOrderAttachmentsController : ControllerBase
         if (attachment == null)
             return NotFound(new { code = 404, message = "附件不存在" });
 
-        // 先删除数据库记录：如果数据库提交失败，文件仍然存在，重试仍可继续；
-        // 反过来先删文件会留下“记录存在但文件丢失”的不可恢复坏引用。
+        // 服务会在同一 DbContext 中登记事务 Outbox；数据库记录删除成功后，
+        // 物理文件由事件处理器异步删除，失败时由 RabbitMQ 重试而不是丢失清理任务。
         await _service.DeleteTrackedAsync(attachment, ct);
-
-        // 文件删除属于数据库事务之外的清理动作。删除失败时记录错误并返回幂等成功，
-        // 避免用户看到附件已经从业务列表消失却收到误导性的 500；运维可依据日志清理孤儿文件。
-        try
-        {
-            await _fileStorage.DeleteAsync(attachment.StoragePath);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogError(
-                exception,
-                "附件物理文件删除失败，需后续清理：WorkOrderId={WorkOrderId}, StoragePath={StoragePath}",
-                workOrderId,
-                attachment.StoragePath);
-        }
 
         return NoContent();
     }

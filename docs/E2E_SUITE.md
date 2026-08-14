@@ -160,6 +160,20 @@ bash tests/e2e/run-integration.sh
 脚本只在 `Development` 环境运行，并把临时日志写入 `/tmp/equipsense-e2e`；不要把正式生产
 凭据或生产数据库用于该验收。
 
+若只验证边缘网关的 OPC UA/Modbus TCP 适配器，不需要启动后端、数据库或 MQTT，可运行：
+
+```bash
+dotnet build EquipAI.sln --configuration Release --no-restore
+bash tests/e2e/run-protocol-integration.sh
+```
+
+该脚本启动 `src/EquipAI.Simulator` 的非交互实例，等待 OPC UA `127.0.0.1:4840` 和
+Modbus TCP `127.0.0.1:5020` 真正监听，再以 `RUN_PROTOCOL_INTEGRATION_TESTS=true` 执行
+`Category=RequiresSimulator` 的 4 条测试；脚本只清理自己启动的 PID 和临时目录，端口已占用时直接失败。
+默认单元测试不启动 Simulator，4 条协议测试会明确显示跳过；显式启用但服务不可用时会失败，禁止静默假绿。
+当前仓库证据为 OPC UA 2/2、Modbus TCP 2/2 通过。该证据只代表仓库 Simulator 驱动的协议客户端链路，
+不替代现场 PLC/OPC UA 服务器、Modbus 从站地址、正式证书、网络隔离和容量验收。
+
 定位 Production E2E 的并发或单个用例问题时，可以复用同一套隔离容器并缩小执行范围；
 参数通过数组传递，不会经过 shell 二次解释：
 

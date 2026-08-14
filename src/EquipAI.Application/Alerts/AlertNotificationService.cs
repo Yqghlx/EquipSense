@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using EquipAI.Application.Integrations;
 using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -61,6 +62,12 @@ public class AlertNotificationService
     {
         "Critical", "High",
     };
+
+    /// <summary>
+    /// 单批站内通知扇出上限。通知是可靠事件的一部分，分页只限制内存和跟踪器规模，
+    /// 不会静默减少租户收件人数量。
+    /// </summary>
+    private const int NotificationFanoutBatchSize = 500;
 
     public AlertNotificationService(
         IServiceScopeFactory scopeFactory,
@@ -199,69 +206,83 @@ public class AlertNotificationService
                 _ => "低",
             };
 
-            // 给租户内所有运维相关用户发通知（维保主管 + 技术员 + 系统管理员）
-            var recipients = await db.UnfilteredSet<User>()
-                .Where(u => u.TenantId == @event.TenantId
-                            && u.IsActive
-                            && (u.Role == UserRole.SystemAdmin
-                                || u.Role == UserRole.MaintenanceLead
-                                || u.Role == UserRole.Technician))
-                .Select(u => new { u.Id, u.Email })
-                .ToListAsync(ct);
-
-            var recipientIds = recipients.Select(user => user.Id).ToArray();
-            var emailEnabledUserIds = await preferenceService.GetEnabledUserIdsAsync(
-                @event.TenantId,
-                recipientIds,
-                "alert",
-                "email",
-                ct);
-            var existingRecipientIds = recipientIds.Length == 0
-                ? []
-                : (await db.Notifications
-                    .IgnoreQueryFilters()
-                    .Where(item => item.TenantId == @event.TenantId
-                        && item.SourceEventId == @event.EventId
-                        && recipientIds.Contains(item.UserId))
-                    .Select(item => item.UserId)
-                    .ToListAsync(ct))
-                .ToHashSet();
-
-            foreach (var recipient in recipients)
+            // 给租户内所有运维相关用户发通知（维保主管 + 技术员 + 系统管理员）。
+            // 使用用户主键稳定分页，不能使用 Skip：重试或并发写入改变结果集时，Skip 可能跳过收件人。
+            Guid? lastRecipientId = null;
+            while (true)
             {
-                // RabbitMQ Inbox 的“处理完成”标记晚于业务事务提交；若进程在两者之间退出，
-                // 同一 EventId 会重投。先查稳定事件键可避免重复站内通知和邮件任务。
-                if (existingRecipientIds.Contains(recipient.Id))
-                    continue;
+                var recipientQuery = db.UnfilteredSet<User>()
+                    .Where(u => u.TenantId == @event.TenantId
+                                && u.IsActive
+                                && (u.Role == UserRole.SystemAdmin
+                                    || u.Role == UserRole.MaintenanceLead
+                                    || u.Role == UserRole.Technician));
+                if (lastRecipientId.HasValue)
+                    recipientQuery = recipientQuery.Where(u => u.Id > lastRecipientId.Value);
 
-                var notification = new Notification
-                {
-                    TenantId = @event.TenantId,
-                    UserId = recipient.Id,
-                    Type = "alert",
-                    Title = $"[{severityText}] 设备告警：{@event.Metric} 异常",
-                    Content = $"设备 {deviceLabel} 的指标 {@event.Metric} 当前值 {@event.Value}，触发 {@event.Severity} 级别告警。",
-                    RelatedId = alert.Id,
-                    SourceEventId = @event.EventId,
-                    Link = $"/alerts?alertId={alert.Id}",
-                };
-                db.Notifications.Add(notification);
+                var recipients = await recipientQuery
+                    .OrderBy(u => u.Id)
+                    .Take(NotificationFanoutBatchSize)
+                    .Select(u => new { u.Id, u.Email })
+                    .ToListAsync(ct);
+                if (recipients.Count == 0)
+                    break;
 
-                // 邮件任务与站内通知使用同一 DbContext、同一次 SaveChanges 提交，
-                // 确保不会出现“邮件已入队但站内通知不存在”或反向的孤儿记录。
-                if (emailEnabledUserIds.Contains(recipient.Id)
-                    && !string.IsNullOrWhiteSpace(recipient.Email))
+                var recipientIds = recipients.Select(user => user.Id).ToArray();
+                var emailEnabledUserIds = await preferenceService.GetEnabledUserIdsAsync(
+                    @event.TenantId,
+                    recipientIds,
+                    "alert",
+                    "email",
+                    ct);
+                var existingRecipientIds = (await db.Notifications
+                        .IgnoreQueryFilters()
+                        .Where(item => item.TenantId == @event.TenantId
+                            && item.SourceEventId == @event.EventId
+                            && recipientIds.Contains(item.UserId))
+                        .Select(item => item.UserId)
+                        .ToListAsync(ct))
+                    .ToHashSet();
+
+                foreach (var recipient in recipients)
                 {
-                    db.EmailNotificationDeliveries.Add(new EmailNotificationDelivery
+                    // RabbitMQ Inbox 的“处理完成”标记晚于业务事务提交；若进程在两者之间退出，
+                    // 同一 EventId 会重投。先查稳定事件键可避免重复站内通知和邮件任务。
+                    if (existingRecipientIds.Contains(recipient.Id))
+                        continue;
+
+                    var notification = new Notification
                     {
                         TenantId = @event.TenantId,
                         UserId = recipient.Id,
-                        NotificationId = notification.Id,
-                    });
-                }
-            }
+                        Type = "alert",
+                        Title = $"[{severityText}] 设备告警：{@event.Metric} 异常",
+                        Content = $"设备 {deviceLabel} 的指标 {@event.Metric} 当前值 {@event.Value}，触发 {@event.Severity} 级别告警。",
+                        RelatedId = alert.Id,
+                        SourceEventId = @event.EventId,
+                        Link = $"/alerts?alertId={alert.Id}",
+                    };
+                    db.Notifications.Add(notification);
 
-            await db.SaveChangesAsync(ct);
+                    // 每批邮件任务仍与对应站内通知使用同一次 SaveChanges 提交，
+                    // 确保不会出现“邮件已入队但站内通知不存在”或反向的孤儿记录。
+                    if (emailEnabledUserIds.Contains(recipient.Id)
+                        && !string.IsNullOrWhiteSpace(recipient.Email))
+                    {
+                        db.EmailNotificationDeliveries.Add(new EmailNotificationDelivery
+                        {
+                            TenantId = @event.TenantId,
+                            UserId = recipient.Id,
+                            NotificationId = notification.Id,
+                        });
+                    }
+                }
+
+                await db.SaveChangesAsync(ct);
+                // 批量提交后清理跟踪器，避免高用户数租户让单个告警事件长期持有全部实体。
+                db.ChangeTracker.Clear();
+                lastRecipientId = recipients[^1].Id;
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -376,7 +397,7 @@ public class AlertNotificationService
             var message = new { msg_type = "interactive", card };
             var resp = await client.PostAsJsonAsync(feishuConfig.WebhookUrl, message, ct);
             var responseBody = await resp.Content.ReadAsStringAsync(ct);
-            if (!resp.IsSuccessStatusCode || !IsFeishuSuccessResponse(responseBody))
+            if (!resp.IsSuccessStatusCode || !FeishuResponseValidator.IsSuccess(responseBody))
             {
                 _logger.LogWarning("告警飞书推送失败（Webhook）: AlertId={AlertId}, Status={Status}",
                     alert.Id, resp.StatusCode);
@@ -425,7 +446,7 @@ public class AlertNotificationService
             };
             var msgResp = await client.SendAsync(msgReq, ct);
             var msgBody = await msgResp.Content.ReadAsStringAsync(ct);
-            if (!msgResp.IsSuccessStatusCode || !IsFeishuSuccessResponse(msgBody))
+            if (!msgResp.IsSuccessStatusCode || !FeishuResponseValidator.IsSuccess(msgBody))
             {
                 _logger.LogWarning("告警飞书推送失败（App）: AlertId={AlertId}, Status={Status}",
                     alertId, msgResp.StatusCode);
@@ -511,28 +532,6 @@ public class AlertNotificationService
         catch (JsonException)
         {
             return false;
-        }
-    }
-
-    /// <summary>
-    /// 判断飞书响应是否包含明确的业务错误码。
-    /// 自定义 Webhook 可能返回纯文本，因此缺少 code 时沿用 HTTP 成功语义。
-    /// </summary>
-    private static bool IsFeishuSuccessResponse(string responseBody)
-    {
-        if (string.IsNullOrWhiteSpace(responseBody))
-            return true;
-
-        try
-        {
-            using var document = JsonDocument.Parse(responseBody);
-            if (!document.RootElement.TryGetProperty("code", out var code))
-                return true;
-            return code.TryGetInt32(out var value) && value == 0;
-        }
-        catch (JsonException)
-        {
-            return true;
         }
     }
 

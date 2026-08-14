@@ -580,6 +580,33 @@ public class AlertNotificationServiceTests
         handler.RequestCount.Should().Be(3);
     }
 
+    [Fact]
+    public async Task DispatchAsync_飞书HTTP成功但响应体非法_应重试并记录失败()
+    {
+        var tenantId = Guid.NewGuid();
+        var alertId = Guid.NewGuid();
+        var handler = new SequenceResponseHandler(
+            "upstream proxy returned an invalid response",
+            HttpStatusCode.OK,
+            HttpStatusCode.OK,
+            HttpStatusCode.OK);
+        var (db, svc, _) = CreateWithHttpHandler(handler);
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "告警飞书响应校验测试租户",
+            Slug = $"alert-feishu-response-{Guid.NewGuid():N}",
+            Settings = "{\"integrations\":{\"feishu\":{\"enabled\":true,\"webhookUrl\":\"https://example.test/feishu\"}}}",
+        });
+        await db.SaveChangesAsync();
+
+        await svc.DispatchAsync(
+            MakeEvent(alertId, tenantId),
+            MakeAlert(alertId, tenantId));
+
+        handler.RequestCount.Should().Be(3);
+    }
+
     /// <summary>
     /// 模拟外部机器人在请求过程中触发宿主取消，验证通知服务不会把取消当成普通推送故障吞掉。
     /// </summary>

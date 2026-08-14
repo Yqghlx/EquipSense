@@ -43,12 +43,17 @@ public class OeeService
     {
         // 维度一：Availability — 瞬时在线设备占比（简化版，不是工业可用率）
         // 显式 tenantId 与全局过滤器共同构成纵深隔离，支持后台或跨租户管理上下文复用。
-        var devices = await _db.UnfilteredSet<Core.Entities.Device>()
+        var deviceSummary = await _db.UnfilteredSet<Core.Entities.Device>()
             .Where(d => d.TenantId == tenantId)
-            .Select(d => new { d.Status })
-            .ToListAsync(ct);
-        var totalDevices = devices.Count;
-        var onlineDevices = devices.Count(d => d.Status == DeviceStatus.Online);
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Online = group.Count(d => d.Status == DeviceStatus.Online),
+            })
+            .FirstOrDefaultAsync(ct);
+        var totalDevices = deviceSummary?.Total ?? 0;
+        var onlineDevices = deviceSummary?.Online ?? 0;
         var availability = totalDevices > 0 ? (double)onlineDevices / totalDevices : 0;
 
         // 维度二：Performance — 平均 air_flow 达标率

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using EquipAI.Application.Knowledge;
 using EquipAI.Application.Knowledge.DTOs;
 using EquipAI.Core.Entities;
@@ -291,6 +292,40 @@ public class KnowledgeImportServiceTests
         json.Should().Contain("\"DeviceType\": \"泵\"");
         json.Should().Contain("\"Name\": \"泵压力异常\"");
         json.Should().Contain("\"ConfidenceWeight\": 0.7");
+    }
+
+    /// <summary>
+    /// 导出必须限制返回条数，避免租户规则长期增长后一次性把全部内容加载到应用内存。
+    /// JSON 与 CSV 共用同一条数上限和稳定排序，防止两种格式导出结果边界不一致。
+    /// </summary>
+    [Fact]
+    public async Task ExportAsJson和CsvAsync_超过上限时应只返回最新上限条规则()
+    {
+        var rules = Enumerable.Range(0, KnowledgeImportService.MaxExportRules + 1)
+            .Select(index => new KnowledgeRule
+            {
+                TenantId = _tenantId,
+                DeviceType = "电机",
+                Name = $"规则-{index:D5}",
+                Conditions = "[]",
+                Conclusion = "测试结论",
+                CreatedAt = DateTime.UnixEpoch.AddMinutes(index),
+            })
+            .ToList();
+        _db.KnowledgeRules.AddRange(rules);
+        await _db.SaveChangesAsync();
+
+        var json = await _sut.ExportAsJsonAsync(_tenantId, null, CancellationToken.None);
+        var csv = await _sut.ExportAsCsvAsync(_tenantId, null, CancellationToken.None);
+
+        using var jsonDocument = JsonDocument.Parse(json);
+        jsonDocument.RootElement.GetArrayLength().Should().Be(KnowledgeImportService.MaxExportRules);
+        json.Should().Contain("规则-10000");
+        json.Should().NotContain("规则-00000");
+        csv.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Should().HaveCount(KnowledgeImportService.MaxExportRules + 1);
+        csv.Should().Contain("规则-10000");
+        csv.Should().NotContain("规则-00000");
     }
 
     /// <summary>

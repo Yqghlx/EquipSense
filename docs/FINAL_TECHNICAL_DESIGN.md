@@ -798,6 +798,8 @@ POST /api/v1/telemetry
 - 设备编码/设备 ID 最多 50 个字符；时间戳必须有效，但不限制历史跨度，以支持边缘网关断网缓存后的补传。
 - HTTP 与 MQTT 共用 `EquipAI.Core.Validation.TelemetryInputValidator`，防止某个接入通道绕过数据库和异步队列边界。
 
+**历史遥测查询边界：** `GET /api/v1/telemetry/{deviceId}?metric=...` 仅用于设备详情趋势图，单次时间范围最多 7 天，且数据库侧最多返回该窗口内最近 10000 个数据点并恢复为时间升序。超出范围或结束时间不晚于起始时间时返回 400；长期统计应使用聚合分析或导出任务，不能通过在线图表接口绕过资源边界。
+
 ### 5.3 批量导入
 
 ```
@@ -2472,12 +2474,15 @@ volumes:
 | GET | /api/v1/reports/device-fault-ranking | 设备故障排行 |
 | GET | /api/v1/reports/work-order-stats | 工单统计 |
 | GET | /api/v1/reports/mtbf-mttr | MTBF/MTTR 看板 |
+| GET | /api/v1/reports/operations | 生成运营 CSV 报表；支持 `startDate`/`endDate`，单次最多 366 天；日期型 `endDate` 包含结束日全天 |
+| GET | /api/v1/reports/operations/current-month | 生成当前月份运营 CSV 报表 |
 
 ### 数据接入
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/v1/telemetry | 遥测数据上报（HTTP） |
+| GET | /api/v1/telemetry/{deviceId} | 查询最新遥测或指定指标历史趋势；历史时间范围最多 7 天、最多返回最近 10000 个点 |
 | MQTT | factory/{tenantId}/telemetry/{deviceId} | 遥测数据上报（MQTT） |
 | POST | /api/v1/import/devices | 设备批量导入 |
 | POST | /api/v1/import/telemetry | 遥测历史数据导入 |

@@ -20,6 +20,11 @@ namespace EquipAI.Application.Alerts;
 /// </summary>
 public class AlertEvaluationService : IAlertEvaluationService
 {
+    /// <summary>
+    /// 单次告警规则评估从数据库读取的最大规则数，避免遥测热路径无界加载。
+    /// </summary>
+    private const int RuleEvaluationBatchSize = 500;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEventBus _eventBus;
     private readonly IAlertAggregator _aggregator;
@@ -98,125 +103,144 @@ public class AlertEvaluationService : IAlertEvaluationService
             deviceType = device.Type;
         }
 
-        var rules = await dbContext.AlertRules
+        IQueryable<AlertRule> matchedRules = dbContext.AlertRules
             .IgnoreQueryFilters()
+            .AsNoTracking()
             .Where(r => r.TenantId == tenantId && r.Enabled && r.Metric == metric)
             .Where(r => r.DeviceId == null || r.DeviceId == deviceId)
             .Where(r => r.DeviceType == null || r.DeviceType == deviceType)
-            .ToListAsync(cancellationToken);
+            .OrderBy(r => r.Id);
 
-        if (rules.Count == 0)
-            return;
-
-        foreach (var rule in rules)
+        Guid? lastRuleId = null;
+        while (true)
         {
-            // 根据规则类型选择对应的评估器
-            var evaluator = _evaluators.FirstOrDefault(e => e.RuleType == rule.RuleType);
-            if (evaluator == null)
-                continue;
-
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            var triggered = evaluator.Evaluate(value, rule, context);
-            sw.Stop();
-            BusinessMetrics.AlertEvaluationDuration.Observe(sw.Elapsed.TotalMilliseconds);
-
-            // 评估结果确定后再锁定状态变更路径：不触发时保护自动恢复，触发时保护聚合计数与告警创建/更新。
-            // 这样不同指标、不同规则仍可并行，但同一告警键不会出现“更新早于创建提交”的竞态。
-            await using var evaluationLease = await _concurrencyGate.EnterAsync(
-                AlertEvaluationConcurrencyGate.BuildKey(tenantId, deviceId, rule.Id, metric),
-                cancellationToken);
-
-            if (!triggered)
+            var batchQuery = matchedRules;
+            if (lastRuleId.HasValue)
             {
-                // 指标回到阈值内：检查是否有该设备该指标该规则的 Active 告警，自动恢复
-                // 设计目的：避免 Active 告警无限累积。运维若已介入处置，告警状态会被改成 Acknowledged，
-                // 不会被这里自动 Resolve（只处理 Status=Active 的告警）。
-                await TryAutoResolveAsync(dbContext, tenantId, deviceId, metric, rule.Id, cancellationToken);
-                continue;
+                batchQuery = batchQuery.Where(r => r.Id > lastRuleId.Value);
             }
 
-            _logger.LogInformation("告警规则 {RuleName} 已触发（设备: {DeviceId}, 指标: {Metric}, 值: {Value}）",
-                rule.Name, deviceId, metric, value);
+            var rules = await batchQuery
+                .Take(RuleEvaluationBatchSize)
+                .ToListAsync(cancellationToken);
 
-            // 通过聚合器判断告警处理策略（防风暴）。窗口按 设备+规则+指标 维度，
-            // 避免同指标的多条规则（分层阈值）共享窗口互相吞并。
-            var (shouldCreate, shouldUpdate, silenced) = await _aggregator.EvaluateAsync(
-                deviceId, rule.Id, metric, cancellationToken);
+            if (rules.Count == 0)
+                break;
 
-            if (silenced)
+            foreach (var rule in rules)
             {
-                BusinessMetrics.AlertsEvaluated.WithLabels("suppressed", rule.Severity.ToString()).Inc();
-                _logger.LogDebug("告警已静默（设备: {DeviceId}, 指标: {Metric}）", deviceId, metric);
-                continue;
-            }
+                // 根据规则类型选择对应的评估器
+                var evaluator = _evaluators.FirstOrDefault(e => e.RuleType == rule.RuleType);
+                if (evaluator == null)
+                    continue;
 
-            if (shouldCreate)
-            {
-                BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
-            }
-            else if (shouldUpdate)
-            {
-                BusinessMetrics.AlertsEvaluated.WithLabels("updated", rule.Severity.ToString()).Inc();
-            }
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var triggered = evaluator.Evaluate(value, rule, context);
+                sw.Stop();
+                BusinessMetrics.AlertEvaluationDuration.Observe(sw.Elapsed.TotalMilliseconds);
 
-            if (shouldCreate)
-            {
-                // 防重启重复告警：AlertAggregator 是进程内内存态（Singleton），后端重启后窗口计数归零，
-                // 持续越限的设备会被误判为"首次"而进入创建分支。若此时 DB 已有同设备同指标同规则的
-                // 活跃告警，直接创建会产生重复 Active 告警 → 重复 SignalR 推送 + 重复自动建单，淹没用户。
-                // 兜底：创建前按 设备+指标+规则 精确查 DB（不按指标粗查，避免吸收同指标不同规则的告警），
-                // 存在则降级为更新（不发布新事件，因用户此前已被通知）。
-                var hasActive = await dbContext.Alerts
-                    .IgnoreQueryFilters()
-                    .AnyAsync(a => a.TenantId == tenantId && a.DeviceId == deviceId
-                                && a.Metric == metric && a.RuleId == rule.Id
-                                && a.Status == AlertStatus.Active, cancellationToken);
+                // 评估结果确定后再锁定状态变更路径：不触发时保护自动恢复，触发时保护聚合计数与告警创建/更新。
+                // 这样不同指标、不同规则仍可并行，但同一告警键不会出现“更新早于创建提交”的竞态。
+                await using var evaluationLease = await _concurrencyGate.EnterAsync(
+                    AlertEvaluationConcurrencyGate.BuildKey(tenantId, deviceId, rule.Id, metric),
+                    cancellationToken);
 
-                if (hasActive)
+                if (!triggered)
                 {
-                    _logger.LogDebug("已存在活跃告警，降级为更新避免重复（聚合器可能因重启重置计数）: 设备={DeviceId}, 指标={Metric}", deviceId, metric);
-                    await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value, cancellationToken);
+                    // 指标回到阈值内：检查是否有该设备该指标该规则的 Active 告警，自动恢复
+                    // 设计目的：避免 Active 告警无限累积。运维若已介入处置，告警状态会被改成 Acknowledged，
+                    // 不会被这里自动 Resolve（只处理 Status=Active 的告警）。
+                    await TryAutoResolveAsync(dbContext, tenantId, deviceId, metric, rule.Id, cancellationToken);
+                    continue;
                 }
-                else
+
+                _logger.LogInformation("告警规则 {RuleName} 已触发（设备: {DeviceId}, 指标: {Metric}, 值: {Value}）",
+                    rule.Name, deviceId, metric, value);
+
+                // 通过聚合器判断告警处理策略（防风暴）。窗口按 设备+规则+指标 维度，
+                // 避免同指标的多条规则（分层阈值）共享窗口互相吞并。
+                var (shouldCreate, shouldUpdate, silenced) = await _aggregator.EvaluateAsync(
+                    deviceId, rule.Id, metric, cancellationToken);
+
+                if (silenced)
                 {
-                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
-                    if (alert != null)
-                    {
-                        // 发布告警触发事件，供 SignalR 推送、工单创建等下游模块消费
-                        var evt = new AlertTriggeredEvent(
-                            Guid.NewGuid(), DateTime.UtcNow, tenantId,
-                            alert.Id, deviceId, rule.Id,
-                            metric, value, rule.Severity.ToString());
-                        await eventBus.PublishAsync(evt, cancellationToken);
-                        // InMemory/测试总线不会替当前 DbContext 保存实体；生产事务总线已在发布时保存，
-                        // 此处再次调用是无害的，用于保持两种运行模式的持久化语义一致。
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                    }
+                    BusinessMetrics.AlertsEvaluated.WithLabels("suppressed", rule.Severity.ToString()).Inc();
+                    _logger.LogDebug("告警已静默（设备: {DeviceId}, 指标: {Metric}）", deviceId, metric);
+                    continue;
                 }
-            }
-            else if (shouldUpdate)
-            {
-                var updated = await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value, cancellationToken);
-                if (!updated)
+
+                if (shouldCreate)
                 {
-                    // 防丢失：shouldUpdate 但无活跃告警可更新——常见于指标在阈值附近震荡：首次越限创建告警 →
-                    // 短暂回落触发 TryAutoResolveAsync 自动恢复（Active→Resolved）→ 再次越限时聚合器窗口计数仍 >1
-                    // （shouldUpdate），但已无 Active 告警可更新。若不兜底创建，该复发越限会被静默丢弃——
-                    // 运维此前收到"已恢复"通知后误以为问题解决，实际复发却不再告警/通知。对在阈值附近波动的
-                    // 工业指标（温度/振动/压力）是严重监控盲区。降级为创建新告警 + 发布事件（复发是新事件，需重新通知）。
-                    // 仍受聚合器防风暴约束（窗口内至多创建/更新 3 次，超过即静默），不会因震荡产生告警风暴。
-                    var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
-                    if (alert != null)
-                    {
-                        await eventBus.PublishAsync(new AlertTriggeredEvent(
-                            Guid.NewGuid(), DateTime.UtcNow, tenantId,
-                            alert.Id, deviceId, rule.Id,
-                            metric, value, rule.Severity.ToString()), cancellationToken);
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                    }
                     BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
                 }
+                else if (shouldUpdate)
+                {
+                    BusinessMetrics.AlertsEvaluated.WithLabels("updated", rule.Severity.ToString()).Inc();
+                }
+
+                if (shouldCreate)
+                {
+                    // 防重启重复告警：AlertAggregator 是进程内内存态（Singleton），后端重启后窗口计数归零，
+                    // 持续越限的设备会被误判为"首次"而进入创建分支。若此时 DB 已有同设备同指标同规则的
+                    // 活跃告警，直接创建会产生重复 Active 告警 → 重复 SignalR 推送 + 重复自动建单，淹没用户。
+                    // 兜底：创建前按 设备+指标+规则 精确查 DB（不按指标粗查，避免吸收同指标不同规则的告警），
+                    // 存在则降级为更新（不发布新事件，因用户此前已被通知）。
+                    var hasActive = await dbContext.Alerts
+                        .IgnoreQueryFilters()
+                        .AnyAsync(a => a.TenantId == tenantId && a.DeviceId == deviceId
+                                    && a.Metric == metric && a.RuleId == rule.Id
+                                    && a.Status == AlertStatus.Active, cancellationToken);
+
+                    if (hasActive)
+                    {
+                        _logger.LogDebug("已存在活跃告警，降级为更新避免重复（聚合器可能因重启重置计数）: 设备={DeviceId}, 指标={Metric}", deviceId, metric);
+                        await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value, cancellationToken);
+                    }
+                    else
+                    {
+                        var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
+                        if (alert != null)
+                        {
+                            // 发布告警触发事件，供 SignalR 推送、工单创建等下游模块消费
+                            var evt = new AlertTriggeredEvent(
+                                Guid.NewGuid(), DateTime.UtcNow, tenantId,
+                                alert.Id, deviceId, rule.Id,
+                                metric, value, rule.Severity.ToString());
+                            await eventBus.PublishAsync(evt, cancellationToken);
+                            // InMemory/测试总线不会替当前 DbContext 保存实体；生产事务总线已在发布时保存，
+                            // 此处再次调用是无害的，用于保持两种运行模式的持久化语义一致。
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                        }
+                    }
+                }
+                else if (shouldUpdate)
+                {
+                    var updated = await UpdateExistingAlertAsync(dbContext, tenantId, deviceId, rule.Id, metric, value, cancellationToken);
+                    if (!updated)
+                    {
+                        // 防丢失：shouldUpdate 但无活跃告警可更新——常见于指标在阈值附近震荡：首次越限创建告警 →
+                        // 短暂回落触发 TryAutoResolveAsync 自动恢复（Active→Resolved）→ 再次越限时聚合器窗口计数仍 >1
+                        // （shouldUpdate），但已无 Active 告警可更新。若不兜底创建，该复发越限会被静默丢弃——
+                        // 运维此前收到"已恢复"通知后误以为问题解决，实际复发却不再告警/通知。对在阈值附近波动的
+                        // 工业指标（温度/振动/压力）是严重监控盲区。降级为创建新告警 + 发布事件（复发是新事件，需重新通知）。
+                        // 仍受聚合器防风暴约束（窗口内至多创建/更新 3 次，超过即静默），不会因震荡产生告警风暴。
+                        var alert = await CreateAlertAsync(dbContext, tenantId, deviceId, rule, metric, value, context, cancellationToken);
+                        if (alert != null)
+                        {
+                            await eventBus.PublishAsync(new AlertTriggeredEvent(
+                                Guid.NewGuid(), DateTime.UtcNow, tenantId,
+                                alert.Id, deviceId, rule.Id,
+                                metric, value, rule.Severity.ToString()), cancellationToken);
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                        }
+                        BusinessMetrics.AlertsEvaluated.WithLabels("triggered", rule.Severity.ToString()).Inc();
+                    }
+                }
             }
+
+            lastRuleId = rules[^1].Id;
+            if (rules.Count < RuleEvaluationBatchSize)
+                break;
         }
     }
 

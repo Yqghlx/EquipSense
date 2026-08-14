@@ -23,6 +23,9 @@ namespace EquipAI.Application.WorkOrders;
 /// </summary>
 public class SlaEscalationHostedService : LockedTimerService
 {
+    /// <summary>单次读取的最大租户数，避免 SLA 扫描随租户总量增长而无界占用内存。</summary>
+    private const int TenantScanBatchSize = 500;
+
     private readonly IServiceScopeFactory _scopeFactory;
 
     public SlaEscalationHostedService(
@@ -59,34 +62,52 @@ public class SlaEscalationHostedService : LockedTimerService
 
         // Tenant 实体无全局租户过滤器（后台服务需跨租户遍历），默认查询即返回全部租户。
         // 跳过系统租户（Guid.Empty，仅承载预置模板，无真实工单）与已过期租户（不再产生 SLA 义务）。
-        var tenants = await dbContext.Tenants
-            .Where(t => t.Id != Guid.Empty && t.Status != TenantStatus.Expired)
-            .Select(t => t.Id)
-            .ToListAsync(ct);
-
+        var processedTenantCount = 0;
         var totalEscalated = 0;
-        foreach (var tenantId in tenants)
+        Guid? lastTenantId = null;
+        while (true)
         {
-            // 单租户隔离：一个租户的升级失败不阻断其余租户的处理
-            try
+            ct.ThrowIfCancellationRequested();
+
+            var query = dbContext.Tenants
+                .Where(t => t.Id != Guid.Empty && t.Status != TenantStatus.Expired);
+            if (lastTenantId.HasValue)
+                query = query.Where(t => t.Id > lastTenantId.Value);
+
+            var tenantIds = await query
+                .OrderBy(t => t.Id)
+                .Take(TenantScanBatchSize)
+                .Select(t => t.Id)
+                .ToListAsync(ct);
+            if (tenantIds.Count == 0)
+                break;
+
+            foreach (var tenantId in tenantIds)
             {
-                totalEscalated += await slaService.CheckAndEscalateAsync(tenantId, ct);
+                // 单租户隔离：一个租户的升级失败不阻断其余租户的处理
+                try
+                {
+                    totalEscalated += await slaService.CheckAndEscalateAsync(tenantId, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // 租户级业务故障可以隔离，但宿主停机信号必须交回 LockedTimerService 结束本轮工作。
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "租户 {TenantId} 的 SLA 升级失败", tenantId);
+                }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                // 租户级业务故障可以隔离，但宿主停机信号必须交回 LockedTimerService 结束本轮工作。
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "租户 {TenantId} 的 SLA 升级失败", tenantId);
-            }
+
+            processedTenantCount += tenantIds.Count;
+            lastTenantId = tenantIds[^1];
         }
 
         if (totalEscalated > 0)
         {
             Logger.LogInformation("SLA 升级扫描完成：处理 {TenantCount} 个租户，累计升级 {EscalatedCount} 个工单",
-                tenants.Count, totalEscalated);
+                processedTenantCount, totalEscalated);
         }
 
         return totalEscalated;

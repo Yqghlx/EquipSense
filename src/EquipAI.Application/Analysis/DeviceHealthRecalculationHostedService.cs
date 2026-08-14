@@ -26,6 +26,9 @@ namespace EquipAI.Application.Analysis;
 /// </summary>
 public class DeviceHealthRecalculationHostedService : LockedTimerService
 {
+    /// <summary>单次读取的最大租户数，避免后台扫描随租户总量增长而无界占用内存。</summary>
+    private const int TenantScanBatchSize = 500;
+
     private readonly IServiceScopeFactory _scopeFactory;
 
     public DeviceHealthRecalculationHostedService(
@@ -62,34 +65,52 @@ public class DeviceHealthRecalculationHostedService : LockedTimerService
 
         // Tenant 实体无全局租户过滤器（后台服务需跨租户遍历），默认查询即返回全部租户。
         // 跳过系统租户（Guid.Empty，仅承载预置模板，无真实设备）与已过期租户（设备不再产生监控价值）。
-        var tenants = await dbContext.Tenants
-            .Where(t => t.Id != Guid.Empty && t.Status != TenantStatus.Expired)
-            .Select(t => t.Id)
-            .ToListAsync(ct);
-
+        var processedTenantCount = 0;
         var totalUpdated = 0;
-        foreach (var tenantId in tenants)
+        Guid? lastTenantId = null;
+        while (true)
         {
-            // 单租户隔离：一个租户的重算失败不阻断其余租户的处理
-            try
+            ct.ThrowIfCancellationRequested();
+
+            var query = dbContext.Tenants
+                .Where(t => t.Id != Guid.Empty && t.Status != TenantStatus.Expired);
+            if (lastTenantId.HasValue)
+                query = query.Where(t => t.Id > lastTenantId.Value);
+
+            var tenantIds = await query
+                .OrderBy(t => t.Id)
+                .Take(TenantScanBatchSize)
+                .Select(t => t.Id)
+                .ToListAsync(ct);
+            if (tenantIds.Count == 0)
+                break;
+
+            foreach (var tenantId in tenantIds)
             {
-                totalUpdated += await healthService.UpdateAllHealthScoresAsync(tenantId, ct);
+                // 单租户隔离：一个租户的重算失败不阻断其余租户的处理
+                try
+                {
+                    totalUpdated += await healthService.UpdateAllHealthScoresAsync(tenantId, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    // 宿主正在关闭时立即传播取消，避免继续遍历后续租户并延长停机时间。
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "租户 {TenantId} 的设备健康度重算失败", tenantId);
+                }
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                // 宿主正在关闭时立即传播取消，避免继续遍历后续租户并延长停机时间。
-                throw;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError(ex, "租户 {TenantId} 的设备健康度重算失败", tenantId);
-            }
+
+            processedTenantCount += tenantIds.Count;
+            lastTenantId = tenantIds[^1];
         }
 
         if (totalUpdated > 0)
         {
             Logger.LogInformation("设备健康度重算完成：处理 {TenantCount} 个租户，累计重算 {UpdatedCount} 台设备",
-                tenants.Count, totalUpdated);
+                processedTenantCount, totalUpdated);
         }
 
         return totalUpdated;

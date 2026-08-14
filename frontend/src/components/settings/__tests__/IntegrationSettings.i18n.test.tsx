@@ -204,4 +204,87 @@ describe('外部集成配置英文界面与回填', () => {
     expect(screen.getByRole('combobox')).toHaveValue('maximo');
     expect(document.body.textContent).not.toMatch(/[\u3400-\u9fff]/);
   });
+
+  it('四类集成均应支持编辑、测试和启停保存', async () => {
+    const user = userEvent.setup();
+    const integrations: IntegrationsMap = {
+      ...existingIntegrations,
+      dingtalk: { ...existingIntegrations.dingtalk, enabled: false },
+      feishu: { ...existingIntegrations.feishu, enabled: true },
+      webhook: { ...existingIntegrations.webhook, enabled: false },
+      eam: { ...existingIntegrations.eam, enabled: true },
+    };
+    mockHooks(integrations);
+    render(<IntegrationSettings />);
+
+    const dingtalkFields = screen.getAllByRole('textbox');
+    await user.clear(dingtalkFields[0]);
+    await user.type(dingtalkFields[0], 'https://dingtalk.example/hook');
+    await user.selectOptions(screen.getByRole('combobox'), 'markdown');
+    await user.click(screen.getByRole('button', { name: 'Test connection' }));
+    expect(mockTest).toHaveBeenCalledWith('dingtalk');
+    await user.click(screen.getByRole('button', { name: 'Enable and save' }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'dingtalk',
+      enabled: true,
+      config: expect.stringContaining('dingtalk.example'),
+    }));
+
+    await user.click(screen.getByRole('tab', { name: 'Feishu' }));
+    await user.type(screen.getAllByRole('textbox')[0], 'https://feishu.example/hook');
+    await user.click(screen.getByRole('button', { name: 'Test connection' }));
+    expect(mockTest).toHaveBeenCalledWith('feishu');
+    await user.click(screen.getByRole('button', { name: 'Disable' }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ type: 'feishu', enabled: false }));
+
+    await user.click(screen.getByRole('tab', { name: 'Webhook' }));
+    await user.type(screen.getAllByRole('textbox')[0], 'https://webhook.example/hook');
+    await user.click(screen.getByRole('button', { name: 'Test connection' }));
+    expect(mockTest).toHaveBeenCalledWith('webhook');
+    await user.click(screen.getByRole('button', { name: 'Enable and save' }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ type: 'webhook', enabled: true }));
+
+    await user.click(screen.getByRole('tab', { name: 'EAM' }));
+    await user.selectOptions(screen.getByRole('combobox'), 'sap_pm');
+    await user.type(screen.getAllByRole('textbox')[0], 'https://eam.example/api');
+    await user.click(screen.getByRole('button', { name: 'Test connection' }));
+    expect(mockTest).toHaveBeenCalledWith('eam');
+    await user.click(screen.getByRole('button', { name: 'Disable' }));
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ type: 'eam', enabled: false }));
+  });
+
+  it('测试成功和失败结果应展示持续时间、详情和错误原因', () => {
+    vi.mocked(useIntegration.useTestIntegration).mockReturnValue({
+      mutate: mockTest,
+      isPending: false,
+      data: { success: true, message: 'Connection succeeded', durationMs: 42, details: '{"status":"ok"}' },
+      isError: false,
+    } as unknown as ReturnType<typeof useIntegration.useTestIntegration>);
+    render(<IntegrationSettings />);
+
+    expect(screen.getByText('Connection succeeded')).toBeInTheDocument();
+    expect(screen.getByText('Duration: 42ms')).toBeInTheDocument();
+    expect(screen.getByText('{"status":"ok"}')).toBeInTheDocument();
+
+    vi.mocked(useIntegration.useTestIntegration).mockReturnValue({
+      mutate: mockTest,
+      isPending: false,
+      data: undefined,
+      isError: true,
+      error: new Error('network unavailable'),
+    } as unknown as ReturnType<typeof useIntegration.useTestIntegration>);
+    const { rerender } = render(<IntegrationSettings />);
+    rerender(<IntegrationSettings />);
+    expect(screen.getByText('Test failed: network unavailable')).toBeInTheDocument();
+  });
+
+  it('加载集成配置时应展示加载状态', () => {
+    vi.mocked(useIntegration.useIntegrations).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    } as unknown as ReturnType<typeof useIntegration.useIntegrations>);
+
+    render(<IntegrationSettings />);
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
+  });
 });

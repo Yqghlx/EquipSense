@@ -1,11 +1,13 @@
 using EquipAI.Application.WorkOrders;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
+using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace EquipAI.Tests.Unit.WorkOrders;
@@ -21,6 +23,7 @@ public class WorkOrderAttachmentServiceTenantIsolationTests : IDisposable
     private readonly Guid _serviceTenantId = Guid.NewGuid();
     private readonly Guid _workOrderId = Guid.NewGuid();
     private readonly Guid _attachmentId = Guid.NewGuid();
+    private readonly Mock<IEventBus> _eventBus = new();
 
     public WorkOrderAttachmentServiceTenantIsolationTests()
     {
@@ -33,6 +36,7 @@ public class WorkOrderAttachmentServiceTenantIsolationTests : IDisposable
         _sut = new WorkOrderAttachmentService(
             _db,
             new TestTenantContext(_serviceTenantId),
+            _eventBus.Object,
             NullLogger<WorkOrderAttachmentService>.Instance);
 
         SeedOtherTenantData();
@@ -95,6 +99,44 @@ public class WorkOrderAttachmentServiceTenantIsolationTests : IDisposable
         (await _db.WorkOrderAttachments
             .IgnoreQueryFilters()
             .AnyAsync(a => a.Id == _attachmentId)).Should().BeTrue();
+        _eventBus.Verify(
+            item => item.PublishAsync(
+                It.IsAny<WorkOrderAttachmentDeletedEvent>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteTrackedAsync_同租户删除时_应发布物理删除事件并删除元数据()
+    {
+        var service = new WorkOrderAttachmentService(
+            _db,
+            new TestTenantContext(_dbTenantId),
+            _eventBus.Object,
+            NullLogger<WorkOrderAttachmentService>.Instance);
+        _eventBus
+            .Setup(item => item.PublishAsync(
+                It.IsAny<WorkOrderAttachmentDeletedEvent>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var attachment = await _db.WorkOrderAttachments
+            .SingleAsync(item => item.Id == _attachmentId);
+
+        await service.DeleteTrackedAsync(attachment);
+
+        (await _db.WorkOrderAttachments
+            .IgnoreQueryFilters()
+            .AnyAsync(item => item.Id == _attachmentId)).Should().BeFalse();
+        _eventBus.Verify(
+            item => item.PublishAsync(
+                It.Is<WorkOrderAttachmentDeletedEvent>(message =>
+                    message.EventId != Guid.Empty
+                    && message.TenantId == _dbTenantId
+                    && message.WorkOrderId == _workOrderId
+                    && message.AttachmentId == _attachmentId
+                    && message.StoragePath == "tenant/other/work-order/other.txt"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     private void SeedOtherTenantData()

@@ -189,6 +189,68 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
         result.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task QueryAsync_历史时间范围超过上限_应在查询前拒绝()
+    {
+        var service = CreateService(GetReadDb());
+        var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = start.AddDays(TelemetryQueryService.MaxHistoryRangeDays + 1);
+
+        var action = () => service.QueryAsync(_deviceId, "temperature", start, end);
+
+        await action.Should().ThrowAsync<ArgumentOutOfRangeException>()
+            .WithMessage($"*{TelemetryQueryService.MaxHistoryRangeDays}*");
+        _selectCommandCounter.Count.Should().Be(0,
+            "超出历史范围的请求应在访问数据库前被拒绝");
+    }
+
+    [Fact]
+    public async Task QueryAsync_结束时间早于起始时间_应在查询前拒绝()
+    {
+        var service = CreateService(GetReadDb());
+        var start = new DateTime(2026, 1, 2, 0, 0, 0, DateTimeKind.Utc);
+        var end = start.AddHours(-1);
+
+        var action = () => service.QueryAsync(_deviceId, "temperature", start, end);
+
+        await action.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*结束时间必须晚于起始时间*");
+        _selectCommandCounter.Count.Should().Be(0,
+            "非法时间顺序应在访问数据库前被拒绝");
+    }
+
+    [Fact]
+    public async Task QueryAsync_历史查询应在数据库侧限制返回点数()
+    {
+        var db = GetDb();
+        var time = DateTime.UtcNow.AddMinutes(-1);
+        await InsertTelemetryAsync(db, _deviceId, "temperature", time, 28.0);
+
+        _selectCommandCounter.Reset();
+        var service = CreateService(GetReadDb());
+        await service.QueryAsync(_deviceId, "temperature", time.AddMinutes(-1), time.AddMinutes(1));
+
+        _selectCommandCounter.LastCommandText.Should().Contain("LIMIT",
+            "历史遥测查询必须在数据库侧设置结果上限，避免高频设备把海量点加载到应用内存");
+    }
+
+    [Fact]
+    public async Task QueryAsync_收到请求取消信号_应停止数据库查询()
+    {
+        var service = CreateService(GetReadDb());
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var action = () => service.QueryAsync(
+            _deviceId,
+            "temperature",
+            DateTime.UtcNow.AddMinutes(-1),
+            DateTime.UtcNow,
+            cancellation.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     // =========================================================================
     // GetLatestAsync — 各指标最新值聚合
     // =========================================================================
@@ -271,10 +333,16 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
     private sealed class SelectCommandCounter : DbCommandInterceptor
     {
         private int _count;
+        private string? _lastCommandText;
 
         public int Count => Volatile.Read(ref _count);
+        public string? LastCommandText => Volatile.Read(ref _lastCommandText);
 
-        public void Reset() => Interlocked.Exchange(ref _count, 0);
+        public void Reset()
+        {
+            Interlocked.Exchange(ref _count, 0);
+            Interlocked.Exchange(ref _lastCommandText, null);
+        }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
             DbCommand command,
@@ -300,6 +368,7 @@ public class TelemetryQueryServiceTests : IAsyncLifetime
             if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
             {
                 Interlocked.Increment(ref _count);
+                Interlocked.Exchange(ref _lastCommandText, command.CommandText);
             }
         }
     }

@@ -264,7 +264,7 @@ public class KnowledgeRulesController : ControllerBase
 
     /// <summary>
     /// 批量导出知识规则
-    /// 支持 JSON 和 CSV 两种导出格式，可选按设备类型过滤
+    /// 支持 JSON 和 CSV 两种导出格式，可选按设备类型过滤，单次最多返回 10000 条
     /// </summary>
     /// <param name="format">导出格式（json 或 csv）</param>
     /// <param name="deviceType">可选：按设备类型过滤</param>

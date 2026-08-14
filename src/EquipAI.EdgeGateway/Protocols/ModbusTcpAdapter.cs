@@ -21,10 +21,10 @@ public class ModbusTcpAdapter : IProtocolAdapter
     private const int DefaultPort = 502;
 
     /// <summary>
-    /// 默认 Modbus 从站单元标识符。标准 Modbus 从站 ID 为 1-247。
+    /// FluentModbus 直连 TCP 单元标识符。该库的单元模式使用 0 表示默认单元。
     /// TCP 场景下通常用 1（部分网关用 0 表示直连，可在 DeviceConfig 扩展覆盖）。
     /// </summary>
-    private const int DefaultUnitIdentifier = 1;
+    private const int DefaultUnitIdentifier = 0;
 
     public ModbusTcpAdapter(ILogger<ModbusTcpAdapter>? logger = null)
     {

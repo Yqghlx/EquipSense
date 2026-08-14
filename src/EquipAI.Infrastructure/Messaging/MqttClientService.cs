@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
 using MQTTnet.Client;
+using MQTTnet.Protocol;
 using System.Security.Authentication;
 
 namespace EquipAI.Infrastructure.Messaging;
@@ -12,6 +13,9 @@ public class MqttOptions
 {
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 1883;
+    /// <summary>
+    /// MQTT 持久会话的 ClientId 前缀；同一后端实例重启时必须保持稳定，横向扩展实例需配置不同前缀。
+    /// </summary>
     public string ClientIdPrefix { get; set; } = "equipai-backend";
     public string TopicPattern { get; set; } = "factory/+/telemetry/+";
     public int ReconnectDelaySeconds { get; set; } = 30;
@@ -137,14 +141,18 @@ public class MqttClientService
 
     /// <summary>
     /// 为当前连接订阅遥测主题。
-    /// 每次重新建立 MQTT 会话都必须重新订阅；本客户端使用 CleanStart，Broker 不会保留订阅关系。
+    /// 每次重新建立 MQTT 连接都显式重新订阅；持久会话可能因首次连接、过期或 Broker 清理而不存在，
+    /// 不能只依赖 Broker 恢复历史订阅关系。
     /// </summary>
     /// <param name="client">已连接的 MQTT 客户端</param>
     /// <param name="cancellationToken">取消令牌</param>
     private async Task SubscribeAsync(IMqttClient client, CancellationToken cancellationToken)
     {
         var subscribeOptions = new MqttClientSubscribeOptionsBuilder()
-            .WithTopicFilter(filter => filter.WithTopic(_options.TopicPattern))
+            .WithTopicFilter(filter => filter
+                .WithTopic(_options.TopicPattern)
+                // 发布端使用 QoS 1；订阅端也必须显式请求 QoS 1，避免 MQTTnet 默认 QoS 0 导致遥测在断线时丢失。
+                .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce))
             .Build();
 
         await client.SubscribeAsync(subscribeOptions, cancellationToken);
@@ -159,8 +167,12 @@ public class MqttClientService
         // 构建 MQTT 客户端选项，包含认证（如果配置了用户名密码）。
         var builder = new MqttClientOptionsBuilder()
             .WithTcpServer(_options.Host, _options.Port)
-            .WithClientId($"{_options.ClientIdPrefix}-{Environment.MachineName}-{Guid.NewGuid():N}")
-            .WithCleanStart(true);
+            // ClientId 必须完全来自稳定配置：容器或 Pod 重建时机器名可能变化，
+            // 变化后 Broker 会创建新会话，无法恢复旧会话中尚未确认的 QoS 1 消息。
+            // 横向扩展时由部署为每个实例配置不同的 ClientIdPrefix，避免实例互相踢出会话。
+            .WithClientId(_options.ClientIdPrefix)
+            // 持久会话让数据库故障期间未 ACK 的消息可在连接/进程恢复后继续投递。
+            .WithCleanSession(false);
 
         if (_options.UseTls)
         {
@@ -228,12 +240,23 @@ public class MqttClientService
 
     private async Task HandleMessageAsync(MqttApplicationMessageReceivedEventArgs e)
     {
-        if (OnMessageReceived != null)
+        try
         {
-            await OnMessageReceived(
-                e.ApplicationMessage.Topic,
-                string.Empty,
-                ExtractPayload(e.ApplicationMessage));
+            if (OnMessageReceived != null)
+            {
+                await OnMessageReceived(
+                    e.ApplicationMessage.Topic,
+                    string.Empty,
+                    ExtractPayload(e.ApplicationMessage));
+            }
+        }
+        catch (Exception ex)
+        {
+            // MQTTnet 在 ProcessingFailed=true 时不会发送 QoS ACK；必须在这里明确设置，
+            // 让数据库故障进入 Broker 重投，而不是被异常日志掩盖后永久丢失。
+            e.ProcessingFailed = true;
+            e.ResponseReasonString = "遥测尚未持久化";
+            _logger.LogError(ex, "MQTT 消息未完成持久化，阻止 ACK: {Topic}", e.ApplicationMessage.Topic);
         }
     }
 
@@ -324,8 +347,8 @@ public class MqttClientService
                         }
 
                         await _client.ConnectAsync(_clientOptions, _reconnectCancellation.Token);
-                        // CleanStart=true 时重连会创建新会话；只恢复 TCP 连接而不恢复订阅会让
-                        // 服务进入“连接正常但遥测永远收不到”的静默故障状态。
+                        // 持久会话可能已过期或首次创建；只恢复 TCP 连接而不恢复订阅会让服务进入
+                        // “连接正常但遥测永远收不到”的静默故障状态，因此每次重连都显式订阅。
                         await SubscribeAsync(_client, _reconnectCancellation.Token);
                         Volatile.Write(ref _mqttConnected, 1);
                         BusinessMetrics.MqttConnected.Set(1);

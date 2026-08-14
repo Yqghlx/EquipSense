@@ -168,6 +168,7 @@ runtime_files=(
   mosquitto.prod.conf
   nginx.conf
   validate-env.sh
+  production-readiness.sh
   generate-mqtt-cert.sh
   Dockerfile.backend
   Dockerfile.frontend
@@ -468,6 +469,23 @@ edge_container_id="$("${COMPOSE[@]}" ps -q edgegateway)"
 [[ -n "$edge_container_id" ]] || fatal "无法获取 edgegateway 容器 ID"
 docker exec "$edge_container_id" test -f /data/buffer.db \
   || fatal "边缘网关 SQLite 缓冲未写入 /data/buffer.db 持久化卷"
+
+# 复用统一只读验收入口，确保 smoke 的配置、Compose 展开、制品和运行态结论
+# 与部署主机使用同一套检查 ID；输出目录由 CI 注入时会作为独立 artifact 留档。
+SMOKE_ACCEPTANCE_OUTPUT_DIR="${SMOKE_ACCEPTANCE_OUTPUT_DIR:-$SMOKE_ROOT/production-acceptance-report}"
+mkdir -p "$(dirname "$SMOKE_ACCEPTANCE_OUTPUT_DIR")"
+if ! PRODUCTION_ACCEPTANCE_EXPECTED_TAG="${SMOKE_ACCEPTANCE_EXPECTED_TAG:-}" \
+  COMPOSE_PROJECT_NAME="$PROJECT_NAME" \
+  bash "$PROJECT_ROOT/docker/production-acceptance.sh" \
+    --profile isolated-ci \
+    --env-file "$RUNTIME_DOCKER/.env" \
+    --runtime-dir "$RUNTIME_DOCKER" \
+    --compose-file "$RUNTIME_DOCKER/docker-compose.yml" \
+    --compose-file "$RUNTIME_DOCKER/docker-compose.smoke.yml" \
+    --runtime \
+    --output-dir "$SMOKE_ACCEPTANCE_OUTPUT_DIR"; then
+  fatal "统一生产验收入口未通过，报告目录：$SMOKE_ACCEPTANCE_OUTPUT_DIR"
+fi
 
 # 完成生产 E2E 前置账户初始化。生产种子账户首次登录必须改密，
 # 先执行真实 MFA/改密流程，再进入业务 API 验收，避免测试脚本绕过安全门禁。

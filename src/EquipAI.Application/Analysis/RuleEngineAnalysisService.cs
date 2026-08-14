@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using EquipAI.Core.Constants;
 using EquipAI.Core.Interfaces;
@@ -58,24 +59,24 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
         }
 
         // 查询所有启用的规则：同租户 + 系统租户（通用规则），且设备类型匹配或为通配符
-        var rules = await db.UnfilteredSet<Core.Entities.KnowledgeRule>()
+        // 规则可能由专家长期积累，不能先 ToList 再在应用层排序；数据库排序后异步流式读取，
+        // 仍保持“找到第一条命中规则即停止”的语义，同时把应用内存固定在单条规则规模。
+        var rules = db.UnfilteredSet<Core.Entities.KnowledgeRule>()
             .AsNoTracking()
             .Where(r => (r.TenantId == tenantId || r.TenantId == Guid.Empty)
                 && r.Enabled
                 && (r.DeviceType == deviceType || r.DeviceType == "*"))
-            .ToListAsync(ct);
-
-        _logger.LogDebug("查到 {Count} 条候选规则（设备类型={DeviceType}，指标={Metric}）",
-            rules.Count, deviceType, metric);
-
-        // 数据库未承诺查询顺序；明确排序后，同一告警在重启、主从切换或执行计划变化时仍得到一致诊断。
-        // 租户自定义规则优先于系统规则，随后偏好精确设备类型，再以置信度、创建时间和 ID 消除并列。
-        foreach (var rule in rules
             .OrderByDescending(r => r.TenantId == tenantId)
             .ThenByDescending(r => r.DeviceType == deviceType)
-            .ThenByDescending(r => r.ConfidenceWeight)
+            // 显式转 double 兼容 SQLite 测试/边缘部署提供程序；生产 PostgreSQL 仍按同一数值顺序排序。
+            .ThenByDescending(r => (double)r.ConfidenceWeight)
             .ThenByDescending(r => r.CreatedAt)
-            .ThenBy(r => r.Id))
+            .ThenBy(r => r.Id);
+
+        _logger.LogDebug("开始流式扫描候选规则（设备类型={DeviceType}，指标={Metric}）",
+            deviceType, metric);
+
+        await foreach (var rule in rules.AsAsyncEnumerable().WithCancellation(ct))
         {
             if (TryMatchConditions(rule.Conditions, metric, value))
             {
@@ -109,14 +110,13 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
         Guid ruleId,
         CancellationToken ct)
     {
-        var entries = await db.UnfilteredSet<Core.Entities.FmeaEntry>()
+        // 只需要按业务优先级展示前几条，Take 必须在数据库侧执行；否则低质量配置越多，
+        // 一次诊断仍会把所有 FMEA 实体拉入内存后才截断。
+        return await db.UnfilteredSet<Core.Entities.FmeaEntry>()
             .AsNoTracking()
             .Where(e => e.KnowledgeRuleId == ruleId
                 && e.IsEnabled
                 && (e.TenantId == tenantId || e.TenantId == SystemConstants.SystemTenantId))
-            .ToListAsync(ct);
-
-        return entries
             .OrderByDescending(e => e.TenantId == tenantId)
             .ThenByDescending(e => e.Rpn)
             .ThenBy(e => e.Id)
@@ -129,7 +129,7 @@ public class RuleEngineAnalysisService : IRuleEngineAnalysisService
                 e.Detection,
                 e.RecommendedAction,
                 e.Rpn))
-            .ToList();
+            .ToListAsync(ct);
     }
 
     /// <summary>

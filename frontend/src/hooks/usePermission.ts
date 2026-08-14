@@ -6,7 +6,7 @@
  * - SystemAdmin: 所有 CRUD
  * - MaintenanceLead: 设备 RW、告警 RW+配置、工单 RW+派工验收、知识库 RW+验证
  * - Technician: 设备 R、告警 R+确认、工单 R+执行、知识库 R
- * - Operator: 设备 R、告警 R+确认、工单 R
+ * - Operator: 设备 R、告警 R+确认、工单 R、报表 R
  * - Viewer: 所有只读
  */
 import { useAuthStore } from '../stores/authStore';
@@ -37,7 +37,7 @@ export interface PermissionResult {
 }
 
 /** 模块类型 */
-type Module = 'device' | 'alert' | 'workOrder' | 'knowledge' | 'ai' | 'admin';
+type Module = 'device' | 'alert' | 'workOrder' | 'knowledge' | 'ai' | 'admin' | 'report';
 
 /**
  * 权限检查 Hook
@@ -66,10 +66,12 @@ export function usePermission(module: Module): PermissionResult {
 
   if (!role) return defaultPermission;
 
-  // 基础读权限按后端 RBAC 矩阵计算；Operator 不具备知识库读取权限，不能让页面先发起必然 403 的请求。
+  // 基础读权限按后端 RBAC 矩阵计算；特殊模块必须与后端权限矩阵保持一致，避免页面先发起必然 403 的请求。
   const base: PermissionResult = {
     ...defaultPermission,
-    canRead: !(role === 'Operator' && module === 'knowledge'),
+    canRead: module === 'report'
+      ? role !== 'Technician'
+      : !(role === 'Operator' && module === 'knowledge'),
   };
 
   switch (role) {

@@ -26,6 +26,12 @@ public class SmartDispatchService : ISmartDispatchService
     /// <summary>最大负载工单数（用于归一化负载分数）</summary>
     private const int MaxLoad = 10;
 
+    /// <summary>单次读取的技术人员候选上限，避免大租户派工请求一次性 materialize 全部画像。</summary>
+    private const int CandidateBatchSize = 500;
+
+    /// <summary>单次派工最多返回的推荐数量，防止调用方通过参数放大响应和排序成本。</summary>
+    private const int MaxRecommendations = 50;
+
     public SmartDispatchService(IServiceScopeFactory scopeFactory, ILogger<SmartDispatchService> logger)
     {
         _scopeFactory = scopeFactory;
@@ -55,44 +61,94 @@ public class SmartDispatchService : ISmartDispatchService
             .Select(d => d.Type)
             .FirstOrDefaultAsync(ct);
 
-        // 查询当前租户下所有可用的技术人员（绕过租户过滤器以确保数据完整）
-        var technicians = await db.UnfilteredSet<TechnicianProfile>()
-            .Where(t => t.TenantId == tenantId && t.IsAvailable)
-            .ToListAsync(ct);
+        var requestedTopN = Math.Clamp(topN, 0, MaxRecommendations);
+        if (requestedTopN == 0)
+        {
+            return [];
+        }
 
-        if (technicians.Count == 0)
+        // 查询当前租户下可用的技术人员（绕过租户过滤器以确保后台作用域数据完整）。
+        // 技能匹配保存在 JSON 字段中，无法安全地完全下推到数据库；因此按稳定主键分批读取，
+        // 在应用层只维护 Top-N 候选，避免技术人员数量增长后把整个租户画像加载进内存。
+        IQueryable<TechnicianProfile> candidateQuery = db.UnfilteredSet<TechnicianProfile>()
+            .Where(t => t.TenantId == tenantId && t.IsAvailable)
+            .OrderBy(t => t.Id);
+
+        var recommendations = new List<DispatchRecommendationDto>(requestedTopN);
+        Guid? lastCandidateId = null;
+        while (true)
+        {
+            var batchQuery = candidateQuery;
+            if (lastCandidateId.HasValue)
+            {
+                batchQuery = batchQuery.Where(candidate => candidate.Id > lastCandidateId.Value);
+            }
+
+            var candidates = await batchQuery
+                .Take(CandidateBatchSize)
+                .Select(t => new TechnicianCandidate(
+                    t.Id,
+                    t.UserId,
+                    t.Name,
+                    t.Skills,
+                    t.ActiveWorkCount))
+                .ToListAsync(ct);
+            if (candidates.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var technician in candidates)
+            {
+                var skills = ParseSkills(technician.Skills);
+                // 技能匹配：擅长设备类型得 1.0 分，否则降为 0.3（通用技术人员）。
+                var skillScore = !string.IsNullOrEmpty(deviceType) && skills.Contains(deviceType) ? 1.0 : 0.3;
+                // 负载分数：当前工单越少越好，归一化到 0-1。
+                var loadScore = Math.Max(0, 1.0 - (double)technician.ActiveWorkCount / MaxLoad);
+                // 加权综合评分。
+                var totalScore = SkillWeight * skillScore + LoadWeight * loadScore;
+
+                recommendations.Add(new DispatchRecommendationDto
+                {
+                    TechnicianUserId = technician.UserId,
+                    Name = technician.Name,
+                    SkillScore = Math.Round(skillScore, 3),
+                    LoadScore = Math.Round(loadScore, 3),
+                    TotalScore = Math.Round(totalScore, 3),
+                    ActiveWorkCount = technician.ActiveWorkCount,
+                    Reason = !string.IsNullOrEmpty(deviceType) && skills.Contains(deviceType)
+                        ? $"擅长{deviceType}，当前负载 {technician.ActiveWorkCount}/{MaxLoad}"
+                        : $"通用技术人员，当前负载 {technician.ActiveWorkCount}/{MaxLoad}"
+                });
+
+                // 候选列表最多比 Top-N 多一条，排序成本固定，不随租户规模增长。
+                if (recommendations.Count > requestedTopN)
+                {
+                    recommendations = recommendations
+                        .OrderByDescending(recommendation => recommendation.TotalScore)
+                        .ThenBy(recommendation => recommendation.TechnicianUserId)
+                        .Take(requestedTopN)
+                        .ToList();
+                }
+            }
+
+            lastCandidateId = candidates[^1].Id;
+            if (candidates.Count < CandidateBatchSize)
+            {
+                break;
+            }
+        }
+
+        if (recommendations.Count == 0)
         {
             _logger.LogWarning("租户 {TenantId} 无可用技术人员", tenantId);
             return [];
         }
 
-        // 计算每位技术人员的综合评分并排序
-        var recommendations = technicians
-            .Select(t =>
-            {
-                var skills = ParseSkills(t.Skills);
-                // 技能匹配：擅长设备类型得 1.0 分，否则降为 0.3（通用技术人员）
-                var skillScore = !string.IsNullOrEmpty(deviceType) && skills.Contains(deviceType) ? 1.0 : 0.3;
-                // 负载分数：当前工单越少越好，归一化到 0-1
-                var loadScore = Math.Max(0, 1.0 - (double)t.ActiveWorkCount / MaxLoad);
-                // 加权综合评分
-                var totalScore = SkillWeight * skillScore + LoadWeight * loadScore;
-
-                return new DispatchRecommendationDto
-                {
-                    TechnicianUserId = t.UserId,
-                    Name = t.Name,
-                    SkillScore = Math.Round(skillScore, 3),
-                    LoadScore = Math.Round(loadScore, 3),
-                    TotalScore = Math.Round(totalScore, 3),
-                    ActiveWorkCount = t.ActiveWorkCount,
-                    Reason = !string.IsNullOrEmpty(deviceType) && skills.Contains(deviceType)
-                        ? $"擅长{deviceType}，当前负载 {t.ActiveWorkCount}/{MaxLoad}"
-                        : $"通用技术人员，当前负载 {t.ActiveWorkCount}/{MaxLoad}"
-                };
-            })
+        recommendations = recommendations
             .OrderByDescending(r => r.TotalScore)
-            .Take(topN)
+            .ThenBy(r => r.TechnicianUserId)
+            .Take(requestedTopN)
             .ToList();
 
         _logger.LogInformation(
@@ -101,6 +157,14 @@ public class SmartDispatchService : ISmartDispatchService
 
         return recommendations;
     }
+
+    /// <summary>数据库批量投影，避免分页过程中跟踪完整技术人员实体。</summary>
+    private sealed record TechnicianCandidate(
+        Guid Id,
+        Guid UserId,
+        string Name,
+        string Skills,
+        int ActiveWorkCount);
 
     /// <summary>
     /// 解析技术人员技能 JSON 数组

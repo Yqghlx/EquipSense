@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using EquipAI.Application.Integrations;
 using EquipAI.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -173,8 +174,14 @@ public class FeishuIntegration : IWorkOrderIntegration
         var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(webhookUrl, card, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
 
+        if (!response.IsSuccessStatusCode || !FeishuResponseValidator.IsSuccess(body))
+        {
+            _logger.LogWarning("飞书 Webhook 推送失败: Status={Status}", response.StatusCode);
+            return null;
+        }
+
         _logger.LogInformation("飞书 Webhook 推送完成: Status={Status}", response.StatusCode);
-        return response.IsSuccessStatusCode ? body : null;
+        return body;
     }
 
     /// <summary>
@@ -242,6 +249,12 @@ public class FeishuIntegration : IWorkOrderIntegration
             return null;
         }
 
+        if (!FeishuResponseValidator.IsSuccess(msgBody))
+        {
+            _logger.LogWarning("飞书应用模式业务响应失败: Status={Status}", msgResponse.StatusCode);
+            return null;
+        }
+
         // 从响应中提取 message_id 作为外部 ID，便于后续状态变更追踪
         try
         {
@@ -268,7 +281,7 @@ public class FeishuIntegration : IWorkOrderIntegration
     /// </summary>
     private static FeishuConfig? DeserializeConfig(string config)
     {
-        try { return JsonSerializer.Deserialize<FeishuConfig>(config); }
+        try { return JsonSerializer.Deserialize<FeishuConfig>(config, IntegrationJsonOptions.Default); }
         catch { return null; }
     }
 }

@@ -70,11 +70,24 @@ RabbitMQ 镜像变量是必填项，目的是让已有部署在变更容器前�
 ## 测试
 
 - 单元测试覆盖 Provider 安全校验、拓扑命名、压缩 `x-death` 解析、总尝试次数边界、生命周期和 readiness。
-- `tests/EquipAI.Tests.Integration/Eventing/RabbitMqEventBusIntegrationTests.cs` 使用真实 RabbitMQ 验证多处理器隔离、有限重试、并发确认发布和重启恢复。
-- 本地默认跳过真实 broker 测试；CI 设置 `RUN_RABBITMQ_INTEGRATION_TESTS=true` 并强制执行。
+- `tests/EquipAI.Tests.Integration/Eventing/RabbitMqEventBusIntegrationTests.cs` 使用真实 RabbitMQ 验证多处理器隔离、有限重试、并发确认发布和重启恢复；真实测试默认使用专用 `/equipai_test` vhost，management API 断连同时按连接名和 vhost 选择目标连接。
+- 本地默认跳过真实 broker 测试；显式运行时必须准备专用 vhost 并设置 `RABBITMQ_TEST_VHOST`。CI 会在测试前创建 `/equipai_test`、授予测试账号权限并验证 v2 dead-letter policy；vhost、权限或 broker 不可用时测试失败，不回退到 `/`。
+
+本地显式运行真实 broker 测试的命令如下（账号和密码由 broker/环境注入，不写入命令）：
+
+```bash
+RUN_RABBITMQ_INTEGRATION_TESTS=true \
+RABBITMQ_TEST_VHOST=/equipai_test \
+RABBITMQ_TEST_HOST=127.0.0.1 \
+RABBITMQ_TEST_PORT=5672 \
+RABBITMQ_TEST_MANAGEMENT_PORT=15672 \
+dotnet test tests/EquipAI.Tests.Integration/EquipAI.Tests.Integration.csproj
+```
 
 ## 可靠性边界
 
-生产 RabbitMQ 模式现已使用事务 Outbox 和幂等 Inbox：业务状态与事件登记在同一 `AppDbContext` 保存，Outbox 分发器在发布确认后标记消息；消费者按“事件 ID + 处理器”取得租约，成功后写入 Inbox 完成标记，重复投递直接确认跳过。手工与告警自动建单均将编码生成、创建审计与 Outbox 登记包进关系型数据库事务；稳定工单 ID 和活跃工单恢复逻辑继续覆盖历史断链补发。详细数据模型和故障边界见 [`superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md`](superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md)。
+生产 RabbitMQ 模式现已使用事务 Outbox 和幂等 Inbox：业务状态与事件登记在同一 `AppDbContext` 保存，Outbox 分发器在发布确认后标记消息；消费者按“事件 ID + 处理器”取得租约，成功后写入 Inbox 完成标记，重复投递直接确认跳过。手工与告警自动建单均将编码生成、创建审计与 Outbox 登记包进关系型数据库事务；遥测批量 INSERT 与 `TelemetryReceivedEvent` Outbox 登记也在同一关系型事务和执行策略中完成，事务失败或提交结果不明确时整批重试，避免遥测已落库但告警事件缺失。稳定工单 ID 和活跃工单恢复逻辑继续覆盖历史断链补发。详细数据模型和故障边界见 [`superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md`](superpowers/specs/2026-08-09-transactional-outbox-inbox-design.md)。
+
+工单附件删除同样遵循该边界：`WorkOrderAttachmentDeletedEvent` 与附件元数据删除在同一事务中登记，物理对象由独立处理器删除。对象存储短暂失败会进入 RabbitMQ 重试队列，达到次数上限后进入处理器专属死信队列；处理器保持幂等，不能以删除数据库元数据的方式清理死信。
 
 系统仍提供 at-least-once 语义，不提供恰好一次。发布确认成功但 Outbox 状态更新前崩溃时可能再次发布同一事件，因此消费者业务副作用必须保持幂等；单节点 quorum queue 只增强重启恢复能力，不等同于多节点高可用。

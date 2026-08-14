@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using EquipAI.Core.Enums;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
@@ -35,23 +36,36 @@ public class TrendAnalysisService
     public async Task<TrendAnalysisResult?> AnalyzeTrendAsync(
         Guid deviceId, string metric, CancellationToken ct = default)
     {
-        // 取最近 7 天的遥测数据，按小时聚合
+        // 直接在数据库侧按小时聚合，避免高频采集时把 7 天原始点全部加载到应用内存。
         var since = DateTime.UtcNow.AddDays(-7);
-        var rawData = await _db.DeviceTelemetry
+        var hourlyRows = await _db.DeviceTelemetry
             .Where(t => t.DeviceId == deviceId && t.Metric == metric && t.Time >= since && t.Value != null)
-            .Select(t => new TrendSample(t.Time, t.Value!.Value))
+            .GroupBy(t => new { Day = t.Time.Date, Hour = t.Time.Hour })
+            .Select(g => new
+            {
+                g.Key.Day,
+                g.Key.Hour,
+                AverageValue = g.Average(t => t.Value!.Value),
+                SampleCount = g.Count(),
+            })
             .ToListAsync(ct);
 
         // 样本不足时无需再查询阈值；这条路径常见于新接入设备，避免无意义的第二次数据库往返。
-        if (rawData.Count < 10)
+        var rawSampleCount = hourlyRows.Sum(row => row.SampleCount);
+        if (rawSampleCount < 10)
         {
-            _logger.LogDebug("趋势分析样本不足: Device={DeviceId}, Metric={Metric}, Count={Count}", deviceId, metric, rawData.Count);
+            _logger.LogDebug("趋势分析样本不足: Device={DeviceId}, Metric={Metric}, Count={Count}", deviceId, metric, rawSampleCount);
             return null;
         }
 
         var threshold = await GetAlertThresholdAsync(deviceId, metric, ct);
+        var hourlyData = hourlyRows
+            .OrderBy(row => row.Day)
+            .ThenBy(row => row.Hour)
+            .Select(row => CreateTrendPoint(row.Day, row.Hour, row.AverageValue))
+            .ToList();
 
-        return BuildTrendAnalysis(deviceId, metric, rawData, threshold);
+        return BuildTrendAnalysis(deviceId, metric, hourlyData, rawSampleCount, threshold);
     }
 
     /// <summary>
@@ -61,27 +75,18 @@ public class TrendAnalysisService
     {
         var now = DateTime.UtcNow;
 
-        // 找出最近有遥测数据的设备+指标组合
+        // 找出最近有遥测数据的设备+指标组合。该查询只作为数据库子查询使用，
+        // 不把租户所有设备指标组合先实体化到应用内存。
         var since = now.AddDays(-1);
-        var activeMetrics = await _db.DeviceTelemetry
-            .Where(t => t.TenantId == tenantId && t.Time >= since && t.Value != null)
-            .Select(t => new { t.DeviceId, t.Metric })
-            .Distinct()
-            .ToListAsync(ct);
-
-        if (activeMetrics.Count == 0)
-        {
-            _logger.LogInformation("趋势分析完成: 共分析 0 个指标，发现 0 个预警");
-            return [];
-        }
-
-        // 批量读取所有活动指标的 7 天数据，避免 AnalyzeTrendAsync 按设备+指标重复访问数据库。
-        var trendSince = now.AddDays(-7);
         var activePairsQuery = _db.DeviceTelemetry
             .Where(t => t.TenantId == tenantId && t.Time >= since && t.Value != null)
             .Select(t => new { t.DeviceId, t.Metric })
             .Distinct();
-        var rawData = await (
+
+        // 批量读取所有活动指标的 7 天小时聚合数据，避免 AnalyzeTrendAsync 按设备+指标重复访问数据库，
+        // 也避免将高频原始遥测集中加载到应用内存。
+        var trendSince = now.AddDays(-7);
+        var hourlyRows = (
             from telemetry in _db.DeviceTelemetry
             join pair in activePairsQuery
                 on new { telemetry.DeviceId, telemetry.Metric }
@@ -96,78 +101,120 @@ public class TrendAnalysisService
                 telemetry.Time,
                 Value = telemetry.Value!.Value,
             })
-            .ToListAsync(ct);
+            .GroupBy(t => new
+            {
+                t.DeviceId,
+                t.Metric,
+                Day = t.Time.Date,
+                Hour = t.Time.Hour,
+            })
+            .Select(g => new
+            {
+                g.Key.DeviceId,
+                g.Key.Metric,
+                g.Key.Day,
+                g.Key.Hour,
+                AverageValue = g.Average(t => t.Value),
+                SampleCount = g.Count(),
+            })
+            .OrderBy(row => row.DeviceId)
+            .ThenBy(row => row.Metric)
+            .ThenBy(row => row.Day)
+            .ThenBy(row => row.Hour);
 
-        // 一次性读取活动设备的阈值，内存中按严重级别选择与单指标分析相同的最高优先级规则。
-        var activeDeviceIds = activeMetrics.Select(m => m.DeviceId).Distinct().ToList();
-        var activeMetricNames = activeMetrics.Select(m => m.Metric).Distinct().ToList();
+        // 每个设备+指标只保留一条最高严重级别阈值，选择工作在数据库侧完成，
+        // 避免规则条数增长时把同一组合的所有规则复制到应用内存。
         var thresholdRows = await _db.AlertRules
             .Where(r => r.TenantId == tenantId
                         && r.DeviceId.HasValue
-                        && activeDeviceIds.Contains(r.DeviceId.Value)
-                        && activeMetricNames.Contains(r.Metric)
                         && r.Enabled
-                        && r.Threshold != null)
-            .Select(r => new
+                        && r.Threshold != null
+                        && activePairsQuery.Any(pair =>
+                            pair.DeviceId == r.DeviceId!.Value && pair.Metric == r.Metric))
+            .GroupBy(r => new { DeviceId = r.DeviceId!.Value, r.Metric })
+            .Select(group => new
             {
-                DeviceId = r.DeviceId!.Value,
-                r.Metric,
-                r.Threshold,
-                r.Severity,
+                group.Key.DeviceId,
+                group.Key.Metric,
+                Threshold = group
+                    .OrderByDescending(r => r.Severity)
+                    .ThenBy(r => r.Id)
+                    .Select(r => r.Threshold)
+                    .FirstOrDefault(),
             })
             .ToListAsync(ct);
         var thresholds = thresholdRows
-            .GroupBy(r => (r.DeviceId, r.Metric))
             .ToDictionary(
-                g => g.Key,
-                g => (double?)g.OrderByDescending(r => r.Severity).First().Threshold!.Value);
+                row => (row.DeviceId, row.Metric),
+                row => (double?)row.Threshold);
 
-        var samplesByPair = rawData
-            .GroupBy(t => (t.DeviceId, t.Metric))
-            .ToDictionary(
-                g => g.Key,
-                g => (IReadOnlyList<TrendSample>)g
-                    .Select(t => new TrendSample(t.Time, t.Value))
-                    .ToList());
-        var results = new List<TrendAnalysisResult>();
-        foreach (var metric in activeMetrics)
+        // 聚合结果按设备+指标排序后流式消费。每次只保留当前组合的小时序列（最多 7×24 个点），
+        // 避免“设备数 × 指标数 × 168 小时”同时驻留内存。
+        var warnings = new List<TrendAnalysisResult>();
+        var analyzedCount = 0;
+        var hasCurrentPair = false;
+        var currentDeviceId = Guid.Empty;
+        var currentMetric = string.Empty;
+        var currentHourlyData = new List<TrendPoint>();
+        var currentRawSampleCount = 0;
+
+        void AnalyzeCurrentPair()
         {
-            if (!samplesByPair.TryGetValue((metric.DeviceId, metric.Metric), out var samples))
-                continue;
+            if (!hasCurrentPair)
+                return;
 
-            thresholds.TryGetValue((metric.DeviceId, metric.Metric), out var threshold);
-            var analysis = BuildTrendAnalysis(metric.DeviceId, metric.Metric, samples, threshold);
-            if (analysis is not null)
-                results.Add(analysis);
+            analyzedCount++;
+            thresholds.TryGetValue((currentDeviceId, currentMetric), out var threshold);
+            var analysis = BuildTrendAnalysis(
+                currentDeviceId,
+                currentMetric,
+                currentHourlyData,
+                currentRawSampleCount,
+                threshold);
+            if (analysis?.WillExceedThreshold == true)
+                warnings.Add(analysis);
         }
 
-        // 只返回有预警的（将在 7 天内超阈值的）
-        var warnings = results.Where(r => r.WillExceedThreshold).ToList();
-        _logger.LogInformation("趋势分析完成: 共分析 {Total} 个指标，发现 {Warnings} 个预警", results.Count, warnings.Count);
+        await foreach (var row in hourlyRows.AsAsyncEnumerable().WithCancellation(ct))
+        {
+            if (!hasCurrentPair
+                || row.DeviceId != currentDeviceId
+                || !string.Equals(row.Metric, currentMetric, StringComparison.Ordinal))
+            {
+                AnalyzeCurrentPair();
+                hasCurrentPair = true;
+                currentDeviceId = row.DeviceId;
+                currentMetric = row.Metric;
+                currentHourlyData = [];
+                currentRawSampleCount = 0;
+            }
+
+            currentHourlyData.Add(CreateTrendPoint(row.Day, row.Hour, row.AverageValue));
+            currentRawSampleCount += row.SampleCount;
+        }
+
+        AnalyzeCurrentPair();
+
+        _logger.LogInformation("趋势分析完成: 共分析 {Total} 个指标，发现 {Warnings} 个预警",
+            analyzedCount, warnings.Count);
         return warnings;
     }
 
     /// <summary>
-    /// 使用已加载的遥测样本计算趋势，供单指标和批量分析共用，确保两条路径的业务语义一致。
+    /// 使用数据库侧已聚合的小时样本计算趋势，供单指标和批量分析共用，确保两条路径的业务语义一致。
     /// </summary>
     private TrendAnalysisResult? BuildTrendAnalysis(
         Guid deviceId,
         string metric,
-        IReadOnlyCollection<TrendSample> rawData,
+        IReadOnlyList<TrendPoint> hourlyData,
+        int rawSampleCount,
         double? threshold)
     {
-        if (rawData.Count < 10)
+        if (rawSampleCount < 10)
         {
-            _logger.LogDebug("趋势分析样本不足: Device={DeviceId}, Metric={Metric}, Count={Count}", deviceId, metric, rawData.Count);
+            _logger.LogDebug("趋势分析样本不足: Device={DeviceId}, Metric={Metric}, Count={Count}", deviceId, metric, rawSampleCount);
             return null;
         }
-
-        // 按小时聚合（取每小时均值），减少噪声
-        var hourlyData = rawData
-            .GroupBy(d => new DateTime(d.Time.Year, d.Time.Month, d.Time.Day, d.Time.Hour, 0, 0))
-            .Select(g => new TrendPoint(g.Key, g.Average(d => d.Value)))
-            .OrderBy(p => p.Timestamp)
-            .ToList();
 
         if (hourlyData.Count < 5)
             return null;
@@ -239,7 +286,7 @@ public class TrendAnalysisService
     /// 简单线性回归（最小二乘法）
     /// 返回 (slope, intercept)，x 为时间索引（小时），y 为指标值
     /// </summary>
-    private static (double Slope, double Intercept) LinearRegression(List<TrendPoint> points)
+    private static (double Slope, double Intercept) LinearRegression(IReadOnlyList<TrendPoint> points)
     {
         var n = points.Count;
         var baseTime = points[0].Timestamp;
@@ -266,8 +313,12 @@ public class TrendAnalysisService
         return (slope, intercept);
     }
 
-    /// <summary>线性回归使用的单条遥测样本。</summary>
-    private record TrendSample(DateTime Time, double Value);
+    /// <summary>将数据库中的日期和小时聚合键转换为 UTC 小时点。</summary>
+    private static TrendPoint CreateTrendPoint(DateTime day, int hour, double value)
+    {
+        var timestamp = new DateTime(day.Year, day.Month, day.Day, hour, 0, 0, DateTimeKind.Utc);
+        return new TrendPoint(timestamp, value);
+    }
 
     private record TrendPoint(DateTime Timestamp, double Value);
 }

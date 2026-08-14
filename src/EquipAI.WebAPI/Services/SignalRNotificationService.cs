@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using EquipAI.Application.Notifications;
 using EquipAI.Core.Entities;
 using EquipAI.Core.Enums;
@@ -58,57 +59,63 @@ public class SignalRNotificationService : ISignalRNotificationService
     /// 查询指定租户内符合角色条件的活动用户，并按渠道偏好进一步筛选。
     /// 后台事件不依赖当前 HTTP 请求，因此租户和活动状态始终显式传入查询链路。
     /// </summary>
-    private async Task<IReadOnlySet<Guid>> GetEnabledRecipientIdsAsync(
+    private async IAsyncEnumerable<IReadOnlyList<Guid>> GetEnabledRecipientBatchesAsync(
         Guid tenantId,
         IReadOnlyCollection<UserRole>? roles,
         string notificationType,
         string channel,
-        CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (tenantId == Guid.Empty)
-            return new HashSet<Guid>();
+            yield break;
 
-        try
+        var query = _db.UnfilteredSet<User>()
+            .AsNoTracking()
+            .Where(user => user.TenantId == tenantId
+                && user.IsActive
+                && user.Id != Guid.Empty);
+
+        if (roles is not null)
         {
-            var query = _db.UnfilteredSet<User>()
-                .Where(user => user.TenantId == tenantId
-                    && user.IsActive
-                    && user.Id != Guid.Empty);
+            var roleValues = roles.Distinct().ToArray();
+            query = query.Where(user => roleValues.Contains(user.Role));
+        }
 
-            if (roles is not null)
-            {
-                var roleValues = roles.Distinct().ToArray();
-                query = query.Where(user => roleValues.Contains(user.Role));
-            }
+        var lastUserId = Guid.Empty;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
 
+            // 先按用户主键稳定分页，再在当前页内应用偏好；这样组名数组、IN 参数和偏好解析
+            // 都受同一个上限约束，避免单个大租户把通知线程的内存峰值推高。
             var candidateIds = await query
+                .Where(user => user.Id > lastUserId)
+                .OrderBy(user => user.Id)
+                .Take(NotificationFanoutBatchSize)
                 .Select(user => user.Id)
                 .ToListAsync(cancellationToken);
 
-            return await _preferenceService.GetEnabledUserIdsAsync(
+            if (candidateIds.Count == 0)
+                yield break;
+
+            lastUserId = candidateIds[^1];
+            var enabledIds = await _preferenceService.GetEnabledUserIdsAsync(
                 tenantId,
                 candidateIds,
                 notificationType,
                 channel,
                 cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // 渠道筛选失败时返回空收件人，保护站内历史写入和其它通知渠道；异常必须留痕，
-            // 否则用户会误以为偏好生效但实际上只是静默丢弃了实时/推送消息。
-            _logger.LogWarning(
-                ex,
-                "通知偏好筛选失败，渠道将降级为空收件人: TenantId={TenantId}, Type={Type}, Channel={Channel}",
-                tenantId,
-                notificationType,
-                channel);
-            return new HashSet<Guid>();
+
+            var batch = candidateIds
+                .Where(enabledIds.Contains)
+                .ToArray();
+            if (batch.Length > 0)
+                yield return batch;
         }
     }
+
+    /// <summary>通知扇出单批最多处理的用户数。</summary>
+    private const int NotificationFanoutBatchSize = 500;
 
     /// <summary>
     /// 向符合偏好的租户内用户组发送 SignalR 消息。
@@ -124,20 +131,19 @@ public class SignalRNotificationService : ISignalRNotificationService
     {
         try
         {
-            var userIds = await GetEnabledRecipientIdsAsync(
-                tenantId,
-                roles,
-                notificationType,
-                "signalr",
-                cancellationToken);
-            if (userIds.Count == 0)
-                return;
-
-            var groups = userIds
-                .Select(userId => GetUserGroupName(tenantId, userId))
-                .ToArray();
-            await _hubContext.Clients.Groups(groups)
-                .SendAsync(method, payload, cancellationToken);
+            await foreach (var userIds in GetEnabledRecipientBatchesAsync(
+                               tenantId,
+                               roles,
+                               notificationType,
+                               "signalr",
+                               cancellationToken))
+            {
+                var groups = userIds
+                    .Select(userId => GetUserGroupName(tenantId, userId))
+                    .ToArray();
+                await _hubContext.Clients.Groups(groups)
+                    .SendAsync(method, payload, cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -168,22 +174,21 @@ public class SignalRNotificationService : ISignalRNotificationService
     {
         try
         {
-            var userIds = await GetEnabledRecipientIdsAsync(
-                tenantId,
-                roles,
-                notificationType,
-                "push",
-                cancellationToken);
-            if (userIds.Count == 0)
-                return;
-
-            await _pushService.SendToUsersAsync(
-                tenantId,
-                userIds,
-                title,
-                body,
-                url,
-                cancellationToken);
+            await foreach (var userIds in GetEnabledRecipientBatchesAsync(
+                               tenantId,
+                               roles,
+                               notificationType,
+                               "push",
+                               cancellationToken))
+            {
+                await _pushService.SendToUsersAsync(
+                    tenantId,
+                    userIds,
+                    title,
+                    body,
+                    url,
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -221,18 +226,30 @@ public class SignalRNotificationService : ISignalRNotificationService
         IReadOnlyCollection<UserRole> roles,
         CancellationToken cancellationToken)
     {
-        var roleValues = roles.ToArray();
-        var recipientIds = await _db.UnfilteredSet<User>()
+        var roleValues = roles.Distinct().ToArray();
+        var query = _db.UnfilteredSet<User>()
+            .AsNoTracking()
             .Where(user => user.TenantId == tenantId
                            && user.IsActive
                            && user.Id != Guid.Empty
-                           && roleValues.Contains(user.Role))
-            .Select(user => user.Id)
-            .ToListAsync(cancellationToken);
+                           && roleValues.Contains(user.Role));
+        var lastUserId = Guid.Empty;
 
-        foreach (var userId in recipientIds)
+        while (true)
         {
-            _db.Notifications.Add(new Notification
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var recipientIds = await query
+                .Where(user => user.Id > lastUserId)
+                .OrderBy(user => user.Id)
+                .Take(NotificationFanoutBatchSize)
+                .Select(user => user.Id)
+                .ToListAsync(cancellationToken);
+            if (recipientIds.Count == 0)
+                return;
+
+            lastUserId = recipientIds[^1];
+            var notifications = recipientIds.Select(userId => new Notification
             {
                 TenantId = tenantId,
                 UserId = userId,
@@ -241,7 +258,16 @@ public class SignalRNotificationService : ISignalRNotificationService
                 Content = content,
                 RelatedId = relatedId,
                 Link = link,
-            });
+            }).ToList();
+
+            _db.Notifications.AddRange(notifications);
+            // 每批提交并解除本批实体跟踪，避免大租户通知扇出把整个租户的通知实体
+            // 同时留在内存中。调用方末尾仍保留 SaveChanges，兼容旧调用约定。
+            await _db.SaveChangesAsync(cancellationToken);
+            foreach (var notification in notifications)
+            {
+                _db.Entry(notification).State = EntityState.Detached;
+            }
         }
     }
 

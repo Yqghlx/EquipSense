@@ -1,4 +1,5 @@
 using EquipAI.Core.Entities;
+using EquipAI.Core.Events;
 using EquipAI.Core.Interfaces;
 using EquipAI.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -15,15 +16,18 @@ public class WorkOrderAttachmentService
 {
     private readonly AppDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
+    private readonly IEventBus _eventBus;
     private readonly ILogger<WorkOrderAttachmentService> _logger;
 
     public WorkOrderAttachmentService(
         AppDbContext dbContext,
         ITenantContext tenantContext,
+        IEventBus eventBus,
         ILogger<WorkOrderAttachmentService> logger)
     {
         _dbContext = dbContext;
         _tenantContext = tenantContext;
+        _eventBus = eventBus;
         _logger = logger;
     }
 
@@ -106,7 +110,7 @@ public class WorkOrderAttachmentService
                 ct);
 
     /// <summary>
-    /// 删除已通过 <see cref="GetAsync"/> 获取的附件记录（物理文件已由 IFileStorageService 删除）。
+    /// 删除已通过 <see cref="GetAsync"/> 获取的附件记录，并登记物理文件删除事件。
     /// </summary>
     public async Task DeleteTrackedAsync(WorkOrderAttachment attachment, CancellationToken ct = default)
     {
@@ -114,6 +118,18 @@ public class WorkOrderAttachmentService
             throw new KeyNotFoundException($"附件不存在: {attachment.Id}");
 
         _dbContext.WorkOrderAttachments.Remove(attachment);
+        var deletionEvent = new WorkOrderAttachmentDeletedEvent(
+            attachment.Id,
+            DateTime.UtcNow,
+            attachment.TenantId,
+            attachment.WorkOrderId,
+            attachment.Id,
+            attachment.StoragePath);
+        // 生产 TransactionalEventBus 会在 PublishAsync 内保存当前 DbContext，
+        // 从而把元数据删除和 Outbox 事件放进同一数据库事务；随后显式 SaveChanges
+        // 兼容 InMemory/测试实现，确保非事务包装器也完成元数据持久化。
+        // 若消息代理暂时不可用，事件仍留在数据库中等待后续分发，不能退回控制器的尽力而为删除。
+        await _eventBus.PublishAsync(deletionEvent, ct);
         await _dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation("工单 {WorkOrderId} 删除附件：{FileName}",

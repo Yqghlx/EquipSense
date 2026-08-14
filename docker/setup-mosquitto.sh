@@ -21,6 +21,14 @@ umask 077
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASSWD_DIR="${SCRIPT_DIR}/mosquitto_passwd"
 PASSWD_FILE="${PASSWD_DIR}/passwd"
+TEMP_FILE=""
+
+cleanup() {
+    if [ -n "${TEMP_FILE}" ] && [ -e "${TEMP_FILE}" ]; then
+        rm -f -- "${TEMP_FILE}"
+    fi
+}
+trap cleanup EXIT INT TERM
 
 # 从命令行参数或环境变量读取。
 if [ "$#" -gt 1 ]; then
@@ -59,22 +67,35 @@ if [[ "${USERNAME}" == *"请修改"* || "${PASSWORD}" == *"请修改"* || "${USE
     exit 1
 fi
 
-# 创建密码文件目录
+# 密码文件目录和目标文件都直接承载认证凭据；拒绝符号链接和非目录/非普通文件，
+# 避免初始化脚本跟随部署目录之外的目标写入敏感内容。
+if [ -L "${PASSWD_DIR}" ]; then
+    echo -e "${RED}错误：密码文件目录不得为符号链接: ${PASSWD_DIR}${NC}" >&2
+    exit 1
+elif [ -e "${PASSWD_DIR}" ] && [ ! -d "${PASSWD_DIR}" ]; then
+    echo -e "${RED}错误：密码文件目录不是目录: ${PASSWD_DIR}${NC}" >&2
+    exit 1
+fi
 mkdir -p "${PASSWD_DIR}"
+if [ -L "${PASSWD_DIR}" ]; then
+    echo -e "${RED}错误：密码文件目录不得为符号链接: ${PASSWD_DIR}${NC}" >&2
+    exit 1
+fi
 
 # 密码文件包含可离线破解的认证哈希；拒绝符号链接，避免脚本或容器工具
 # 跟随未审计目标写入或覆盖其它路径。
 if [ -L "${PASSWD_FILE}" ]; then
     echo -e "${RED}错误：拒绝写入符号链接密码文件: ${PASSWD_FILE}${NC}" >&2
     exit 1
+elif [ -e "${PASSWD_FILE}" ] && [ ! -f "${PASSWD_FILE}" ]; then
+    echo -e "${RED}错误：密码文件不是普通文件: ${PASSWD_FILE}${NC}" >&2
+    exit 1
 fi
 
-# 检查是否已有密码文件，如果有则备份
-if [ -f "${PASSWD_FILE}" ]; then
-    BACKUP_FILE="${PASSWD_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
-    echo -e "${YELLOW}检测到已有密码文件，备份到 ${BACKUP_FILE}${NC}"
-    cp "${PASSWD_FILE}" "${BACKUP_FILE}"
-fi
+# 先在同一目录创建临时目标；生成成功后再原子替换正式密码文件。
+# 这样 mosquitto_passwd、Docker 或磁盘故障不会把当前仍可用的认证文件截断成半成品。
+TEMP_FILE="$(mktemp "${PASSWD_DIR}/.passwd.tmp.XXXXXX")"
+rm -f -- "${TEMP_FILE}"
 
 # 密码只通过标准输入传递给官方工具，禁止使用 -b 将明文密码放进进程参数。
 # 官方工具会交互式读取两次密码（输入和确认），因此这里显式提供两行 stdin。
@@ -82,7 +103,7 @@ if command -v mosquitto_passwd &> /dev/null; then
     echo -e "${GREEN}使用 mosquitto_passwd 命令创建密码文件${NC}"
 
     if ! printf '%s\n%s\n' "${PASSWORD}" "${PASSWORD}" \
-        | mosquitto_passwd -c "${PASSWD_FILE}" "${USERNAME}"; then
+        | mosquitto_passwd -c "${TEMP_FILE}" "${USERNAME}"; then
         echo -e "${RED}错误：mosquitto_passwd 无法创建密码文件${NC}" >&2
         exit 1
     fi
@@ -93,7 +114,7 @@ elif command -v docker &> /dev/null; then
     if ! printf '%s\n%s\n' "${PASSWORD}" "${PASSWORD}" \
         | docker run --rm -i -v "${PASSWD_DIR}":/work \
             eclipse-mosquitto:2@sha256:a908c65cc8e67ec9d292ef27c2c0360dbaaee7eb1b935cdd194e67697f15dea1 \
-            mosquitto_passwd -c /work/passwd "${USERNAME}"; then
+            mosquitto_passwd -c "/work/$(basename "${TEMP_FILE}")" "${USERNAME}"; then
         echo -e "${RED}错误：Docker 中的 mosquitto_passwd 无法创建密码文件${NC}" >&2
         exit 1
     fi
@@ -103,8 +124,31 @@ else
     exit 1
 fi
 
-# 设置密码文件权限（仅所有者可读写，mosquitto 容器内进程需要可读）
-chmod 600 "${PASSWD_FILE}" 2>/dev/null || true
+# 生成器成功返回不等于目标内容完整；先确认临时文件存在且非空，再设置权限并原子替换。
+if [ ! -s "${TEMP_FILE}" ]; then
+    echo -e "${RED}错误：密码文件生成器未产生有效临时文件${NC}" >&2
+    exit 1
+fi
+chmod 600 "${TEMP_FILE}"
+
+# 检查是否已有密码文件，如果有则备份。备份目标由 mktemp 创建为普通文件，
+# 不会跟随预先布置的同名符号链接。
+if [ -f "${PASSWD_FILE}" ]; then
+    BACKUP_FILE="$(mktemp "${PASSWD_FILE}.bak.XXXXXX")"
+    if ! cp -- "${PASSWD_FILE}" "${BACKUP_FILE}"; then
+        rm -f -- "${BACKUP_FILE}"
+        echo -e "${RED}错误：无法备份现有密码文件，已保留原文件${NC}" >&2
+        exit 1
+    fi
+    chmod 600 "${BACKUP_FILE}"
+    echo -e "${YELLOW}检测到已有密码文件，备份到 ${BACKUP_FILE}${NC}"
+fi
+
+if ! mv -f -- "${TEMP_FILE}" "${PASSWD_FILE}"; then
+    echo -e "${RED}错误：无法原子替换密码文件，已保留原文件${NC}" >&2
+    exit 1
+fi
+TEMP_FILE=""
 
 # 验证密码文件
 if [ -f "${PASSWD_FILE}" ] && [ -s "${PASSWD_FILE}" ]; then

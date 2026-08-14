@@ -84,43 +84,68 @@ public class DeviceComparisonService
             };
         }
 
-        // 候选设备至少两台后，一次性拉取这些可见设备的目标指标和时间窗口内遥测，再在内存中按设备聚合。
-        // 设备数量由租户规模决定，逐设备查询会产生 N+1 往返并放大数据库连接池压力。
+        // 候选设备至少两台后，先在数据库侧完成窗口统计，再单独取每台设备的最新点。
+        // 设备对比可能覆盖 30 天甚至更长窗口，高频设备的原始点数量远大于设备数量；
+        // 若先 ToList 再在内存中 Average/Min/Max，不仅浪费应用内存，还会让小租户受到大租户查询拖累。
         var deviceLookup = visibleDevices.ToDictionary(d => d.Id);
-        var telemetry = await _db.DeviceTelemetry
+        var telemetryQuery = _db.DeviceTelemetry
             .Where(t => t.TenantId == tenantId
                         && deviceLookup.Keys.Contains(t.DeviceId)
                         && t.Metric == metric
                         && t.Time >= since
-                        && t.Value != null)
-            .Select(t => new
+                        && t.Value != null);
+
+        var telemetrySummaries = await telemetryQuery
+            .GroupBy(t => t.DeviceId)
+            .Select(group => new
             {
-                t.DeviceId,
-                t.Time,
-                Value = t.Value!.Value,
+                DeviceId = group.Key,
+                AverageValue = group.Average(t => t.Value!.Value),
+                MinValue = group.Min(t => t.Value!.Value),
+                MaxValue = group.Max(t => t.Value!.Value),
+                DataPointCount = group.Count(),
             })
             .ToListAsync(ct);
 
-        var deviceMetrics = telemetry
+        // 只返回每台设备一个最新点，避免为了确定 LatestValue 再把窗口内原始行搬到应用层。
+        var latestRows = await telemetryQuery
             .GroupBy(t => t.DeviceId)
-            .Select(group =>
+            .Select(group => group
+                .OrderByDescending(t => t.Time)
+                .Select(t => new
+                {
+                    DeviceId = t.DeviceId,
+                    t.Time,
+                    Value = t.Value!.Value,
+                })
+                .First())
+            .ToListAsync(ct);
+        var latestByDevice = latestRows.ToDictionary(row => row.DeviceId);
+
+        var deviceMetrics = telemetrySummaries
+            .Where(summary => latestByDevice.ContainsKey(summary.DeviceId))
+            .Select(summary =>
             {
-                var device = deviceLookup[group.Key];
-                var latest = group.MaxBy(t => t.Time)!;
+                var device = deviceLookup[summary.DeviceId];
+                var latest = latestByDevice[summary.DeviceId];
                 return new DeviceMetricSummary
                 {
                     DeviceId = device.Id,
                     DeviceCode = device.DeviceCode,
                     DeviceName = device.Name ?? device.DeviceCode,
-                    AverageValue = Math.Round(group.Average(t => t.Value), 2),
-                    MinValue = Math.Round(group.Min(t => t.Value), 2),
-                    MaxValue = Math.Round(group.Max(t => t.Value), 2),
+                    AverageValue = Math.Round(summary.AverageValue, 2),
+                    MinValue = Math.Round(summary.MinValue, 2),
+                    MaxValue = Math.Round(summary.MaxValue, 2),
                     LatestValue = Math.Round(latest.Value, 2),
-                    DataPointCount = group.Count(),
+                    DataPointCount = summary.DataPointCount,
                 };
             })
             .ToList();
 
+        /*
+         * 统计字段已在数据库侧计算；这里仅按设备数量做 Z-Score，内存复杂度从 O(遥测点数)
+         * 降为 O(设备数)，确保高频采集不会让对比接口成为应用内存放大器。
+         */
         if (deviceMetrics.Count < 2)
         {
             return new DeviceComparisonResult

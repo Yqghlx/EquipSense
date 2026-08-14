@@ -260,6 +260,17 @@ groups:
           summary: "遥测处理 P95 耗时 > 500ms"
           description: "遥测处理步骤 {{ $labels.step }} P95 耗时 {{ $value | humanize }} ms，可能 DB 写入或事件总线堵塞"
 
+      # 遥测批量落库重试耗尽 — 数据本身未落库，必须立即通知值班人员
+      - alert: TelemetryPersistenceDropped
+        expr: increase(equipai_telemetry_dropped_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: business
+        annotations:
+          summary: "遥测落库失败并丢弃"
+          description: "过去 5 分钟有 {{ $value }} 条遥测在数据库重试耗尽后被丢弃，请立即检查数据库、Outbox 和边缘网关积压"
+
       # 遥测已落库但事件发布失败 — 数据看似完整，告警评估实际缺失
       - alert: TelemetryEventPublishDropped
         expr: increase(equipai_telemetry_event_dropped_total[5m]) > 0

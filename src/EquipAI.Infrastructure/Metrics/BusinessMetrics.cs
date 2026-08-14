@@ -27,8 +27,9 @@ public static class BusinessMetrics
         .CreateCounter("equipai_telemetry_dropped_total", "遥测数据写入失败丢弃总数（重试耗尽后）");
 
     /// <summary>
-    /// 时序数据已落库但对应事件发布失败的总数。
-    /// 与 TelemetryDropped 分开，避免把“数据存在但告警未评估”误判成数据库写入丢失。
+    /// 历史兼容指标：时序数据已落库但对应事件发布失败的总数。
+    /// 当前生产遥测写入与事务 Outbox 已被同一数据库事务包裹，正常情况下该指标应保持为 0；
+    /// 保留指标名是为了兼容既有仪表盘和告警规则，避免升级时丢失历史时间序列。
     /// </summary>
     public static readonly Counter TelemetryEventDropped = Prometheus.Metrics
         .CreateCounter(

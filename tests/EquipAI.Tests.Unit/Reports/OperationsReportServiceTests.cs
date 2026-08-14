@@ -337,6 +337,61 @@ public class OperationsReportServiceTests : IAsyncDisposable
         content.Should().Contain("2,0,2,0,0,0,2,0.0%", "窗口外 3 条告警应被过滤");
     }
 
+    [Fact]
+    public async Task GenerateReportAsync_日期型结束时间_应包含结束日全天数据()
+    {
+        var db = GetDb();
+        var service = CreateService(db);
+
+        db.Alerts.Add(CreateAlert(
+            _tenantId,
+            AlertSeverity.High,
+            AlertStatus.Active,
+            new DateTime(2026, 1, 31, 23, 59, 0, DateTimeKind.Utc)));
+        await db.SaveChangesAsync();
+
+        var result = await service.GenerateReportAsync(
+            _tenantId,
+            new DateTime(2026, 1, 1),
+            new DateTime(2026, 1, 31));
+        var content = Encoding.UTF8.GetString(result);
+
+        content.Should().Contain(
+            "1,0,1,0,0,0,1,0.0%",
+            "日期型 endDate 应包含结束日全天，而不是只查询到当天零点");
+    }
+
+    /// <summary>
+    /// 报表日期范围必须为正且不能超过一年，避免一次请求把多年告警和工单全部加载到内存。
+    /// </summary>
+    [Theory]
+    [InlineData("2026-01-01", "2026-01-01")]
+    [InlineData("2026-02-01", "2026-01-01")]
+    public async Task GenerateReportAsync_日期范围无效_应在查询前拒绝(string startText, string endText)
+    {
+        var service = CreateService(GetDb());
+        var start = DateTime.Parse(startText).ToUniversalTime();
+        var end = DateTime.Parse(endText).ToUniversalTime();
+
+        var act = () => service.GenerateReportAsync(_tenantId, start, end);
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*日期范围*开始时间必须早于结束时间*");
+    }
+
+    [Fact]
+    public async Task GenerateReportAsync_日期范围超过一年_应在查询前拒绝()
+    {
+        var service = CreateService(GetDb());
+        var start = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var end = new DateTime(2026, 1, 3, 0, 0, 0, DateTimeKind.Utc);
+
+        var act = () => service.GenerateReportAsync(_tenantId, start, end);
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>()
+            .WithMessage("*日期范围不能超过*366*天*");
+    }
+
     // =========================================================================
     // 跨租户隔离 — 关键不变量
     // =========================================================================

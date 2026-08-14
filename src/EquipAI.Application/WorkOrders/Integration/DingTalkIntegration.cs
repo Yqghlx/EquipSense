@@ -170,9 +170,25 @@ public class DingTalkIntegration : IWorkOrderIntegration
             var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").PostAsJsonAsync(url, message, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
 
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("钉钉推送失败: Host={Host}, Status={Status}",
+                    GetTargetHost(url), response.StatusCode);
+                return null;
+            }
+
+            // 钉钉业务错误可能使用 HTTP 200 返回，必须校验 errcode，
+            // 否则路由器会误记为成功并跳过重试，造成工单通知静默丢失。
+            if (!IsDingTalkSuccessResponse(body))
+            {
+                _logger.LogWarning("钉钉推送业务失败: Host={Host}, Status={Status}",
+                    GetTargetHost(url), response.StatusCode);
+                return null;
+            }
+
             _logger.LogInformation("钉钉推送完成: Host={Host}, Status={Status}",
                 GetTargetHost(url), response.StatusCode);
-            return response.IsSuccessStatusCode ? body : null;
+            return body;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -187,11 +203,34 @@ public class DingTalkIntegration : IWorkOrderIntegration
     }
 
     /// <summary>
+    /// 判断钉钉响应是否真正表示推送成功。
+    /// 钉钉机器人可能以 HTTP 200 返回非零 errcode，不能只看 HTTP 状态码。
+    /// </summary>
+    private static bool IsDingTalkSuccessResponse(string responseBody)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            return document.RootElement.TryGetProperty("errcode", out var errorCode)
+                && errorCode.TryGetInt32(out var code)
+                && code == 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 反序列化配置 JSON，失败时返回 null
     /// </summary>
     private static DingTalkConfig? DeserializeConfig(string config)
     {
-        try { return JsonSerializer.Deserialize<DingTalkConfig>(config); }
+        try { return JsonSerializer.Deserialize<DingTalkConfig>(config, IntegrationJsonOptions.Default); }
         catch { return null; }
     }
 

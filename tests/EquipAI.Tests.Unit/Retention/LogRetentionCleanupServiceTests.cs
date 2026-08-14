@@ -6,9 +6,11 @@ using EquipAI.Tests.Unit.TestHelpers;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Data.Common;
 
 namespace EquipAI.Tests.Unit.Retention;
 
@@ -27,6 +29,7 @@ public class LogRetentionCleanupServiceTests : IAsyncLifetime
 {
     private SqliteConnection _connection = null!;
     private ServiceProvider _sp = null!;
+    private readonly SelectCommandCounter _selectCommandCounter = new();
 
     public async Task InitializeAsync()
     {
@@ -43,7 +46,9 @@ public class LogRetentionCleanupServiceTests : IAsyncLifetime
             .Build();
 
         var services = new ServiceCollection();
-        services.AddDbContext<AppDbContext>(o => o.UseSqlite(_connection));
+        services.AddDbContext<AppDbContext>(o => o
+            .UseSqlite(_connection)
+            .AddInterceptors(_selectCommandCounter));
         // 后台清理服务的 scope 无 HTTP 上下文，ITenantContext 退化为 Guid.Empty（复刻生产 DI 回退分支）
         services.AddScoped<ITenantContext>(_ => new BackgroundTenantContext());
         services.AddLogging();
@@ -147,6 +152,41 @@ public class LogRetentionCleanupServiceTests : IAsyncLifetime
         remaining.Should().BeEmpty("IgnoreQueryFilters 应绕过租户过滤器，清理所有租户的过期记录");
     }
 
+    [Fact]
+    public async Task CleanupAsync_关系型数据库应使用集合删除而不是加载过期记录()
+    {
+        var svc = CreateService();
+
+        using (var scope = _sp.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.AuditLogs.AddRange(
+                Enumerable.Range(1, 20).Select(_ => new AuditLog
+                {
+                    TenantId = Guid.NewGuid(),
+                    Action = "Create",
+                    ResourceType = "Device",
+                    CreatedAt = DateTime.UtcNow.AddDays(-400),
+                }));
+            db.Notifications.AddRange(
+                Enumerable.Range(1, 20).Select(_ => new Notification
+                {
+                    TenantId = Guid.NewGuid(),
+                    UserId = Guid.NewGuid(),
+                    Title = "旧通知",
+                    Type = "alert",
+                    CreatedAt = DateTime.UtcNow.AddDays(-120),
+                }));
+            await db.SaveChangesAsync();
+        }
+
+        _selectCommandCounter.Reset();
+        await svc.CleanupAsync();
+
+        _selectCommandCounter.Count.Should().Be(0,
+            "关系型数据库应在数据库侧集合删除过期记录，不能先把所有旧日志加载到应用内存");
+    }
+
     /// <summary>
     /// 后台 scope 的租户上下文 — 无 HTTP 上下文时 DI 回退分支，TenantId=Guid.Empty
     /// </summary>
@@ -156,5 +196,40 @@ public class LogRetentionCleanupServiceTests : IAsyncLifetime
         public string IsolationMode => "Shared";
         public bool IsSystemAdmin => false;
         public Guid UserId => Guid.Empty;
+    }
+
+    /// <summary>统计清理过程是否执行了读取旧记录的 SELECT。</summary>
+    private sealed class SelectCommandCounter : DbCommandInterceptor
+    {
+        private int _count;
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Reset() => Interlocked.Exchange(ref _count, 0);
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            CountSelect(command);
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            CountSelect(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void CountSelect(DbCommand command)
+        {
+            if (command.CommandText.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase))
+                Interlocked.Increment(ref _count);
+        }
     }
 }

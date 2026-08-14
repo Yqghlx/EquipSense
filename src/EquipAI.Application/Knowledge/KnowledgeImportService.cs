@@ -16,6 +16,11 @@ namespace EquipAI.Application.Knowledge;
 /// </summary>
 public class KnowledgeImportService
 {
+    /// <summary>
+    /// 单次知识规则导出的最大条数，避免超大租户导出耗尽应用内存。
+    /// </summary>
+    public const int MaxExportRules = 10_000;
+
     private readonly AppDbContext _dbContext;
     private readonly KnowledgeVersionService _versionService;
     private readonly IAuditLogService _auditLogService;
@@ -141,16 +146,21 @@ public class KnowledgeImportService
         if (!string.IsNullOrWhiteSpace(deviceType))
             query = query.Where(r => r.DeviceType == deviceType);
 
-        var rules = await query.Select(r => new
-        {
-            r.DeviceType,
-            r.Name,
-            r.Conditions,
-            r.Conclusion,
-            r.RecommendedActions,
-            r.CheckSteps,
-            r.ConfidenceWeight
-        }).ToListAsync(ct);
+        var rules = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id)
+            .Take(MaxExportRules)
+            .Select(r => new
+            {
+                r.DeviceType,
+                r.Name,
+                r.Conditions,
+                r.Conclusion,
+                r.RecommendedActions,
+                r.CheckSteps,
+                r.ConfidenceWeight
+            })
+            .ToListAsync(ct);
 
         return JsonSerializer.Serialize(rules, new JsonSerializerOptions
         {
@@ -176,7 +186,11 @@ public class KnowledgeImportService
         if (!string.IsNullOrWhiteSpace(deviceType))
             query = query.Where(r => r.DeviceType == deviceType);
 
-        var rules = await query.ToListAsync(ct);
+        var rules = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .ThenByDescending(r => r.Id)
+            .Take(MaxExportRules)
+            .ToListAsync(ct);
 
         var sb = new StringBuilder();
         sb.AppendLine("device_type,name,conditions,conclusion,recommended_actions,check_steps,confidence_weight");

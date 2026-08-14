@@ -156,25 +156,40 @@ public class MlAnomalyDetectionService : IMlAnomalyDetectionService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var cutoff = DateTime.UtcNow.AddDays(-TrainingWindowDays);
-        var values = await db.DeviceTelemetry
+        // 基线接口是用户可直接调用的查询，不能把七天内的每个遥测点都读入应用内存。
+        // 均值、极值、样本数和平方和都在数据库侧聚合；平方和用于还原与旧实现一致的总体标准差。
+        var aggregate = await db.DeviceTelemetry
+            .AsNoTracking()
             .Where(t => t.DeviceId == deviceId && t.Metric == metric && t.Time >= cutoff)
             .Where(t => t.Value != null)
             .Select(t => t.Value!.Value)
-            .ToListAsync(ct);
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                SampleCount = group.Count(),
+                Mean = group.Average(),
+                Min = group.Min(),
+                Max = group.Max(),
+                SumOfSquares = group.Sum(value => value * value),
+            })
+            .FirstOrDefaultAsync(ct);
 
-        if (values.Count < MinSampleCount)
+        if (aggregate is null || aggregate.SampleCount < MinSampleCount)
             return null;
 
-        var mean = values.Average();
-        var stdDev = Math.Sqrt(values.Sum(v => Math.Pow(v - mean, 2)) / values.Count);
+        // E[x²] - E[x]² 与原先逐点计算的总体方差等价；Math.Max 处理浮点舍入导致的极小负数。
+        var variance = Math.Max(
+            0d,
+            aggregate.SumOfSquares / aggregate.SampleCount - aggregate.Mean * aggregate.Mean);
+        var stdDev = Math.Sqrt(variance);
 
         return new BaselineStats(
             Metric: metric,
-            Mean: mean,
+            Mean: aggregate.Mean,
             StdDev: stdDev,
-            Min: values.Min(),
-            Max: values.Max(),
-            SampleCount: values.Count,
+            Min: aggregate.Min,
+            Max: aggregate.Max,
+            SampleCount: aggregate.SampleCount,
             LastTrainingTime: DateTime.UtcNow);
     }
 }

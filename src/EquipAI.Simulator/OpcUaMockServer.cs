@@ -92,10 +92,10 @@ public class OpcUaMockServer : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // OPC UA 服务器启动失败不影响传感器值字典的更新
-            // 外部仍可通过 GetValue() 直接读取传感器值
-            Console.WriteLine($"[警告] OPC UA 服务器启动失败: {ex.Message}");
-            Console.WriteLine("[提示] 传感器值字典仍可通过 GetValue() 方法直接访问");
+            // Simulator 的职责是提供可被协议客户端真实访问的服务；只更新内存字典
+            // 会让调用方误以为 OPC UA 已就绪，因此启动失败必须向上抛出。
+            Console.WriteLine($"[错误] OPC UA 服务器启动失败: {ex.Message}");
+            throw;
         }
     }
 
@@ -117,6 +117,7 @@ public class OpcUaMockServer : IAsyncDisposable
                 StoreType = CertificateStoreType.Directory,
                 StorePath = Path.Combine(pkiRoot, "own"),
                 SubjectName = subject,
+                CertificateType = ObjectTypeIds.RsaSha256ApplicationCertificateType,
             },
         };
 

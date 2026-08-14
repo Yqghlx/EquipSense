@@ -84,11 +84,29 @@ public class EamIntegration : IWorkOrderIntegration
 
             if (response.IsSuccessStatusCode)
             {
-                // 从 EAM 响应中提取外部工单编号
-                var externalId = ExtractExternalId(responseBody);
+                if (string.IsNullOrWhiteSpace(responseBody))
+                {
+                    _logger.LogWarning(
+                        "EAM 工单创建返回成功状态但响应体为空，无法获得外部工单号: WorkOrderId={WorkOrderId}",
+                        workOrderId);
+                    return null;
+                }
+
+                // 从 EAM 响应中提取外部工单编号；没有可定位的编号时不能把原始 JSON 当作 ID。
+                var externalId = ExtractExternalId(
+                    responseBody,
+                    response.Content.Headers.ContentType?.MediaType);
+                if (string.IsNullOrWhiteSpace(externalId))
+                {
+                    _logger.LogWarning(
+                        "EAM 工单创建响应未包含可用的外部工单号，按失败处理: WorkOrderId={WorkOrderId}",
+                        workOrderId);
+                    return null;
+                }
+
                 _logger.LogInformation("EAM 工单创建成功: WorkOrderId={WorkOrderId}, ExternalId={ExternalId}",
                     workOrderId, externalId);
-                return externalId ?? responseBody;
+                return externalId;
             }
 
             _logger.LogWarning("EAM 工单创建失败: Status={Status}", response.StatusCode);
@@ -247,15 +265,23 @@ public class EamIntegration : IWorkOrderIntegration
     };
 
     /// <summary>
-    /// 从 EAM 响应体中提取外部工单编号
-    /// 尝试从 JSON 响应中读取常见的工单编号字段
+    /// 从 EAM 响应体中提取外部工单编号。
+    /// JSON 响应只接受已知工单号字段；明确的纯文本响应可作为工单号兜底。
     /// </summary>
-    private string? ExtractExternalId(string responseBody)
+    private string? ExtractExternalId(string responseBody, string? mediaType)
     {
+        var trimmedBody = responseBody.Trim();
+
         try
         {
-            using var doc = JsonDocument.Parse(responseBody);
+            using var doc = JsonDocument.Parse(trimmedBody);
             var root = doc.RootElement;
+
+            if (root.ValueKind == JsonValueKind.String)
+                return root.GetString();
+
+            if (root.ValueKind != JsonValueKind.Object)
+                return null;
 
             // Maximo 返回 wonum 字段
             if (root.TryGetProperty("wonum", out var wonum))
@@ -269,12 +295,21 @@ public class EamIntegration : IWorkOrderIntegration
             if (root.TryGetProperty("WorkOrderNumber", out var sapNum))
                 return sapNum.GetString();
 
+            // 部分 Maximo 代理会把资源属性包装在 properties 节点中。
+            if (root.TryGetProperty("properties", out var properties)
+                && properties.TryGetProperty("wonum", out var propertiesWonum))
+                return propertiesWonum.GetString();
+
+            // JSON 响应没有已知工单号时必须失败，不能把错误详情或状态对象当作外部 ID。
             return null;
         }
-        catch (Exception ex)
+        catch (JsonException)
         {
-            // JSON 解析失败，无法提取外部工单编号
-            _logger.LogWarning(ex, "EAM 响应 JSON 解析失败，无法提取外部工单编号");
+            // 少数 EAM 实现直接返回 text/plain 工单号；只有明确的纯文本响应才允许降级使用原文。
+            if (string.Equals(mediaType, "text/plain", StringComparison.OrdinalIgnoreCase))
+                return trimmedBody;
+
+            _logger.LogWarning("EAM 响应不是可识别的 JSON 工单响应，无法提取外部工单编号");
             return null;
         }
     }
@@ -284,7 +319,7 @@ public class EamIntegration : IWorkOrderIntegration
     /// </summary>
     private static EamConfig? DeserializeConfig(string config)
     {
-        try { return JsonSerializer.Deserialize<EamConfig>(config); }
+        try { return JsonSerializer.Deserialize<EamConfig>(config, IntegrationJsonOptions.Default); }
         catch { return null; }
     }
 }

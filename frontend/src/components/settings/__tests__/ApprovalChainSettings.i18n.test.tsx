@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApprovalChainSettings } from '../ApprovalChainSettings';
 import * as useApprovals from '../../../hooks/useApprovals';
@@ -184,5 +184,88 @@ describe('审批链配置英文界面', () => {
     render(<ApprovalChainSettings />);
 
     expect(screen.getByText('No approval chain templates. Click "Add template" to create one.')).toBeInTheDocument();
+  });
+
+  it('新建模板应提交完整步骤配置并在成功后关闭对话框', async () => {
+    const user = userEvent.setup();
+    const createMutate = vi.fn((_payload: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    vi.mocked(useApprovals.useCreateApprovalChain).mockReturnValue({
+      mutate: createMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useApprovals.useCreateApprovalChain>);
+
+    render(<ApprovalChainSettings />);
+    await user.click(screen.getByRole('button', { name: 'Add template' }));
+    const dialog = screen.getByRole('dialog');
+    const fields = within(dialog).getAllByRole('textbox');
+    await user.type(fields[0], 'Emergency approval');
+    await user.type(fields[1], 'Corrective');
+    await user.type(fields[2], 'Urgent');
+    await user.click(within(dialog).getByRole('switch'));
+    await user.click(within(dialog).getByRole('button', { name: 'Add step' }));
+
+    const stepFields = within(dialog).getAllByPlaceholderText('Role');
+    await user.clear(stepFields[1]);
+    await user.type(stepFields[1], 'system_admin');
+    const approverFields = within(dialog).getAllByPlaceholderText('Approver ID');
+    await user.type(approverFields[1], 'user-002');
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+    expect(createMutate).toHaveBeenCalledWith({
+      name: 'Emergency approval',
+      workOrderType: 'Corrective',
+      priority: 'Urgent',
+      isDefault: true,
+      steps: [
+        { stepOrder: 1, role: 'maintenance_lead', specificApproverId: undefined, isRequired: true },
+        { stepOrder: 2, role: 'system_admin', specificApproverId: 'user-002', isRequired: true },
+      ],
+    }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('编辑、删除和取消操作应调用对应 mutation', async () => {
+    const user = userEvent.setup();
+    const updateMutate = vi.fn((_payload: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    const deleteMutate = vi.fn();
+    vi.mocked(useApprovals.useUpdateApprovalChain).mockReturnValue({
+      mutate: updateMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useApprovals.useUpdateApprovalChain>);
+    vi.mocked(useApprovals.useDeleteApprovalChain).mockReturnValue({
+      mutate: deleteMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useApprovals.useDeleteApprovalChain>);
+
+    render(<ApprovalChainSettings />);
+    await user.click(screen.getByRole('button', { name: 'Edit approval chain' }));
+    const dialog = screen.getByRole('dialog');
+    const nameInput = within(dialog).getAllByRole('textbox')[0];
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Updated approval');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'chain-001',
+      name: 'Updated approval',
+      workOrderType: 'Corrective',
+      priority: 'High',
+    }), expect.objectContaining({ onSuccess: expect.any(Function) }));
+
+    await user.click(screen.getByRole('button', { name: 'Delete approval chain' }));
+    expect(deleteMutate).toHaveBeenCalledWith('chain-001');
+
+    await user.click(screen.getByRole('button', { name: 'Add template' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('加载中时应展示加载状态', () => {
+    vi.mocked(useApprovals.useApprovalChains).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+    } as unknown as ReturnType<typeof useApprovals.useApprovalChains>);
+
+    render(<ApprovalChainSettings />);
+    expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
 });

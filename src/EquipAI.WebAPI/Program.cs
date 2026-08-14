@@ -454,6 +454,7 @@ try
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderIntegrationHandler>();
     eventBus.Subscribe<WorkOrderCreatedEvent, WorkOrderNotificationHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderNotificationHandler>();
+    eventBus.Subscribe<WorkOrderAttachmentDeletedEvent, WorkOrderAttachmentDeletionHandler>();
 
     // MQTT 的连接生命周期由 MqttBackgroundService.StopAsync 统一管理。
     // 不再额外注册 ApplicationStopping 同步回调，避免重复断开、停机竞态和 sync-over-async 阻塞。

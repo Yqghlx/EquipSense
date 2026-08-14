@@ -157,6 +157,84 @@ public class DingTalkIntegrationTests
     }
 
     [Fact]
+    public async Task PushCreatedAsync_HTTP成功但业务错误码非零_应返回Null()
+    {
+        // Arrange — 钉钉业务失败可能仍返回 HTTP 200，必须继续交给路由器重试
+        var (integration, handler) = CreateWithMockHttp(out _);
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"errcode\":310000,\"errmsg\":\"机器人被禁用\"}")
+            });
+
+        var config = JsonSerializer.Serialize(new DingTalkConfig
+        {
+            WebhookUrl = "https://oapi.dingtalk.com/robot/send?access_token=test123"
+        });
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "业务失败测试", "High", config);
+
+        // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PushStatusChangedAsync_HTTP成功但业务错误码非零_应返回失败标志()
+    {
+        // Arrange — 创建和状态同步必须共享同一套钉钉业务成功判定
+        var (integration, handler) = CreateWithMockHttp(out _);
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"errcode\":310000,\"errmsg\":\"机器人被禁用\"}")
+            });
+
+        var config = JsonSerializer.Serialize(new DingTalkConfig
+        {
+            WebhookUrl = "https://oapi.dingtalk.com/robot/send?access_token=test123"
+        });
+
+        // Act
+        var result = await integration.PushStatusChangedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "InProgress", null, config);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PushCreatedAsync_小驼峰配置应正确读取WebhookUrl()
+    {
+        // Arrange — 管理端保存的 tenant.Settings 使用 API 约定的小驼峰字段名
+        var (integration, handler) = CreateWithMockHttp(out _);
+        var config = """
+            {"enabled":true,"webhookUrl":"https://oapi.dingtalk.com/robot/send?access_token=test123","baseUrl":"https://equip.example.com"}
+            """;
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "小驼峰配置测试", "High", config);
+
+        // Assert — 配置可读时应真正发出请求并返回成功响应
+        result.Should().NotBeNull();
+        handler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PushCreatedAsync_应发送ActionCard格式消息()
     {
         // Arrange

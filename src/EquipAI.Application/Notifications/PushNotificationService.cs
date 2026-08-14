@@ -15,6 +15,12 @@ namespace EquipAI.Application.Notifications;
 /// </summary>
 public class PushNotificationService : IPushNotificationService
 {
+    /// <summary>
+    /// 单轮推送最多读取的订阅数。外部推送不可回滚，分页只限制内存和数据库读取规模，
+    /// 不会把租户广播静默截断。
+    /// </summary>
+    private const int SendBatchSize = 500;
+
     private readonly AppDbContext _dbContext;
     private readonly ITenantContext _tenantContext;
     private readonly ILogger<PushNotificationService> _logger;
@@ -156,28 +162,73 @@ public class PushNotificationService : IPushNotificationService
 
         cancellationToken.ThrowIfCancellationRequested();
 
-        var subscriptions = await _dbContext.PushSubscriptions
+        var query = _dbContext.PushSubscriptions
             .IgnoreQueryFilters()
             .Where(subscription => subscription.TenantId == tenantId
                 && selectedUserIds.Contains(subscription.UserId)
-                && subscription.IsActive)
-            .ToListAsync(cancellationToken);
+                && subscription.IsActive);
 
         var payload = JsonSerializer.Serialize(new { title, body, url });
-        await SendPayloadToSubscriptions(subscriptions, payload, cancellationToken);
+        await SendSubscriptionsByBatchAsync(query, payload, cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task SendToTenantAsync(Guid tenantId,
-        string title, string body, string? url = null)
+        string title, string body, string? url = null,
+        CancellationToken cancellationToken = default)
     {
-        var subscriptions = await _dbContext.PushSubscriptions
+        if (tenantId == Guid.Empty)
+            return;
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var query = _dbContext.PushSubscriptions
             .IgnoreQueryFilters()
-            .Where(s => s.TenantId == tenantId && s.IsActive)
-            .ToListAsync();
+            .Where(s => s.TenantId == tenantId && s.IsActive);
 
         var payload = JsonSerializer.Serialize(new { title, body, url });
-        await SendPayloadToSubscriptions(subscriptions, payload, CancellationToken.None);
+        await SendSubscriptionsByBatchAsync(query, payload, cancellationToken);
+    }
+
+    /// <summary>
+    /// 按订阅主键稳定分页发送，避免大租户广播一次性把所有订阅加载到内存。
+    /// 不能使用 Skip 分页：发送过程中清理失效订阅会改变结果集，Skip 可能跳过仍有效的订阅。
+    /// </summary>
+    private async Task SendSubscriptionsByBatchAsync(
+        IQueryable<Core.Entities.PushSubscription> query,
+        string payload,
+        CancellationToken cancellationToken)
+    {
+        var lastId = Guid.Empty;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var subscriptions = await query
+                .Where(subscription => subscription.Id > lastId)
+                .OrderBy(subscription => subscription.Id)
+                .Take(SendBatchSize)
+                .ToListAsync(cancellationToken);
+
+            if (subscriptions.Count == 0)
+                return;
+
+            lastId = subscriptions[^1].Id;
+            await SendPayloadToSubscriptions(subscriptions, payload, cancellationToken);
+
+            // 只允许失效订阅在 SendPayloadToSubscriptions 中短暂进入跟踪器，
+            // 否则长租户广播会把已发送的订阅对象一直留在 DbContext 中。不能调用
+            // ChangeTracker.Clear：调用方可能已在同一个 Scoped DbContext 中暂存站内通知，
+            // 清空整个跟踪器会让后续 SaveChanges 静默丢失这些通知。这里只解除本批订阅，
+            // 最后一页保留跟踪状态，兼容调用方对本次发送所选订阅的审计和测试检查。
+            if (subscriptions.Count == SendBatchSize)
+            {
+                foreach (var subscription in subscriptions)
+                {
+                    _dbContext.Entry(subscription).State = EntityState.Detached;
+                }
+            }
+        }
     }
 
     /// <summary>

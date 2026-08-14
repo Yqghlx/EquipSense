@@ -72,6 +72,9 @@ public class ChannelPreference
 /// </summary>
 public class NotificationPreferenceService
 {
+    /// <summary>偏好筛选单批最多读取的用户数，避免调用方传入超大候选集合。</summary>
+    private const int PreferenceBatchSize = 500;
+
     private readonly AppDbContext _db;
     private readonly ITenantContext _tenantContext;
     private readonly ILogger<NotificationPreferenceService> _logger;
@@ -171,20 +174,36 @@ public class NotificationPreferenceService
         if (tenantId == Guid.Empty || candidateIds.Length == 0)
             return new HashSet<Guid>();
 
-        var users = await _db.UnfilteredSet<User>()
-            .Where(user => user.TenantId == tenantId
-                && user.IsActive
-                && candidateIds.Contains(user.Id))
-            .Select(user => new { user.Id, user.NotificationPrefs })
-            .ToListAsync(ct);
+        var enabledUserIds = new HashSet<Guid>();
+        for (var offset = 0; offset < candidateIds.Length; offset += PreferenceBatchSize)
+        {
+            ct.ThrowIfCancellationRequested();
 
-        return users
-            .Where(user => IsEnabled(
-                Normalize(ParsePrefs(user.NotificationPrefs)),
-                notificationType,
-                channel))
-            .Select(user => user.Id)
-            .ToHashSet();
+            var candidateBatch = candidateIds
+                .Skip(offset)
+                .Take(PreferenceBatchSize)
+                .ToArray();
+            var users = await _db.UnfilteredSet<User>()
+                .Where(user => user.TenantId == tenantId
+                    && user.IsActive
+                    && candidateBatch.Contains(user.Id))
+                .Select(user => new { user.Id, user.NotificationPrefs })
+                .Take(candidateBatch.Length)
+                .ToListAsync(ct);
+
+            foreach (var user in users)
+            {
+                if (IsEnabled(
+                        Normalize(ParsePrefs(user.NotificationPrefs)),
+                        notificationType,
+                        channel))
+                {
+                    enabledUserIds.Add(user.Id);
+                }
+            }
+        }
+
+        return enabledUserIds;
     }
 
     /// <summary>

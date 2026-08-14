@@ -143,6 +143,24 @@ public sealed class TransactionalOutboxTests
     }
 
     [Fact]
+    public void 附件删除事件序列化后应保留完整删除上下文()
+    {
+        var @event = new WorkOrderAttachmentDeletedEvent(
+            Guid.NewGuid(),
+            DateTime.UtcNow,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "tenant/work-order/attachment.txt");
+
+        var serialized = IntegrationEventSerializer.Serialize(@event);
+
+        serialized.EventType.Should().Be(nameof(WorkOrderAttachmentDeletedEvent));
+        IntegrationEventSerializer.Deserialize(serialized.EventType, serialized.Payload)
+            .Should().BeEquivalentTo(@event);
+    }
+
+    [Fact]
     public async Task Outbox分发成功后才标记已发布()
     {
         await using var fixture = await SqliteFixture.CreateAsync();

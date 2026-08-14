@@ -173,6 +173,26 @@ else
     error "EMAIL_DELIVERY_MAX_BACKOFF_SECONDS 必须是大于等于 0 的整数"
   fi
 
+  # SMTP 配置由 Compose 直接注入应用；即使邮件能力是可选的，显式填写的参数也必须先通过格式校验，
+  # 避免把非法端口、发件人地址或 TLS 开关推迟到邮件 worker 运行后才暴露。
+  smtp_port="$(read_env_value SMTP_PORT)"
+  if [ -n "$smtp_port" ] \
+    && (! [[ "$smtp_port" =~ ^[0-9]{1,5}$ ]] || ! (( 10#$smtp_port >= 1 && 10#$smtp_port <= 65535 ))); then
+    error "SMTP_PORT 必须是 1-65535 范围内的整数"
+  fi
+
+  smtp_from_email="$(read_env_value SMTP_FROM_EMAIL)"
+  if [ -n "$smtp_from_email" ] \
+    && ! [[ "$smtp_from_email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]]; then
+    error "SMTP_FROM_EMAIL 格式无效"
+  fi
+
+  smtp_enable_ssl="$(read_env_value SMTP_ENABLE_SSL)"
+  if [ -n "$smtp_enable_ssl" ] \
+    && ! [[ "$smtp_enable_ssl" =~ ^([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|0|1)$ ]]; then
+    error "SMTP_ENABLE_SSL 必须是 true 或 false"
+  fi
+
   rate_limiting_window="$(read_env_value RATE_LIMITING_WINDOW)"
   if [ -n "$rate_limiting_window" ] && ! [[ "$rate_limiting_window" =~ ^[0-9]{2}:[0-9]{2}:[0-9]{2}$ ]]; then
     error "RATE_LIMITING_WINDOW 必须是 hh:mm:ss 格式"

@@ -15,6 +15,9 @@ namespace EquipAI.Application.Telemetry;
 /// </summary>
 public class TelemetryCleanupService : LockedTimerService
 {
+    /// <summary>单次读取的最大租户数，避免清理任务随租户总量增长而无界占用内存。</summary>
+    private const int TenantScanBatchSize = 500;
+
     private readonly IServiceScopeFactory _scopeFactory;
 
     public TelemetryCleanupService(
@@ -59,30 +62,45 @@ public class TelemetryCleanupService : LockedTimerService
         try
         {
             // 绕过租户过滤器，获取所有活跃租户及其数据保留天数
-            var tenants = await db.UnfilteredSet<Core.Entities.Tenant>()
-                .Where(t => t.IsActive)
-                .Select(t => new { t.Id, t.DataRetentionDays })
-                .ToListAsync(ct);
-
             var totalDeleted = 0;
-
-            foreach (var tenant in tenants)
+            Guid? lastTenantId = null;
+            while (true)
             {
-                var cutoff = DateTime.UtcNow.AddDays(-tenant.DataRetentionDays);
+                ct.ThrowIfCancellationRequested();
 
-                var deleted = await db.Database.ExecuteSqlRawAsync(
-                    @"DELETE FROM device_telemetry
-                      WHERE device_id IN (
-                        SELECT id FROM devices WHERE tenant_id = {0}
-                      ) AND time < {1}",
-                    ct, tenant.Id, cutoff);
+                var query = db.UnfilteredSet<Core.Entities.Tenant>()
+                    .Where(t => t.IsActive);
+                if (lastTenantId.HasValue)
+                    query = query.Where(t => t.Id > lastTenantId.Value);
 
-                if (deleted > 0)
+                var tenants = await query
+                    .OrderBy(t => t.Id)
+                    .Take(TenantScanBatchSize)
+                    .Select(t => new { t.Id, t.DataRetentionDays })
+                    .ToListAsync(ct);
+                if (tenants.Count == 0)
+                    break;
+
+                foreach (var tenant in tenants)
                 {
-                    Logger.LogInformation("租户 {TenantId}: 清理 {Count} 条过期遥测数据（保留 {Days} 天）",
-                        tenant.Id, deleted, tenant.DataRetentionDays);
-                    totalDeleted += deleted;
+                    var cutoff = DateTime.UtcNow.AddDays(-tenant.DataRetentionDays);
+
+                    var deleted = await db.Database.ExecuteSqlRawAsync(
+                        @"DELETE FROM device_telemetry
+                          WHERE device_id IN (
+                            SELECT id FROM devices WHERE tenant_id = {0}
+                          ) AND time < {1}",
+                        ct, tenant.Id, cutoff);
+
+                    if (deleted > 0)
+                    {
+                        Logger.LogInformation("租户 {TenantId}: 清理 {Count} 条过期遥测数据（保留 {Days} 天）",
+                            tenant.Id, deleted, tenant.DataRetentionDays);
+                        totalDeleted += deleted;
+                    }
                 }
+
+                lastTenantId = tenants[^1].Id;
             }
 
             Logger.LogInformation("遥测数据清理完成，共清理 {Total} 条记录", totalDeleted);

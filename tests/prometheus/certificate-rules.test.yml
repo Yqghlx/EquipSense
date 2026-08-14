@@ -64,3 +64,21 @@ tests:
             exp_annotations:
               summary: "证书将在 30 天内到期"
               description: "证书 mqtt_ca 剩余 15 天，请安排证书轮换"
+
+  # 遥测批量落库重试耗尽时必须触发 Critical，不能只在 /metrics 中留下无值班通知的计数器。
+  - interval: 1m
+    input_series:
+      - series: 'equipai_telemetry_dropped_total{job="equipai-backend",instance="backend:8080"}'
+        values: '0 0 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: TelemetryPersistenceDropped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              category: business
+              job: equipai-backend
+              instance: backend:8080
+            exp_annotations:
+              summary: "遥测落库失败并丢弃"
+              description: "过去 5 分钟有 {{ $value }} 条遥测在数据库重试耗尽后被丢弃，请立即检查数据库、Outbox 和边缘网关积压"

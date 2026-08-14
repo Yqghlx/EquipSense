@@ -145,6 +145,28 @@ public class WebhookIntegrationTests
     }
 
     [Fact]
+    public async Task PushCreatedAsync_小驼峰配置应读取Url和BodyTemplate()
+    {
+        // Arrange — 集成配置由管理端按小驼峰字段名写入 tenant.Settings
+        var (integration, handler) = CreateWithMockHttp(out _);
+        var config = """
+            {"url":"https://example.com/webhook","bodyTemplate":"{\"title\":\"{{workOrder.title}}\"}"}
+            """;
+
+        // Act
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "小驼峰配置测试", "High", config);
+
+        // Assert — 能读取配置才会实际发出请求并返回外部响应
+        result.Should().NotBeNull();
+        handler.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
     public async Task PushCreatedAsync_有SignatureSecret时_应添加XEquipSenseSignature头()
     {
         // Arrange

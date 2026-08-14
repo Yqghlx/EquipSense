@@ -6,13 +6,14 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, Download } from 'lucide-react';
+import { Shield } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Button } from '../components/ui/button';
 import { useAuditLogs, exportAuditLogsCsv } from '../hooks/useAuditLogs';
 import { formatDate } from '../lib/utils';
+import ExportButton from '../components/ui/ExportButton';
 
 /** 动作类型对应的 Badge 颜色 */
 const actionVariant: Record<string, string> = {
@@ -79,15 +80,6 @@ export default function AuditLogsPage() {
 
   const { data, isLoading } = useAuditLogs({ page, pageSize: 20, action: actionFilter, resourceType: resourceFilter });
 
-  /** 导出 CSV */
-  const handleExport = async () => {
-    try {
-      await exportAuditLogsCsv({ action: actionFilter, resourceType: resourceFilter });
-    } catch {
-      // 导出失败静默处理（网络错误等），实际可加 toast
-    }
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -100,10 +92,12 @@ export default function AuditLogsPage() {
             {t('audit.description', '记录系统中所有敏感操作，用于合规追溯')}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleExport}>
-          <Download className="h-4 w-4 mr-2" />
-          {t('common.export', '导出 CSV')}
-        </Button>
+        <ExportButton
+          onExport={() => exportAuditLogsCsv({ action: actionFilter, resourceType: resourceFilter })}
+          label={t('common.export', '导出 CSV')}
+          exportingLabel={t('audit.exporting')}
+          errorMessage={t('audit.exportFailed')}
+        />
       </div>
 
       {/* 筛选栏 */}

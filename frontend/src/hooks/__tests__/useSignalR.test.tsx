@@ -169,4 +169,33 @@ describe('useSignalR', () => {
     expect(handlers['onworkorderescalated']).toHaveLength(1);
     expect(handlers['ondevicestatuschanged']).toHaveLength(1);
   });
+
+  it('收到实时事件时应推送通知并刷新对应查询', async () => {
+    const invalidateQueries = vi.spyOn(QueryClient.prototype, 'invalidateQueries').mockResolvedValue({} as never);
+    renderHook(() => useSignalR(), { wrapper: createWrapper() });
+    await waitFor(() => expect(handlers['onalerttriggered']).toHaveLength(1));
+
+    handlers['onalerttriggered'][0]({ alertId: 'alert-1', alertCode: 'ALT-001', deviceId: 'device-1', metric: 'temperature', value: 88, severity: 'High' });
+    handlers['onalertacknowledged'][0]();
+    handlers['onalertresolved'][0]();
+    handlers['onworkordercreated'][0]();
+    handlers['onworkorderstatuschanged'][0]();
+    handlers['onworkorderanalysisupdated'][0]({ workOrderId: 'wo-1' });
+    handlers['onpendingrulecreated'][0]();
+    handlers['onworkorderescalated'][0]({ workOrderCode: 'WO-1', title: '紧急维修', newPriority: 'Urgent' });
+    handlers['ondevicestatuschanged'][0]({ deviceCode: 'P-1', deviceName: '水泵 1', status: 'Offline' });
+    handlers['ondevicestatuschanged'][0]({ deviceCode: 'P-1', deviceName: '水泵 1', status: 'Online' });
+    handlers['ongatewayoffline'][0]({ gatewayCode: 'GW-1', gatewayName: '一号网关' });
+    handlers['ontelemetryupdate'][0]('device-1');
+
+    expect(mockPush).toHaveBeenCalledTimes(4);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['alerts'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['work-orders', 'wo-1'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['pending-rules'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['devices'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['gateways'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['telemetry', 'device-1'] });
+    invalidateQueries.mockRestore();
+  });
 });

@@ -24,6 +24,12 @@ namespace EquipAI.Application.Retention;
 /// </summary>
 public class LogRetentionCleanupService : LockedTimerService
 {
+    /// <summary>
+    /// 非关系型测试提供程序的删除批次大小。
+    /// 生产数据库走 ExecuteDeleteAsync，不会把过期日志加载到应用内存；批量回退只用于不支持集合删除的提供程序。
+    /// </summary>
+    private const int FallbackDeleteBatchSize = 1000;
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
 
@@ -71,27 +77,62 @@ public class LogRetentionCleanupService : LockedTimerService
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var auditCutoff = DateTime.UtcNow.AddDays(-auditDays);
-        var oldAuditLogs = await db.AuditLogs.IgnoreQueryFilters()
-            .Where(a => a.CreatedAt < auditCutoff)
-            .ToListAsync(ct);
-        if (oldAuditLogs.Count > 0)
+        var deletedAuditLogs = await DeleteExpiredAsync(
+            db,
+            db.AuditLogs.IgnoreQueryFilters().Where(a => a.CreatedAt < auditCutoff),
+            db.AuditLogs,
+            ct);
+        if (deletedAuditLogs > 0)
         {
-            db.AuditLogs.RemoveRange(oldAuditLogs);
-            Logger.LogInformation("清理 {Count} 条过期审计日志（保留 {Days} 天）", oldAuditLogs.Count, auditDays);
+            Logger.LogInformation("清理 {Count} 条过期审计日志（保留 {Days} 天）", deletedAuditLogs, auditDays);
         }
 
         var notifCutoff = DateTime.UtcNow.AddDays(-notificationDays);
-        var oldNotifications = await db.Notifications.IgnoreQueryFilters()
-            .Where(n => n.CreatedAt < notifCutoff)
-            .ToListAsync(ct);
-        if (oldNotifications.Count > 0)
+        var deletedNotifications = await DeleteExpiredAsync(
+            db,
+            db.Notifications.IgnoreQueryFilters().Where(n => n.CreatedAt < notifCutoff),
+            db.Notifications,
+            ct);
+        if (deletedNotifications > 0)
         {
-            db.Notifications.RemoveRange(oldNotifications);
-            Logger.LogInformation("清理 {Count} 条过期通知（保留 {Days} 天）", oldNotifications.Count, notificationDays);
+            Logger.LogInformation("清理 {Count} 条过期通知（保留 {Days} 天）", deletedNotifications, notificationDays);
         }
 
-        await db.SaveChangesAsync(ct);
+        // 关系型数据库的 ExecuteDeleteAsync 已经直接提交删除；非关系型回退在批次内部保存。
+    }
+
+    /// <summary>
+    /// 删除满足条件的旧记录。
+    ///
+    /// 关系型数据库必须使用服务端集合删除：日志表可能远大于应用内存，先 ToList 再 RemoveRange
+    /// 会把清理任务本身变成 OOM 风险。非关系型提供程序仅为单元测试保留有限批次回退，避免测试
+    /// 适配器为了实现删除而改变生产路径。
+    /// </summary>
+    private static async Task<int> DeleteExpiredAsync<TEntity>(
+        AppDbContext db,
+        IQueryable<TEntity> expiredQuery,
+        DbSet<TEntity> entitySet,
+        CancellationToken ct)
+        where TEntity : class
+    {
+        if (db.Database.IsRelational())
+            return await expiredQuery.ExecuteDeleteAsync(ct);
+
+        var totalDeleted = 0;
+        while (true)
+        {
+            var batch = await expiredQuery
+                .Take(FallbackDeleteBatchSize)
+                .ToListAsync(ct);
+            if (batch.Count == 0)
+                break;
+
+            entitySet.RemoveRange(batch);
+            await db.SaveChangesAsync(ct);
+            totalDeleted += batch.Count;
+        }
+
+        return totalDeleted;
     }
 }
-
 
