@@ -350,8 +350,11 @@ generate_smoke_issued_tls_certificate() {
 generate_smoke_issued_tls_certificate "$RUNTIME_DOCKER/ssl"
 bash "$RUNTIME_DOCKER/generate-mqtt-cert.sh" mosquitto 365 >/dev/null
 # 密码只经标准输入交给官方工具，禁止使用 -b 或命令行参数，避免凭据出现在进程列表和审计记录中。
+# 以调用者 uid 运行容器：passwd 文件归 runner 所有，随后的 chmod 才被允许
+# （Linux 上容器内其他 uid 建的文件，宿主普通用户无权改权限；macOS 会掩盖这一点）。
 printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
-  | docker run --rm -i -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" \
+  | docker run --rm -i --user "$(id -u):$(id -g)" \
+    -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" \
     mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
 

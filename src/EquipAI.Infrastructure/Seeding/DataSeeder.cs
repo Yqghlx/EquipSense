@@ -320,7 +320,10 @@ public class DataSeeder
                     IsActive = true,
                     // 关键修复：所有种子用户都必须改密码（原代码只强制 admin），
                     // 避免客户拿到系统后 lead/tech/operator/viewer 仍用公开默认密码登录。
-                    MustChangePassword = true,
+                    // 仅生产环境强制：开发/CI 的全新数据库若也强制，E2E/压测登录后
+                    // 全部被重定向到改密页，业务 API 返回 403，自动化无法开箱即用；
+                    // 生产由 SeedCredentialValidator 保证必须注入独立强密码并保留强制改密。
+                    MustChangePassword = _hostEnvironment.IsProduction(),
                     Language = "zh-CN"
                 };
 
