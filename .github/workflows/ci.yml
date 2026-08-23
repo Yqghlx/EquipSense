@@ -897,8 +897,13 @@ jobs:
           Redis__ConnectionString: "localhost:6379"
           Jwt__Secret: "e2e-test-secret-key-that-is-at-least-32-characters-long!!"
           DISABLE_RATE_LIMITING: "true"
+          # E2E 负向用例故意输错密码；不关锁定会 5 次失败锁 admin 15 分钟，
+          # 污染后续所有用例（生产环境该开关无效，锁定恒启用）。
+          Auth__DisableAccountLockout: "true"
           # E2E 跨租户隔离测试（permission-denied.spec.ts）依赖第二租户账户
           SEED_TENANT2_ACCOUNT: "true"
+          # 全套件会创建远超默认 50 台的设备；配额耗尽后 POST /devices 全部被拒。
+          SEED_MAX_DEVICES: "100000"
         run: |
           dotnet run --project src/EquipAI.WebAPI --no-build --configuration Release &
           # 等待后端健康检查通过（最多约 90 秒），超时必须阻断后续 E2E。

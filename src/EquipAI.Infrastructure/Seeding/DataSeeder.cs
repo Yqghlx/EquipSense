@@ -126,7 +126,14 @@ public class DataSeeder
     {
         // 完整 E2E 会在同一个隔离租户中并行创建大量临时资源；该容量只在临时隔离验收中启用，
         // 避免测试用例因为真实套餐配额提前结束，同时不改变普通开发和生产租户的套餐边界。
-        var seededMaxDevices = isolatedFullDemo ? int.MaxValue : 50;
+        // SEED_MAX_DEVICES 允许 CI/E2E 在非隔离模式下抬高配额（默认 50）；
+        // E2E 全套件会创建远超 50 台的设备，配额耗尽后 UsageLimitMiddleware
+        // 会拒绝所有后续 POST /devices，造成批量用例失败。
+        var seededMaxDevices = isolatedFullDemo
+            ? int.MaxValue
+            : int.TryParse(Environment.GetEnvironmentVariable("SEED_MAX_DEVICES"), out var seedMaxDevices) && seedMaxDevices > 0
+                ? seedMaxDevices
+                : 50;
         var seededMaxUsers = isolatedFullDemo ? int.MaxValue : 20;
 
         // 系统租户

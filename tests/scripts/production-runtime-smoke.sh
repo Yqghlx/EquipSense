@@ -377,6 +377,14 @@ generate_smoke_issued_tls_certificate() {
 
 generate_smoke_issued_tls_certificate "$RUNTIME_DOCKER/ssl"
 bash "$RUNTIME_DOCKER/generate-mqtt-cert.sh" mosquitto 365 >/dev/null
+# nginx master 以 root 运行但容器 cap_drop ALL（无 DAC_OVERRIDE）：
+# runner 属主的 600 私钥它读不了 → Permission denied。在有免密 sudo 的 CI 上
+# 把证书目录属主改为 root（mode 600 不变，validate-env 门禁仍通过）；
+# 本地无 sudo 时跳过——Docker Desktop 权限映射宽松，不受影响。
+if sudo -n true 2>/dev/null; then
+  sudo chown -R 0:0 "$RUNTIME_DOCKER/ssl" "$RUNTIME_DOCKER/mqtt-certs" \
+    "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
+fi
 # 密码只经标准输入交给官方工具，禁止使用 -b 或命令行参数，避免凭据出现在进程列表和审计记录中。
 # 以调用者 uid 运行容器：passwd 文件归 runner 所有，随后的 chmod 才被允许
 # （Linux 上容器内其他 uid 建的文件，宿主普通用户无权改权限；macOS 会掩盖这一点）。
