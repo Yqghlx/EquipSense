@@ -6,7 +6,13 @@ set -Eeuo pipefail
 
 # 官方镜像的入口脚本只有在参数是 rabbitmq-server 时才会自动降权；本脚本作为
 # command 运行时需要显式切换到 rabbitmq 用户，避免 broker 以 root 身份运行。
+# 同时必须修正 HOME 与内置 .erlang.cookie 的属主：绕过官方 entrypoint 意味着
+# 跳过了它的权限修复步骤；macOS Docker Desktop 对权限宽松会掩盖问题，
+# Linux 上 rabbitmq 用户读 root 属主的 cookie 直接 eacces 拒绝启动。
 if [[ "$(id -u)" == "0" ]]; then
+  export HOME=/var/lib/rabbitmq
+  chown rabbitmq: /var/lib/rabbitmq/.erlang.cookie 2>/dev/null || true
+  chmod 600 /var/lib/rabbitmq/.erlang.cookie 2>/dev/null || true
   exec su-exec rabbitmq /bin/bash "$BASH_SOURCE" "$@"
 fi
 
