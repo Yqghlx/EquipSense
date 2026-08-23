@@ -160,6 +160,14 @@ if ! docker image inspect "$BACKEND_IMAGE" "$FRONTEND_IMAGE" "$EDGEGATEWAY_IMAGE
 fi
 
 mkdir -p "$RUNTIME_DOCKER/ssl" "$RUNTIME_DOCKER/mqtt-certs" "$RUNTIME_DOCKER/mqtt-ca" "$RUNTIME_DOCKER/mosquitto_passwd" "$RUNTIME_DOCKER/rabbitmq" "$RUNTIME_DOCKER/prometheus" "$RUNTIME_DOCKER/grafana/provisioning/datasources" "$RUNTIME_DOCKER/grafana/provisioning/dashboards" "$RUNTIME_DOCKER/waf-rules"
+# runner umask 077 时 mktemp 与 mkdir 产物是 700，容器内服务账户无法穿越
+# bind-mount 源路径（表现为"规则文件不存在"等误报）。统一放开目录穿越权限。
+chmod 755 "$SMOKE_ROOT" "$RUNTIME_DOCKER" \
+          "$RUNTIME_DOCKER"/ssl "$RUNTIME_DOCKER"/mqtt-certs "$RUNTIME_DOCKER"/mqtt-ca \
+          "$RUNTIME_DOCKER"/mosquitto_passwd "$RUNTIME_DOCKER"/rabbitmq \
+          "$RUNTIME_DOCKER"/prometheus "$RUNTIME_DOCKER"/grafana \
+          "$RUNTIME_DOCKER"/grafana/provisioning "$RUNTIME_DOCKER"/grafana/provisioning/datasources \
+          "$RUNTIME_DOCKER"/grafana/provisioning/dashboards "$RUNTIME_DOCKER"/waf-rules
 
 # 只复制不含运行时凭据的配置；绝不复制仓库中的 .env、证书、私钥、密码文件和备份。
 runtime_files=(
