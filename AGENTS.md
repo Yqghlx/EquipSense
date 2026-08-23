@@ -87,16 +87,26 @@ npx playwright test --debug
 npx playwright show-report
 ```
 
-### 模拟器（发送测试遥测数据）
+### 模拟器与遥测注入
 
 模拟器有两个副本，**仅 `src/EquipAI.Simulator` 收录在 `EquipAI.sln` 中**（被解决方案构建编译）；`tools/EquipAI.Simulator` 是测试项目当前仍引用的旧副本，运行模拟器命令请用前者。
 
+**注意两者能力不同：**
+
+- `src/EquipAI.Simulator` 是 **OPC UA / Modbus TCP 模拟服务器**（供边缘网关协议适配器联调），**不直接发布 MQTT**。仅支持 `--headless` 参数，其余参数被静默忽略。
+- `tools/EquipAI.Simulator` 旧副本支持直连 broker 发布 MQTT（`--tenant` / `--interval` / `--mqtt-username` 等），但没有 `--devices`、`--anomaly-rate` 参数。
+
 ```bash
-# 向指定租户的 3 个设备每 5 秒发送遥测数据（5% 概率触发异常）
-dotnet run --project src/EquipAI.Simulator -- \
-  --tenant 11111111-1111-1111-1111-111111111111 \
-  --devices 3 \
-  --interval 5
+# 启动 OPC UA (opc.tcp://localhost:4840) + Modbus TCP (localhost:5020) 模拟服务
+dotnet run --project src/EquipAI.Simulator -- --headless
+```
+
+```bash
+# 直接向后端注入一条遥测（后端订阅 factory/{tenantId}/telemetry/{deviceId}，
+# payload 需含 timestamp 与 metrics；时间戳超前服务器不能超过 10 分钟）
+docker exec equipai-mosquitto mosquitto_pub -h localhost \
+  -t 'factory/<tenant-id>/telemetry/<device-id>' \
+  -m '{"timestamp":"<UTC now>","quality":"good","metrics":{"temperature":95}}'
 ```
 
 ### Docker 环境
@@ -150,7 +160,7 @@ EquipSense/
 │   ├── EquipAI.Application/      # 应用层（业务逻辑，按模块分文件夹）
 │   ├── EquipAI.Infrastructure/   # 基础设施层（EF Core、Redis、MQTT、JWT）
 │   ├── EquipAI.EdgeGateway/      # 边缘网关（独立部署）
-│   └── EquipAI.Simulator/        # MQTT 遥测数据模拟器
+│   └── EquipAI.Simulator/        # OPC UA / Modbus 模拟服务器（供边缘网关联调）
 ├── frontend/                      # 前端源码
 │   └── src/
 │       ├── pages/                # 页面组件
@@ -311,15 +321,15 @@ dotnet ef database update --startup-project ../EquipAI.WebAPI
 
 ### 测试告警触发
 
-使用模拟器发送异常数据：
+向已注册设备发布超阈值的遥测（如 temperature > 80 触发 High 告警）：
 
 ```bash
-dotnet run --project src/EquipAI.Simulator -- \
-  --tenant <your-tenant-id> \
-  --devices 1 \
-  --interval 2 \
-  --anomaly-rate 20  # 20% 概率生成异常值
+docker exec equipai-mosquitto mosquitto_pub -h localhost \
+  -t "factory/<your-tenant-id>/telemetry/<device-id>" \
+  -m '{"timestamp":"<UTC now>","quality":"good","metrics":{"temperature":95}}'
 ```
+
+首条命中立即建告警；30 分钟窗口内同设备同指标第 2-3 次更新已有告警，超过 3 次静默（防风暴聚合）。
 
 前端告警中心页面会通过 SignalR 实时接收告警推送。
 
@@ -336,7 +346,7 @@ dotnet run --project src/EquipAI.Simulator -- \
 
 ## 已知坑点
 
-- **模拟器有两份**：只有 `src/EquipAI.Simulator` 作为正式运行入口收录在 `EquipAI.sln` 中；`tools/EquipAI.Simulator` 是测试项目使用的旧副本，命令一律用前者。
+- **模拟器有两份**：只有 `src/EquipAI.Simulator` 作为正式运行入口收录在 `EquipAI.sln` 中（OPC UA/Modbus 模拟服务器，不发布 MQTT）；`tools/EquipAI.Simulator` 是测试项目使用的旧副本，支持直连 broker 发布 MQTT。两者都不存在 `--devices` / `--anomaly-rate` 参数；向 MQTT 注入遥测用 `mosquitto_pub`，见「测试告警触发」。
 - **E2E 测试位置**：Playwright 配置在 `frontend/`，测试用例按功能分目录放 `frontend/e2e-comprehensive/` 下（不是 `tests/e2e/`）。运行前需 `cd frontend && npx playwright install`。
 - **前端 lint 阈值严格**：CI 用 `npx eslint src/ --max-warnings 1`，新增 warning 也可能挂 CI。
 - **i18n 双语必须齐全**：改文案需同步中英文，`npm run check:i18n` 在 CI 强制运行。

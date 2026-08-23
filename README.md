@@ -92,14 +92,23 @@ npm run dev
 # 前端监听 http://localhost:5173，自动代理 API 和 SignalR 到后端
 ```
 
-#### 4. 发送模拟数据（可选）
+#### 4. 注入模拟数据（可选）
+
+`src/EquipAI.Simulator` 是 OPC UA (`opc.tcp://localhost:4840`) / Modbus TCP (`localhost:5020`) 模拟服务器，供边缘网关协议适配器联调，不直接发布 MQTT：
 
 ```bash
-dotnet run --project src/EquipAI.Simulator -- \
-  --tenant 11111111-1111-1111-1111-111111111111 --devices 3 --interval 5
+dotnet run --project src/EquipAI.Simulator -- --headless
 ```
 
-正式模拟器位于 `src/EquipAI.Simulator`；`tools/EquipAI.Simulator` 仅保留给现有故障场景单元测试使用，不作为运行入口。模拟器每 5 秒向 3 个虚拟设备发送遥测数据，5% 概率生成异常值触发告警。
+向后端注入遥测用 `mosquitto_pub`（后端订阅 `factory/{tenantId}/telemetry/{deviceId}`，时间戳超前服务器不能超过 10 分钟）：
+
+```bash
+docker exec equipai-mosquitto mosquitto_pub -h localhost \
+  -t 'factory/11111111-1111-1111-1111-111111111111/<device-id>' \
+  -m '{"timestamp":"<UTC now>","quality":"good","metrics":{"temperature":95}}'
+```
+
+`tools/EquipAI.Simulator` 仅保留给现有故障场景单元测试使用，不作为运行入口。
 
 ## 项目结构
 
