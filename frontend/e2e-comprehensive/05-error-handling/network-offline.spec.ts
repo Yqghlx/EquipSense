@@ -272,7 +272,7 @@ test.describe('网络异常降级', () => {
     await dialog.locator('input').nth(1).fill('防抖测试设备');
     // 设备类型是必填字段；先完成前端校验，才能验证真实提交中的防重复状态。
     await dialog.getByRole('combobox').first().click();
-    await page.getByRole('option', { name: 'motor' }).click();
+    await page.getByRole('option', { name: /电机|motor/i }).click();
 
     // 暂缓首个响应，确保能观察到提交中的禁用状态；否则本地 API 过快返回时，
     // 对话框会在第二次点击前关闭，测试会把“已关闭”误报成“重复提交失败”。
