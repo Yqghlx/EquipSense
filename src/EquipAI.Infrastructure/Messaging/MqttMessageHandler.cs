@@ -98,6 +98,15 @@ public class MqttMessageHandler
 
             timestamp = timestamp.ToSafeUtc();
 
+            // 未来时间戳会占据时序头部并持续污染 latest/基线/聚合查询，只容忍设备时钟偏差。
+            if (TelemetryInputValidator.ValidateNotInFuture(timestamp) is not null)
+            {
+                _logger.LogWarning(
+                    "忽略时间戳超前超过 {Minutes} 分钟的 MQTT 消息: {Topic}, Timestamp={Timestamp}",
+                    TelemetryInputValidator.MaxFutureClockSkewMinutes, topic, timestamp);
+                return;
+            }
+
             var quality = "good";
             if (json.TryGetProperty("quality", out var qEl))
             {

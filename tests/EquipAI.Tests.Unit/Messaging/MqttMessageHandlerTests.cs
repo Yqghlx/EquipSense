@@ -144,6 +144,50 @@ public class MqttMessageHandlerTests
         telemetry.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task HandleAsync_时间戳超前超过容忍度_不入队()
+    {
+        var telemetry = new Mock<ITelemetryService>();
+        var handler = CreateHandler(telemetry);
+        var futureTimestamp = DateTime.UtcNow.AddMinutes(TelemetryInputValidator.MaxFutureClockSkewMinutes + 5);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            timestamp = futureTimestamp,
+            metrics = new Dictionary<string, double> { ["temperature"] = 1 },
+            quality = "good",
+        });
+
+        await handler.HandleAsync(CreateTopic(), payload);
+
+        // 未来时间戳会占据时序头部污染 latest/基线查询，必须与无效消息一样整条拒绝。
+        telemetry.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task HandleAsync_时间戳超前在时钟偏差容忍内_正常入队()
+    {
+        var telemetry = new Mock<ITelemetryService>();
+        telemetry
+            .Setup(service => service.EnqueueAndWaitForPersistenceAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<double>(),
+                It.IsAny<DateTime>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+        var handler = CreateHandler(telemetry);
+        var skewedTimestamp = DateTime.UtcNow.AddMinutes(TelemetryInputValidator.MaxFutureClockSkewMinutes - 1);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            timestamp = skewedTimestamp,
+            metrics = new Dictionary<string, double> { ["temperature"] = 1 },
+            quality = "good",
+        });
+
+        await handler.HandleAsync(CreateTopic(), payload);
+
+        telemetry.Invocations
+            .Count(call => call.Method.Name == nameof(ITelemetryService.EnqueueAndWaitForPersistenceAsync))
+            .Should().Be(1, "边缘网关小幅时钟偏差不应丢数据");
+    }
+
     private static MqttMessageHandler CreateHandler(Mock<ITelemetryService> telemetry)
         => new(telemetry.Object, NullLogger<MqttMessageHandler>.Instance);
 

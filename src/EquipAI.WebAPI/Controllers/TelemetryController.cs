@@ -59,6 +59,11 @@ public class TelemetryController : ControllerBase
         var quality = request.Quality.Trim();
         var timestamp = request.Timestamp.ToSafeUtc();
 
+        // 与 MQTT 入口一致：历史数据不限（断网补传），未来数据只容忍时钟偏差。
+        var futureError = TelemetryInputValidator.ValidateNotInFuture(timestamp);
+        if (futureError is not null)
+            return BadRequest(new { code = 400, message = futureError });
+
         Guid deviceId;
         if (Guid.TryParse(deviceIdentifier, out var uuid))
         {

@@ -24,6 +24,13 @@ public static class TelemetryInputValidator
     public const int MaxPayloadBytes = 256 * 1024;
 
     /// <summary>
+    /// 允许的时间戳最大超前量（分钟）。历史数据不限（支持断网补传），
+    /// 但未来时间戳没有业务正当理由——超限会以"未来时间"占据 latest 查询、
+    /// 基线与聚合的时序头部，持续污染读路径，因此按时钟偏差容忍度拒绝。
+    /// </summary>
+    public const int MaxFutureClockSkewMinutes = 10;
+
+    /// <summary>
     /// 校验 HTTP 遥测上报请求。
     /// </summary>
     /// <param name="deviceIdentifier">设备编码或设备 ID。</param>
@@ -127,10 +134,25 @@ public static class TelemetryInputValidator
 
     /// <summary>
     /// 校验时间戳是否为可入库的有效时间。
-    /// 不限制时间的新旧，允许边缘网关完成断网缓存后补传历史数据。
+    /// 不限制过去的时间跨度，允许边缘网关完成断网缓存后补传历史数据；
+    /// 未来时间由 <see cref="ValidateNotInFuture"/> 单独限制。
     /// </summary>
     /// <param name="timestamp">数据时间戳。</param>
     /// <returns>校验失败原因；校验通过时返回 <see langword="null"/>。</returns>
     public static string? ValidateTimestamp(DateTime timestamp)
         => timestamp == default ? "时间戳必须是有效时间" : null;
+
+    /// <summary>
+    /// 校验时间戳不得超出时钟偏差容忍度的未来范围。入参必须是 UTC（先经过 ToSafeUtc）。
+    /// </summary>
+    /// <param name="utcTimestamp">已转换为 UTC 的数据时间戳。</param>
+    /// <param name="utcNow">当前 UTC 时间；测试可注入，默认取系统时钟。</param>
+    /// <returns>校验失败原因；校验通过时返回 <see langword="null"/>。</returns>
+    public static string? ValidateNotInFuture(DateTime utcTimestamp, DateTime? utcNow = null)
+    {
+        var now = utcNow ?? DateTime.UtcNow;
+        return utcTimestamp > now.AddMinutes(MaxFutureClockSkewMinutes)
+            ? $"时间戳超前服务器时间超过 {MaxFutureClockSkewMinutes} 分钟，疑似设备时钟错误或伪造数据"
+            : null;
+    }
 }
