@@ -1,5 +1,5 @@
 # 阶段1：构建
-FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:e2f26f26169fd10d6f1b426e01c97397717b32e9d5ab4ee4a7d5497ed9403007 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:306301580fcaa5b445180e759db59309979002d1000669cb4cf58a567d0014bc AS build
 WORKDIR /src
 
 # 先复制项目文件并还原依赖（利用 Docker 层缓存）
@@ -16,7 +16,7 @@ RUN dotnet publish EquipAI.WebAPI/EquipAI.WebAPI.csproj \
     -c Release -o /app/publish --no-restore
 
 # 阶段2：运行
-FROM mcr.microsoft.com/dotnet/aspnet:8.0@sha256:fd7596eaea7ad453fe7ac16724a3c9ae36edcda894ba13743d6a5c83d6a3b36d AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:8.0@sha256:b0beb9cc1dee1c1b0749796110d4734292071b814207ad0d4f40611f7db04f7b AS runtime
 WORKDIR /app
 
 # 安装 ICU 库（中文等 Unicode 排序所需）、netcat（等待 PG 就绪）、curl（健康检查）

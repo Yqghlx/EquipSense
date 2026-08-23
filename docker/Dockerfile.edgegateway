@@ -1,5 +1,5 @@
 # 阶段1：构建
-FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:e2f26f26169fd10d6f1b426e01c97397717b32e9d5ab4ee4a7d5497ed9403007 AS build
+FROM mcr.microsoft.com/dotnet/sdk:8.0@sha256:306301580fcaa5b445180e759db59309979002d1000669cb4cf58a567d0014bc AS build
 WORKDIR /src
 
 # 继承仓库锁定的 SDK 和构建警告策略，确保边缘网关与主后端使用同一编译基线。
@@ -17,7 +17,7 @@ RUN dotnet publish EquipAI.EdgeGateway/EquipAI.EdgeGateway.csproj \
     -c Release -o /app/publish --no-restore
 
 # 阶段2：运行
-FROM mcr.microsoft.com/dotnet/runtime:8.0@sha256:794b603ad8cf882df3a37dcb124eccdcd688c367864cd66e93e921cda9caba76 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime:8.0@sha256:a27922704a14d6d1ce103697aa3efa885902db33651b41a84ad1594fdf5be66e AS runtime
 WORKDIR /app
 
 # 安装 ICU 库（中文等 Unicode 排序所需）
