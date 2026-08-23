@@ -37,6 +37,8 @@ env:
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: yqghlx/equipsense
+  # deploy job 的 if 用它判断是否配置了部署密钥（job 级 if 不能直接引用 secrets）。
+  HAS_DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
 
 jobs:
   # ============================================================================
@@ -652,7 +654,8 @@ jobs:
   deploy:
     name: CD 自动部署
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') && secrets.DEPLOY_SSH_KEY != ''
+    # secrets 上下文在 job 级 if 中不可用，经 workflow 级 env 转接（HAS_DEPLOY_KEY）。
+    if: startsWith(github.ref, 'refs/tags/v') && env.HAS_DEPLOY_KEY != ''
     needs: [release, create-release]
     environment: production  # 可配合 Environment Protection Rules（人工审批 / 分支限制）
     steps:
