@@ -214,7 +214,14 @@ fi
 validation_output=""
 validation_status=1
 if [ -f "$ENV_FILE" ] && [ ! -L "$ENV_FILE" ] && [ -f "${SCRIPT_DIR}/validate-env.sh" ]; then
-  validation_args=(bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  # 私钥按容器要求归属服务账户（nginx root、mosquitto broker uid）且 mode 600，
+  # 普通用户无权读取，openssl 内容校验会因 EACCES 误报「不是有效的私钥」。
+  # 有免密 sudo 时以 root 同身份校验；部署机上建议直接以 root 运行本脚本。
+  if sudo -n true 2>/dev/null; then
+    validation_args=(sudo -n bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  else
+    validation_args=(bash "${SCRIPT_DIR}/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  fi
   if [ "$ALLOW_ISOLATED_E2E" = true ]; then
     validation_args+=(--allow-isolated-e2e)
   fi

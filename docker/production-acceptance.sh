@@ -717,7 +717,13 @@ main() {
   parse_arguments "$@"
   prepare_inputs
 
-  validation_args=(bash "$RUNTIME_DIR/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  # 私钥归属服务账户且 mode 600 时普通用户读不了，需以 root 同身份做 openssl 校验
+  # （与 production-readiness.sh 同一处理）；部署机上建议直接以 root 运行验收。
+  if sudo -n true 2>/dev/null; then
+    validation_args=(sudo -n bash "$RUNTIME_DIR/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  else
+    validation_args=(bash "$RUNTIME_DIR/validate-env.sh" "$ENV_FILE" --check-runtime-files)
+  fi
   if [ "$PROFILE" = isolated-ci ]; then
     validation_args+=(--allow-isolated-e2e)
   fi
