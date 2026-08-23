@@ -395,10 +395,8 @@ printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
     -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" \
     mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
-# mosquitto 容器以 root 起步读取 passwd 后再降权；与证书同理改为 root 属主。
-if sudo -n true 2>/dev/null; then
-  sudo chown 0:0 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
-fi
+# 注意：passwd 不能 chown 给 root——validate-env 需以 runner 身份读取校验；
+# mosquitto 容器无 cap_drop，root 天然可读任意属主的文件，无需调整属主。
 
 # 整个 runtime smoke 都运行在临时隔离 Compose 项目中，演示数据开关只服务于该验收环境。
 validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files" "--allow-isolated-e2e")
