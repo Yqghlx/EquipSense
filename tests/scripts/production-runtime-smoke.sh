@@ -632,6 +632,10 @@ done
 wait_for_http "https://127.0.0.1:$FRONTEND_PORT/health" "-k"
 wait_for_http "https://127.0.0.1:$FRONTEND_PORT/login" "-k"
 
+login_body="$(curl -k --fail --silent --show-error --max-time 10 "https://127.0.0.1:$FRONTEND_PORT/login")"
+[[ -n "$login_body" ]] || fatal "HTTPS 登录页响应体为空"
+printf 'HTTPS /login 响应体长度：%s\n' "${#login_body}"
+
 proxy_status="$(curl -k --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' "https://127.0.0.1:$FRONTEND_PORT/api/v1/auth/me")"
 case "$proxy_status" in
   401|403)
@@ -640,6 +644,15 @@ case "$proxy_status" in
     fatal "Nginx API 反向代理未返回预期未授权响应：HTTP $proxy_status"
     ;;
 esac
+
+login_api_body="$(curl -k --silent --show-error --max-time 10 \
+  -H 'Content-Type: application/json' \
+  --data '{}' \
+  "https://127.0.0.1:$FRONTEND_PORT/api/v1/auth/login")"
+[[ -n "$login_api_body" ]] || fatal "API 反向代理登录响应体为空"
+printf '%s' "$login_api_body" | grep -qi '<html' \
+  && fatal "API 反向代理返回了错误页而不是业务响应"
+printf 'API /auth/login 响应体：%s\n' "$login_api_body"
 
 if [[ "$SMOKE_RUN_E2E" = true ]]; then
   printf '运行 Production 镜像完整业务 E2E……\n'

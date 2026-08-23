@@ -18,6 +18,7 @@ import {
   downloadImportTemplate,
 } from '../../hooks/useDevices';
 import type { DeviceImportPreviewResult, ImportResult } from '../../types';
+import { getCriticalityLabel, getDeviceTypeLabel } from '../../utils/labels';
 import { AxiosError } from 'axios';
 
 /** 设备导入预览对话框属性 */
@@ -173,9 +174,9 @@ export default function DeviceImportPreviewDialog({ open, onClose, file }: Devic
                           <td className="px-2 py-1">{item.rowNumber}</td>
                           <td className="px-2 py-1 font-mono">{item.deviceCode}</td>
                           <td className="px-2 py-1">{item.name}</td>
-                          <td className="px-2 py-1">{item.type}</td>
+                          <td className="px-2 py-1">{getDeviceTypeLabel(t, item.type)}</td>
                           <td className="px-2 py-1">{item.manufacturer || '-'}</td>
-                          <td className="px-2 py-1">{item.criticality || 'Normal'}</td>
+                          <td className="px-2 py-1">{getCriticalityLabel(t, item.criticality || 'Normal')}</td>
                         </tr>
                       ))}
                     </tbody>

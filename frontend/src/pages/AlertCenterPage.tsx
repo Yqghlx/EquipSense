@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -11,6 +12,7 @@ import { useAlerts, useAcknowledgeAlert, useResolveAlert } from '../hooks/useAle
 import api from '../lib/api';
 import type { Alert } from '../types';
 import ExportButton from '../components/ui/ExportButton';
+import { matchesStatus } from '../utils/status';
 
 /** 导出当前筛选条件下的告警为 CSV（触发浏览器下载） */
 async function exportAlertsCsv(status: string, severity: string) {
@@ -49,10 +51,34 @@ export default function AlertCenterPage() {
   const acknowledgeAlert = useAcknowledgeAlert();
   const resolveAlert = useResolveAlert();
 
+  const actionPending = acknowledgeAlert.isPending || resolveAlert.isPending;
+
   /** 点击告警行打开详情抽屉 */
   const handleRowClick = (alert: Alert) => {
     setSelectedAlert(alert);
     setDrawerOpen(true);
+  };
+
+  /** 确认告警：成功才关闭抽屉，失败必须给出可见提示。 */
+  const handleAcknowledge = async (id: string) => {
+    try {
+      await acknowledgeAlert.mutateAsync(id);
+      toast.success(t('alert.acknowledgeSuccess'));
+      setDrawerOpen(false);
+    } catch {
+      toast.error(t('alert.acknowledgeFailed'));
+    }
+  };
+
+  /** 解决告警：成功才关闭抽屉，失败必须给出可见提示。 */
+  const handleResolve = async (id: string) => {
+    try {
+      await resolveAlert.mutateAsync(id);
+      toast.success(t('alert.resolveSuccess'));
+      setDrawerOpen(false);
+    } catch {
+      toast.error(t('alert.resolveFailed'));
+    }
   };
 
   return (
@@ -145,19 +171,35 @@ export default function AlertCenterPage() {
                     <TableCell>
                       {/* 操作按钮：阻止行点击事件冒泡 */}
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        {alert.status === 'active' && (
+                        {matchesStatus(alert.status, 'active') && (
                           <>
-                            <Button variant="outline" size="sm" onClick={() => acknowledgeAlert.mutate(alert.id)}>
-                              {t('alert.acknowledge')}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={actionPending}
+                              aria-busy={acknowledgeAlert.isPending}
+                              onClick={() => { void handleAcknowledge(alert.id); }}
+                            >
+                              {acknowledgeAlert.isPending ? t('alert.acknowledging') : t('alert.acknowledge')}
                             </Button>
-                            <Button size="sm" onClick={() => resolveAlert.mutate(alert.id)}>
-                              {t('alert.resolve')}
+                            <Button
+                              size="sm"
+                              disabled={actionPending}
+                              aria-busy={resolveAlert.isPending}
+                              onClick={() => { void handleResolve(alert.id); }}
+                            >
+                              {resolveAlert.isPending ? t('alert.resolving') : t('alert.resolve')}
                             </Button>
                           </>
                         )}
-                        {alert.status === 'acknowledged' && (
-                          <Button size="sm" onClick={() => resolveAlert.mutate(alert.id)}>
-                            {t('alert.resolve')}
+                        {matchesStatus(alert.status, 'acknowledged') && (
+                          <Button
+                            size="sm"
+                            disabled={actionPending}
+                            aria-busy={resolveAlert.isPending}
+                            onClick={() => { void handleResolve(alert.id); }}
+                          >
+                            {resolveAlert.isPending ? t('alert.resolving') : t('alert.resolve')}
                           </Button>
                         )}
                       </div>
@@ -186,8 +228,9 @@ export default function AlertCenterPage() {
         alert={selectedAlert}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        onAcknowledge={(id) => { acknowledgeAlert.mutate(id); setDrawerOpen(false); }}
-        onResolve={(id) => { resolveAlert.mutate(id); setDrawerOpen(false); }}
+        actionPending={actionPending}
+        onAcknowledge={(id) => { void handleAcknowledge(id); }}
+        onResolve={(id) => { void handleResolve(id); }}
       />
     </div>
   );

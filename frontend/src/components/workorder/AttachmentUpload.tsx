@@ -6,7 +6,8 @@
  */
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Upload, FileText, Download, Trash2, Paperclip } from 'lucide-react';
+import { toast } from 'sonner';
+import { Upload, FileText, Download, Trash2, Paperclip, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
   useWorkOrderAttachments,
   useUploadAttachment,
@@ -27,19 +28,29 @@ export default function AttachmentUpload({ workOrderId, canEdit = false }: Attac
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const { data: attachments = [], isLoading } = useWorkOrderAttachments(workOrderId);
+  const {
+    data: attachments,
+    isLoading,
+    isError,
+    refetch,
+  } = useWorkOrderAttachments(workOrderId);
   const uploadMutation = useUploadAttachment(workOrderId);
   const deleteMutation = useDeleteAttachment(workOrderId);
+  const attachmentList = attachments ?? [];
+  const attachmentsFailed = isError && attachments == null;
 
-  // 处理文件选择
+  // 处理文件选择；每个文件独立回调，失败时必须 toast，避免静默吞掉。
   const handleFiles = useCallback(
     (files: FileList | null) => {
       if (!files) return;
       Array.from(files).forEach((file) => {
-        uploadMutation.mutate(file);
+        uploadMutation.mutate(file, {
+          onSuccess: () => toast.success(t('workOrders.uploadSuccess')),
+          onError: () => toast.error(t('workOrders.uploadFailed')),
+        });
       });
     },
-    [uploadMutation]
+    [t, uploadMutation]
   );
 
   // 拖拽事件
@@ -65,9 +76,12 @@ export default function AttachmentUpload({ workOrderId, canEdit = false }: Attac
     );
   };
 
-  // 删除附件
+  /** 删除附件；失败时必须提示，避免用户以为已经删掉。 */
   const handleDelete = (attachmentId: string) => {
-    deleteMutation.mutate(attachmentId);
+    deleteMutation.mutate(attachmentId, {
+      onSuccess: () => toast.success(t('workOrders.deleteSuccess')),
+      onError: () => toast.error(t('workOrders.deleteFailed')),
+    });
   };
 
   return (
@@ -75,7 +89,7 @@ export default function AttachmentUpload({ workOrderId, canEdit = false }: Attac
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Paperclip className="h-4 w-4" />
-          {t('workOrders.attachments', '附件')} ({attachments.length})
+          {t('workOrders.attachments', '附件')} ({attachmentList.length})
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -122,13 +136,22 @@ export default function AttachmentUpload({ workOrderId, canEdit = false }: Attac
         {/* 附件列表 */}
         {isLoading ? (
           <p className="text-sm text-muted-foreground">{t('common.loading', '加载中...')}</p>
-        ) : attachments.length === 0 ? (
+        ) : attachmentsFailed ? (
+          <div className="flex flex-col items-center gap-2 py-4 text-center">
+            <AlertTriangle className="h-6 w-6 text-amber-500" />
+            <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+            <Button variant="outline" size="sm" onClick={() => { void refetch(); }}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              {t('common.retry')}
+            </Button>
+          </div>
+        ) : attachmentList.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             {t('workOrders.noAttachments', '暂无附件')}
           </p>
         ) : (
           <ul className="space-y-2">
-            {attachments.map((att) => (
+            {attachmentList.map((att) => (
               <li
                 key={att.id}
                 className="flex items-center justify-between rounded-md border px-3 py-2"
@@ -149,6 +172,7 @@ export default function AttachmentUpload({ workOrderId, canEdit = false }: Attac
                     className="h-7 w-7"
                     onClick={() => handleDownload(att.id)}
                     title={t('common.download', '下载')}
+                    aria-label={t('common.download', '下载')}
                   >
                     <Download className="h-3.5 w-3.5" />
                   </Button>
@@ -160,6 +184,7 @@ export default function AttachmentUpload({ workOrderId, canEdit = false }: Attac
                       onClick={() => handleDelete(att.id)}
                       disabled={deleteMutation.isPending}
                       title={t('common.delete', '删除')}
+                      aria-label={t('common.delete', '删除')}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>

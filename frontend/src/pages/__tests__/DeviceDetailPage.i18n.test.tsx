@@ -14,10 +14,15 @@ import {
   useUpdateGatewayDevice,
 } from '../../hooks/useGatewayDevices';
 import { useGateways } from '../../hooks/useGateways';
+import { toast } from 'sonner';
 
 const translations: Record<string, string> = {
   'common.loading': 'Loading',
   'common.noData': 'No data',
+  'common.loadFailed': 'Failed to load data',
+  'common.retry': 'Retry',
+  'device.refreshHealthSuccess': 'Health score refreshed',
+  'device.refreshHealthFailed': 'Failed to refresh the health score',
   'device.tabs.overview': 'Overview',
   'device.tabs.connection': 'Connection',
   'device.connection.title': 'Data Collection Config',
@@ -38,6 +43,11 @@ const translations: Record<string, string> = {
   'device.healthScore': 'Health score',
   'device.name': 'Name',
   'device.type': 'Type',
+  'device.types.pump': 'Pump',
+  'alert.normal': 'Normal',
+  'alert.critical': 'Critical',
+  'alert.high': 'High',
+  'alert.low': 'Low',
   'device.model': 'Model',
   'device.manufacturer': 'Manufacturer',
   'device.criticality': 'Criticality',
@@ -67,7 +77,20 @@ const translations: Record<string, string> = {
   'common.save': 'Save',
   'common.cancel': 'Cancel',
   'common.close': 'Close',
+  'device.connection.saveSuccess': 'Collection config saved',
+  'device.connection.saveFailed': 'Failed to save the collection config',
+  'device.connection.deleteSuccess': 'Collection config deleted',
+  'device.connection.deleteFailed': 'Failed to delete the collection config',
+  'device.connection.enableSuccess': 'Data collection enabled',
+  'device.connection.disableSuccess': 'Data collection stopped',
+  'device.connection.toggleFailed': 'Failed to update collection status',
+  'device.connection.createSuccess': 'Collection config created',
+  'device.connection.createFailed': 'Failed to create the collection config',
 };
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -127,12 +150,29 @@ beforeEach(() => {
       status: 'online',
     },
     isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
   } as unknown as ReturnType<typeof useDevice>);
   mockedUseRefreshHealthScore.mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useRefreshHealthScore>);
   mockedUseUpdateDevice.mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateDevice>);
-  mockedUseRecentTelemetry.mockReturnValue({ data: [] } as unknown as ReturnType<typeof useRecentTelemetry>);
-  mockedUseAlerts.mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useAlerts>);
-  mockedUseGatewayDevices.mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<typeof useGatewayDevices>);
+  mockedUseRecentTelemetry.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useRecentTelemetry>);
+  mockedUseAlerts.mockReturnValue({
+    data: { items: [] },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useAlerts>);
+  mockedUseGatewayDevices.mockReturnValue({
+    data: [],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useGatewayDevices>);
   mockedUseUpdateGatewayDevice.mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useUpdateGatewayDevice>);
   mockedUseDeleteGatewayDevice.mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useDeleteGatewayDevice>);
   mockedUseTestConnection.mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useTestConnection>);
@@ -168,7 +208,12 @@ describe('设备详情连接配置英文界面', () => {
     const view = renderDevicePage();
     expect(screen.getByText('Loading')).toBeInTheDocument();
 
-    mockedUseDevice.mockReturnValue({ data: undefined, isLoading: false } as unknown as ReturnType<typeof useDevice>);
+    mockedUseDevice.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useDevice>);
     view.rerender(
       <MemoryRouter initialEntries={['/devices/device-1']}>
         <Routes>
@@ -196,9 +241,14 @@ describe('设备详情连接配置英文界面', () => {
         healthScore: 88,
       },
       isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useDevice>);
     mockedUseRecentTelemetry.mockReturnValue({
       data: [{ time: '2026-08-12T09:00:00Z', value: 72 }],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useRecentTelemetry>);
     mockedUseAlerts.mockReturnValue({
       data: {
@@ -212,6 +262,9 @@ describe('设备详情连接配置英文界面', () => {
           occurredAt: '2026-08-12T09:00:00Z',
         }],
       },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useAlerts>);
     view.rerender(
       <MemoryRouter initialEntries={['/devices/device-1']}>
@@ -224,14 +277,35 @@ describe('设备详情连接配置英文界面', () => {
     expect(screen.getByRole('heading', { name: 'Pump 1' })).toBeInTheDocument();
     expect(screen.getByText('ALT-001')).toBeInTheDocument();
     expect(screen.getByText('88.0')).toBeInTheDocument();
-    await user.click(screen.getByTitle('Refresh health'));
-    expect(refreshMutate).toHaveBeenCalledWith('device-1');
+    const refreshButton = screen.getByRole('button', { name: 'Refresh health' });
+    expect(refreshButton).toHaveAccessibleName('Refresh health');
+    await user.click(refreshButton);
+    expect(refreshMutate).toHaveBeenCalledWith(
+      'device-1',
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('加载失败时应展示可重试错误态而不是暂无数据', async () => {
+    const refetch = vi.fn();
+    mockedUseDevice.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useDevice>);
+    renderDevicePage();
+
+    expect(screen.getByText('Failed to load data')).toBeInTheDocument();
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /Retry/ }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it('已有关联配置时应支持启停、测试、编辑和删除', async () => {
     const user = userEvent.setup();
-    const updateMutate = vi.fn((_payload: unknown, options?: { onSettled?: () => void }) => options?.onSettled?.());
-    const deleteMutate = vi.fn((_id: string, options?: { onSettled?: () => void }) => options?.onSettled?.());
+    const updateMutate = vi.fn((_payload: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    const deleteMutate = vi.fn((_id: string, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     const testMutate = vi.fn((_payload: unknown, options?: { onSuccess?: (result: { success: boolean; message: string }) => void }) => {
       options?.onSuccess?.({ success: true, message: 'Connection OK' });
     });
@@ -249,6 +323,8 @@ describe('设备详情连接配置英文界面', () => {
         createdAt: '2026-08-12T00:00:00Z',
       }],
       isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     } as unknown as ReturnType<typeof useGatewayDevices>);
     mockedUseUpdateGatewayDevice.mockReturnValue({ mutate: updateMutate, isPending: false } as unknown as ReturnType<typeof useUpdateGatewayDevice>);
     mockedUseDeleteGatewayDevice.mockReturnValue({ mutate: deleteMutate, isPending: false } as unknown as ReturnType<typeof useDeleteGatewayDevice>);
@@ -260,7 +336,12 @@ describe('设备详情连接配置英文界面', () => {
     expect(screen.getByText('1000ms').closest('div')).not.toBeNull();
 
     await user.click(screen.getByRole('switch'));
-    expect(updateMutate).toHaveBeenCalledWith({ id: 'gateway-device-1', enabled: false });
+    expect(updateMutate).toHaveBeenCalledWith(
+      { id: 'gateway-device-1', enabled: false },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+    expect(toast.success).toHaveBeenCalledWith('Data collection stopped');
+
     await user.click(screen.getByRole('button', { name: 'Test Connection' }));
     expect(screen.getByText('Connection OK')).toBeInTheDocument();
 
@@ -273,12 +354,102 @@ describe('设备详情连接配置英文界面', () => {
     expect(updateMutate).toHaveBeenCalledWith(expect.objectContaining({
       id: 'gateway-device-1',
       deviceName: 'Pump 1 Updated',
-    }), expect.any(Object));
+    }), expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }));
+    expect(toast.success).toHaveBeenCalledWith('Collection config saved');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Delete' }));
     const deleteDialog = screen.getByRole('dialog');
     await user.click(within(deleteDialog).getByRole('button', { name: 'Delete' }));
-    expect(deleteMutate).toHaveBeenCalledWith('gateway-device-1', expect.any(Object));
+    expect(deleteMutate).toHaveBeenCalledWith(
+      'gateway-device-1',
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+    expect(toast.success).toHaveBeenCalledWith('Collection config deleted');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('采集配置保存失败时应提示错误并保留编辑弹窗', async () => {
+    const user = userEvent.setup();
+    const updateMutate = vi.fn((_payload: unknown, options?: { onError?: () => void }) => options?.onError?.());
+    mockedUseGatewayDevices.mockReturnValue({
+      data: [{
+        id: 'gateway-device-1',
+        deviceId: 'device-1',
+        deviceName: 'Pump 1',
+        protocol: 'opcua',
+        connectionConfig: '{}',
+        dataPoints: '{}',
+        pollIntervalMs: 1000,
+        enabled: true,
+        gatewayId: 'gateway-1',
+        createdAt: '2026-08-12T00:00:00Z',
+      }],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGatewayDevices>);
+    mockedUseUpdateGatewayDevice.mockReturnValue({ mutate: updateMutate, isPending: false } as unknown as ReturnType<typeof useUpdateGatewayDevice>);
+
+    renderDevicePage();
+    await user.click(screen.getByRole('tab', { name: 'Connection' }));
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Failed to save the collection config');
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' })).toBeInTheDocument();
+  });
+
+  it('采集配置删除失败时应提示错误并保留确认弹窗', async () => {
+    const user = userEvent.setup();
+    const deleteMutate = vi.fn((_id: string, options?: { onError?: () => void }) => options?.onError?.());
+    mockedUseGatewayDevices.mockReturnValue({
+      data: [{
+        id: 'gateway-device-1',
+        deviceId: 'device-1',
+        deviceName: 'Pump 1',
+        protocol: 'opcua',
+        connectionConfig: '{}',
+        dataPoints: '{}',
+        pollIntervalMs: 1000,
+        enabled: true,
+        gatewayId: 'gateway-1',
+        createdAt: '2026-08-12T00:00:00Z',
+      }],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useGatewayDevices>);
+    mockedUseDeleteGatewayDevice.mockReturnValue({ mutate: deleteMutate, isPending: false } as unknown as ReturnType<typeof useDeleteGatewayDevice>);
+
+    renderDevicePage();
+    await user.click(screen.getByRole('tab', { name: 'Connection' }));
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Failed to delete the collection config');
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('采集配置列表加载失败时应展示可重试错误而不是创建表单', async () => {
+    const refetch = vi.fn();
+    mockedUseGatewayDevices.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useGatewayDevices>);
+
+    renderDevicePage();
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Connection' }));
+
+    expect(screen.getByText('Failed to load data')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create & Link' })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /Retry/ }));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it('未关联配置时应切换协议并创建连接', async () => {
@@ -299,6 +470,95 @@ describe('设备详情连接配置英文界面', () => {
       deviceName: 'Pump 1',
       protocol: 'modbus-tcp',
       pollIntervalMs: 3000,
-    }));
+    }), expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }));
+  });
+
+  it('遥测加载失败时应显示可重试错误而不是暂无数据', async () => {
+    const refetch = vi.fn();
+    mockedUseRecentTelemetry.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useRecentTelemetry>);
+    mockedUseAlerts.mockReturnValue({
+      data: { items: [{ id: 'a1', alertCode: 'ALT-KEEP', metric: 'temperature', value: 1, severity: 'Low', status: 'Active', occurredAt: '2026-08-14T00:00:00Z' }] },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useAlerts>);
+    renderDevicePage();
+
+    expect(screen.getByText('Failed to load data')).toBeInTheDocument();
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /Retry/ }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('遥测成功且为空时应显示空态', () => {
+    mockedUseRecentTelemetry.mockReturnValue({
+      data: [],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useRecentTelemetry>);
+    mockedUseAlerts.mockReturnValue({
+      data: { items: [{ id: 'a1', alertCode: 'ALT-KEEP', metric: 'temperature', value: 1, severity: 'Low', status: 'Active', occurredAt: '2026-08-14T00:00:00Z' }] },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useAlerts>);
+    renderDevicePage();
+
+    expect(screen.getByText('No data')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load data')).not.toBeInTheDocument();
+  });
+
+  it('最近告警加载失败时应显示可重试错误而不是暂无数据', async () => {
+    const refetch = vi.fn();
+    mockedUseRecentTelemetry.mockReturnValue({
+      data: [{ time: '2026-08-14T00:00:00Z', value: 1 }],
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useRecentTelemetry>);
+    mockedUseAlerts.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useAlerts>);
+    renderDevicePage();
+
+    expect(screen.getByText('Failed to load data')).toBeInTheDocument();
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /Retry/ }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('档案编辑图标应具备可访问名称', () => {
+    renderDevicePage();
+    expect(screen.getByRole('button', { name: 'Edit' })).toHaveAccessibleName('Edit');
+  });
+
+  it('概览应将设备类型和关键等级显示为翻译文案', () => {
+    mockedUseDevice.mockReturnValue({
+      data: {
+        id: 'device-1',
+        name: 'Pump 1',
+        deviceCode: 'P-001',
+        status: 'online',
+        type: 'pump',
+        criticality: 'Normal',
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useDevice>);
+    renderDevicePage();
+
+    expect(screen.getByText('Pump')).toBeInTheDocument();
+    expect(screen.getByText('Normal')).toBeInTheDocument();
+    expect(screen.queryByText('pump')).not.toBeInTheDocument();
   });
 });

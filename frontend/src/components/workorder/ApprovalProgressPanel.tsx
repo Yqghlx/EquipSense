@@ -12,6 +12,7 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { Check, X, Clock } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
@@ -103,23 +104,31 @@ export function ApprovalProgressPanel({ workOrderId, approvals }: ApprovalProgre
   // 检查是否有步骤已被驳回，则后续步骤不再可操作
   const hasRejected = approvals.some((a) => a.action === 'Rejected');
 
-  /** 处理审批通过 */
+  /** 处理审批通过；失败时保留意见，禁止 onSettled 一律清空。 */
   const handleApprove = () => {
     approveMutation.mutate(
       { id: workOrderId, comment: approveComment || undefined },
-      { onSettled: () => setApproveComment('') },
+      {
+        onSuccess: () => {
+          toast.success(t('workorder.approval.approveSuccess'));
+          setApproveComment('');
+        },
+        onError: () => toast.error(t('workorder.approval.approveFailed')),
+      },
     );
   };
 
-  /** 处理审批驳回 */
+  /** 处理审批驳回；失败时保留驳回表单，方便用户改完再提交。 */
   const handleReject = () => {
     rejectMutation.mutate(
       { id: workOrderId, comment: rejectComment || undefined },
       {
-        onSettled: () => {
+        onSuccess: () => {
+          toast.success(t('workorder.approval.rejectSuccess'));
           setRejectingStep(null);
           setRejectComment('');
         },
+        onError: () => toast.error(t('workorder.approval.rejectFailed')),
       },
     );
   };

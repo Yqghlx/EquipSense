@@ -18,14 +18,14 @@ public class CreateDeviceRequest
     /// 设备名称
     /// </summary>
     [Required(ErrorMessage = "设备名称不能为空")]
-    [StringLength(200, ErrorMessage = "设备名称长度不能超过 200 个字符")]
+    [StringLength(100, ErrorMessage = "设备名称长度不能超过 100 个字符")]
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
     /// 设备类型（如 "电机"、"泵"、"压缩机"）
     /// </summary>
     [Required(ErrorMessage = "设备类型不能为空")]
-    [StringLength(100, ErrorMessage = "设备类型长度不能超过 100 个字符")]
+    [StringLength(50, ErrorMessage = "设备类型长度不能超过 50 个字符")]
     public string Type { get; set; } = string.Empty;
 
     /// <summary>

@@ -295,6 +295,12 @@ if [ "$RUNTIME_CHECK" = true ]; then
           for service in "${services[@]}"; do
             # jaeger-init 只负责一次性初始化，成功后正常处于 exited 状态。
             [ "$service" = "jaeger-init" ] && continue
+            # 隔离 Production smoke 只拉起核心应用和 Jaeger，不启动 Seq/Prometheus/Grafana/Alertmanager。
+            if [ "$ALLOW_ISOLATED_E2E" = true ]; then
+              case "$service" in
+                seq|prometheus|grafana|alertmanager) continue ;;
+              esac
+            fi
 
             service_line="$(printf '%s\n' "$services_status_output" | awk -F '\t' -v expected_service="$service" '$1 == expected_service { print; exit }')"
             if [ -z "$service_line" ]; then

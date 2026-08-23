@@ -11,7 +11,7 @@ namespace EquipAI.Application.Interfaces;
 public interface IDeviceService
 {
     /// <summary>
-    /// 分页查询设备列表，支持按状态和类型筛选
+    /// 分页查询设备列表，支持按状态、类型和关键词（编码/名称/型号）筛选
     /// </summary>
     /// <param name="query">分页查询参数</param>
     /// <param name="tenantId">租户 ID</param>

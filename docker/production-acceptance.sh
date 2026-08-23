@@ -229,7 +229,11 @@ record_check() {
 first_line() {
   local text="$1"
   local line
-  line="$(printf '%s\n' "$text" | sed -n '1p')"
+  # 子命令常先打印标题再打印 [✗]；摘要必须落到第一条失败原因，避免把启动横幅当成失败证据。
+  line="$(printf '%s\n' "$text" | awk '/\[✗\]/ { print; exit }')"
+  if [ -z "$line" ]; then
+    line="$(printf '%s\n' "$text" | sed -n '1p')"
+  fi
   printf '%s' "${line:-无输出}"
 }
 
@@ -374,7 +378,9 @@ evidence_is_valid() {
   fi
 
   mode="$(stat -f '%Lp' "$evidence_file" 2>/dev/null || stat -c '%a' "$evidence_file" 2>/dev/null || true)"
-  if [[ "$mode" =~ ^[0-9]+$ ]] && (( 10#$mode & 022 != 0 )); then
+  # stat 返回的是八进制权限字面量（如 600/644）。必须按 8# 解析，
+  # 并拒绝组/其他人的任何位，否则 644 的世界可读证据会被当成安全。
+  if [[ "$mode" =~ ^[0-7]+$ ]] && (( (8#$mode & 077) != 0 )); then
     EVIDENCE_REASON="证据文件权限过宽"
     return 1
   fi

@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react';
 import { ApprovalProgressPanel } from '../ApprovalProgressPanel';
 import { useApproveWorkOrder, useRejectApproval } from '../../../hooks/useApprovals';
 import type { ApprovalAction } from '../../../types';
+import { toast } from 'sonner';
 
 const translations: Record<string, string> = {
   'workorder.approval.step': 'Approval level {{step}}',
@@ -23,7 +24,15 @@ const translations: Record<string, string> = {
   'workorder.approval.cancel': 'Cancel',
   'workorder.approval.comment': 'Comment: {{comment}}',
   'workorder.approval.noRecords': 'No approval records',
+  'workorder.approval.approveSuccess': 'Approval granted',
+  'workorder.approval.approveFailed': 'Failed to approve',
+  'workorder.approval.rejectSuccess': 'Approval rejected',
+  'workorder.approval.rejectFailed': 'Failed to reject the approval',
 };
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -78,8 +87,8 @@ describe('工单审批进度英文界面', () => {
 
   it('应展示已通过、驳回、等待和未知状态，并支持审批通过与驳回', async () => {
     const user = userEvent.setup();
-    const approveMutate = vi.fn((_payload: unknown, options?: { onSettled?: () => void }) => options?.onSettled?.());
-    const rejectMutate = vi.fn((_payload: unknown, options?: { onSettled?: () => void }) => options?.onSettled?.());
+    const approveMutate = vi.fn((_payload: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    const rejectMutate = vi.fn((_payload: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
     mockedUseApproveWorkOrder.mockReturnValue({ mutate: approveMutate, isPending: false } as unknown as ReturnType<typeof useApproveWorkOrder>);
     mockedUseRejectApproval.mockReturnValue({ mutate: rejectMutate, isPending: false } as unknown as ReturnType<typeof useRejectApproval>);
     const view = render(
@@ -104,16 +113,20 @@ describe('工单审批进度英文界面', () => {
     await user.click(screen.getByRole('button', { name: 'Approve' }));
     expect(approveMutate).toHaveBeenCalledWith(
       { id: 'work-order-1', comment: 'Approved after inspection' },
-      expect.objectContaining({ onSettled: expect.any(Function) }),
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+    expect(toast.success).toHaveBeenCalledWith('Approval granted');
+    expect(screen.getByPlaceholderText('Enter approval comment...')).toHaveValue('');
 
     await user.click(screen.getByRole('button', { name: 'Reject' }));
     await user.type(screen.getByPlaceholderText('Enter rejection reason...'), 'Need more evidence');
     await user.click(screen.getByRole('button', { name: 'Confirm reject' }));
     expect(rejectMutate).toHaveBeenCalledWith(
       { id: 'work-order-1', comment: 'Need more evidence' },
-      expect.objectContaining({ onSettled: expect.any(Function) }),
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
     );
+    expect(toast.success).toHaveBeenCalledWith('Approval rejected');
+    expect(screen.queryByPlaceholderText('Enter rejection reason...')).not.toBeInTheDocument();
 
     view.rerender(
       <ApprovalProgressPanel
@@ -133,5 +146,57 @@ describe('工单审批进度英文界面', () => {
   it('没有审批记录时应显示空态', () => {
     render(<ApprovalProgressPanel workOrderId="work-order-1" approvals={[]} />);
     expect(screen.getByText('No approval records')).toBeInTheDocument();
+  });
+
+  it('审批通过失败时应提示错误并保留意见', async () => {
+    const user = userEvent.setup();
+    const approveMutate = vi.fn((_payload: unknown, options?: { onError?: () => void }) => options?.onError?.());
+    mockedUseApproveWorkOrder.mockReturnValue({ mutate: approveMutate, isPending: false } as unknown as ReturnType<typeof useApproveWorkOrder>);
+    render(
+      <ApprovalProgressPanel
+        workOrderId="work-order-1"
+        approvals={[{
+          id: 'approval-1',
+          workOrderId: 'work-order-1',
+          stepOrder: 1,
+          expectedRole: 'maintenance_lead',
+          action: 'Pending',
+        }]}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText('Enter approval comment...'), 'Need another look');
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Failed to approve');
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('Enter approval comment...')).toHaveValue('Need another look');
+  });
+
+  it('审批驳回失败时应提示错误并保留驳回表单', async () => {
+    const user = userEvent.setup();
+    const rejectMutate = vi.fn((_payload: unknown, options?: { onError?: () => void }) => options?.onError?.());
+    mockedUseRejectApproval.mockReturnValue({ mutate: rejectMutate, isPending: false } as unknown as ReturnType<typeof useRejectApproval>);
+    render(
+      <ApprovalProgressPanel
+        workOrderId="work-order-1"
+        approvals={[{
+          id: 'approval-1',
+          workOrderId: 'work-order-1',
+          stepOrder: 1,
+          expectedRole: 'maintenance_lead',
+          action: 'Pending',
+        }]}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Reject' }));
+    await user.type(screen.getByPlaceholderText('Enter rejection reason...'), 'Need more evidence');
+    await user.click(screen.getByRole('button', { name: 'Confirm reject' }));
+
+    expect(toast.error).toHaveBeenCalledWith('Failed to reject the approval');
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('Enter rejection reason...')).toHaveValue('Need more evidence');
+    expect(screen.getByRole('button', { name: 'Confirm reject' })).toBeInTheDocument();
   });
 });

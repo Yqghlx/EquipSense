@@ -6,11 +6,13 @@ using Microsoft.Extensions.Logging;
 namespace EquipAI.Application.WorkOrders.Handlers;
 
 /// <summary>
-/// 工单集成事件处理器
-/// 监听 WorkOrderStatusChangedEvent，在工单创建/状态变更时委托 IntegrationRouter 推送到外部系统
-/// 集成配置存储在 Tenant.Settings JSONB 字段中
+/// 工单集成事件处理器。
+/// 创建只发布 WorkOrderCreatedEvent；状态流转发布 WorkOrderStatusChangedEvent。
+/// 两者都要进 IntegrationRouter，否则钉钉/飞书/EAM/Webhook 的创建通知永远不会发出。
 /// </summary>
-public class WorkOrderIntegrationHandler : IEventHandler<WorkOrderStatusChangedEvent>
+public class WorkOrderIntegrationHandler :
+    IEventHandler<WorkOrderCreatedEvent>,
+    IEventHandler<WorkOrderStatusChangedEvent>
 {
     private readonly IntegrationRouter _router;
     private readonly ILogger<WorkOrderIntegrationHandler> _logger;
@@ -23,18 +25,41 @@ public class WorkOrderIntegrationHandler : IEventHandler<WorkOrderStatusChangedE
         _logger = logger;
     }
 
+    /// <summary>
+    /// 工单创建后推送外部创建通知。
+    /// </summary>
+    public async Task HandleAsync(WorkOrderCreatedEvent eventMsg, CancellationToken ct)
+    {
+        try
+        {
+            await _router.RouteCreatedAsync(eventMsg.TenantId, eventMsg.WorkOrderId, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "集成路由创建推送失败: WorkOrderId={WorkOrderId}",
+                eventMsg.WorkOrderId);
+        }
+    }
+
+    /// <summary>
+    /// 工单状态变更后同步外部系统。
+    /// PendingDispatch 若再次出现（历史兼容），仍走创建路由，避免重复定义第二套创建语义。
+    /// </summary>
     public async Task HandleAsync(WorkOrderStatusChangedEvent eventMsg, CancellationToken ct)
     {
         try
         {
             if (eventMsg.NewStatus == "PendingDispatch")
             {
-                // 工单新建：路由创建通知
                 await _router.RouteCreatedAsync(eventMsg.TenantId, eventMsg.WorkOrderId, ct);
             }
             else
             {
-                // 工单状态变更：路由状态更新
                 await _router.RouteStatusChangedAsync(
                     eventMsg.TenantId, eventMsg.WorkOrderId, eventMsg.NewStatus, ct);
             }

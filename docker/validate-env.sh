@@ -88,10 +88,12 @@ else
 
   for key in "${REQUIRED_ENV_VARS[@]}"; do
     value="$(read_env_value "$key")"
+    lower_value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
     if [ -z "$value" ] \
       || [[ "$value" == *"请修改"* ]] \
       || [[ "$value" == *"PLEASE_CHANGE"* ]] \
       || [[ "$value" == *"CHANGE_ME"* ]] \
+      || [[ "$lower_value" == *"change-me"* ]] \
       || [[ "$value" == *"SET_VIA_ENVIRONMENT"* ]] \
       || { [ "$key" = "MQTT_USERNAME" ] && [ "$value" = "device" ]; } \
       || { [ "$key" = "MQTT_PASSWORD" ] && [ "$value" = "device123" ]; }; then

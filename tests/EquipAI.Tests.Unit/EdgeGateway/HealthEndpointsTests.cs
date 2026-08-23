@@ -30,7 +30,7 @@ public sealed class HealthEndpointsTests
             serviceProvider,
             port);
         using var requestCancellation = new CancellationTokenSource();
-        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(250) };
+        using var client = CreateLoopbackClient(TimeSpan.FromMilliseconds(250));
 
         await endpoints.StartAsync(requestCancellation.Token);
         try
@@ -78,7 +78,7 @@ public sealed class HealthEndpointsTests
             serviceProvider,
             port);
         using var requestCancellation = new CancellationTokenSource();
-        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(250) };
+        using var client = CreateLoopbackClient(TimeSpan.FromMilliseconds(250));
         client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", authKey);
 
         await endpoints.StartAsync(requestCancellation.Token);
@@ -117,7 +117,7 @@ public sealed class HealthEndpointsTests
         await endpoints.StartAsync(requestCancellation.Token);
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(250) };
+            using var client = CreateLoopbackClient(TimeSpan.FromMilliseconds(250));
             using var healthResponse = await GetWithRetryAsync(
                 client,
                 $"http://127.0.0.1:{port}/health");
@@ -134,7 +134,7 @@ public sealed class HealthEndpointsTests
         {
             if (stopTask is not null && !stopTask.IsCompleted)
             {
-                using var wakeClient = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+                using var wakeClient = CreateLoopbackClient(TimeSpan.FromSeconds(1));
                 try
                 {
                     await wakeClient.GetAsync($"http://127.0.0.1:{port}/health");
@@ -165,7 +165,7 @@ public sealed class HealthEndpointsTests
             port,
             maxConcurrentConnectionTests: 1);
         using var requestCancellation = new CancellationTokenSource();
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        using var client = CreateLoopbackClient(TimeSpan.FromSeconds(2));
         client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", options.AuthKey);
         var requests = new List<Task<HttpResponseMessage>>();
 
@@ -220,7 +220,7 @@ public sealed class HealthEndpointsTests
             serviceProvider,
             port);
         using var requestCancellation = new CancellationTokenSource();
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        using var client = CreateLoopbackClient(TimeSpan.FromSeconds(2));
         client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", options.AuthKey);
 
         await endpoints.StartAsync(requestCancellation.Token);
@@ -259,7 +259,7 @@ public sealed class HealthEndpointsTests
             serviceProvider,
             port);
         using var requestCancellation = new CancellationTokenSource();
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        using var client = CreateLoopbackClient(TimeSpan.FromSeconds(2));
         client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", options.AuthKey);
 
         await endpoints.StartAsync(requestCancellation.Token);
@@ -309,7 +309,7 @@ public sealed class HealthEndpointsTests
             serviceProvider,
             port);
         using var requestCancellation = new CancellationTokenSource();
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+        using var client = CreateLoopbackClient(TimeSpan.FromSeconds(2));
         client.DefaultRequestHeaders.Add("X-Gateway-Auth-Key", options.AuthKey);
 
         await endpoints.StartAsync(requestCancellation.Token);
@@ -390,6 +390,15 @@ public sealed class HealthEndpointsTests
 
         throw new InvalidOperationException("健康端点在限定时间内未启动", lastError);
     }
+
+    /// <summary>
+    /// 本机 HttpListener 测试必须绕过系统代理，否则 HTTP_PROXY 会把 127.0.0.1 转成 502。
+    /// </summary>
+    private static HttpClient CreateLoopbackClient(TimeSpan timeout)
+        => new(new HttpClientHandler { UseProxy = false, UseCookies = false })
+        {
+            Timeout = timeout,
+        };
 
     private static int GetFreePort()
     {

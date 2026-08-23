@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { Plus, Search, Pencil, Trash2, Eye, Upload, RefreshCw, AlertTriangle, ScanLine } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -16,6 +17,7 @@ import { useDevices, useCreateDevice, useUpdateDevice, useDeleteDevice, exportDe
 import { usePermission } from '../hooks/usePermission';
 import ExportButton from '../components/ui/ExportButton';
 import type { CreateDeviceRequest, Device } from '../types';
+import { getDeviceTypeLabel } from '../utils/labels';
 
 /**
  * 设备列表页
@@ -30,6 +32,7 @@ export default function DeviceListPage() {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<string>('');
   const [search, setSearch] = useState('');
+  const [keyword, setKeyword] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | undefined>();
   const [quickRegisterOpen, setQuickRegisterOpen] = useState(false);
@@ -37,33 +40,53 @@ export default function DeviceListPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data, isLoading, isError, refetch } = useDevices({ page, pageSize: 20, status: status || undefined });
+  const { data, isLoading, isError, refetch } = useDevices({
+    page,
+    pageSize: 20,
+    status: status || undefined,
+    keyword: keyword || undefined,
+  });
   const createDevice = useCreateDevice();
   const updateDevice = useUpdateDevice();
   const deleteDevice = useDeleteDevice();
 
-  /** 提交设备表单（新建或编辑） */
+  // 输入停 300ms 后再请求，避免每个按键都打列表接口。
+  useEffect(() => {
+    const timer = window.setTimeout(() => setKeyword(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  /** 提交设备表单（新建或编辑）；失败时保留弹窗并给出明确提示，禁止静默吞掉。 */
   const handleSubmit = async (req: CreateDeviceRequest) => {
-    if (editingDevice) {
-      await updateDevice.mutateAsync({ ...req, id: editingDevice.id });
-    } else {
-      await createDevice.mutateAsync(req);
+    try {
+      if (editingDevice) {
+        await updateDevice.mutateAsync({ ...req, id: editingDevice.id });
+      } else {
+        await createDevice.mutateAsync(req);
+      }
+      toast.success(t('device.saveSuccess'));
+      setDialogOpen(false);
+      setEditingDevice(undefined);
+    } catch {
+      toast.error(t('device.saveFailed'));
     }
-    setDialogOpen(false);
-    setEditingDevice(undefined);
   };
 
-  /** 删除设备（需用户确认） */
+  /** 删除设备（需用户确认）；失败时必须提示，避免用户以为已经删掉。 */
   const handleDelete = async (id: string) => {
-    if (window.confirm(t('common.confirm') + '?')) {
+    if (!window.confirm(t('common.confirm') + '?')) {
+      return;
+    }
+    try {
       await deleteDevice.mutateAsync(id);
+      toast.success(t('device.deleteSuccess'));
+    } catch {
+      toast.error(t('device.deleteFailed'));
     }
   };
 
-  /** 根据搜索关键字在客户端过滤设备列表 */
-  const filteredDevices = data?.items.filter(
-    (d) => !search || d.name.includes(search) || d.deviceCode.includes(search),
-  ) ?? [];
+  /** 列表数据以服务端筛选结果为准，不再只过滤当前页。 */
+  const devices = data?.items ?? [];
 
   return (
     <div className="space-y-4">
@@ -118,7 +141,10 @@ export default function DeviceListPage() {
             className="pl-9"
             placeholder={t('common.search') + '...'}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
           />
         </div>
         <Select value={status} onValueChange={(v) => { if (v !== null) { setStatus(v === 'all' ? '' : v); setPage(1); } }}>
@@ -161,18 +187,18 @@ export default function DeviceListPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredDevices.length === 0 ? (
+              {devices.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground">
                     {t('common.noData')}
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredDevices.map((device) => (
+                devices.map((device) => (
                   <TableRow key={device.id} className="cursor-pointer" onClick={() => navigate(`/devices/${device.id}`)}>
                     <TableCell className="font-mono text-sm">{device.deviceCode}</TableCell>
                     <TableCell>{device.name}</TableCell>
-                    <TableCell>{device.type}</TableCell>
+                    <TableCell>{getDeviceTypeLabel(t, device.type)}</TableCell>
                     <TableCell><DeviceStatusBadge status={device.status} /></TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {device.model ?? '-'}
@@ -180,13 +206,13 @@ export default function DeviceListPage() {
                     <TableCell>
                       {/* 操作按钮区域：阻止行点击事件冒泡 */}
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" onClick={() => navigate(`/devices/${device.id}`)}>
+                        <Button variant="ghost" size="icon" aria-label={t('common.view')} onClick={() => navigate(`/devices/${device.id}`)}>
                           <Eye className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => { setEditingDevice(device); setDialogOpen(true); }} disabled={!perm.canEdit}>
+                        <Button variant="ghost" size="icon" aria-label={t('common.edit')} onClick={() => { setEditingDevice(device); setDialogOpen(true); }} disabled={!perm.canEdit}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(device.id)} disabled={!perm.canDelete}>
+                        <Button variant="ghost" size="icon" aria-label={t('common.delete')} onClick={() => handleDelete(device.id)} disabled={!perm.canDelete || deleteDevice.isPending}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

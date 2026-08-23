@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using EquipAI.Application.Integrations;
 using EquipAI.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -164,7 +165,7 @@ public class EamIntegration : IWorkOrderIntegration
             var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
-            if (response.IsSuccessStatusCode)
+            if (response.IsSuccessStatusCode && IntegrationBusinessResponse.IsSuccess(responseBody))
             {
                 _logger.LogInformation("EAM 工单状态更新成功: ExternalId={ExternalId}, Status={Status}",
                     externalId, eamStatus);

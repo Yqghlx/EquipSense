@@ -7,6 +7,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import type { Device, CreateDeviceRequest } from '../../types';
+import { DEVICE_CRITICALITY_VALUES, DEVICE_TYPE_VALUES, getCriticalityLabel, getDeviceTypeLabel } from '../../utils/labels';
 
 /** 设备表单校验规则 */
 const deviceSchema = z.object({
@@ -23,9 +24,6 @@ const deviceSchema = z.object({
 });
 
 type DeviceFormData = z.infer<typeof deviceSchema>;
-
-/** 可选的设备类型列表 */
-const deviceTypes = ['pump', 'motor', 'valve', 'sensor', 'plc', 'other'];
 
 interface DeviceFormProps {
   /** 编辑模式时传入已有设备数据 */
@@ -105,8 +103,8 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
             <SelectValue placeholder={t('device.type')} />
           </SelectTrigger>
           <SelectContent>
-            {deviceTypes.map((type) => (
-              <SelectItem key={type} value={type}>{type}</SelectItem>
+            {DEVICE_TYPE_VALUES.map((type) => (
+              <SelectItem key={type} value={type}>{getDeviceTypeLabel(t, type)}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -119,8 +117,8 @@ export function DeviceForm({ device, onSubmit, onCancel, loading }: DeviceFormPr
         <Select defaultValue={device?.criticality ?? 'Normal'} onValueChange={(v) => { if (v) setValue('criticality', v); }}>
           <SelectTrigger id="deviceCriticality"><SelectValue placeholder={t('device.criticality')} /></SelectTrigger>
           <SelectContent>
-            {(['Critical', 'High', 'Normal', 'Low'] as const).map((c) => (
-              <SelectItem key={c} value={c}>{c}</SelectItem>
+            {DEVICE_CRITICALITY_VALUES.map((c) => (
+              <SelectItem key={c} value={c}>{getCriticalityLabel(t, c)}</SelectItem>
             ))}
           </SelectContent>
         </Select>

@@ -4,6 +4,8 @@ import { Button } from '../ui/button';
 import { Separator } from '../ui/separator';
 import { Badge } from '../ui/badge';
 import { SeverityBadge } from './SeverityBadge';
+import { matchesStatus } from '../../utils/status';
+import { formatDate } from '../../lib/utils';
 import type { Alert } from '../../types';
 
 /**
@@ -36,6 +38,8 @@ interface AlertDetailDrawerProps {
   onAcknowledge?: (id: string) => void;
   /** 解决告警回调 */
   onResolve?: (id: string) => void;
+  /** 确认/解决请求进行中，禁用操作按钮避免重复提交 */
+  actionPending?: boolean;
 }
 
 /**
@@ -45,7 +49,7 @@ interface AlertDetailDrawerProps {
  * 关联设备、触发指标、数值以及时间线。
  * 根据 alert.status 动态显示"确认"和"解决"操作按钮。
  */
-export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResolve }: AlertDetailDrawerProps) {
+export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResolve, actionPending = false }: AlertDetailDrawerProps) {
   const { t } = useTranslation();
 
   if (!alert) return null;
@@ -83,18 +87,18 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
             </div>
             <div>
               <p className="text-muted-foreground">{t('alert.triggeredAt')}</p>
-              <p className="font-medium">{new Date(alert.occurredAt).toLocaleString()}</p>
+              <p className="font-medium">{formatDate(alert.occurredAt)}</p>
             </div>
-            {alert.acknowledged && (
+            {alert.acknowledgedAt && (
               <div>
-                <p className="text-muted-foreground">{t('alert.triggeredAt')}</p>
-                <p className="font-medium">{new Date(alert.occurredAt).toLocaleString()}</p>
+                <p className="text-muted-foreground">{t('alert.acknowledgedAt')}</p>
+                <p className="font-medium">{formatDate(alert.acknowledgedAt)}</p>
               </div>
             )}
-            {alert.resolved && (
+            {alert.resolvedAt && (
               <div>
-                <p className="text-muted-foreground">{t('alert.resolved')}</p>
-                <p className="font-medium">{new Date(alert.occurredAt).toLocaleString()}</p>
+                <p className="text-muted-foreground">{t('alert.resolvedAt')}</p>
+                <p className="font-medium">{formatDate(alert.resolvedAt)}</p>
               </div>
             )}
           </div>
@@ -128,27 +132,27 @@ export function AlertDetailDrawer({ alert, open, onClose, onAcknowledge, onResol
             </>
           )}
 
-          {/* active 状态：显示确认和解决按钮 */}
-          {alert.status === 'active' && (
+          {/* Active 状态：显示确认和解决按钮（后端 Enum.ToString() 为 PascalCase） */}
+          {matchesStatus(alert.status, 'active') && (
             <div className="flex gap-2 pt-2">
               {onAcknowledge && (
-                <Button size="sm" variant="outline" onClick={() => onAcknowledge(alert.id)}>
-                  {t('alert.acknowledge')}
+                <Button size="sm" variant="outline" disabled={actionPending} onClick={() => onAcknowledge(alert.id)}>
+                  {actionPending ? t('alert.acknowledging') : t('alert.acknowledge')}
                 </Button>
               )}
               {onResolve && (
-                <Button size="sm" onClick={() => onResolve(alert.id)}>
-                  {t('alert.resolve')}
+                <Button size="sm" disabled={actionPending} onClick={() => onResolve(alert.id)}>
+                  {actionPending ? t('alert.resolving') : t('alert.resolve')}
                 </Button>
               )}
             </div>
           )}
 
-          {/* acknowledged 状态：仅显示解决按钮 */}
-          {alert.status === 'acknowledged' && onResolve && (
+          {/* Acknowledged 状态：仅显示解决按钮 */}
+          {matchesStatus(alert.status, 'acknowledged') && onResolve && (
             <div className="pt-2">
-              <Button size="sm" onClick={() => onResolve(alert.id)}>
-                {t('alert.resolve')}
+              <Button size="sm" disabled={actionPending} onClick={() => onResolve(alert.id)}>
+                {actionPending ? t('alert.resolving') : t('alert.resolve')}
               </Button>
             </div>
           )}

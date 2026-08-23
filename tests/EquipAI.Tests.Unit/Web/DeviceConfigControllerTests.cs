@@ -149,6 +149,57 @@ public class DeviceConfigControllerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task QuickRegister_带空白的设备编码应裁剪后入库()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var service = new DeviceConfigService(db, tenantContext);
+
+        var result = await service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            DeviceCode = "  PUMP-TRIM-001  ",
+            Name = "裁剪编码设备",
+            DeviceType = "泵",
+        });
+
+        result.DeviceCode.Should().Be("PUMP-TRIM-001");
+        (await db.UnfilteredSet<Device>().SingleAsync(d => d.Id == result.DeviceId))
+            .DeviceCode.Should().Be("PUMP-TRIM-001");
+    }
+
+    [Fact]
+    public async Task QuickRegister_模板名称超过设备类型长度应拒绝()
+    {
+        using var scope = _sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var tenantContext = scope.ServiceProvider.GetRequiredService<ITenantContext>();
+        var templateId = Guid.NewGuid();
+        db.DeviceTypeTemplates.Add(new DeviceTypeTemplate
+        {
+            Id = templateId,
+            TenantId = SystemConstants.SystemTenantId,
+            Name = new string('T', 51),
+            Industry = "制造业",
+            Parameters = "{}",
+        });
+        await db.SaveChangesAsync();
+
+        var service = new DeviceConfigService(db, tenantContext);
+        var act = () => service.QuickRegisterAsync(new QuickRegisterRequest
+        {
+            TemplateId = templateId,
+            DeviceCode = "TPL-LONG-001",
+            Name = "超长类型设备",
+        });
+
+        var exception = await FluentActions.Awaiting(act).Should().ThrowAsync<DeviceConfigException>();
+        exception.Which.Code.Should().Be("INVALID_DEVICE_TYPE");
+        (await db.UnfilteredSet<Device>().CountAsync(d => d.DeviceCode == "TPL-LONG-001"))
+            .Should().Be(0);
+    }
+
+    [Fact]
     public async Task QuickRegister_使用系统模板并应用默认规则_应保存模板关联和完整规则语义()
     {
         using var scope = _sp.CreateScope();

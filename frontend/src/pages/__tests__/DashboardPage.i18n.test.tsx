@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import userEvent from '@testing-library/user-event';
 import { render, screen } from '@testing-library/react';
 import DashboardPage from '../DashboardPage';
 import { useDashboardStats, useOee } from '../../hooks/useDashboard';
@@ -41,6 +42,9 @@ const translations: Record<string, string> = {
   'dashboard.trendWarnings.risk.info': 'Within 7 days',
   'dashboard.trendWarnings.risk.noEstimate': 'No time estimate',
   'common.noData': 'No data',
+  'common.loading': 'Loading...',
+  'common.loadFailed': 'Failed to load data',
+  'common.retry': 'Retry',
   'workorder.status.pendingDispatch': 'Pending Dispatch',
   'workorder.status.assigned': 'Assigned',
   'workorder.status.inProgress': 'In Progress',
@@ -115,9 +119,23 @@ beforeEach(() => {
     alertTrend: [],
     workOrderTrend: [],
   };
-  mockedUseDashboardStats.mockReturnValue({ data: stats, isLoading: false } as unknown as ReturnType<typeof useDashboardStats>);
-  mockedUseOee.mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useOee>);
-  mockedUseAlerts.mockReturnValue({ data: { items: [] } } as unknown as ReturnType<typeof useAlerts>);
+  mockedUseDashboardStats.mockReturnValue({
+    data: stats,
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useDashboardStats>);
+  mockedUseOee.mockReturnValue({
+    data: undefined,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useOee>);
+  mockedUseAlerts.mockReturnValue({
+    data: { items: [] },
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  } as unknown as ReturnType<typeof useAlerts>);
   mockedUseGlobalStats.mockReturnValue({ data: undefined } as unknown as ReturnType<typeof useGlobalStats>);
   mockedUseTrendWarnings.mockReturnValue({
     data: [],
@@ -141,5 +159,50 @@ describe('仪表盘工单状态英文界面', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Trend warnings' })).toBeInTheDocument();
     expect(screen.getByText('No metrics are expected to exceed a threshold soon')).toBeInTheDocument();
     expect(screen.queryByText('趋势预警')).not.toBeInTheDocument();
+  });
+
+  it('统计加载失败时应显示可重试错误而不是暂无数据', async () => {
+    const refetch = vi.fn();
+    mockedUseDashboardStats.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useDashboardStats>);
+    render(<DashboardPage />);
+
+    expect(screen.getAllByText('Failed to load data').length).toBeGreaterThan(0);
+    expect(screen.getByText('Work Order Status Distribution').closest('div')).toHaveTextContent('Failed to load data');
+    await userEvent.setup().click(screen.getAllByRole('button', { name: /Retry/ })[0]);
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('最近告警加载失败时应显示可重试错误而不是暂无数据', async () => {
+    const refetch = vi.fn();
+    mockedUseAlerts.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch,
+    } as unknown as ReturnType<typeof useAlerts>);
+    render(<DashboardPage />);
+
+    expect(screen.getByText('Failed to load data')).toBeInTheDocument();
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: /Retry/ }));
+    expect(refetch).toHaveBeenCalled();
+  });
+
+  it('最近告警成功且为空时应显示空态', () => {
+    mockedUseAlerts.mockReturnValue({
+      data: { items: [] },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useAlerts>);
+    render(<DashboardPage />);
+
+    expect(screen.getByText('No data')).toBeInTheDocument();
+    expect(screen.queryByText('Failed to load data')).not.toBeInTheDocument();
   });
 });

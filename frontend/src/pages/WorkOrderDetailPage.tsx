@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, RefreshCw, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -33,7 +33,7 @@ import {
   useWorkOrderApprovals,
   useSubmitWorkOrder,
 } from '../hooks/useApprovals';
-import { getWorkOrderStatusLabels } from '../utils/workorder';
+import { getWorkOrderStatusLabels, isTerminalWorkOrderStatus } from '../utils/workorder';
 import type { WorkOrder } from '../types';
 
 
@@ -61,7 +61,7 @@ export default function WorkOrderDetailPage() {
   const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
   const [selectedTechnician, setSelectedTechnician] = useState('');
 
-  const { data: workOrder, isLoading } = useWorkOrder(id ?? '');
+  const { data: workOrder, isLoading, isError, refetch } = useWorkOrder(id ?? '');
   const { data: logs = [], isLoading: logsLoading } = useWorkOrderLogs(id ?? '');
   const { data: approvals } = useWorkOrderApprovals(id);
   const startOrder = useStartWorkOrder();
@@ -76,7 +76,27 @@ export default function WorkOrderDetailPage() {
   const assignOrder = useAssignFromRecommendation();
 
   if (isLoading) return <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>;
+  if (isError && !workOrder) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-amber-500" />
+        <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+        <Button variant="outline" size="sm" onClick={() => { void refetch(); }}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {t('common.retry')}
+        </Button>
+      </div>
+    );
+  }
   if (!workOrder) return <div className="py-20 text-center text-muted-foreground">{t('common.noData')}</div>;
+
+  const actionPending = startOrder.isPending
+    || completeOrder.isPending
+    || acceptOrder.isPending
+    || rejectOrder.isPending
+    || closeOrder.isPending
+    || cancelOrder.isPending
+    || submitOrder.isPending;
 
   return (
     <div className="space-y-6">
@@ -132,18 +152,51 @@ export default function WorkOrderDetailPage() {
       {/* 状态流转操作按钮 */}
       <ActionButtons
         workOrder={workOrder}
+        hasApprovals={(approvals?.length ?? 0) > 0}
+        actionPending={actionPending}
         onDispatch={() => setDispatchDialogOpen(true)}
-        onStart={() => startOrder.mutate(workOrder.id)}
-        onAccept={() => acceptOrder.mutate(workOrder.id)}
-        onReject={(reason) => rejectOrder.mutate({ id: workOrder.id, reason })}
-        onClose={() => closeOrder.mutate(workOrder.id)}
+        onStart={async () => {
+          try {
+            await startOrder.mutateAsync(workOrder.id);
+            toast.success(t('workorder.startSuccess'));
+          } catch {
+            toast.error(t('workorder.startFailed'));
+          }
+        }}
+        onAccept={async () => {
+          try {
+            await acceptOrder.mutateAsync(workOrder.id);
+            toast.success(t('workorder.acceptSuccess'));
+          } catch {
+            toast.error(t('workorder.acceptFailed'));
+          }
+        }}
+        onReject={async (reason) => {
+          await rejectOrder.mutateAsync({ id: workOrder.id, reason });
+          toast.success(t('workorder.rejectSuccess'));
+        }}
+        onClose={async () => {
+          try {
+            await closeOrder.mutateAsync(workOrder.id);
+            toast.success(t('workorder.closeSuccess'));
+          } catch {
+            toast.error(t('workorder.closeFailed'));
+          }
+        }}
         onCancel={() => setCancelDialogOpen(true)}
-        onSubmitForApproval={() => submitOrder.mutate({
-          id: workOrder.id,
-          resolution,
-          executionReport,
-          requiredParts,
-        })}
+        onSubmitForApproval={async () => {
+          try {
+            await submitOrder.mutateAsync({
+              id: workOrder.id,
+              resolution,
+              executionReport,
+              requiredParts,
+            });
+            toast.success(t('workorder.submitSuccess'));
+          } catch {
+            toast.error(t('workorder.submitFailed'));
+          }
+        }}
       />
 
       <div className="grid gap-6 md:grid-cols-2">
@@ -228,7 +281,8 @@ export default function WorkOrderDetailPage() {
               onClick={async () => {
                 try {
                   if (navigator.onLine) {
-                    completeOrder.mutate({ id: workOrder.id, resolution, executionReport, requiredParts });
+                    await completeOrder.mutateAsync({ id: workOrder.id, resolution, executionReport, requiredParts });
+                    toast.success(t('workorder.completeSuccess'));
                   } else {
                     await enqueue(
                       'work-order-complete',
@@ -236,14 +290,14 @@ export default function WorkOrderDetailPage() {
                       'PUT',
                       { id: workOrder.id, resolution, executionReport, requiredParts },
                     );
+                    toast.success(t('workorder.offlineSaveSuccess'));
                   }
-                } catch (err) {
-                  toast.error(t('common.error'), {
-                    description: err instanceof Error ? err.message : String(err),
-                  });
+                } catch {
+                  toast.error(t('workorder.completeFailed'));
                 }
               }}
               disabled={!resolution || completeOrder.isPending}
+              aria-busy={completeOrder.isPending}
             >
               {navigator.onLine ? t('workorder.complete') : t('workorder.offlineSave')}
             </Button>
@@ -356,10 +410,17 @@ export default function WorkOrderDetailPage() {
               <Button variant="outline" onClick={() => setCancelDialogOpen(false)}>{t('common.cancel')}</Button>
               <Button
                 variant="destructive"
-                disabled={!cancelReason}
-                onClick={() => {
-                  cancelOrder.mutate({ id: workOrder.id, reason: cancelReason });
-                  setCancelDialogOpen(false);
+                disabled={!cancelReason || cancelOrder.isPending}
+                aria-busy={cancelOrder.isPending}
+                onClick={async () => {
+                  try {
+                    await cancelOrder.mutateAsync({ id: workOrder.id, reason: cancelReason });
+                    toast.success(t('workorder.cancelSuccess'));
+                    setCancelDialogOpen(false);
+                    setCancelReason('');
+                  } catch {
+                    toast.error(t('workorder.cancelFailed'));
+                  }
                 }}
               >
                 {t('workorder.confirmCancel')}
@@ -379,17 +440,21 @@ interface ActionButtonsProps {
   /** 派工回调 */
   onDispatch: () => void;
   /** 开始执行回调 */
-  onStart: () => void;
+  onStart: () => void | Promise<void>;
   /** 验收通过回调 */
-  onAccept: () => void;
-  /** 验收不通过回调（附带原因） */
-  onReject: (reason: string) => void;
+  onAccept: () => void | Promise<void>;
+  /** 验收不通过回调（附带原因）；失败时应抛出，以便保留原因输入框 */
+  onReject: (reason: string) => void | Promise<void>;
   /** 关闭工单回调 */
-  onClose: () => void;
+  onClose: () => void | Promise<void>;
   /** 取消工单回调 */
   onCancel: () => void;
   /** 提交验收（发起审批流程）回调 */
-  onSubmitForApproval: () => void;
+  onSubmitForApproval: () => void | Promise<void>;
+  /** 任意状态变更请求进行中 */
+  actionPending?: boolean;
+  /** 是否已有审批记录；无审批链时 SubmittedForApproval 仍需提供验收入口 */
+  hasApprovals?: boolean;
 }
 
 /**
@@ -402,7 +467,7 @@ interface ActionButtonsProps {
  * - completed → 验收通过 / 验收不通过
  * - accepted → 关闭
  */
-function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onClose, onCancel, onSubmitForApproval }: ActionButtonsProps) {
+function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onClose, onCancel, onSubmitForApproval, actionPending = false, hasApprovals = false }: ActionButtonsProps) {
   const { t } = useTranslation();
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
@@ -412,7 +477,9 @@ function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onC
     PendingDispatch: [{ label: t('workorder.dispatch'), action: onDispatch }],
     Assigned: [{ label: t('workorder.startExecution'), action: onStart }],
     InProgress: [{ label: t('workorder.submitForApproval'), action: onSubmitForApproval }],
-    SubmittedForApproval: [],
+    SubmittedForApproval: hasApprovals
+      ? []
+      : [{ label: t('workorder.accept'), action: onAccept }],
     Completed: [
       { label: t('workorder.accept'), action: onAccept },
       { label: t('workorder.reject'), action: () => setShowReject(true), variant: 'outline' },
@@ -426,8 +493,8 @@ function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onC
   /** 创建按钮数组副本，防止后续 push 操作修改原始常量数组 */
   const available = [...(buttons[workOrder.status] ?? [])];
 
-  // 非 terminal 状态添加取消按钮
-  if (available.length === 0 && workOrder.status !== 'cancelled' && workOrder.status !== 'closed') {
+  // 非终态且当前没有其它操作时补充取消按钮；必须按 PascalCase 比较，避免 Closed 被误判为仍可取消
+  if (available.length === 0 && !isTerminalWorkOrderStatus(workOrder.status)) {
     available.push({ label: t('workorder.cancel'), action: onCancel, variant: 'destructive' });
   }
 
@@ -437,11 +504,17 @@ function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onC
     <Card>
       <CardContent className="flex flex-wrap items-center gap-3 p-4">
         {available.map((btn) => (
-          <Button key={btn.label} variant={btn.variant ?? 'default'} onClick={btn.action}>
-            {btn.label}
+          <Button
+            key={btn.label}
+            variant={btn.variant ?? 'default'}
+            disabled={actionPending}
+            aria-busy={actionPending}
+            onClick={() => { void btn.action(); }}
+          >
+            {actionPending ? t('common.loading') : btn.label}
           </Button>
         ))}
-        {/* 验收不通过原因输入区 */}
+        {/* 验收不通过原因输入区：失败时保留输入，避免用户重填原因 */}
         {showReject && (
           <div className="flex w-full items-center gap-2">
             <Input
@@ -450,7 +523,20 @@ function ActionButtons({ workOrder, onDispatch, onStart, onAccept, onReject, onC
               placeholder={t('workorder.rejectReasonPlaceholder')}
               className="flex-1"
             />
-            <Button size="sm" disabled={!rejectReason} onClick={() => { onReject(rejectReason); setShowReject(false); }}>{t('common.submit')}</Button>
+            <Button
+              size="sm"
+              disabled={!rejectReason || actionPending}
+              onClick={async () => {
+                try {
+                  await onReject(rejectReason);
+                  setShowReject(false);
+                } catch {
+                  toast.error(t('workorder.rejectFailed'));
+                }
+              }}
+            >
+              {t('common.submit')}
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setShowReject(false)}>{t('common.cancel')}</Button>
           </div>
         )}

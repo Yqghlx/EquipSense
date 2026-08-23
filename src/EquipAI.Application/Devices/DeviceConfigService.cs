@@ -163,18 +163,21 @@ public class DeviceConfigService
                 templateRules = DeviceTemplateAlarmRuleParser.Parse(template.DefaultAlarmRules);
         }
 
+        var deviceCode = request.DeviceCode.Trim();
         var deviceName = string.IsNullOrWhiteSpace(request.Name)
-            ? request.DeviceCode
+            ? deviceCode
             : request.Name.Trim();
         var deviceType = template?.Name ?? (string.IsNullOrWhiteSpace(request.DeviceType)
             ? "通用设备"
             : request.DeviceType.Trim());
+        if (deviceType.Length > 50)
+            throw new DeviceConfigException("INVALID_DEVICE_TYPE", "设备类型长度不能超过 50 个字符。");
 
         var device = new Device
         {
             Id = deviceId,
             TenantId = tenantId,
-            DeviceCode = request.DeviceCode,
+            DeviceCode = deviceCode,
             Name = deviceName,
             Type = deviceType,
             TypeTemplateId = template?.Id,

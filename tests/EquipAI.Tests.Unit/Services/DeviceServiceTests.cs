@@ -73,7 +73,8 @@ public class DeviceServiceTests : IAsyncDisposable
         string name = "测试设备",
         string type = "电机",
         DeviceStatus status = DeviceStatus.Offline,
-        DeviceCriticality criticality = DeviceCriticality.Normal)
+        DeviceCriticality criticality = DeviceCriticality.Normal,
+        string? model = null)
     {
         var device = new Device
         {
@@ -83,7 +84,8 @@ public class DeviceServiceTests : IAsyncDisposable
             Name = name,
             Type = type,
             Status = status,
-            Criticality = criticality
+            Criticality = criticality,
+            Model = model
         };
         _db.Devices.Add(device);
         await _db.SaveChangesAsync();
@@ -146,6 +148,47 @@ public class DeviceServiceTests : IAsyncDisposable
         // Assert
         result.Items.Should().HaveCount(2);
         result.Items.Should().OnlyContain(d => d.Type == "电机");
+    }
+
+    [Fact]
+    public async Task GetDevicesAsync_按关键词应匹配编码名称或型号且不区分大小写()
+    {
+        await SeedDeviceAsync("PUMP-001", "一号冷却水泵", "泵", model: "S200");
+        await SeedDeviceAsync("FAN-002", "排风扇", "风机", model: "X11");
+        await SeedDeviceAsync("MTR-003", "主电机", "电机", model: "S300");
+
+        var byCode = await _sut.GetDevicesAsync(new PagedQuery { Page = 1, PageSize = 20, Keyword = "pump" }, _tenantId);
+        byCode.Items.Should().ContainSingle(d => d.DeviceCode == "PUMP-001");
+        byCode.Total.Should().Be(1);
+
+        var byName = await _sut.GetDevicesAsync(new PagedQuery { Page = 1, PageSize = 20, Keyword = "冷却" }, _tenantId);
+        byName.Items.Should().ContainSingle(d => d.DeviceCode == "PUMP-001");
+
+        var byModel = await _sut.GetDevicesAsync(new PagedQuery { Page = 1, PageSize = 20, Keyword = "s200" }, _tenantId);
+        byModel.Items.Should().ContainSingle(d => d.DeviceCode == "PUMP-001");
+    }
+
+    [Fact]
+    public async Task GetDevicesAsync_关键词无匹配时应返回空列表()
+    {
+        await SeedDeviceAsync("PUMP-001", "一号冷却水泵", "泵");
+
+        var result = await _sut.GetDevicesAsync(new PagedQuery { Page = 1, PageSize = 20, Keyword = "不存在的设备" }, _tenantId);
+
+        result.Items.Should().BeEmpty();
+        result.Total.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetDevicesAsync_空白关键词应等同于不筛选()
+    {
+        await SeedDeviceAsync("PUMP-001", "一号冷却水泵", "泵");
+        await SeedDeviceAsync("FAN-002", "排风扇", "风机");
+
+        var result = await _sut.GetDevicesAsync(new PagedQuery { Page = 1, PageSize = 20, Keyword = "   " }, _tenantId);
+
+        result.Items.Should().HaveCount(2);
+        result.Total.Should().Be(2);
     }
 
     [Fact]

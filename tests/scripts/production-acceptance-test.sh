@@ -352,6 +352,23 @@ test_invalid_smtp_from_is_fail() {
     $'external.smtp\texternal\ttrue\tFAIL'
 }
 
+test_world_readable_external_evidence_is_blocked() {
+  local output_dir="$TEST_ROOT/world-readable-evidence-report"
+  chmod 644 "$TEST_ROOT/evidence/external.smtp.pass"
+  local result_code
+  set +e
+  run_acceptance --profile production --env-file "$TEST_ROOT/production.env" \
+    --compose-file "$TEST_ROOT/compose.yml" --evidence-dir "$TEST_ROOT/evidence" \
+    --output-dir "$output_dir"
+  result_code=$?
+  set -e
+  chmod 600 "$TEST_ROOT/evidence/external.smtp.pass"
+
+  [[ "$result_code" -eq 2 ]] || fail "权限为 644 的外部证据文件应阻断验收"
+  assert_contains "$(cat "$output_dir/checks.tsv")" $'external.smtp\texternal\ttrue\tBLOCKED'
+  assert_contains "$(cat "$output_dir/summary.md")" "证据文件权限过宽"
+}
+
 test_stale_external_evidence_is_blocked() {
   local output_dir="$TEST_ROOT/stale-evidence-report"
   touch -t 200001010000 "$TEST_ROOT/evidence/external.mqtt.pass"
@@ -455,6 +472,7 @@ test_external_evidence_can_clear_external_blocks
 test_invalid_smtp_port_is_fail
 test_invalid_smtp_from_is_fail
 test_stale_external_evidence_is_blocked
+test_world_readable_external_evidence_is_blocked
 test_invalid_integration_switch_is_fail
 test_symlink_output_is_rejected
 test_symlink_env_is_rejected

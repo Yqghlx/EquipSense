@@ -11,9 +11,10 @@ import { useAlerts } from '../hooks/useAlerts';
 import { useGlobalStats } from '../hooks/useTenantsAdmin';
 import { useAuthStore } from '../stores/authStore';
 import { getWorkOrderStatusLabels } from '../utils/workorder';
+import { Button } from '../components/ui/button';
 import {
   Wrench, AlertTriangle, ClipboardList, Activity,
-  Building2, Users, Snowflake,
+  Building2, Users, Snowflake, RefreshCw,
 } from 'lucide-react';
 /** 告警严重级别对应的颜色映射 */
 const severityColors: Record<string, string> = {
@@ -48,9 +49,22 @@ export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
   const isSystemAdmin = user?.role === 'SystemAdmin';
 
-  const { data: stats, isLoading: statsLoading } = useDashboardStats();
-  const { data: oee } = useOee();
-  const { data: alertsData } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
+  const {
+    data: stats,
+    isLoading: statsLoading,
+    isError: statsError,
+    refetch: refetchStats,
+  } = useDashboardStats();
+  const { data: oee, isError: oeeError, refetch: refetchOee } = useOee();
+  const {
+    data: alertsData,
+    isLoading: alertsLoading,
+    isError: alertsError,
+    refetch: refetchAlerts,
+  } = useAlerts({ page: 1, pageSize: 10 }, { status: 'active' });
+  const statsFailed = statsError && !stats;
+  const alertsFailed = alertsError && !alertsData;
+  const alertsEmpty = Boolean(alertsData && alertsData.items.length === 0);
   const { data: globalStats } = useGlobalStats({ enabled: isSystemAdmin });
   const workOrderStatusLabels = getWorkOrderStatusLabels(t);
 
@@ -112,8 +126,13 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {/* 新客户引导：设备/告警/工单全为 0 时显示快速开始卡片 */}
-      {stats && !statsLoading && stats.totalDevices === 0
+      {/* 统计加载失败必须显式提示，不能把网络错误画成空看板 */}
+      {statsFailed && (
+        <LoadFailedBanner onRetry={() => { void refetchStats(); }} />
+      )}
+
+      {/* 新客户引导：仅在统计成功且设备/告警/工单全为 0 时显示 */}
+      {stats && !statsFailed && !statsLoading && stats.totalDevices === 0
         && stats.activeAlerts === 0 && stats.pendingWorkOrders === 0 && (
         <Card className="border-primary/30 bg-gradient-to-br from-primary/5 to-primary/10">
           <CardContent className="p-6">
@@ -185,7 +204,7 @@ export default function DashboardPage() {
                 <Icon className={`h-5 w-5 ${color}`} />
               </div>
               <div>
-                <p className="text-2xl font-bold">{statsLoading ? '...' : value}</p>
+                <p className="text-2xl font-bold">{statsLoading && !stats ? t('common.loading') : value}</p>
                 <p className="text-sm text-muted-foreground">{label}</p>
               </div>
             </CardContent>
@@ -194,6 +213,9 @@ export default function DashboardPage() {
       </div>
 
       {/* OEE 设备综合效率看板 */}
+      {oeeError && !oee && (
+        <LoadFailedBanner onRetry={() => { void refetchOee(); }} />
+      )}
       {oee && (
         <Card>
           <CardContent className="p-4">
@@ -253,33 +275,36 @@ export default function DashboardPage() {
       {/* 趋势预警：复用已有分析查询，帮助用户在告警发生前安排维护 */}
       <TrendWarningsCard />
 
-      {/* 图表区域：设备状态 + 告警级别分布 */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardContent className="p-4">
-            <PieChart title={t('dashboard.deviceStatusDistribution')} data={devicePieData} height={280} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <PieChart title={t('dashboard.alertSeverityDistribution')} data={severityPieData} height={280} />
-          </CardContent>
-        </Card>
-      </div>
+      {/* 统计失败时不渲染空图，避免把加载失败当成“暂无数据” */}
+      {!statsFailed && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardContent className="p-4">
+                <PieChart title={t('dashboard.deviceStatusDistribution')} data={devicePieData} height={280} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <PieChart title={t('dashboard.alertSeverityDistribution')} data={severityPieData} height={280} />
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* 趋势图：告警 + 工单 */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardContent className="p-4">
-            <TrendChart title={t('dashboard.alertTrends')} data={alertTrendData} color="#ef4444" height={280} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4">
-            <TrendChart title={t('dashboard.workOrderTrend')} data={workOrderTrendData} color="#3b82f6" height={280} />
-          </CardContent>
-        </Card>
-      </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Card>
+              <CardContent className="p-4">
+                <TrendChart title={t('dashboard.alertTrends')} data={alertTrendData} color="#ef4444" height={280} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <TrendChart title={t('dashboard.workOrderTrend')} data={workOrderTrendData} color="#3b82f6" height={280} />
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
 
       {/* 工单状态分布 + 最近告警 */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -287,7 +312,11 @@ export default function DashboardPage() {
         <Card>
           <CardContent className="p-4">
             <h3 className="mb-3 text-base font-semibold">{t('dashboard.workOrderStatusDistribution')}</h3>
-            {stats && Object.keys(stats.workOrdersByStatus).length > 0 ? (
+            {statsLoading && !stats ? (
+              <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+            ) : statsFailed ? (
+              <LoadFailedBanner compact onRetry={() => { void refetchStats(); }} />
+            ) : stats && Object.keys(stats.workOrdersByStatus).length > 0 ? (
               <div className="grid grid-cols-3 gap-3">
                 {Object.entries(stats.workOrdersByStatus).map(([status, count]) => (
                   <div key={status} className="flex items-center justify-between rounded-md border p-2.5">
@@ -309,7 +338,11 @@ export default function DashboardPage() {
           <CardContent className="p-4">
             <h3 className="mb-3 text-base font-semibold">{t('dashboard.recentAlerts')}</h3>
             <div className="space-y-2">
-              {alertsData?.items.length === 0 ? (
+              {alertsLoading && !alertsData ? (
+                <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+              ) : alertsFailed ? (
+                <LoadFailedBanner compact onRetry={() => { void refetchAlerts(); }} />
+              ) : alertsEmpty ? (
                 <p className="text-sm text-muted-foreground">{t('common.noData')}</p>
               ) : (
                 alertsData?.items.slice(0, 10).map((alert) => (
@@ -329,6 +362,21 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
+
+/** 查询失败横幅：与列表页一致，失败必须可重试，不能伪装成空数据。 */
+function LoadFailedBanner({ onRetry, compact = false }: { onRetry: () => void; compact?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className={`flex flex-col items-center gap-2 text-center ${compact ? 'py-6' : 'py-4'}`}>
+      <AlertTriangle className="h-6 w-6 text-amber-500" />
+      <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        <RefreshCw className="mr-2 h-4 w-4" />
+        {t('common.retry')}
+      </Button>
     </div>
   );
 }

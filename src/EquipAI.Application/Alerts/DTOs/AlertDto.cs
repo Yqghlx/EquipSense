@@ -18,6 +18,12 @@ public class AlertDto
     public DateTime OccurredAt { get; set; }
     public bool Acknowledged { get; set; }
     public bool Resolved { get; set; }
+
+    /// <summary>确认时间；未确认时为空，供详情抽屉展示真实时间线。</summary>
+    public DateTime? AcknowledgedAt { get; set; }
+
+    /// <summary>解决时间；未解决时为空，禁止前端用触发时间冒充。</summary>
+    public DateTime? ResolvedAt { get; set; }
     public int TriggerCount { get; set; }
     public DateTime? WindowStartAt { get; set; }
     public DateTime CreatedAt { get; set; }

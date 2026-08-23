@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -123,6 +124,7 @@ export function DeviceQuickRegisterDialog({ open, onOpenChange }: DeviceQuickReg
 
     try {
       await quickRegister.mutateAsync(request);
+      toast.success(t('device.quickRegister.submitSuccess'));
       resetForm();
       onOpenChange(false);
     } catch (error: unknown) {

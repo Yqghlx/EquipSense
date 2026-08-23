@@ -236,6 +236,40 @@ public class EamIntegrationTests
     }
 
     [Fact]
+    public async Task PushStatusChangedAsync_HTTP成功但响应含业务错误_应返回False()
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"Error\":\"BMXAA4129E\",\"success\":false}"),
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new EamIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<EamIntegration>>());
+        var config = JsonSerializer.Serialize(new EamConfig
+        {
+            Enabled = true,
+            Type = "maximo",
+            Endpoint = "https://maximo.example.com",
+        });
+
+        var result = await integration.PushStatusChangedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "InProgress", "EAM-WO-001", config);
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task PushStatusChangedAsync_缺少ExternalId应跳过()
     {
         var logger = new Mock<ILogger<EamIntegration>>();

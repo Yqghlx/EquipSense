@@ -345,4 +345,36 @@ public class WebhookIntegrationTests
         request.Headers.Contains("X-EquipSense-Signature").Should().BeTrue();
         request.Headers.GetValues("X-EquipSense-Signature").First().Should().StartWith("sha256=");
     }
+
+    [Fact]
+    public async Task PushCreatedAsync_HTTP成功但业务码失败_应返回Null()
+    {
+        var handler = new Mock<HttpMessageHandler>();
+        handler.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"success\":false,\"code\":50001}"),
+            });
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory
+            .Setup(factory => factory.CreateClient("WorkOrderIntegration"))
+            .Returns(new HttpClient(handler.Object));
+        var integration = new WebhookIntegration(
+            httpClientFactory.Object,
+            Mock.Of<ILogger<WebhookIntegration>>());
+        var config = JsonSerializer.Serialize(new WebhookConfig
+        {
+            Url = "https://hooks.example.com/work-order",
+        });
+
+        var result = await integration.PushCreatedAsync(
+            Guid.NewGuid(), Guid.NewGuid(), "Webhook 业务失败", "High", config);
+
+        result.Should().BeNull();
+    }
 }

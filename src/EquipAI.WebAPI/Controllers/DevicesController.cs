@@ -56,9 +56,9 @@ public class DevicesController : ControllerBase
     }
 
     /// <summary>
-    /// 分页查询设备列表，支持按状态和类型筛选
+    /// 分页查询设备列表，支持按状态、类型和关键词筛选
     /// </summary>
-    /// <param name="query">分页查询参数</param>
+    /// <param name="query">分页查询参数（Keyword 匹配设备编码、名称、型号）</param>
     /// <param name="status">可选：按设备状态筛选（如 Online、Offline、Maintenance、Warning）</param>
     /// <param name="type">可选：按设备类型筛选（如 电机、泵、压缩机）</param>
     /// <returns>分页设备结果</returns>

@@ -452,6 +452,7 @@ try
     eventBus.Subscribe<AnalysisCompletedEvent, WorkOrderAnalysisHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, KnowledgeCaptureHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderIntegrationHandler>();
+    eventBus.Subscribe<WorkOrderCreatedEvent, WorkOrderIntegrationHandler>();
     eventBus.Subscribe<WorkOrderCreatedEvent, WorkOrderNotificationHandler>();
     eventBus.Subscribe<WorkOrderStatusChangedEvent, WorkOrderNotificationHandler>();
     eventBus.Subscribe<WorkOrderAttachmentDeletedEvent, WorkOrderAttachmentDeletionHandler>();

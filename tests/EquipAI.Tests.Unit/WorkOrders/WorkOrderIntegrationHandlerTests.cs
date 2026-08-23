@@ -113,6 +113,37 @@ public class WorkOrderIntegrationHandlerTests
         await act.Should().NotThrowAsync();
     }
 
+    [Fact]
+    public async Task HandleAsync_工单创建事件应路由创建通知且不抛出()
+    {
+        var (db, handler) = CreateSut();
+        var woId = Guid.NewGuid();
+        db.WorkOrders.Add(new WorkOrder
+        {
+            Id = woId,
+            TenantId = _tenantId,
+            Title = "创建推送",
+            Status = WorkOrderStatus.PendingDispatch,
+        });
+        await db.SaveChangesAsync();
+
+        var created = new WorkOrderCreatedEvent(
+            Guid.NewGuid(), DateTime.UtcNow, _tenantId, woId, Guid.NewGuid(), "创建推送", "High");
+
+        var act = () => handler.HandleAsync(created, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public void 程序入口应把工单创建事件订到集成处理器()
+    {
+        var programPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "EquipAI.WebAPI", "Program.cs"));
+        File.Exists(programPath).Should().BeTrue($"应能定位 Program.cs: {programPath}");
+        File.ReadAllText(programPath).Should().Contain(
+            "Subscribe<WorkOrderCreatedEvent, WorkOrderIntegrationHandler>");
+    }
+
     private class TestTenantContext : ITenantContext
     {
         public TestTenantContext(Guid tenantId) { TenantId = tenantId; }

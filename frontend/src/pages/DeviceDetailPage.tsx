@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Plug, Network, Radio, Loader2, RefreshCw, Pencil, Trash2, Check, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { ArrowLeft, Plug, Network, Radio, Loader2, RefreshCw, Pencil, Trash2, Check, X, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -30,6 +31,7 @@ import {
 import { formatDate } from '../lib/utils';
 import { useGateways } from '../hooks/useGateways';
 import type { Device } from '../types';
+import { DEVICE_CRITICALITY_VALUES, getCriticalityLabel, getDeviceTypeLabel } from '../utils/labels';
 
 /** 协议显示映射 */
 const protocolMeta: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -56,16 +58,41 @@ export default function DeviceDetailPage() {
   const [selectedMetric, setSelectedMetric] = useState('temperature');
   const [timeRange, setTimeRange] = useState('1h');
 
-  const { data: device, isLoading } = useDevice(id ?? '');
+  const { data: device, isLoading, isError, refetch } = useDevice(id ?? '');
   const refreshHealth = useRefreshHealthScore();
-  const { data: telemetry } = useRecentTelemetry(
+  const {
+    data: telemetry,
+    isLoading: telemetryLoading,
+    isError: telemetryError,
+    refetch: refetchTelemetry,
+  } = useRecentTelemetry(
     id ?? '',
     selectedMetric,
     getTimeRangeDurationMilliseconds(timeRange),
   );
-  const { data: alertsData } = useAlerts({ page: 1, pageSize: 20 }, { deviceId: id });
+  const {
+    data: alertsData,
+    isLoading: alertsLoading,
+    isError: alertsError,
+    refetch: refetchAlerts,
+  } = useAlerts({ page: 1, pageSize: 20 }, { deviceId: id });
+  const telemetryFailed = telemetryError && telemetry == null;
+  const alertsFailed = alertsError && !alertsData;
+  const alertsEmpty = Boolean(alertsData && alertsData.items.length === 0);
 
   if (isLoading) return <div className="py-20 text-center text-muted-foreground">{t('common.loading')}</div>;
+  if (isError && !device) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-20 text-center">
+        <AlertTriangle className="h-8 w-8 text-amber-500" />
+        <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+        <Button variant="outline" size="sm" onClick={() => { void refetch(); }}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {t('common.retry')}
+        </Button>
+      </div>
+    );
+  }
   if (!device) return <div className="py-20 text-center text-muted-foreground">{t('common.noData')}</div>;
 
   const chartData = Array.isArray(telemetry)
@@ -76,7 +103,7 @@ export default function DeviceDetailPage() {
     <div className="space-y-6">
       {/* 页头：返回按钮 + 设备名称 + 状态 */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/devices')}>
+        <Button variant="ghost" size="icon" aria-label={t('common.close')} onClick={() => navigate('/devices')}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
@@ -101,8 +128,14 @@ export default function DeviceDetailPage() {
                 size="icon"
                 className="h-7 w-7"
                 disabled={refreshHealth.isPending}
-                onClick={() => refreshHealth.mutate(device.id)}
-                title={t('device.refreshHealth', '刷新健康度')}
+                onClick={() => {
+                  refreshHealth.mutate(device.id, {
+                    onSuccess: () => toast.success(t('device.refreshHealthSuccess')),
+                    onError: () => toast.error(t('device.refreshHealthFailed')),
+                  });
+                }}
+                title={t('device.refreshHealth')}
+                aria-label={t('device.refreshHealth')}
               >
                 <RefreshCw className={`h-4 w-4 ${refreshHealth.isPending ? 'animate-spin' : ''}`} />
               </Button>
@@ -151,7 +184,18 @@ export default function DeviceDetailPage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {chartData.length > 0 ? (
+                  {telemetryLoading && telemetry == null ? (
+                    <div className="flex h-[300px] items-center justify-center text-muted-foreground">{t('common.loading')}</div>
+                  ) : telemetryFailed ? (
+                    <div className="flex h-[300px] flex-col items-center justify-center gap-3 text-center">
+                      <AlertTriangle className="h-8 w-8 text-amber-500" />
+                      <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+                      <Button variant="outline" size="sm" onClick={() => { void refetchTelemetry(); }}>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        {t('common.retry')}
+                      </Button>
+                    </div>
+                  ) : chartData.length > 0 ? (
                     <TrendChart data={chartData} height={300} />
                   ) : (
                     <div className="flex h-[300px] items-center justify-center text-muted-foreground">{t('common.noData')}</div>
@@ -177,7 +221,22 @@ export default function DeviceDetailPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {alertsData?.items.length === 0 ? (
+                        {alertsLoading && !alertsData ? (
+                          <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">{t('common.loading')}</TableCell></TableRow>
+                        ) : alertsFailed ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="py-8">
+                              <div className="flex flex-col items-center gap-3 text-center">
+                                <AlertTriangle className="h-8 w-8 text-amber-500" />
+                                <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+                                <Button variant="outline" size="sm" onClick={() => { void refetchAlerts(); }}>
+                                  <RefreshCw className="mr-2 h-4 w-4" />
+                                  {t('common.retry')}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : alertsEmpty ? (
                           <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">{t('common.noData')}</TableCell></TableRow>
                         ) : (
                           alertsData?.items.map((alert) => (
@@ -227,7 +286,7 @@ interface ConnectionConfigPanelProps {
  */
 function ConnectionConfigPanel({ deviceId, deviceName }: ConnectionConfigPanelProps) {
   const { t } = useTranslation();
-  const { data: gatewayDevices, isLoading } = useGatewayDevices();
+  const { data: gatewayDevices, isLoading, isError, refetch } = useGatewayDevices();
   const updateMutation = useUpdateGatewayDevice();
   const deleteMutation = useDeleteGatewayDevice();
   const testConnMutation = useTestConnection();
@@ -246,9 +305,16 @@ function ConnectionConfigPanel({ deviceId, deviceName }: ConnectionConfigPanelPr
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  /** 切换启停 */
+  /** 切换启停；失败时必须 toast，避免开关看似已切但后端未生效。 */
   const toggleEnabled = (id: string, current: boolean) => {
-    updateMutation.mutate({ id, enabled: !current });
+    const nextEnabled = !current;
+    updateMutation.mutate(
+      { id, enabled: nextEnabled },
+      {
+        onSuccess: () => toast.success(t(nextEnabled ? 'device.connection.enableSuccess' : 'device.connection.disableSuccess')),
+        onError: () => toast.error(t('device.connection.toggleFailed')),
+      },
+    );
   };
 
   /** 测试连接 */
@@ -263,7 +329,7 @@ function ConnectionConfigPanel({ deviceId, deviceName }: ConnectionConfigPanelPr
     );
   };
 
-  /** 保存编辑 */
+  /** 保存编辑；失败时保留弹窗，禁止 onSettled 一律关闭。 */
   const saveEdit = () => {
     if (!editTarget) return;
     updateMutation.mutate(
@@ -274,20 +340,45 @@ function ConnectionConfigPanel({ deviceId, deviceName }: ConnectionConfigPanelPr
         dataPoints: editTarget.dataPoints,
         pollIntervalMs: editTarget.pollIntervalMs,
       },
-      { onSettled: () => setEditTarget(null) },
+      {
+        onSuccess: () => {
+          toast.success(t('device.connection.saveSuccess'));
+          setEditTarget(null);
+        },
+        onError: () => toast.error(t('device.connection.saveFailed')),
+      },
     );
   };
 
-  /** 确认删除 */
+  /** 确认删除；失败时保留确认框，避免用户以为已经删掉。 */
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    deleteMutation.mutate(deleteTarget, { onSettled: () => setDeleteTarget(null) });
+    deleteMutation.mutate(deleteTarget, {
+      onSuccess: () => {
+        toast.success(t('device.connection.deleteSuccess'));
+        setDeleteTarget(null);
+      },
+      onError: () => toast.error(t('device.connection.deleteFailed')),
+    });
   };
 
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (isError && gatewayDevices == null) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-12 text-center">
+        <AlertTriangle className="h-8 w-8 text-amber-500" />
+        <p className="text-sm text-muted-foreground">{t('common.loadFailed')}</p>
+        <Button variant="outline" size="sm" onClick={() => { void refetch(); }}>
+          <RefreshCw className="mr-2 h-4 w-4" />
+          {t('common.retry')}
+        </Button>
       </div>
     );
   }
@@ -371,6 +462,7 @@ function ConnectionConfigPanel({ deviceId, deviceName }: ConnectionConfigPanelPr
           <div className="flex items-center gap-3 pt-2 border-t">
             <Switch
               checked={gwDevice.enabled}
+              disabled={updateMutation.isPending}
               onCheckedChange={() => toggleEnabled(gwDevice.id, gwDevice.enabled)}
             />
             <span className="text-sm text-muted-foreground">
@@ -549,17 +641,23 @@ function CreateConnectionPanel({ deviceId, deviceName, createMutation, testConnM
     });
   };
 
-  /** 提交创建，自动使用当前设备名称 */
+  /** 提交创建；失败时保留表单并 toast，禁止静默结束。 */
   const handleCreate = () => {
-    createMutation.mutate({
-      deviceName,
-      protocol: form.protocol,
-      connectionConfig: form.connectionConfig,
-      dataPoints: form.dataPoints,
-      pollIntervalMs: form.pollIntervalMs,
-      deviceId,
-      gatewayId: form.gatewayId || undefined,
-    });
+    createMutation.mutate(
+      {
+        deviceName,
+        protocol: form.protocol,
+        connectionConfig: form.connectionConfig,
+        dataPoints: form.dataPoints,
+        pollIntervalMs: form.pollIntervalMs,
+        deviceId,
+        gatewayId: form.gatewayId || undefined,
+      },
+      {
+        onSuccess: () => toast.success(t('device.connection.createSuccess')),
+        onError: () => toast.error(t('device.connection.createFailed')),
+      },
+    );
   };
 
   /** 测试连接 */
@@ -765,15 +863,15 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
         <span className="text-sm font-medium text-muted-foreground">{t('device.basicInfo')}</span>
         {editing ? (
           <div className="flex gap-1">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditing(false)}>
+            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t('common.cancel')} onClick={() => setEditing(false)}>
               <X className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary" onClick={saveEdit} disabled={updateMutation.isPending}>
+            <Button variant="ghost" size="icon" className="h-7 w-7 text-primary" aria-label={t('common.save')} onClick={saveEdit} disabled={updateMutation.isPending}>
               {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
             </Button>
           </div>
         ) : (
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={startEdit}>
+          <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={t('common.edit')} onClick={startEdit}>
             <Pencil className="h-4 w-4" />
           </Button>
         )}
@@ -802,8 +900,8 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
               <Select value={form.criticality} onValueChange={(v) => { if (v) setForm({ ...form, criticality: v }); }}>
                 <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(['Critical', 'High', 'Normal', 'Low'] as const).map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  {DEVICE_CRITICALITY_VALUES.map((c) => (
+                    <SelectItem key={c} value={c}>{getCriticalityLabel(t, c)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -836,10 +934,10 @@ function DeviceInfoCard({ device }: DeviceInfoCardProps) {
         ) : (
           <>
             <div><p className="text-sm text-muted-foreground">{t('device.name')}</p><p className="font-medium">{device.name}</p></div>
-            <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{device.type}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.type')}</p><p className="font-medium">{getDeviceTypeLabel(t, device.type)}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.model')}</p><p className="font-medium">{device.model ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.manufacturer')}</p><p className="font-medium">{device.manufacturer ?? '-'}</p></div>
-            <div><p className="text-sm text-muted-foreground">{t('device.criticality')}</p><p className="font-medium">{device.criticality ?? '-'}</p></div>
+            <div><p className="text-sm text-muted-foreground">{t('device.criticality')}</p><p className="font-medium">{getCriticalityLabel(t, device.criticality)}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.serialNumber')}</p><p className="font-medium">{device.serialNumber ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.installDate')}</p><p className="font-medium">{device.installDate ?? '-'}</p></div>
             <div><p className="text-sm text-muted-foreground">{t('device.gatewayId')}</p><p className="font-medium">{device.gatewayId ?? '-'}</p></div>

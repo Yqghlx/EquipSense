@@ -261,8 +261,12 @@ export interface Alert {
   windowStartAt?: string;
   /** 是否已确认 */
   acknowledged: boolean;
+  /** 确认时间（ISO 8601），未确认时为空 */
+  acknowledgedAt?: string;
   /** 是否已解决 */
   resolved: boolean;
+  /** 解决时间（ISO 8601），未解决时为空 */
+  resolvedAt?: string;
   /** 创建时间（ISO 8601） */
   createdAt: string;
   /** 告警触发时刻的设备全量指标快照（JSON 字符串），由后端 DataSnapshot 投影；前端解析展示根因上下文 */

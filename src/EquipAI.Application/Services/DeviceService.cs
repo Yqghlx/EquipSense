@@ -19,6 +19,7 @@ namespace EquipAI.Application.Services;
 public class DeviceService : IDeviceService
 {
     private const int DeleteAssociationBatchSize = 500;
+    private const int MaxDeviceSearchKeywordLength = 64;
     private const string DeviceDeletedResolution = "设备已删除，自动归档活跃告警";
 
     private readonly AppDbContext _dbContext;
@@ -72,15 +73,7 @@ public class DeviceService : IDeviceService
             devices = devices.Where(d => d.Type == type);
         }
 
-        // 关键词搜索：匹配设备编码、名称或型号
-        if (!string.IsNullOrWhiteSpace(query.Keyword))
-        {
-            var keyword = $"%{query.Keyword}%";
-            devices = devices.Where(d =>
-                EF.Functions.ILike(d.DeviceCode, keyword) ||
-                EF.Functions.ILike(d.Name, keyword) ||
-                EF.Functions.ILike(d.Model!, keyword));
-        }
+        devices = ApplyDeviceKeywordFilter(devices, query.Keyword);
 
         var (items, total) = await devices.ToPagedAsync(query);
 
@@ -449,5 +442,53 @@ public class DeviceService : IDeviceService
             .Where(d => d.DeviceCode == deviceCode)
             .Select(d => (Guid?)d.Id)
             .FirstOrDefaultAsync();
+    }
+
+    /// <summary>
+    /// 按设备编码、名称、型号做不区分大小写的子串搜索。
+    /// 生产走 PostgreSQL ILike；InMemory 单测不支持 ILike，回退为 ToLower + Contains，匹配语义保持一致。
+    /// 用户输入按字面量处理，避免 % / _ 被当成通配符扫全表。
+    /// </summary>
+    private IQueryable<Core.Entities.Device> ApplyDeviceKeywordFilter(
+        IQueryable<Core.Entities.Device> devices,
+        string? rawKeyword)
+    {
+        if (string.IsNullOrWhiteSpace(rawKeyword))
+        {
+            return devices;
+        }
+
+        var term = rawKeyword.Trim();
+        if (term.Length > MaxDeviceSearchKeywordLength)
+        {
+            term = term[..MaxDeviceSearchKeywordLength];
+        }
+
+        var provider = _dbContext.Database.ProviderName ?? string.Empty;
+        if (provider.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            var pattern = $"%{EscapeLikePattern(term)}%";
+            return devices.Where(d =>
+                EF.Functions.ILike(d.DeviceCode, pattern, "\\") ||
+                EF.Functions.ILike(d.Name, pattern, "\\") ||
+                (d.Model != null && EF.Functions.ILike(d.Model, pattern, "\\")));
+        }
+
+        var lower = term.ToLowerInvariant();
+        return devices.Where(d =>
+            d.DeviceCode.ToLower().Contains(lower) ||
+            d.Name.ToLower().Contains(lower) ||
+            (d.Model != null && d.Model.ToLower().Contains(lower)));
+    }
+
+    /// <summary>
+    /// 转义 ILike 通配符，保证搜索词按字面匹配。
+    /// </summary>
+    private static string EscapeLikePattern(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
     }
 }

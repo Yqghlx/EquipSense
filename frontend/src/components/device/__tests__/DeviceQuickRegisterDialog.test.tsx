@@ -23,6 +23,7 @@ const translations: Record<string, string> = {
   'device.quickRegister.applyRules': '启用推荐告警规则',
   'device.quickRegister.processWarning': '阈值需结合现场工艺确认后再启用。',
   'device.quickRegister.submit': '创建并套用模板',
+  'device.quickRegister.submitSuccess': '设备已按模板注册',
   'device.quickRegister.loadingTemplates': '正在加载模板...',
   'device.quickRegister.loadFailed': '模板加载失败',
   'device.quickRegister.retry': '重试',
@@ -37,6 +38,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => translations[key] ?? key,
   }),
+}));
+
+const mockedToastSuccess = vi.hoisted(() => vi.fn());
+
+vi.mock('sonner', () => ({
+  toast: { success: mockedToastSuccess, error: vi.fn() },
 }));
 
 vi.mock('../../../hooks/useDeviceConfig', () => ({
@@ -123,6 +130,7 @@ describe('DeviceQuickRegisterDialog', () => {
       applyDefaultAlarmRules: true,
     }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(mockedToastSuccess).toHaveBeenCalledWith('设备已按模板注册');
   });
 
   it('必填字段错误应使用 aria-invalid 和 aria-describedby 关联提示', async () => {

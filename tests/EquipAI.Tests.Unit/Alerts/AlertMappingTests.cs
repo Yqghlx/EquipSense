@@ -70,4 +70,32 @@ public class AlertMappingTests
 
         dto.DataSnapshot.Should().BeNull();
     }
+
+    /// <summary>
+    /// 确认/解决时间必须投影到 DTO，否则前端详情只能拿触发时间冒充时间线。
+    /// </summary>
+    [Fact]
+    public void Map_Alert到AlertDto应投影确认和解决时间()
+    {
+        var mapper = CreateMapper();
+        var acknowledgedAt = new DateTime(2026, 8, 14, 8, 10, 0, DateTimeKind.Utc);
+        var resolvedAt = new DateTime(2026, 8, 14, 9, 0, 0, DateTimeKind.Utc);
+        var alert = new Alert
+        {
+            AlertCode = "ALT-TIMELINE",
+            Severity = AlertSeverity.High,
+            Status = AlertStatus.Resolved,
+            Metric = "temperature",
+            Value = 95m,
+            AcknowledgedAt = acknowledgedAt,
+            ResolvedAt = resolvedAt,
+        };
+
+        var dto = mapper.Map<AlertDto>(alert)!;
+
+        dto.AcknowledgedAt.Should().Be(acknowledgedAt);
+        dto.ResolvedAt.Should().Be(resolvedAt);
+        dto.Acknowledged.Should().BeTrue();
+        dto.Resolved.Should().BeTrue();
+    }
 }

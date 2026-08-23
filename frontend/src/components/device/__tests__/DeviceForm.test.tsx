@@ -73,7 +73,7 @@ describe('DeviceForm', () => {
       await user.click(selectTrigger);
 
       // 等待下拉选项出现后点击 "pump"
-      const pumpOption = await screen.findByRole('option', { name: 'pump' });
+      const pumpOption = await screen.findByRole('option', { name: 'device.types.pump' });
       await user.click(pumpOption);
 
       // 提交表单
@@ -139,6 +139,22 @@ describe('DeviceForm', () => {
       expect(screen.getByText('device.nameRequired')).toHaveAttribute('id', 'deviceName-error');
       expect(screen.getByText('device.nameRequired')).toHaveAttribute('role', 'alert');
       expect(document.getElementById('deviceType-error')).toHaveAttribute('role', 'alert');
+    });
+
+    it('类型和关键等级下拉应显示翻译文案而不是原始枚举', async () => {
+      const user = userEvent.setup();
+      render(<DeviceForm onSubmit={vi.fn()} onCancel={vi.fn()} />);
+
+      await user.click(screen.getAllByRole('combobox')[0]);
+      expect(await screen.findByRole('option', { name: 'device.types.pump' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'device.types.motor' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'pump' })).not.toBeInTheDocument();
+      await user.keyboard('{Escape}');
+
+      await user.click(screen.getAllByRole('combobox')[1]);
+      expect(await screen.findByRole('option', { name: 'alert.critical' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'alert.normal' })).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'Critical' })).not.toBeInTheDocument();
     });
 
     it('点击取消应调用 onCancel', async () => {

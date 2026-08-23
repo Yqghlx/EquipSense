@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { Plus, Search, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -164,8 +165,13 @@ export default function WorkOrderListPage() {
           <WorkOrderForm
             devices={devices}
             onSubmit={async (req: CreateWorkOrderRequest) => {
-              await createWorkOrder.mutateAsync(req);
-              setDialogOpen(false);
+              try {
+                await createWorkOrder.mutateAsync(req);
+                toast.success(t('workorder.createSuccess'));
+                setDialogOpen(false);
+              } catch {
+                toast.error(t('workorder.createFailed'));
+              }
             }}
             onCancel={() => setDialogOpen(false)}
             loading={createWorkOrder.isPending}

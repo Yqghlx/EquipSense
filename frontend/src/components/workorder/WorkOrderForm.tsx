@@ -22,8 +22,8 @@ const workOrderSchema = z.object({
 type WorkOrderFormData = z.infer<typeof workOrderSchema>;
 
 interface WorkOrderFormProps {
-  /** 表单提交回调 */
-  onSubmit: (data: CreateWorkOrderRequest) => void;
+  /** 表单提交回调；返回 Promise 以便页面展示失败反馈 */
+  onSubmit: (data: CreateWorkOrderRequest) => void | Promise<void>;
   /** 取消回调 */
   onCancel: () => void;
   /** 是否正在提交中 */
@@ -44,9 +44,9 @@ export function WorkOrderForm({ onSubmit, onCancel, loading, devices = [] }: Wor
     resolver: zodResolver(workOrderSchema),
   });
 
-  /** 表单提交处理 */
+  /** 表单提交处理：把页面 mutation 的 Promise 交回 RHF，避免失败变成未处理拒绝。 */
   const handleFormSubmit = (data: WorkOrderFormData) => {
-    onSubmit({
+    return onSubmit({
       ...data,
       description: data.description ?? '',
       // 空字符串会导致后端 DateTime 反序列化失败，转为 undefined

@@ -385,6 +385,25 @@ test_validate_env_rejects_reused_production_credentials() {
   [[ "$output" != *"shared-production-secret"* ]] || fail "校验输出不得泄露凭据值"
 }
 
+test_validate_env_rejects_change_me_placeholder() {
+  local env_file="$TEST_ROOT/change-me-placeholder.env"
+  cp "$TEST_ROOT/valid.env" "$env_file"
+  sed -i.bak 's/^PG_PASSWORD=.*/PG_PASSWORD=change-me-shared-secret/' "$env_file"
+  rm -f "$env_file.bak"
+  chmod 600 "$env_file"
+
+  local output
+  local result_code
+  set +e
+  output="$(bash "$PROJECT_ROOT/docker/validate-env.sh" "$env_file" 2>&1)"
+  result_code=$?
+  set -e
+
+  [[ "$result_code" -ne 0 ]] || fail "小写 change-me 占位密码不应通过生产环境校验"
+  assert_contains "$output" "PG_PASSWORD"
+  [[ "$output" != *"change-me-shared-secret"* ]] || fail "校验输出不得泄露占位凭据值"
+}
+
 test_validate_env_rejects_weak_production_config() {
   local env_file="$TEST_ROOT/weak.env"
   printf '%s\n' \
@@ -1478,6 +1497,30 @@ test_production_readiness_accepts_healthy_runtime() {
   assert_contains "$output" "运行态服务检查通过"
   [[ "$output" != *"READINESS_TEST_SECRET_DO_NOT_PRINT"* ]] \
     || fail "健康运行态输出不应泄露环境变量值"
+}
+
+test_production_readiness_isolated_runtime_skips_optional_observability() {
+  local case_dir="$TEST_ROOT/production-readiness-isolated-runtime"
+  create_readiness_fixture "$case_dir" pass
+  # 隔离 smoke 不会创建 Seq/Prometheus/Grafana/Alertmanager 容器。
+  grep -vE 'printf .* (seq|prometheus|alertmanager|grafana) running' \
+    "$case_dir/bin/docker" > "$case_dir/bin/docker.isolated"
+  mv "$case_dir/bin/docker.isolated" "$case_dir/bin/docker"
+  chmod 700 "$case_dir/bin/docker"
+
+  local output
+  output="$(
+    cd "$case_dir" && \
+      DOCKER_CALL_LOG="$case_dir/docker.calls" \
+      PRODUCTION_DOCKER_BIN="$case_dir/bin/docker" \
+      PRODUCTION_ENV_FILE="$case_dir/.env" \
+      PRODUCTION_COMPOSE_FILE="$case_dir/docker-compose.yml" \
+      READINESS_RUNTIME_STATE=healthy \
+      bash ./production-readiness.sh --runtime --allow-isolated-e2e 2>&1
+  )" || fail "隔离 smoke 运行态不应因为未启动 Seq/Prometheus 失败"
+
+  assert_contains "$output" "运行态服务检查通过"
+  [[ "$output" != *"seq 未创建"* ]] || fail "隔离 smoke 不应把可选观测服务当成必需"
 }
 
 test_production_readiness_rejects_unhealthy_runtime() {
@@ -5110,6 +5153,7 @@ case "${1:-all}" in
     test_validate_env_rejects_demo_data_in_production_without_isolated_flag
     test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit
     test_validate_env_rejects_reused_production_credentials
+    test_validate_env_rejects_change_me_placeholder
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
@@ -5166,6 +5210,7 @@ case "${1:-all}" in
     test_demo_data_seeding_defaults_are_safe_and_smoke_is_explicit
     test_production_readiness_requires_static_gate
     test_production_readiness_accepts_healthy_runtime
+    test_production_readiness_isolated_runtime_skips_optional_observability
     test_production_readiness_rejects_unhealthy_runtime
     test_production_readiness_rejects_unavailable_docker
     test_production_readiness_suppresses_unknown_compose_secret_details
@@ -5287,12 +5332,14 @@ case "${1:-all}" in
     test_validate_env_rejects_short_machine_api_key
     test_validate_env_rejects_missing_automapper_license
     test_validate_env_rejects_reused_production_credentials
+    test_validate_env_rejects_change_me_placeholder
     test_validate_env_rejects_weak_production_config
     test_validate_env_rejects_non_production_environment
     test_validate_env_rejects_duplicate_keys
     test_validate_env_rejects_symlink_environment_file
     test_production_readiness_requires_static_gate
     test_production_readiness_accepts_healthy_runtime
+    test_production_readiness_isolated_runtime_skips_optional_observability
     test_production_readiness_rejects_unhealthy_runtime
     test_production_readiness_rejects_unavailable_docker
     test_production_readiness_suppresses_unknown_compose_secret_details

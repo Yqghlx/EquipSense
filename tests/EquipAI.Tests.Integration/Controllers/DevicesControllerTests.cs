@@ -280,4 +280,45 @@ public class DevicesControllerTests
         result!.Items.Should().NotBeEmpty();
         result.Items.Should().OnlyContain(d => d.Type == "电机");
     }
+
+    /// <summary>
+    /// 验证：关键词应对设备编码、名称做服务端筛选，而不是只返回当前页后再本地过滤。
+    /// </summary>
+    [Fact]
+    public async Task GetDevices_FilterByKeyword_ReturnsMatchingResults()
+    {
+        var client = await GetAuthenticatedClientAsync();
+        var token = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+
+        await client.PostAsJsonAsync("/api/v1/devices", new CreateDeviceRequest
+        {
+            DeviceCode = $"KW-{token}",
+            Name = "关键词编码设备",
+            Type = "泵"
+        });
+        await client.PostAsJsonAsync("/api/v1/devices", new CreateDeviceRequest
+        {
+            DeviceCode = $"NM-{Guid.NewGuid():N}"[..20],
+            Name = $"冷却{token}水泵",
+            Type = "泵"
+        });
+        await client.PostAsJsonAsync("/api/v1/devices", new CreateDeviceRequest
+        {
+            DeviceCode = $"OT-{Guid.NewGuid():N}"[..20],
+            Name = "无关风机",
+            Type = "风机"
+        });
+
+        var response = await client.GetAsync($"/api/v1/devices?keyword={token}&page=1&pageSize=20");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<PagedResult<DeviceDto>>();
+        result.Should().NotBeNull();
+        result!.Items.Should().HaveCountGreaterThanOrEqualTo(2);
+        result.Items.Should().OnlyContain(d =>
+            d.DeviceCode.Contains(token, StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains(token, StringComparison.OrdinalIgnoreCase)
+            || (d.Model ?? string.Empty).Contains(token, StringComparison.OrdinalIgnoreCase));
+        result.Items.Should().NotContain(d => d.Name == "无关风机");
+    }
 }

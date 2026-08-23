@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using EquipAI.Application.Integrations;
 using EquipAI.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 
@@ -158,10 +159,17 @@ public class WebhookIntegration : IWorkOrderIntegration
             var response = await _httpClientFactory.CreateClient("WorkOrderIntegration").SendAsync(request, ct);
             var responseBody = await response.Content.ReadAsStringAsync(ct);
 
+            if (!response.IsSuccessStatusCode || !IntegrationBusinessResponse.IsSuccess(responseBody))
+            {
+                _logger.LogWarning("Webhook 推送失败: Host={Host}, Status={Status}",
+                    GetTargetHost(config.Url), response.StatusCode);
+                return null;
+            }
+
             _logger.LogInformation("Webhook 推送完成: Host={Host}, Status={Status}",
                 GetTargetHost(config.Url), response.StatusCode);
 
-            return response.IsSuccessStatusCode ? responseBody : null;
+            return responseBody;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
