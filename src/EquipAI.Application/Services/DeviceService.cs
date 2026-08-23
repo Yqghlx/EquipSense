@@ -311,18 +311,26 @@ public class DeviceService : IDeviceService
             return await ExecuteAsync();
         }
 
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync();
-        try
+        // DbContext 配置了 EnableRetryOnFailure（NpgsqlRetryingExecutionStrategy），
+        // 显式事务不能直接 BeginTransactionAsync，必须由执行策略把整个事务体作为可重试单元执行，
+        // 否则首个批量 DML 就会抛 InvalidOperationException（被映射为 HTTP 409）。
+        // 与 CreateDeviceAsync / DeviceImportService 保持同一写法。
+        var executionStrategy = _dbContext.Database.CreateExecutionStrategy();
+        return await executionStrategy.ExecuteAsync(async () =>
         {
-            var result = await ExecuteAsync();
-            await transaction.CommitAsync();
-            return result;
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
+            {
+                var result = await ExecuteAsync();
+                await transaction.CommitAsync();
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        });
     }
 
     /// <summary>
