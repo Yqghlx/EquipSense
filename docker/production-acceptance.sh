@@ -377,10 +377,17 @@ evidence_is_valid() {
     return 1
   fi
 
-  mode="$(stat -f '%Lp' "$evidence_file" 2>/dev/null || stat -c '%a' "$evidence_file" 2>/dev/null || true)"
+  # GNU stat 用 -c，BSD/macOS 用 -f；必须 GNU 优先——GNU 的 -f '%Lp' 会"成功"输出
+  # 无意义字面量而非报错，若 BSD 写法在前会拿到垃圾值并跳过权限校验。
+  mode="$(stat -c '%a' "$evidence_file" 2>/dev/null || stat -f '%Lp' "$evidence_file" 2>/dev/null || true)"
   # stat 返回的是八进制权限字面量（如 600/644）。必须按 8# 解析，
   # 并拒绝组/其他人的任何位，否则 644 的世界可读证据会被当成安全。
-  if [[ "$mode" =~ ^[0-7]+$ ]] && (( (8#$mode & 077) != 0 )); then
+  # 读不到权限一律 fail-closed，不允许在权限未知时放行证据。
+  if [[ ! "$mode" =~ ^[0-7]{3,4}$ ]]; then
+    EVIDENCE_REASON="无法读取证据文件权限，按不可信处理"
+    return 1
+  fi
+  if (( (8#$mode & 077) != 0 )); then
     EVIDENCE_REASON="证据文件权限过宽"
     return 1
   fi

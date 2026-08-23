@@ -67,6 +67,6 @@
   "overrides": {
     "hono": "4.13.1",
     "ip-address": "10.4.0",
-    "nanoid": "3.3.17"
+    "nanoid": "3.3.18"
   }
 }
