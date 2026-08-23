@@ -664,6 +664,10 @@ jobs:
       # 脚本负责预检、镜像拉取、滚动重启、三重健康门禁及失败回滚验证。
       - name: SSH 部署（拉取镜像 + 重启 + 健康检查 + 失败回滚）
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
+        # envs 把这里的 step 级环境变量转发到远端脚本进程，避免把 secrets 直接内插进脚本文本。
+        env:
+          TARGET_VERSION: ${{ steps.ver.outputs.version }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -671,9 +675,6 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           script_stop: true
           envs: TARGET_VERSION,DEPLOY_PATH
-          env:
-            TARGET_VERSION: ${{ steps.ver.outputs.version }}
-            DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           script: |
             set -euo pipefail
             cd "$DEPLOY_PATH"
