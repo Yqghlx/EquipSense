@@ -36,6 +36,9 @@ public class AuthService : IAuthService
     private readonly ITotpSecretProtector _totpSecretProtector;
     private readonly IDistributedLockProvider _distributedLockProvider;
     private readonly MfaPolicyOptions _mfaPolicy;
+
+    /// <summary>账户锁定是否启用；生产恒为 true，非生产可用 Auth:DisableAccountLockout 关闭。</summary>
+    private readonly bool _lockoutEnabled;
     private readonly IPiiProtector _piiProtector;
     private readonly ITenantContext _tenantContext;
 
@@ -172,6 +175,12 @@ public class AuthService : IAuthService
         _piiProtector = piiProtector;
         _tenantContext = tenantContext;
         _mfaPolicy = MfaPolicyOptions.FromConfiguration(configuration);
+        // 与限流开关同一治理口径：仅非生产环境允许关闭（防暴力破解是生产硬要求）。
+        // E2E/压测套件包含大量故意输错密码的负向用例，会与真实登录共享账户，
+        // 不关闭时 5 次失败即锁 15 分钟，造成跨用例污染。
+        _lockoutEnabled = !bool.TryParse(configuration["Auth:DisableAccountLockout"], out var disableLockout)
+                          || !disableLockout
+                          || string.Equals(configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -216,8 +225,8 @@ public class AuthService : IAuthService
         {
             user.AccessFailedCount++;
 
-            // 连续失败达到上限时锁定账户
-            if (user.AccessFailedCount >= MaxAccessAttempts)
+            // 连续失败达到上限时锁定账户（生产强制启用；非生产可经配置关闭）
+            if (_lockoutEnabled && user.AccessFailedCount >= MaxAccessAttempts)
             {
                 user.LockoutEnd = DateTime.UtcNow.AddMinutes(LockoutDurationMinutes);
                 _logger.LogWarning("用户 {Username} 连续登录失败 {Count} 次，账户锁定 {Minutes} 分钟",
