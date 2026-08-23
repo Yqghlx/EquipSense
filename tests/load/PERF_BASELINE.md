@@ -5,6 +5,62 @@
 > 测试环境：M1 macOS（4 核 8GB），PG + Redis + Mosquitto 在 Docker，后端 dotnet run（非容器）。
 > 生产环境（容器化部署）性能应接近或更好。
 
+## 复测数据（2026-08-23，真实生产化栈）
+
+> 环境升级：本次复测跑在**完整生产栈**上 —— 生产 compose 构建的 backend 容器
+> （WAF/限流/HttpOnly Cookie 认证链路全开）+ PG16/TimescaleDB + Redis + Mosquitto，
+> 并包含当日修复的 max_connections=300（详见下文「容量对齐」）。
+
+### 1. API 读压测（`api-read.js`，生产容器后端）
+
+| 并发数 | P50 | P95 | P99 | 错误率 | 状态 |
+|--------|-----|-----|-----|--------|------|
+| 50 VU  | —   | 39ms | 90ms | 0% | ✅ |
+| 200 VU | 4ms | 52ms | 105ms | 0% | ✅（checks 100%，57660/57660） |
+
+### 2. 遥测写路径（`telemetry-write.js`）
+
+| 场景 | P95 | P99 | 错误率 | 状态 |
+|------|-----|-----|--------|------|
+| HTTP 上报（relaxed 阈值） | 48ms | 102ms | 0% | ✅ |
+
+### 3. 告警风暴（`alert-storm.js`，100 VU × 60s）
+
+| 指标 | 结果 | 状态 |
+|------|------|------|
+| 请求成功率 | 100%（5903/5903） | ✅ |
+| P95 / P99 | 36ms / 46ms | ✅ |
+| 聚合防风暴 | 100 VU 轰炸 1 分钟仅产生 53 条告警（6 台设备），未泛滥 | ✅ |
+
+**注意**：脚本 setup 曾因 pageSize=500 被 API 的 PageSize≤100 校验拒绝（已修复为 100）。
+
+### 4. MQTT 注入（mosquitto_pub 批量，600 消息 × 3 指标）
+
+30 并发批次发布 ~4s 完成；逐设备核对全部落库；重复 (device,metric,timestamp) 被
+去重逻辑正确剔除。`mqtt-publish.js` 为无实际发布的模板（需 k6 MQTT 扩展），真实
+证据以本批量注入为准。
+
+### 5. 混沌演练（`tests/stress/chaos-probe.js`，10 VU，生产容器后端）
+
+| 场景 | 健康成功率 | 错误率 | P95 | 结论 |
+|------|-----------|--------|-----|------|
+| 基线（无故障） | 100% | 0% | 1.69s¹ | ✅ 全阈值通过 |
+| **Postgres 暂停 25s**（连接池冻结） | 97.93% | 4.13% | 658ms | ✅ k6 退出码 0，自动恢复 |
+
+¹ 基线 p95 含首轮登录预热。
+
+network-delay / packet-loss / container-kill 三场景依赖 Pumba（需拉取镜像）
+与 distroless 后端镜像（无 shell，无法容器内注入崩溃信号），本地网络受限暂缓；
+`chaos-test.sh` 已修复 bash 3.2 兼容问题可直接执行。
+
+### 容量对齐（重要发现）
+
+TimescaleDB 镜像默认 `max_connections=25`（CPU 自适应），而后端 Default + ReadOnly
+两个 DbContext 池理论上限 2×100=200。实测：低配额下双 60s 告警风暴把连接耗尽
+（53300 too many clients），遥测落库管线**永久停摆且无告警日志**，psql 也无法登录，
+只能重启进程恢复。两 compose 已将 max_connections 提到 300；同强度风暴复测
+0 错误、无需重启。
+
 ## 基线数据（2026-06-20）
 
 ### 1. API 读压测（`api-read.js`）

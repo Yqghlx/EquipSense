@@ -126,8 +126,13 @@ jobs:
 
       - name: 配置并验证 RabbitMQ v2 可靠死信策略
         run: |
-          container_id=$(docker ps --filter ancestor=rabbitmq:4.3.4-management-alpine --format '{{.ID}}' | head -n 1)
+          # 服务容器以 digest 引用启动，--filter ancestor 匹配不到（ancestor 按本地
+          # 镜像名比对）；GitHub Actions 的服务容器名即 service key，按 name 过滤。
+          container_id=$(docker ps --filter name=rabbitmq --format '{{.ID}}' | head -n 1)
           test -n "$container_id"
+          for i in $(seq 1 30); do
+            docker exec "$container_id" rabbitmqctl await_startup --quiet 2>/dev/null && break || sleep 2
+          done
           if ! docker exec "$container_id" rabbitmqctl list_vhosts --silent | grep -Fqx '/equipai_test'; then
             docker exec "$container_id" rabbitmqctl add_vhost /equipai_test
           fi

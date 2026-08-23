@@ -81,14 +81,14 @@ run_probe() {
   if [ -n "${AUTH_MACHINE_API_KEY:-}" ]; then
     machine_api_key_args=(-e "AUTH_MACHINE_API_KEY=$AUTH_MACHINE_API_KEY")
   fi
-  log "启动 k6 探针（场景: $scenario, 时长: $PROBE_DURATION, VUs: $PROBE_VUS）"
+  log "启动 k6 探针（场景: $scenario, 时长: $PROBE_DURATION, VUs: ${PROBE_VUS}）"
   # 不吞掉 k6 失败状态；否则脚本会在阈值失败或探针配置错误时错误地报告“完成”。
   set +e
   k6 run \
     -e "BASE_URL=$BASE_URL" \
     -e "AUTH_USER=$AUTH_USER" \
     -e "AUTH_PASS=$AUTH_PASS" \
-    "${machine_api_key_args[@]}" \
+    ${machine_api_key_args[@]+"${machine_api_key_args[@]}"} \
     --vus "$PROBE_VUS" \
     --duration "$PROBE_DURATION" \
     --out json="$SCRIPT_DIR/chaos-probe-${scenario}.json" \
@@ -97,7 +97,7 @@ run_probe() {
   k6_status=${PIPESTATUS[0]}
   set -e
   if [ "$k6_status" -ne 0 ]; then
-    err "k6 探针失败（场景: $scenario，退出码: $k6_status）"
+    err "k6 探针失败（场景: ${scenario}，退出码: ${k6_status}）"
     return "$k6_status"
   fi
   log "探针完成，结果: $outfile"
@@ -122,7 +122,7 @@ inject_fault() {
     --regex \
     "$target" \
     "$@" 2>&1 | tee -a "$SCRIPT_DIR/chaos-injection.log" || true
-  log "故障 $fault_type 已解除（$target）"
+  log "故障 $fault_type 已解除（${target}）"
 }
 
 # 等待服务恢复（故障解除后健康检查）
