@@ -385,7 +385,7 @@ if sudo -n true 2>/dev/null; then
   # 只改文件属主，不动目录：目录若归 root，runner 随后无法清理临时目录。
   sudo chown 0:0 "$RUNTIME_DOCKER/ssl/key.pem" "$RUNTIME_DOCKER/ssl/cert.pem" \
     "$RUNTIME_DOCKER/mqtt-certs/ca.crt" "$RUNTIME_DOCKER/mqtt-certs/server.crt" \
-    "$RUNTIME_DOCKER/mqtt-certs/server.key" "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
+    "$RUNTIME_DOCKER/mqtt-certs/server.key"
 fi
 # 密码只经标准输入交给官方工具，禁止使用 -b 或命令行参数，避免凭据出现在进程列表和审计记录中。
 # 以调用者 uid 运行容器：passwd 文件归 runner 所有，随后的 chmod 才被允许
@@ -395,6 +395,10 @@ printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
     -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" \
     mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
+# mosquitto 容器以 root 起步读取 passwd 后再降权；与证书同理改为 root 属主。
+if sudo -n true 2>/dev/null; then
+  sudo chown 0:0 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
+fi
 
 # 整个 runtime smoke 都运行在临时隔离 Compose 项目中，演示数据开关只服务于该验收环境。
 validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files" "--allow-isolated-e2e")
