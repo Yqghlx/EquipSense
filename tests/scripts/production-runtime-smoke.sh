@@ -182,13 +182,21 @@ runtime_files=(
 for runtime_file in "${runtime_files[@]}"; do
   cp "$PROJECT_ROOT/docker/$runtime_file" "$RUNTIME_DOCKER/$runtime_file"
 done
+cp "$PROJECT_ROOT/docker/prometheus/rules.yml" "$RUNTIME_DOCKER/prometheus/rules.yml"
+cp "$PROJECT_ROOT/docker/rabbitmq/rabbitmq.conf" "$RUNTIME_DOCKER/rabbitmq/rabbitmq.conf"
+cp "$PROJECT_ROOT/docker/rabbitmq/definitions.json" "$RUNTIME_DOCKER/rabbitmq/definitions.json"
+cp "$PROJECT_ROOT/docker/rabbitmq/start.sh" "$RUNTIME_DOCKER/rabbitmq/start.sh"
+cp "$PROJECT_ROOT/docker/grafana/provisioning/datasources/prometheus.yml" "$RUNTIME_DOCKER/grafana/provisioning/datasources/prometheus.yml"
+cp "$PROJECT_ROOT/docker/grafana/provisioning/dashboards/dashboard.yml" "$RUNTIME_DOCKER/grafana/provisioning/dashboards/dashboard.yml"
+cp "$PROJECT_ROOT/docker/waf-rules/rules.json" "$RUNTIME_DOCKER/waf-rules/rules.json"
+
 # runner 的 umask 可能是 077：cp 出来的配置与入口脚本会变成 600/700，
 # 容器内以服务账户（非 runner uid）读取时直接 Permission denied。
-# 显式归位：入口脚本 755、其余配置 644。
+# 必须放在所有 cp 之后统一归位：入口脚本 755、其余配置 644。
 chmod 755 "$RUNTIME_DOCKER"/entrypoint.sh \
           "$RUNTIME_DOCKER"/nginx-entrypoint.sh \
           "$RUNTIME_DOCKER"/alertmanager-entrypoint.sh \
-          "$RUNTIME_DOCKER/rabbitmq/start.sh" 2>/dev/null || true
+          "$RUNTIME_DOCKER"/rabbitmq/start.sh
 chmod 644 "$RUNTIME_DOCKER"/docker-compose.yml \
           "$RUNTIME_DOCKER"/docker-compose.smoke.yml \
           "$RUNTIME_DOCKER"/mosquitto.prod.conf \
@@ -197,16 +205,10 @@ chmod 644 "$RUNTIME_DOCKER"/docker-compose.yml \
           "$RUNTIME_DOCKER"/production-readiness.sh \
           "$RUNTIME_DOCKER"/generate-mqtt-cert.sh \
           "$RUNTIME_DOCKER"/prometheus.yml \
-          "$RUNTIME_DOCKER"/alertmanager.yml 2>/dev/null || true
-cp "$PROJECT_ROOT/docker/prometheus/rules.yml" "$RUNTIME_DOCKER/prometheus/rules.yml"
-chmod 644 "$RUNTIME_DOCKER"/prometheus/rules.yml "$RUNTIME_DOCKER"/rabbitmq/rabbitmq.conf \
-          "$RUNTIME_DOCKER"/rabbitmq/definitions.json 2>/dev/null || true
-cp "$PROJECT_ROOT/docker/rabbitmq/rabbitmq.conf" "$RUNTIME_DOCKER/rabbitmq/rabbitmq.conf"
-cp "$PROJECT_ROOT/docker/rabbitmq/definitions.json" "$RUNTIME_DOCKER/rabbitmq/definitions.json"
-cp "$PROJECT_ROOT/docker/rabbitmq/start.sh" "$RUNTIME_DOCKER/rabbitmq/start.sh"
-cp "$PROJECT_ROOT/docker/grafana/provisioning/datasources/prometheus.yml" "$RUNTIME_DOCKER/grafana/provisioning/datasources/prometheus.yml"
-cp "$PROJECT_ROOT/docker/grafana/provisioning/dashboards/dashboard.yml" "$RUNTIME_DOCKER/grafana/provisioning/dashboards/dashboard.yml"
-cp "$PROJECT_ROOT/docker/waf-rules/rules.json" "$RUNTIME_DOCKER/waf-rules/rules.json"
+          "$RUNTIME_DOCKER"/alertmanager.yml \
+          "$RUNTIME_DOCKER"/prometheus/rules.yml \
+          "$RUNTIME_DOCKER"/rabbitmq/rabbitmq.conf \
+          "$RUNTIME_DOCKER"/rabbitmq/definitions.json
 # WAF 规则不包含凭据；保持组/其他用户不可写，同时允许镜像内的非 root 应用用户读取只读挂载。
 chmod 644 "$RUNTIME_DOCKER/waf-rules/rules.json"
 
