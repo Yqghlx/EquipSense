@@ -182,7 +182,25 @@ runtime_files=(
 for runtime_file in "${runtime_files[@]}"; do
   cp "$PROJECT_ROOT/docker/$runtime_file" "$RUNTIME_DOCKER/$runtime_file"
 done
+# runner 的 umask 可能是 077：cp 出来的配置与入口脚本会变成 600/700，
+# 容器内以服务账户（非 runner uid）读取时直接 Permission denied。
+# 显式归位：入口脚本 755、其余配置 644。
+chmod 755 "$RUNTIME_DOCKER"/entrypoint.sh \
+          "$RUNTIME_DOCKER"/nginx-entrypoint.sh \
+          "$RUNTIME_DOCKER"/alertmanager-entrypoint.sh \
+          "$RUNTIME_DOCKER/rabbitmq/start.sh" 2>/dev/null || true
+chmod 644 "$RUNTIME_DOCKER"/docker-compose.yml \
+          "$RUNTIME_DOCKER"/docker-compose.smoke.yml \
+          "$RUNTIME_DOCKER"/mosquitto.prod.conf \
+          "$RUNTIME_DOCKER"/nginx.conf \
+          "$RUNTIME_DOCKER"/validate-env.sh \
+          "$RUNTIME_DOCKER"/production-readiness.sh \
+          "$RUNTIME_DOCKER"/generate-mqtt-cert.sh \
+          "$RUNTIME_DOCKER"/prometheus.yml \
+          "$RUNTIME_DOCKER"/alertmanager.yml 2>/dev/null || true
 cp "$PROJECT_ROOT/docker/prometheus/rules.yml" "$RUNTIME_DOCKER/prometheus/rules.yml"
+chmod 644 "$RUNTIME_DOCKER"/prometheus/rules.yml "$RUNTIME_DOCKER"/rabbitmq/rabbitmq.conf \
+          "$RUNTIME_DOCKER"/rabbitmq/definitions.json 2>/dev/null || true
 cp "$PROJECT_ROOT/docker/rabbitmq/rabbitmq.conf" "$RUNTIME_DOCKER/rabbitmq/rabbitmq.conf"
 cp "$PROJECT_ROOT/docker/rabbitmq/definitions.json" "$RUNTIME_DOCKER/rabbitmq/definitions.json"
 cp "$PROJECT_ROOT/docker/rabbitmq/start.sh" "$RUNTIME_DOCKER/rabbitmq/start.sh"
