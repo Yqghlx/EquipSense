@@ -382,8 +382,10 @@ bash "$RUNTIME_DOCKER/generate-mqtt-cert.sh" mosquitto 365 >/dev/null
 # 把证书目录属主改为 root（mode 600 不变，validate-env 门禁仍通过）；
 # 本地无 sudo 时跳过——Docker Desktop 权限映射宽松，不受影响。
 if sudo -n true 2>/dev/null; then
-  sudo chown -R 0:0 "$RUNTIME_DOCKER/ssl" "$RUNTIME_DOCKER/mqtt-certs" \
-    "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
+  # 只改文件属主，不动目录：目录若归 root，runner 随后无法清理临时目录。
+  sudo chown 0:0 "$RUNTIME_DOCKER/ssl/key.pem" "$RUNTIME_DOCKER/ssl/cert.pem" \
+    "$RUNTIME_DOCKER/mqtt-certs/ca.crt" "$RUNTIME_DOCKER/mqtt-certs/server.crt" \
+    "$RUNTIME_DOCKER/mqtt-certs/server.key" "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
 fi
 # 密码只经标准输入交给官方工具，禁止使用 -b 或命令行参数，避免凭据出现在进程列表和审计记录中。
 # 以调用者 uid 运行容器：passwd 文件归 runner 所有，随后的 chmod 才被允许
