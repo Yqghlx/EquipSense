@@ -379,13 +379,12 @@ generate_smoke_issued_tls_certificate "$RUNTIME_DOCKER/ssl"
 bash "$RUNTIME_DOCKER/generate-mqtt-cert.sh" mosquitto 365 >/dev/null
 # nginx master 以 root 运行但容器 cap_drop ALL（无 DAC_OVERRIDE）：
 # runner 属主的 600 私钥它读不了 → Permission denied。在有免密 sudo 的 CI 上
-# 把证书目录属主改为 root（mode 600 不变，validate-env 门禁仍通过）；
+# 把证书属主改为 root（mode 600 不变，validate-env 门禁仍通过）；
 # 本地无 sudo 时跳过——Docker Desktop 权限映射宽松，不受影响。
+# mqtt 证书不在此列：mosquitto 降权运行，文件归 broker uid（见下方 passwd 段）。
 if sudo -n true 2>/dev/null; then
   # 只改文件属主，不动目录：目录若归 root，runner 随后无法清理临时目录。
-  sudo chown 0:0 "$RUNTIME_DOCKER/ssl/key.pem" "$RUNTIME_DOCKER/ssl/cert.pem" \
-    "$RUNTIME_DOCKER/mqtt-certs/ca.crt" "$RUNTIME_DOCKER/mqtt-certs/server.crt" \
-    "$RUNTIME_DOCKER/mqtt-certs/server.key"
+  sudo chown 0:0 "$RUNTIME_DOCKER/ssl/key.pem" "$RUNTIME_DOCKER/ssl/cert.pem"
 fi
 # 密码只经标准输入交给官方工具，禁止使用 -b 或命令行参数，避免凭据出现在进程列表和审计记录中。
 # 以调用者 uid 运行容器：passwd 文件归 runner 所有，随后的 chmod 才被允许
@@ -395,8 +394,22 @@ printf '%s\n%s\n' "$MQTT_PASSWORD" "$MQTT_PASSWORD" \
     -v "$RUNTIME_DOCKER/mosquitto_passwd:/work" "$MOSQUITTO_IMAGE" \
     mosquitto_passwd -c /work/passwd "$MQTT_USERNAME" >/dev/null
 chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
-# 注意：passwd 不能 chown 给 root——validate-env 需以 runner 身份读取校验；
-# mosquitto 容器无 cap_drop，root 天然可读任意属主的文件，无需调整属主。
+# mosquitto 官方镜像启动后会降权到 mosquitto 用户（日志：running as user: mosquitto），
+# 降权后才打开 password_file 与 TLS 私钥：runner 属主的 passwd(600) 和 root 属主的
+# server.key(600) 它都读不了，broker 以 "Unable to open pwfile" 终止并 crash loop，
+# 后端 MQTT 永远连不上（macOS Docker Desktop 权限映射宽松会掩盖此问题）。
+# 属主必须对齐 broker 运行账户；uid 从固定镜像内查询，避免硬编码漂移。
+# validate-env 只校验 mode 不校验属主，root/runner 身份均可读取，门禁不受影响。
+MOSQUITTO_RUN_UID="$(docker run --rm --entrypoint /bin/sh "$MOSQUITTO_IMAGE" -c 'id -u mosquitto' 2>/dev/null || true)"
+if [[ "$MOSQUITTO_RUN_UID" =~ ^[0-9]+$ ]]; then
+  if sudo -n true 2>/dev/null; then
+    sudo chown "${MOSQUITTO_RUN_UID}:${MOSQUITTO_RUN_UID}" \
+      "$RUNTIME_DOCKER/mosquitto_passwd/passwd" \
+      "$RUNTIME_DOCKER/mqtt-certs/server.key"
+  fi
+elif sudo -n true 2>/dev/null; then
+  fatal "无法确定 mosquitto 运行 uid，broker 文件属主无法对齐"
+fi
 
 # 整个 runtime smoke 都运行在临时隔离 Compose 项目中，演示数据开关只服务于该验收环境。
 validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files" "--allow-isolated-e2e")
