@@ -48,15 +48,30 @@ if [[ "${ready}" != "true" ]]; then
   exit 1
 fi
 
+fail() {
+  echo "RabbitMQ smoke 断言失败: $1" >&2
+  echo "--- vhosts ---" >&2; docker exec "${container}" rabbitmqctl list_vhosts --silent >&2 || true
+  echo "--- users ---" >&2; docker exec "${container}" rabbitmqctl list_users --silent >&2 || true
+  echo "--- policies(/) ---" >&2; docker exec "${container}" rabbitmqctl list_policies -p / --formatter json >&2 || true
+  exit 1
+}
+
 vhosts="$(docker exec "${container}" rabbitmqctl list_vhosts --silent)"
-grep -Fqx -- "/" <<<"${vhosts}"
+grep -Fqx -- "/" <<<"${vhosts}" || fail "默认 vhost / 缺失"
 
 users="$(docker exec "${container}" rabbitmqctl list_users --silent | awk '{print $1}')"
-grep -Fqx -- "${username}" <<<"${users}"
+grep -Fqx -- "${username}" <<<"${users}" || fail "用户 ${username} 缺失"
 
-policies="$(docker exec "${container}" rabbitmqctl list_policies -p / --formatter json)"
-[[ "${policies}" == *'equipai-v2-at-least-once-dlx'* ]]
-[[ "${policies}" == *'at-least-once'* ]]
-[[ "${policies}" == *'reject-publish'* ]]
+# check_running 就绪 ≠ start.sh 已把 v2 policy 应用完（两者存在竞态），
+# 轮询等待 policy 出现，避免偶发失败。
+policies=""
+for _ in {1..30}; do
+  policies="$(docker exec "${container}" rabbitmqctl list_policies -p / --formatter json 2>/dev/null || true)"
+  [[ "${policies}" == *'equipai-v2-at-least-once-dlx'* ]] && break
+  sleep 2
+done
+[[ "${policies}" == *'equipai-v2-at-least-once-dlx'* ]] || fail "policy 名缺失"
+[[ "${policies}" == *'at-least-once'* ]] || fail "at-least-once 定义缺失"
+[[ "${policies}" == *'reject-publish'* ]] || fail "reject-publish 定义缺失"
 
 echo "RabbitMQ 启动冒烟测试通过：vhost、凭证和 v2 policy 均已就绪。"
