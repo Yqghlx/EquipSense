@@ -372,9 +372,12 @@ COMPOSE=(
 "${COMPOSE[@]}" config --quiet
 COMPOSE_READY=true
 if ! "${COMPOSE[@]}" up -d jaeger-init jaeger postgres redis mosquitto rabbitmq backend edgegateway frontend >/dev/null; then
-  # Compose 在依赖健康检查失败时通常只返回一句摘要；在清理临时资源前保留后端启动日志，
-  # 否则迁移、配置或依赖连接类故障无法从 CI 输出定位。
-  "${COMPOSE[@]}" logs --no-color --tail=200 backend >&2 || true
+  # Compose 在依赖健康检查失败时通常只返回一句摘要；在清理临时资源前保留
+  # 各基础设施容器与后端的启动日志，否则迁移、配置或依赖连接类故障无法从 CI 输出定位。
+  for svc in rabbitmq postgres redis mosquitto backend edgegateway; do
+    echo "=== smoke 失败诊断: $svc 最近日志 ===" >&2
+    "${COMPOSE[@]}" logs --no-color --tail=60 "$svc" >&2 || true
+  done
   exit 1
 fi
 
