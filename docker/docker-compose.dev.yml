@@ -7,6 +7,9 @@ services:
     container_name: equipai-postgres
     ports:
       - "${DEV_BIND_ADDRESS:-127.0.0.1}:5432:5432"
+    # 后端 Default + ReadOnly 两个 DbContext 池各允许最多 100 连接，
+    # 默认 max_connections=100 会在压测/高峰时被单个后端耗尽（psql 都连不上）。
+    command: postgres -c max_connections=300
     environment:
       POSTGRES_DB: equipai_dev
       POSTGRES_USER: postgres

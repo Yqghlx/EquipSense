@@ -81,4 +81,5 @@ tests:
               instance: backend:8080
             exp_annotations:
               summary: "遥测落库失败并丢弃"
-              description: "过去 5 分钟有 {{ $value }} 条遥测在数据库重试耗尽后被丢弃，请立即检查数据库、Outbox 和边缘网关积压"
+              # promtool 会对注解做模板展开，{{ $value }} 在断言里必须写成渲染后的实际值。
+              description: "过去 5 分钟有 1 条遥测在数据库重试耗尽后被丢弃，请立即检查数据库、Outbox 和边缘网关积压"

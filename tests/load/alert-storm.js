@@ -65,8 +65,9 @@ export function setup() {
   const token = getToken();
   console.log(`[storm] setup: 共享 token 给 ${vus} 个 VU`);
 
+  // API 校验 PageSize ≤ 100（每页条数必须在 1 到 100 之间），超出直接 400。
   const res = http.get(
-    `${config.baseUrl}/api/v1/devices?page=1&pageSize=500`,
+    `${config.baseUrl}/api/v1/devices?page=1&pageSize=100`,
     { headers: authHeaders(token) },
   );
   if (res.status !== 200) {
