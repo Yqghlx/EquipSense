@@ -16,6 +16,9 @@ services:
   rabbitmq:
     container_name: !reset null
     ports: !reset []
+    # CI 上该脚本曾报 Permission denied 且无上下文；先打印 uid/权限事实再启动，
+    # 便于从 smoke 日志直接定位是读权限还是执行权限问题。
+    command: ["/bin/bash", "-lc", "id; ls -la /usr/local/bin/equipai-rabbitmq-start.sh; exec /bin/bash /usr/local/bin/equipai-rabbitmq-start.sh"]
   edgegateway:
     image: ${SMOKE_EDGEGATEWAY_IMAGE:?请设置 SMOKE_EDGEGATEWAY_IMAGE}
     container_name: !reset null
