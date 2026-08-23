@@ -400,7 +400,13 @@ chmod 600 "$RUNTIME_DOCKER/mosquitto_passwd/passwd"
 
 # 整个 runtime smoke 都运行在临时隔离 Compose 项目中，演示数据开关只服务于该验收环境。
 validation_args=("$RUNTIME_DOCKER/.env" "--check-runtime-files" "--allow-isolated-e2e")
-bash "$RUNTIME_DOCKER/validate-env.sh" "${validation_args[@]}" >/dev/null
+# 私钥已按上文 chown 给 root；validate-env 要用 openssl 解析私钥内容做有效性校验，
+# 必须与属主同身份读取，否则 EACCES 会被误报成「不是有效的私钥」。
+if sudo -n true 2>/dev/null; then
+  sudo -n bash "$RUNTIME_DOCKER/validate-env.sh" "${validation_args[@]}" >/dev/null
+else
+  bash "$RUNTIME_DOCKER/validate-env.sh" "${validation_args[@]}" >/dev/null
+fi
 
 COMPOSE=(
   docker compose
