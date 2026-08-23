@@ -464,6 +464,15 @@ wait_for_http() {
     fi
     sleep 2
   done
+  # 探针失败只报状态码无法定位：先保留响应体（健康检查会列出具体 Unhealthy 条目），
+  # 再附相关服务日志，供 CI 输出直接定位是哪个依赖/哪段配置导致未就绪。
+  printf 'HTTP 探针失败现场：%s\n' "$url" >&2
+  curl --silent --show-error --max-time 10 "$url" >&2 || true
+  printf '\n' >&2
+  for probe_svc in backend mosquitto edgegateway; do
+    printf '=== smoke 探针失败诊断: %s 最近日志 ===\n' "$probe_svc" >&2
+    "${COMPOSE[@]}" logs --no-color --tail=100 "$probe_svc" >&2 || true
+  done
   fatal "HTTP 探针失败：$url"
 }
 
