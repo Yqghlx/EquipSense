@@ -125,7 +125,10 @@ public class DataQualityBackgroundScopeTests : IAsyncLifetime
                     SELECT n + 1 FROM numbers WHERE n < 10005
                 )
                 INSERT INTO device_telemetry (time, tenant_id, device_id, metric, value, quality, source)
-                SELECT datetime('now', '-' || (n % 3600) || ' seconds'), {0}, {1}, {2}, 50.0, 'good', 'test'
+                -- 窗口为最近 1 小时；样本最老取 50 分钟（n % 3000）。
+                -- 不能贴着窗口边界（整 1 小时）：CI 慢机器上插入与查询之间
+                -- 的时间流逝会把边界样本挤出窗口，计数偶发少 2 条（n=3600/7200）。
+                SELECT datetime('now', '-' || (n % 3000) || ' seconds'), {0}, {1}, {2}, 50.0, 'good', 'test'
                 FROM numbers
                 """,
                 tenantId,
