@@ -17,8 +17,11 @@ container="equipsense-rabbitmq-startup-smoke-$$"
 
 trap 清理 EXIT
 
+# 显式以 root 启动：start.sh 的权限修复分支（HOME/cookie 属主）依赖 root；
+# 若镜像默认 USER 非 root，修复分支会被跳过，cookie 属主异常时直接 eacces。
 docker run -d \
   --name "${container}" \
+  --user 0:0 \
   -e "RABBITMQ_DEFAULT_USER=${username}" \
   -e "RABBITMQ_DEFAULT_PASS=${password}" \
   -v "${project_dir}/docker/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro" \
