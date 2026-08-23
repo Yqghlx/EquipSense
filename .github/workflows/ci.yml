@@ -37,8 +37,6 @@ env:
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: yqghlx/equipsense
-  # deploy job 的 if 用它判断是否配置了部署密钥（job 级 if 不能直接引用 secrets）。
-  HAS_DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
 
 jobs:
   # ============================================================================
@@ -654,18 +652,23 @@ jobs:
   deploy:
     name: CD 自动部署
     runs-on: ubuntu-latest
-    # secrets 上下文在 job 级 if 中不可用，经 workflow 级 env 转接（HAS_DEPLOY_KEY）。
-    if: startsWith(github.ref, 'refs/tags/v') && env.HAS_DEPLOY_KEY != ''
+    # job 级 if 不能引用 secrets/env 上下文；密钥是否配置改由首个 step 判定并跳过后续步骤。
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [release, create-release]
     environment: production  # 可配合 Environment Protection Rules（人工审批 / 分支限制）
     steps:
-      - name: 提取版本号
+      - name: 提取版本号与部署密钥门禁
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          DEPLOY_SSH_KEY_SET: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "deploy_enabled=$DEPLOY_SSH_KEY_SET" >> "$GITHUB_OUTPUT"
 
       # SSH 到生产服务器后调用仓库内经过行为测试的部署脚本。
       # 脚本负责预检、镜像拉取、滚动重启、三重健康门禁及失败回滚验证。
       - name: SSH 部署（拉取镜像 + 重启 + 健康检查 + 失败回滚）
+        if: steps.ver.outputs.deploy_enabled == 'true'
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         # envs 把这里的 step 级环境变量转发到远端脚本进程，避免把 secrets 直接内插进脚本文本。
         env:
